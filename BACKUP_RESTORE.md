@@ -8,7 +8,7 @@ Git versions source code only. Spreadsheet rows, formulas and views, Script Prop
 
 Configure an environment-specific `BACKUP_FOLDER_ID` with restricted access. The implementation checks folder sharing and rejects publicly/link-shared destinations; this is not a substitute for an administrator reviewing inherited access, group membership, shared-drive policies, and the resulting file ACL.
 
-Run `createDatabaseBackup()` from the Apps Script editor to create a manual verified snapshot; it returns the Drive copy ID. Approved migration execution also creates its own pre-change snapshot. Create a snapshot before risky production changes. The implementation compares sheet names, values, and formulas in the copy and source; an operator must still verify that the snapshot opens and is accessible to the designated recovery operator. Record its ID, time, environment, schema version, and source workbook ID in an appropriately restricted operations record.
+Run `createDatabaseBackup()` from the Apps Script editor to create a manual verified snapshot; it returns the Drive copy ID. Approved migration execution also creates its own pre-change snapshot and this cannot be disabled by the `DAILY_BACKUP_ENABLED` automation switch. The scheduled daily backup is opt-in (`DAILY_BACKUP_ENABLED=false` by default) and reports its result in `AUTOMATION_SETTINGS` (`LAST_BACKUP_TIME`, `LAST_BACKUP_RESULT`) and `BACKUP_LOG`. Create a snapshot before risky production changes. The implementation compares sheet names, values, and formulas in the copy and source; an operator must still verify that the snapshot opens and is accessible to the designated recovery operator. Record its ID, time, environment, schema version, and source workbook ID in an appropriately restricted operations record.
 
 Backups are not automatically deleted. Retention and any deletion are reviewed manual operator decisions. Do not add a cleanup trigger. A spreadsheet snapshot is not a complete backup of Script Properties, triggers, authorization, Calendar events, or sent mail; maintain a separate secure configuration and operations inventory.
 
@@ -27,6 +27,7 @@ There is no automatic restore implementation or unattended overwrite operation.
 7. Check backup folder and Calendar bindings separately. A copied workbook does not imply that those settings or trigger ownership changed.
 8. Run read-only inspections, then a controlled development-equivalent smoke test with external effects disabled.
 9. Reconcile notifications and Calendar events against audit/delivery records. A restored ledger can predate mail already sent; blindly replaying it may duplicate delivery. An uncertain external outcome requires manual investigation.
-10. Obtain operator approval before resuming triggers and external effects. Retain the original workbook and recovery notes until the recovery is accepted.
+10. Review the restored `AUTOMATION_SETTINGS` table: the snapshot contains the automation preferences as they were when the backup was taken. Force the restart state to `EMAIL_MODE=OFF` (or `PREVIEW`), keep the emergency stop on, confirm `MEMBERS.Role` values, and re-run the preflight before enabling automation again.
+11. Obtain operator approval before resuming triggers and external effects. Retain the original workbook and recovery notes until the recovery is accepted.
 
 Practice this procedure in development. There is no claimed live restore drill, recovery-time objective, or recovery-point guarantee in this repository.
