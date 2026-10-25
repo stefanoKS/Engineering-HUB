@@ -355,6 +355,53 @@ var Ui = (function () {
     });
   }
 
+  /** Shared dashboard publication status. Never returns the destination spreadsheet id. */
+  function publicationStatus() {
+    return guard(function () {
+      Access.requireManager();
+      return SharedDashboardPublisher.status();
+    });
+  }
+
+  function savePublicationSettings(payload) {
+    return guard(function () {
+      payload = payload || {};
+      Access.requireManager();
+      var result = SharedDashboardPublisher.saveSettings(payload.changes || {}, AuditLog.actor(), payload.confirmation || '');
+      return {
+        updated: result.updated,
+        enabled: AutomationSettings.get().SHARED_DASHBOARD_PUBLISH_ENABLED === true
+      };
+    });
+  }
+
+  function publicationPreview() {
+    return guard(function () {
+      Access.requireManager();
+      var preview = SharedDashboardPublisher.preview();
+      return {
+        initialized: preview.initialized,
+        publishedVersion: preview.publishedVersion,
+        unchanged: preview.unchanged,
+        counts: preview.counts,
+        storedCounts: preview.storedCounts,
+        excluded: preview.excluded,
+        warnings: preview.warnings.map(function (warning) { return warning.code; })
+      };
+    });
+  }
+
+  function publishPublicationNow() {
+    return guard(function () {
+      Access.requireManager();
+      var result = SharedDashboardPublisher.publish({mode: 'MANUAL', actorEmail: AuditLog.actor()});
+      return {
+        version: result.version, asOf: result.asOf, counts: result.counts,
+        excluded: result.excluded, warnings: result.warnings
+      };
+    });
+  }
+
   function notificationHistory() {
     return guard(function () {
       Access.requireManager();
@@ -408,6 +455,10 @@ var Ui = (function () {
     saveAutomationSettings: saveAutomationSettings,
     restoreAutomationDefaults: restoreAutomationDefaults,
     previewNotifications: previewNotifications,
+    publicationStatus: publicationStatus,
+    savePublicationSettings: savePublicationSettings,
+    publicationPreview: publicationPreview,
+    publishPublicationNow: publishPublicationNow,
     notificationHistory: notificationHistory,
     reconcileUncertain: reconcileUncertain,
     refresh: refresh,
@@ -473,6 +524,10 @@ function uiAutomationSettings() { return Ui.automationSettings(); }
 function uiSaveAutomationSettings(payload) { return Ui.saveAutomationSettings(payload); }
 function uiRestoreAutomationDefaults(payload) { return Ui.restoreAutomationDefaults(payload); }
 function uiPreviewNotifications() { return Ui.previewNotifications(); }
+function uiPublicationStatus() { return Ui.publicationStatus(); }
+function uiSavePublicationSettings(payload) { return Ui.savePublicationSettings(payload); }
+function uiPublicationPreview() { return Ui.publicationPreview(); }
+function uiPublishPublicationNow() { return Ui.publishPublicationNow(); }
 function uiNotificationHistory() { return Ui.notificationHistory(); }
 function uiReconcileUncertain(payload) { return Ui.reconcileUncertain(payload); }
 function uiRefresh() { return Ui.refresh(); }
