@@ -79,6 +79,20 @@
     <div class="hint">カレンダーID、スプレッドシートID、認証情報はScriptプロパティで管理し、この画面には表示しません。</div>
   </fieldset>
 
+  <fieldset>
+    <legend>共有ダッシュボード公開（閲覧専用アプリ）</legend>
+    <div class="hint" id="publicationInfo">読み込み中...</div>
+    <label class="inline"><input id="publishEnabled" type="checkbox"> 定期公開を有効にする（ADMIN・要確認入力）</label>
+    <label>公開間隔（分・5〜1440）</label><input id="publishInterval" type="number" min="5" max="1440">
+    <div style="display:flex; gap:6px; flex-wrap:wrap">
+      <button onclick="savePublication()">公開設定を保存</button>
+      <button class="secondary" onclick="publishNow()">今すぐ公開</button>
+      <button class="secondary" onclick="previewPublication()">公開差分を確認</button>
+    </div>
+    <div class="hint" id="publicationPreview">未実行</div>
+    <div class="hint">公開対象は「Dashboard_Visibility = INTERNAL」のプロジェクトのみです。公開先スプレッドシートIDはScriptプロパティで管理し、この画面には表示しません。</div>
+  </fieldset>
+
   <div style="display:flex; gap:6px; flex-wrap:wrap">
     <button onclick="save()">設定を保存</button>
     <button class="secondary" onclick="preview()">送信プレビュー</button>
@@ -223,7 +237,70 @@
     }
 
     function load() { call('uiAutomationSettings', undefined, render); }
+
+    var publication = null;
+
+    function renderPublication(status) {
+      publication = status;
+      var lines = [
+        '公開設定: ' + (status.enabled ? 'ON' : 'OFF'),
+        '公開先: ' + (status.destinationConfigured ? '設定済み' : '未設定'),
+        '最終成功: ' + (status.lastSuccessAt || 'なし'),
+        '最終結果: ' + (status.lastResult || 'なし') + (status.lastError ? '（' + status.lastError + '）' : ''),
+        'バージョン: ' + (status.lastVersion || '-'),
+        '公開データ: ' + (status.readable && status.snapshot
+          ? 'v' + status.snapshot.version + ' / ' + status.snapshot.publishedAt + ' / ' + status.snapshot.ageHours + '時間前'
+          : '未作成' + (status.error ? '（' + status.error + '）' : ''))
+      ];
+      document.getElementById('publicationInfo').textContent = lines.join(' / ');
+      setChecked('publishEnabled', status.enabled);
+      setValue('publishInterval', status.intervalMinutes);
+    }
+
+    function loadPublication() { call('uiPublicationStatus', undefined, renderPublication); }
+
+    function savePublication() {
+      var enable = checked('publishEnabled');
+      var confirmation = '';
+      if (enable && !(publication && publication.enabled)) {
+        if (!EH.confirmAction('共有ダッシュボードの公開を有効にします。INTERNALのプロジェクトが全社員に表示されます。続行しますか？')) return;
+        var typed = window.prompt('確認のため「ENABLE SHARED DASHBOARD PUBLICATION」と入力してください');
+        if (typed !== 'ENABLE SHARED DASHBOARD PUBLICATION') { setStatus('error', '公開の有効化は中止されました'); return; }
+        confirmation = typed;
+      }
+      call('uiSavePublicationSettings', {
+        changes: {
+          SHARED_DASHBOARD_PUBLISH_ENABLED: enable,
+          SHARED_DASHBOARD_PUBLISH_INTERVAL_MINUTES: Number(value('publishInterval'))
+        },
+        confirmation: confirmation
+      }, function () { loadPublication(); });
+    }
+
+    function publishNow() {
+      if (!EH.confirmAction('現在の公開対象をスナップショットへ書き出します。よろしいですか？')) return;
+      call('uiPublishPublicationNow', undefined, function (result) {
+        document.getElementById('publicationPreview').textContent =
+          'v' + result.version + ' を公開しました / ' + result.counts.projects + ' プロジェクト / ' +
+          result.counts.tasks + ' タスク / 除外 ' + result.excluded.projects + ' プロジェクト' +
+          (result.warnings.length ? ' / 警告: ' + result.warnings.join(',') : '');
+        loadPublication();
+      });
+    }
+
+    function previewPublication() {
+      call('uiPublicationPreview', undefined, function (result) {
+        document.getElementById('publicationPreview').textContent =
+          (result.initialized ? '公開済み v' + result.publishedVersion : '未作成') +
+          ' / 対象 ' + result.counts.PROJECT_COUNT + ' プロジェクト・' + result.counts.TASK_COUNT + ' タスク' +
+          ' / 除外 ' + result.excluded.projects + ' プロジェクト' +
+          ' / 差分 ' + (result.unchanged ? 'なし' : 'あり') +
+          (result.warnings.length ? ' / 警告: ' + result.warnings.join(',') : '');
+      });
+    }
+
     load();
+    loadPublication();
   </script>
 </body>
 </html>

@@ -143,3 +143,29 @@ AutomationSettings.save({ASSIGNMENT_EMAIL_ENABLED: true}, 'manager@example.com')
 - Turning a switch off suppresses side effects even if the trigger still exists.
 - Migrations always create a verified backup; `DAILY_BACKUP_ENABLED` cannot bypass it.
 - Automation status is written to the generated `AUTOMATION_STATUS` sheet without identifiers or secrets.
+
+## V1.2 shared dashboard publication settings
+
+Publication of the sanitized employee dashboard is configured in the same table but is
+completely independent of the mail mode: changing it never enables mail and changing the
+mail mode never affects publication.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `SHARED_DASHBOARD_PUBLISH_ENABLED` | `false` | Publish the sanitized snapshot on a schedule. Manual publication stays available either way. |
+| `SHARED_DASHBOARD_PUBLISH_INTERVAL_MINUTES` | `30` | Target cadence, clamped to 5–1440 and rounded down to an Apps Script-supported cadence. |
+| `LAST_SHARED_DASHBOARD_PUBLISH_AT` | status | Last successful publication (application-written). |
+| `LAST_SHARED_DASHBOARD_PUBLISH_RESULT` | status | `SUCCESS` / `FAILED`. |
+| `LAST_SHARED_DASHBOARD_PUBLISH_VERSION` | status | Snapshot version currently published. |
+| `LAST_SHARED_DASHBOARD_PUBLISH_ERROR` | status | Last failure message, truncated to 200 characters. |
+| `SHARED_DASHBOARD_PUBLISH_APPROVED_BY` | status | Verified account that last enabled publication. |
+
+- Enabling requires a verified `ADMIN`, the exact confirmation
+  `ENABLE SHARED DASHBOARD PUBLICATION`, a configured destination and an initialized snapshot
+  workbook. Disabling is available to a manager and needs no confirmation.
+- Enabling writes `SHARED_DASHBOARD_PUBLICATION_APPROVED`; disabling writes
+  `SHARED_DASHBOARD_PUBLICATION_DISABLED`; every save also writes `SETTING_CHANGED`.
+- Status keys are application-written and cannot be set through `AutomationSettings.save`.
+- The destination spreadsheet ID is **not** a setting here; it lives in Script Properties
+  (`SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID`) and is never returned by any UI or API.
+- See [dashboard/DEPLOYMENT.md](dashboard/DEPLOYMENT.md) for the activation procedure.

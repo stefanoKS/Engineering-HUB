@@ -27,6 +27,9 @@ Japanese-first; the menu is **Engineering HUB**.
 | Enable LIVE email | ✅ + confirmation | ❌ | ❌ | ❌ |
 | Stop email (OFF / emergency stop) | ✅ | ✅ | ❌ | ❌ |
 | Install triggers | ✅ creator account | ✅ creator account | ❌ | ❌ |
+| Publish the shared dashboard snapshot | ✅ | ✅ (manual) | ❌ | ❌ |
+| Enable scheduled dashboard publication | ✅ + confirmation | ❌ | ❌ | ❌ |
+| Change `Dashboard_Visibility` / `Dashboard_Summary` | ✅ | ✅ own projects (domain API) | ❌ | ❌ |
 
 The first administrator must be created once with `bootstrapFirstAdministrator` (deployment allowlist + exact
 confirmation). The last active administrator can never be demoted or deactivated.

@@ -2,22 +2,34 @@
 
 Google スプレッドシートをデータベース、Google Apps Script をアプリケーション、GitHub をソースコードの履歴管理に使用する、エンジニアリング向けのプロジェクト管理システムです。
 
-[English](README.md) · [設計](ARCHITECTURE.md) · [データ構造](DATA_SCHEMA.md) · [デプロイ](DEPLOYMENT.md) · [バックアップと復元](BACKUP_RESTORE.md) · [管理者向け手順](docs/MANAGER_WORKFLOW.md) · [自動化設定](docs/AUTOMATION_SETTINGS.md) · [Workspace実機確認](docs/GOOGLE_WORKSPACE_SMOKE_TEST.md) · [セキュリティモデル](docs/SECURITY_MODEL.md) · [運用ランブック](docs/OPERATIONS_RUNBOOK.md)
+[English](README.md) · [設計](ARCHITECTURE.md) · [データ構造](DATA_SCHEMA.md) · [デプロイ](DEPLOYMENT.md) · [バックアップと復元](BACKUP_RESTORE.md) · [管理者向け手順](docs/MANAGER_WORKFLOW.md) · [自動化設定](docs/AUTOMATION_SETTINGS.md) · [共有ダッシュボード](docs/dashboard/ARCHITECTURE.md) · [公開データ契約](docs/dashboard/DATA_CONTRACT.md) · [Workspace実機確認](docs/GOOGLE_WORKSPACE_SMOKE_TEST.md) · [セキュリティモデル](docs/SECURITY_MODEL.md) · [運用ランブック](docs/OPERATIONS_RUNBOOK.md)
 
 ## リリース状況 — 本番承認前
 
 | 項目 | 内容 |
 | --- | --- |
-| リリース | V1.1（管理の使いやすさ・信頼性・自動化制御）＋本番向け堅牢化 |
-| バージョン | `1.1.0` |
-| ローカルテスト | **105件すべて成功**（`npm test`）。`npm run lint` と `npm run validate` も成功 |
-| スキーマバージョン | **3**（`003_management_reliability`。追加のみ） |
-| ローカルで確認済み | 未見積とゼロの区別、期限のみの割当、割当承認と日程確定の分離、対象判定、工数加重の進捗、決定的な健全性判定、ダッシュボード・Gantt・作業負荷、ロール制御（ADMIN/MANAGER/MEMBER/VIEWER）、安全なDOM描画、初回管理者ブートストラップ、OFF/PREVIEW/LIVE の全組み合わせ、期限前通知の日数設定とキャッチアップ、週次レポート、トリガー設定の再作成、通知台帳の状態、移行時のデータ保持 |
-| 本番の阻害要因 | Google Workspace での実機確認が未実施、開発/本番プロジェクトが未作成、移行後のロールが空欄で初期管理者の設定が必要、実シートでのクォータ・性能が未測定、リポジトリ公開範囲が未決定 |
+| リリース | V1.2（全社員向け・閲覧専用の共有ダッシュボード）／V1.1（管理の使いやすさ・信頼性・自動化制御）＋本番向け堅牢化 |
+| バージョン | `1.2.0` |
+| ローカルテスト | **149件すべて成功**（`npm test`）。`npm run lint` と `npm run validate` も成功 |
+| スキーマバージョン | **4**（`004_shared_dashboard`。追加のみ・承認と検証済みバックアップが必要） |
+| ローカルで確認済み | 未見積とゼロの区別、期限のみの割当、割当承認と日程確定の分離、対象判定、工数加重の進捗、決定的な健全性判定、ダッシュボード・Gantt・作業負荷、ロール制御（ADMIN/MANAGER/MEMBER/VIEWER）、安全なDOM描画、初回管理者ブートストラップ、OFF/PREVIEW/LIVE の全組み合わせ、期限前通知の日数設定とキャッチアップ、週次レポート、トリガー設定の再作成、通知台帳の状態、移行時のデータ保持、公開項目の許可リスト、`INTERNAL` のみの公開、A/Bスナップショットの確定と失敗時の保持、閲覧専用API、Asia/Tokyo の期限表記 |
+| 本番の阻害要因 | Google Workspace での実機確認が未実施、開発/本番プロジェクトが未作成、移行後のロールが空欄で初期管理者の設定が必要、実シートでのクォータ・性能が未測定、リポジトリ公開範囲が未決定、ダッシュボードの公開設定・Drive ACL・定期公開が未検証 |
 | Google Workspace 検証 | **未検証**。本リポジトリは実環境で実行していません |
 
 正式なリリース判定は [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) に記録します。実機の証跡が揃うまで
 **本番承認前**のままとし、CIの成功だけでは状態を変更しません。
+
+## 2つのアプリケーション
+
+| アプリケーション | ソース | 役割 |
+| --- | --- | --- |
+| 管理アプリ（コンテナバインド） | `src/` | 業務データ、サイドバー、自動化、公開処理 |
+| 共有ダッシュボード（スタンドアロンWebアプリ） | `dashboard-app/` | 全社員向けの**閲覧専用**ポートフォリオ。公開スナップショットのみ読み取り |
+
+共有ダッシュボードは業務データベース（管理用スプレッドシート）へアクセスせず、書き込み・メール送信・
+カレンダー・トリガーの機能を持ちません。公開対象は `Dashboard_Visibility = INTERNAL` と明示された
+プロジェクトだけです。詳細は [docs/dashboard/ARCHITECTURE.md](docs/dashboard/ARCHITECTURE.md) と
+[docs/dashboard/ACCESS_AND_SHARING.md](docs/dashboard/ACCESS_AND_SHARING.md) を参照してください。
 
 
 ## 最初に確認すること

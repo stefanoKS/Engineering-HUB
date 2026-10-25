@@ -41,17 +41,28 @@ var AutomationSettings = (function () {
     PROJECT_STALE_DAYS: 7,
     HEALTH_MILESTONE_APPROACH_DAYS: 14,
     HEALTH_DELAY_TOLERANCE_DAYS: 0,
+    // V1.2 shared dashboard publication. OFF until a manager reviews the snapshot.
+    SHARED_DASHBOARD_PUBLISH_ENABLED: false,
+    SHARED_DASHBOARD_PUBLISH_INTERVAL_MINUTES: 30,
     LAST_DASHBOARD_REFRESH_AT: '',
     LAST_WORKLOAD_REFRESH_AT: '',
     LAST_BACKUP_TIME: '',
     LAST_BACKUP_RESULT: '',
     CALENDAR_LAST_SYNC_AT: '',
     CALENDAR_LAST_SYNC_STATUS: '',
-    LAST_WEEKLY_REPORT_AT: ''
+    LAST_WEEKLY_REPORT_AT: '',
+    LAST_SHARED_DASHBOARD_PUBLISH_AT: '',
+    LAST_SHARED_DASHBOARD_PUBLISH_RESULT: '',
+    LAST_SHARED_DASHBOARD_PUBLISH_VERSION: '',
+    LAST_SHARED_DASHBOARD_PUBLISH_ERROR: '',
+    SHARED_DASHBOARD_PUBLISH_APPROVED_BY: ''
   };
 
   var STATUS_KEYS = ['LAST_DASHBOARD_REFRESH_AT', 'LAST_WORKLOAD_REFRESH_AT', 'LAST_BACKUP_TIME',
-    'LAST_BACKUP_RESULT', 'CALENDAR_LAST_SYNC_AT', 'CALENDAR_LAST_SYNC_STATUS', 'LAST_WEEKLY_REPORT_AT'];
+    'LAST_BACKUP_RESULT', 'CALENDAR_LAST_SYNC_AT', 'CALENDAR_LAST_SYNC_STATUS', 'LAST_WEEKLY_REPORT_AT',
+    'LAST_SHARED_DASHBOARD_PUBLISH_AT', 'LAST_SHARED_DASHBOARD_PUBLISH_RESULT',
+    'LAST_SHARED_DASHBOARD_PUBLISH_VERSION', 'LAST_SHARED_DASHBOARD_PUBLISH_ERROR',
+    'SHARED_DASHBOARD_PUBLISH_APPROVED_BY'];
 
   var DESCRIPTIONS = {
     EMAIL_MODE: 'Outgoing mail mode: OFF / PREVIEW / LIVE.',
@@ -78,7 +89,14 @@ var AutomationSettings = (function () {
     PROJECT_STALE_ALERT_ENABLED: 'Flag projects without recent updates.',
     PROJECT_STALE_DAYS: 'Days without updates before a project is stale.',
     HEALTH_MILESTONE_APPROACH_DAYS: 'Days before a milestone that make a project yellow.',
-    HEALTH_DELAY_TOLERANCE_DAYS: 'Accepted forecast delay in days before health degrades.'
+    HEALTH_DELAY_TOLERANCE_DAYS: 'Accepted forecast delay in days before health degrades.',
+    SHARED_DASHBOARD_PUBLISH_ENABLED: 'Publish the sanitized snapshot for the shared employee dashboard.',
+    SHARED_DASHBOARD_PUBLISH_INTERVAL_MINUTES: 'Scheduled snapshot publication interval in minutes.',
+    LAST_SHARED_DASHBOARD_PUBLISH_AT: 'Last successful shared dashboard publication (Asia/Tokyo).',
+    LAST_SHARED_DASHBOARD_PUBLISH_RESULT: 'Result of the last shared dashboard publication attempt.',
+    LAST_SHARED_DASHBOARD_PUBLISH_VERSION: 'Snapshot version currently published.',
+    LAST_SHARED_DASHBOARD_PUBLISH_ERROR: 'Last publication failure, truncated.',
+    SHARED_DASHBOARD_PUBLISH_APPROVED_BY: 'Verified account that last enabled publication.'
   };
 
   function clone(value) { return JSON.parse(JSON.stringify(value)); }
@@ -194,6 +212,7 @@ var AutomationSettings = (function () {
     if (key === 'HEALTH_DELAY_TOLERANCE_DAYS') return integer(value, key, 0, 365);
     if (key === 'REMINDER_CATCHUP_DAYS') return integer(value, key, 0, 31);
     if (key === 'OVERDUE_FREQUENCY_DAYS') return integer(value, key, 1, 90);
+    if (key === 'SHARED_DASHBOARD_PUBLISH_INTERVAL_MINUTES') return integer(value, key, 5, 1440);
     if (typeof DEFAULTS[key] === 'number') return integer(value, key, 0, Number.MAX_SAFE_INTEGER);
     return String(value === null || value === undefined ? '' : value);
   }
@@ -407,6 +426,10 @@ var AutomationSettings = (function () {
       rows.push(['最終週次レポート', values.LAST_WEEKLY_REPORT_AT, '']);
       rows.push(['最終バックアップ', values.LAST_BACKUP_TIME, values.LAST_BACKUP_RESULT]);
       rows.push(['カレンダー最終同期', values.CALENDAR_LAST_SYNC_AT, values.CALENDAR_LAST_SYNC_STATUS]);
+      rows.push(['共有ダッシュボード公開', values.SHARED_DASHBOARD_PUBLISH_ENABLED ? 'ON' : 'OFF',
+        values.LAST_SHARED_DASHBOARD_PUBLISH_RESULT || '']);
+      rows.push(['最終公開', values.LAST_SHARED_DASHBOARD_PUBLISH_AT,
+        'version ' + (values.LAST_SHARED_DASHBOARD_PUBLISH_VERSION || '-')]);
     } catch (error) {
       rows.push(['状態を取得できません', error.message, '']);
     }

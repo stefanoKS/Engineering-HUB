@@ -1,7 +1,7 @@
 export default [
   { ignores: ['node_modules/**', 'coverage/**'] },
   {
-    files: ['src/**/*.gs'],
+    files: ['src/**/*.gs', 'dashboard-app/**/*.gs'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'script'

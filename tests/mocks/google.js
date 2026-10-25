@@ -119,7 +119,9 @@ class MockSheet {
     }, 0);
   }
   getMaxRows() { return this.maxRows; }
-  getMaxColumns() { return this.maxColumns; }
+  // Sheets guarantees the grid is at least as wide as its widest row; keep the mock faithful
+  // so a migration appends columns instead of shifting user-added ones.
+  getMaxColumns() { return Math.max(this.maxColumns, ...this.rows.map(row => row.length), 0); }
   insertRowsAfter(position, count) {
     if (!Number.isInteger(position) || position < 1 || position > this.maxRows ||
         !Number.isInteger(count) || count < 1) throw new Error('Invalid row insertion');
@@ -217,6 +219,17 @@ function createGoogleMocks(options = {}) {
     waitLock() { if (!this.tryLock()) throw new Error('Lock unavailable'); },
     releaseLock() { this.held = false; },
     hasLock() { return this.held; }
+  };
+  // Script cache is process-local and expires by key on demand; tests inspect `store`.
+  const cacheStore = new Map();
+  const cache = {
+    store: cacheStore,
+    get(key) { return cacheStore.has(key) ? cacheStore.get(key) : null; },
+    getAll(keys) { return Object.fromEntries(keys.filter(key => cacheStore.has(key)).map(key => [key, cacheStore.get(key)])); },
+    put(key, value) { cacheStore.set(key, String(value)); return this; },
+    putAll(values) { Object.entries(values).forEach(([key, value]) => this.put(key, value)); return this; },
+    remove(key) { cacheStore.delete(key); return this; },
+    removeAll(keys) { keys.forEach(key => cacheStore.delete(key)); return this; }
   };
   const iterator = items => {
     let index = 0;
@@ -381,6 +394,7 @@ function createGoogleMocks(options = {}) {
           everyDays(value) { details.everyDays = value; return this; },
           everyWeeks(value) { details.everyWeeks = value; return this; },
           everyHours(value) { details.everyHours = value; return this; },
+          everyMinutes(value) { details.everyMinutes = value; return this; },
           atHour(value) { details.hour = value; return this; },
           nearMinute(value) { details.minute = value; return this; },
           inTimezone(value) { details.timeZone = value; return this; },
@@ -397,7 +411,7 @@ function createGoogleMocks(options = {}) {
     },
     HtmlService: {
       createHtmlOutputFromFile(name) {
-        const file = path.join(__dirname, '../../src', `${name}.html`);
+        const file = path.join(__dirname, '../../', options.htmlDir || 'src', `${name}.html`);
         if (!fs.existsSync(file)) throw new Error(`Unknown HTML template: ${name}`);
         const content = fs.readFileSync(file, 'utf8');
         const output = {
@@ -407,6 +421,9 @@ function createGoogleMocks(options = {}) {
           setWidth() { return output; },
           setHeight() { return output; },
           setSandboxMode() { return output; },
+          setXFrameOptionsMode() { return output; },
+          setFaviconUrl() { return output; },
+          addMetaTag() { return output; },
           append() { return output; }
         };
         return output;
@@ -418,7 +435,7 @@ function createGoogleMocks(options = {}) {
       createTemplateFromFile(name) {
         // Resolve <?!= include('Partial') ?> scriptlets so tests see the real assembled page.
         const read = templateName => {
-          const file = path.join(__dirname, '../../src', `${templateName}.html`);
+          const file = path.join(__dirname, '../../', options.htmlDir || 'src', `${templateName}.html`);
           if (!fs.existsSync(file)) throw new Error(`Unknown HTML template: ${templateName}`);
           return fs.readFileSync(file, 'utf8').replace(/<\?!=\s*include\('([^']+)'\)\s*\?>/g, (match, partial) => read(partial));
         };
@@ -431,16 +448,24 @@ function createGoogleMocks(options = {}) {
           setWidth() { return output; },
           setHeight() { return output; },
           setSandboxMode() { return output; },
+          setXFrameOptionsMode() { return output; },
+          setFaviconUrl() { return output; },
+          addMetaTag() { return output; },
           append() { return output; }
         };
         return { evaluate: () => output };
       }
     },
     Charts: { ChartType: { COLUMN: 'COLUMN', BAR: 'BAR', PIE: 'PIE', LINE: 'LINE' } },
+    CacheService: {
+      getScriptCache: () => cache,
+      getDocumentCache: () => cache,
+      getUserCache: () => cache
+    },
     Logger: { log() {} }
   };
   return { globals, spreadsheet, book: spreadsheet, properties, sentEmails, calendars,
-    calendarEvents, backups, triggers, folders, files, spreadsheets, lock, addFolder, addCalendar, uiSidebars,
+    calendarEvents, backups, triggers, folders, files, spreadsheets, lock, addFolder, addCalendar, uiSidebars, cache,
     setActor(value) { identity.current = value; return identity.current; },
     getActor() { return identity.current; } };
 }

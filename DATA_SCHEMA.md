@@ -2,16 +2,17 @@
 
 ## Contract and versions
 
-`src/Schema.gs` is authoritative. The current schema version is **3**.
+`src/Schema.gs` is authoritative. The current schema version is **4**.
 
 | Version | Migration | Adds |
 | --- | --- | --- |
 | 1 | — | Base tables and fields |
 | 2 | `002_task_assignment_safety` | `TASKS.Assignment_Version`, `Assignment_Approved_At`, `Notification_Baseline` |
 | 3 | `003_management_reliability` | `AUTOMATION_SETTINGS`, `PROJECT_PHASES`, `SCHEDULE_CONFIRMATIONS`, `PROJECTS.Notification_Enabled`, `MEMBERS.Role`, `NOTIFICATION_LOG.Reconciled_At`/`Reconciled_By`, seeded safe automation defaults (mail OFF) |
+| 4 | `004_shared_dashboard` | `PROJECTS.Dashboard_Visibility`, `PROJECTS.Dashboard_Summary`, `TASKS.Public_Note` (additive; publishes nothing by itself) |
 
 Approved migrations upgrade one version at a time, each with its own verified backup. Fresh empty workbooks
-initialize directly to version 3. `SCHEMA_MIGRATIONS` records successful versions; changing code or a header
+initialize directly to version 4. `SCHEMA_MIGRATIONS` records successful versions; changing code or a header
 manually does not apply a migration.
 
 The upgrade appends missing schema elements; it does not invent assignment approvals, roles or notification
@@ -32,6 +33,7 @@ The first field in each list is the stable primary key. Relationships are descri
 Project_ID Project_Name Description Category Project_Owner_ID Status Priority
 Planned_Start Forecast_End Committed_Deadline Original_Deadline Actual_Completion
 Progress_Percent Health Next_Milestone Next_Action Last_Updated Created_At Archived_At Notification_Enabled
+Dashboard_Visibility Dashboard_Summary
 ```
 
 Required: `Project_Name`, `Status`. `Project_Owner_ID` references `MEMBERS`.
@@ -42,6 +44,11 @@ Required: `Project_Name`, `Status`. `Project_Owner_ID` references `MEMBERS`.
   dashboard refresh does not.
 - `Notification_Enabled` is boolean. Blank keeps the previous behaviour (notifications allowed); `false` suppresses
   every notification for the project.
+- `Dashboard_Visibility` is `INTERNAL` or `RESTRICTED` and defaults to `RESTRICTED`. Only `INTERNAL` projects are
+  written to the shared dashboard snapshot; a blank value (every migrated row) is treated as `RESTRICTED`, so
+  nothing is published until a manager reviews the project.
+- `Dashboard_Summary` is the approved public summary. `Description`, `Next_Action` and `Next_Milestone` are never
+  published. See [docs/dashboard/DATA_CONTRACT.md](docs/dashboard/DATA_CONTRACT.md).
 
 ### SUBPROJECTS
 
@@ -60,7 +67,7 @@ Task_ID Project_ID Subproject_ID Task_Name Description Owner_Member_ID Status
 Priority Planned_Start Due_Date Estimated_Hours Actual_Hours Progress_Percent
 Dependency_IDs Acceptance_Criteria Next_Action Required_Skill_ID Required_Skill_Level
 Assignment_Version Assignment_Approved_At Notification_Enabled Notification_Baseline
-Created_At Last_Updated Completed_At
+Created_At Last_Updated Completed_At Public_Note
 ```
 
 Required: `Project_ID`, `Task_Name`, `Owner_Member_ID`, `Status`. References: project → `PROJECTS`, subproject →
@@ -77,6 +84,8 @@ the domain layer rejects missing, cross-project, and cyclic dependencies.
   cleared by material assignment changes. `Notification_Baseline` is an application-managed snapshot.
 - Do not manually forge the approval/baseline fields to enable delivery.
 - A deadline-only task (no `Planned_Start`, no `Estimated_Hours`) is valid.
+- `Public_Note` is the only task free text that may be published to the shared dashboard. `Description`,
+  `Acceptance_Criteria`, `Next_Action`, `Dependency_IDs`, `Estimated_Hours` and `Actual_Hours` are never published.
 
 ### SCHEDULE_CONFIRMATIONS
 
@@ -177,7 +186,10 @@ Audit_ID Timestamp Entity_Type Entity_ID Action Previous_Value New_Value Actor R
 Application history is not a tamper-proof security log: spreadsheet editors can modify it. Restrict access
 accordingly. V1.1 actions include `SETTING_CHANGED`, `SCHEDULE_CONFIRMED`, `SCHEDULE_CONFIRMATION_INVALIDATED`,
 `TRIGGERS_INSTALLED`, `DELIVERY_RECONCILED`, `UI_PROJECT_CREATED`, `UI_SUBPROJECT_CREATED`, `UI_TASK_ASSIGNED`,
-`ADMIN_BOOTSTRAPPED`, `EMAIL_LIVE_ACTIVATED`, `EMAIL_LIVE_DEACTIVATED`.
+`ADMIN_BOOTSTRAPPED`, `EMAIL_LIVE_ACTIVATED`, `EMAIL_LIVE_DEACTIVATED`. V1.2 adds
+`SHARED_DASHBOARD_INITIALIZED`, `SHARED_DASHBOARD_PUBLICATION_APPROVED`,
+`SHARED_DASHBOARD_PUBLICATION_DISABLED`, `SHARED_DASHBOARD_PUBLISHED` and
+`SHARED_DASHBOARD_PUBLICATION_FAILED`.
 
 ### SCHEMA_MIGRATIONS
 

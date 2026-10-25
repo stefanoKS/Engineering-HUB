@@ -1,6 +1,6 @@
 # Engineering-HUB instructions
 
-Read and follow all thirty-three rules in [AGENTS.md](../AGENTS.md) before changing this repository.
+Read and follow all forty-one rules in [AGENTS.md](../AGENTS.md) before changing this repository.
 
 This is a Google Apps Script application backed by Google Sheets. Treat code, spreadsheet data, Drive backups, Script Properties, installable triggers and the workbook `AUTOMATION_SETTINGS` table as separate operational state. Follow `/DATA_SCHEMA.md` for data contracts and `/DEPLOYMENT.md` for environment binding and explicit activation.
 
@@ -26,6 +26,14 @@ This is a Google Apps Script application backed by Google Sheets. Treat code, sp
 - Ledger states `PENDING`/`SENT`/`PREVIEW`/`DELIVERY_UNCERTAIN`; never auto-retry an ambiguous delivery; never replay history.
 - Notification changes require regression tests for the OFF/PREVIEW/LIVE matrix, per-project/per-task switches, deduplication and uncertain delivery.
 - Manager preferences live in `AUTOMATION_SETTINGS` (never source constants) and every change is audited.
+
+## Shared dashboard (V1.2)
+
+- `dashboard-app/` is a **separate**, read-only Apps Script web app with its own clasp target and Script Properties. It never reads the management workbook, has no write path, and may not use `MailApp`, `GmailApp`, `CalendarApp`, `ScriptApp`, `UrlFetchApp`, `DriveApp` or manager modules. `npm run validate` rejects them.
+- Publish only allowlisted fields through `SharedDashboardModel`; `Dashboard_Visibility` must be exactly `INTERNAL`. Never publish e-mail addresses, skills, HR capacity, logs, settings, private descriptions or acceptance criteria.
+- Publication is A/B transactional, defaults OFF, is independent of the mail mode, and requires ADMIN plus `ENABLE SHARED DASHBOARD PUBLICATION`. A failed run must leave the previous snapshot readable.
+- The snapshot spreadsheet ID lives in `SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID` and is never returned to a browser.
+- Access is the deployment ACL (`access: DOMAIN`, execute as deployer, `spreadsheets.readonly`), not client-side hiding. Dashboard Workspace behaviour is UNVERIFIED until [docs/dashboard/SMOKE_TEST.md](../docs/dashboard/SMOKE_TEST.md) is completed.
 
 ## Testing and release
 

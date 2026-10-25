@@ -2,22 +2,34 @@
 
 Engineering project management using Google Sheets as the database, Google Apps Script as the application, and GitHub as the source-code history.
 
-[日本語](README_JP.md) · [Architecture](ARCHITECTURE.md) · [Data schema](DATA_SCHEMA.md) · [Deployment](DEPLOYMENT.md) · [Backup and restore](BACKUP_RESTORE.md) · [Manager workflow](docs/MANAGER_WORKFLOW.md) · [Automation settings](docs/AUTOMATION_SETTINGS.md) · [Workspace smoke test](docs/GOOGLE_WORKSPACE_SMOKE_TEST.md) · [Security model](docs/SECURITY_MODEL.md) · [Operations runbook](docs/OPERATIONS_RUNBOOK.md)
+[日本語](README_JP.md) · [Architecture](ARCHITECTURE.md) · [Data schema](DATA_SCHEMA.md) · [Deployment](DEPLOYMENT.md) · [Backup and restore](BACKUP_RESTORE.md) · [Manager workflow](docs/MANAGER_WORKFLOW.md) · [Automation settings](docs/AUTOMATION_SETTINGS.md) · [Shared dashboard](docs/dashboard/ARCHITECTURE.md) · [Dashboard data contract](docs/dashboard/DATA_CONTRACT.md) · [Workspace smoke test](docs/GOOGLE_WORKSPACE_SMOKE_TEST.md) · [Security model](docs/SECURITY_MODEL.md) · [Operations runbook](docs/OPERATIONS_RUNBOOK.md)
 
 ## Release status — NOT APPROVED FOR PRODUCTION
 
 | Field | Value |
 | --- | --- |
-| Release | V1.1 (management usability, reliability & automation controls) + production hardening |
-| Version | `1.1.0` |
-| Local test count | **105 passing** (`npm test`), 0 failing; `npm run lint` and `npm run validate` pass |
-| Schema version | **3** — `003_management_reliability` (additive only) |
-| Verified locally | Unknown-vs-zero estimates, deadline-only assignment, separated approval/schedule confirmation, eligibility policy, weighted progress, deterministic health, dashboard/Gantt/workload views, role enforcement (ADMIN/MANAGER/MEMBER/VIEWER), safe DOM rendering, first-admin bootstrap, OFF/PREVIEW/LIVE matrix, reminder offsets and catch-up, weekly report, trigger drift recreation, ledger states, data preservation on upgrade |
-| Known production blockers | No live Google Workspace execution of any kind; development/production projects not created; roles blank after migration until bootstrap; real Sheets quota/performance unmeasured; repository visibility undecided |
+| Release | V1.2 (shared read-only employee dashboard) on top of V1.1 (management usability, reliability & automation controls) + production hardening |
+| Version | `1.2.0` |
+| Local test count | **149 passing** (`npm test`), 0 failing; `npm run lint` and `npm run validate` pass |
+| Schema version | **4** — `004_shared_dashboard` (additive only; approval + verified backup required) |
+| Verified locally | Unknown-vs-zero estimates, deadline-only assignment, separated approval/schedule confirmation, eligibility policy, weighted progress, deterministic health, dashboard/Gantt/workload views, role enforcement (ADMIN/MANAGER/MEMBER/VIEWER), safe DOM rendering, first-admin bootstrap, OFF/PREVIEW/LIVE matrix, reminder offsets and catch-up, weekly report, trigger drift recreation, ledger states, data preservation on upgrade, sanitized dashboard DTO allowlist, `INTERNAL`-only publication, A/B snapshot commit and rollback-on-failure, read-only viewer API, deadline wording in Asia/Tokyo |
+| Known production blockers | No live Google Workspace execution of any kind; development/production projects not created; roles blank after migration until bootstrap; real Sheets quota/performance unmeasured; repository visibility undecided; dashboard deployment ACL, Drive ACLs and scheduled publication unverified |
 | Google Workspace verification | **UNVERIFIED** — nothing in this repository has been run against a real Workspace |
 
 The canonical release gate is [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md). It stays at
 **NOT APPROVED FOR PRODUCTION** until recorded live evidence exists; a green CI run cannot change it.
+
+## Two applications
+
+| Application | Source | Purpose |
+| --- | --- | --- |
+| Manager (container-bound) | `src/` | Operational database, sidebars, automation, publication |
+| Shared dashboard (standalone web app) | `dashboard-app/` | **Read-only** portfolio for all employees; reads only the sanitized snapshot |
+
+The dashboard never reads the private management workbook and has no write, mail, Calendar or
+trigger access. Only projects explicitly marked `Dashboard_Visibility = INTERNAL` are
+published. See [docs/dashboard/ARCHITECTURE.md](docs/dashboard/ARCHITECTURE.md) and
+[docs/dashboard/ACCESS_AND_SHARING.md](docs/dashboard/ACCESS_AND_SHARING.md).
 
 
 ## Safety first

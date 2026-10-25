@@ -26,8 +26,8 @@ test('version 3 upgrade preserves every pre-existing operational cell and cannot
   history.rows = [history.rows[0], ['INITIALIZE_V2', new Date().toISOString(), 0, 2, 'SUCCESS', 'NEW_EMPTY_DATABASE']];
 
   const before = JSON.parse(JSON.stringify(context.Backup.snapshot(app.book)));
-  app.properties.setProperty('APPROVED_MIGRATIONS', '003_management_reliability');
-  assert.equal(context.upgradeExistingDatabase(), 3);
+  app.properties.setProperty('APPROVED_MIGRATIONS', '003_management_reliability,004_shared_dashboard');
+  assert.equal(context.upgradeExistingDatabase(), 4);
 
   for (const old of before) {
     if (['SCHEMA_MIGRATIONS', 'BACKUP_LOG', 'AUTOMATION_SETTINGS'].includes(old.name)) continue;
@@ -36,7 +36,7 @@ test('version 3 upgrade preserves every pre-existing operational cell and cannot
       `${old.name} row ${r + 1} column ${c + 1} changed`)));
   }
 
-  assert.equal(app.backups.length, 1, 'the migration always takes a verified backup');
+  assert.equal(app.backups.length, 2, 'each migration takes a verified backup');
   assert.ok(app.book.getSheetByName('PROJECT_PHASES'));
   assert.ok(app.book.getSheetByName('SCHEDULE_CONFIRMATIONS'));
   assert.equal(db.find('TASKS', 'T1').Task_Name, '機構設計');
