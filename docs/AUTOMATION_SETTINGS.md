@@ -118,7 +118,7 @@ Values are stored as JSON text in the `Value` column. Status keys cannot be writ
 
 ## How to change settings
 
-1. Open the bound spreadsheet → **Engineering HUB → 自動化設定**.
+1. Open the bound spreadsheet → **設計・開発課 管理 → 自動化設定**.
 2. Change switches, offsets, recipients, schedule.
 3. **設定を保存** writes only the changed keys through `AutomationSettings.save` and appends an audit record
    (`SETTING_CHANGED`, old value, new value, actor, timestamp).
@@ -169,3 +169,27 @@ mail mode never affects publication.
 - The destination spreadsheet ID is **not** a setting here; it lives in Script Properties
   (`SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID`) and is never returned by any UI or API.
 - See [dashboard/DEPLOYMENT.md](dashboard/DEPLOYMENT.md) for the activation procedure.
+
+## V1.3 request notification switches
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `DEADLINE_REQUEST_EMAIL_ENABLED` | `false` | notify managers when a deadline change request is imported |
+| `COMPLETION_REPORT_EMAIL_ENABLED` | `false` | notify managers when a completion report is imported |
+| `PENDING_REQUEST_REMINDER_ENABLED` | `false` | send one bounded daily reminder while requests wait for approval |
+
+All three pass through the single gate in `src/Notifications.gs`:
+
+* `EMAIL_MODE = OFF` (or the emergency stop) sends nothing.
+* `PREVIEW` records a preview row in `NOTIFICATION_LOG` and sends no mail.
+* `LIVE` additionally requires `EMAIL_ENABLED=true`, `DRY_RUN=false`, an activated
+  notification account, allowed recipient domains, an unused deduplication key and the
+  per-run cap.
+
+Status keys written by the application: `LAST_REQUEST_IMPORT_AT` and
+`LAST_PENDING_REQUEST_REMINDER_AT`. They cannot be set through the settings UI.
+
+Request notifications go to the configured management recipients only. They contain the
+request ID, task/project identifiers, the self-reported requester name, the dates and the
+stored reason/explanation. They never contain the private workbook ID or any credential.
+

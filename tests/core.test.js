@@ -25,7 +25,7 @@ function oldDatabase() {
     const col = tasks.rows[0].indexOf(field);
     tasks.rows.forEach(row => row.splice(col, 1));
   }
-  app.properties.setProperty('APPROVED_MIGRATIONS', '002_task_assignment_safety,003_management_reliability,004_shared_dashboard');
+  app.properties.setProperty('APPROVED_MIGRATIONS', '002_task_assignment_safety,003_management_reliability,004_shared_dashboard,005_task_planning_and_requests');
   return app;
 }
 
@@ -33,7 +33,7 @@ test('initialization requires explicit designation and confirmation, creates no 
   const app = loadApp();
   assert.throws(() => app.context.initializeNewDatabase('wrong'), /confirmation/);
   app.context.initializeNewDatabase('INITIALIZE test-db');
-  assert.equal(app.context.Migrations.currentVersion(), 4);
+  assert.equal(app.context.Migrations.currentVersion(), 5);
   assert.equal(app.sentEmails.length, 0);
   assert.equal(app.triggers.length, 0);
   assert.equal(app.calendarEvents.length, 0);
@@ -66,9 +66,9 @@ test('workbook environment marker prevents development from accessing production
 test('approved upgrade preserves project, task ownership, skill records and existing cell positions', () => {
   const app = oldDatabase();
   const before = JSON.parse(JSON.stringify(app.context.Backup.snapshot(app.book)));
-  assert.equal(app.context.upgradeExistingDatabase(), 4);
+  assert.equal(app.context.upgradeExistingDatabase(), 5);
   // Each approved migration takes its own verified pre-migration backup.
-  assert.equal(app.backups.length, 3);
+  assert.equal(app.backups.length, 4);
   assert.equal(app.context.Database.find('PROJECTS', 'P001').Project_Name, 'Inspection cell');
   assert.equal(app.context.Database.find('TASKS', 'T001').Owner_Member_ID, 'M001');
   assert.equal(app.context.Database.find('TASKS', 'T001').Assignment_Approved_At, '');
@@ -86,7 +86,7 @@ test('repeating an applied migration changes no cells and creates no further bac
   const before = JSON.stringify(app.context.Backup.snapshot(app.book));
   app.context.upgradeExistingDatabase();
   assert.equal(JSON.stringify(app.context.Backup.snapshot(app.book)), before);
-  assert.equal(app.backups.length, 3);
+  assert.equal(app.backups.length, 4);
 });
 
 test('missing tables and missing columns are appended without replacing manual columns', () => {

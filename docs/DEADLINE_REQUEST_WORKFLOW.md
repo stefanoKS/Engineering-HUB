@@ -1,0 +1,134 @@
+# Deadline change request workflow
+
+Any employee who can open the shared dashboard may request a deadline change for **any
+published task**, and may report that a task is finished. Neither action changes the
+authoritative task: only a manager decision does.
+
+## 1. Who can request what
+
+| Action | Who | Constraint |
+| --- | --- | --- |
+| Request a deadline change | any viewer of the internal dashboard | the task must be in the current published snapshot; the requester is *not* required to be the owner |
+| Report completion | any viewer of the internal dashboard | same rule |
+| Approve / reject / return | `MANAGER` or `ADMIN`, verified server-side | no browser-supplied role is trusted |
+
+No login page, password, personal token or employee account is introduced. The requester
+name is **unverified self-reported information** and is stored and displayed as such
+(`申請者名（自己申告）`).
+
+## 2. Submission (dashboard application)
+
+Server function: `submitDeadlineRequest(payload)` / `submitCompletionReport(payload)`
+(`dashboard-app/RequestService.gs`).
+
+Validation at submission:
+
+1. The viewer passes the domain-restricted deployment check.
+2. Request submission must be configured (`REQUEST_INBOX_SPREADSHEET_ID`) and enabled.
+3. Only the documented payload keys are accepted; anything else is refused.
+4. The task ID must resolve in the **active published snapshot** — a restricted or unknown
+   task can never receive a request.
+5. The requested date must be a valid `yyyy-MM-dd` and must differ from the current
+   deadline (earlier or later are both allowed).
+6. The reason must be one of the six canonical values; text fields are length-limited.
+7. The requester/reporter name is mandatory (≤ 120 characters).
+8. A rate limit (5 submissions per browser token per hour) and a 24-hour duplicate guard
+   apply. A retry from the same browser token returns the original request ID instead of
+   creating a second request.
+9. The row is appended under the script lock to the **separate request inbox** workbook.
+
+The dashboard never receives the private workbook ID and has no update or delete path.
+
+The user receives a permanent request ID (`REQ-<timestamp>-<random>`), the receipt text and
+the current request state. The same ID can be looked up later with
+`requestSubmissionStatus(requestId)`.
+
+## 3. Request status values
+
+| Status | Meaning |
+| --- | --- |
+| `PENDING` | imported, waiting for a manager |
+| `PROCESSING` | a decision is being applied (recovery marker) |
+| `APPROVED` | approved and applied |
+| `REJECTED` | rejected; the deadline is unchanged |
+| `RETURNED` | sent back for more information; the deadline is unchanged |
+| `STALE` | the task changed after submission; re-review required |
+| `WITHDRAWN` | reserved for a future withdrawal flow |
+
+A pending or rejected request **never** changes `Due_Date`, and a pending request never
+removes the overdue indicator on the dashboard.
+
+## 4. Manager decision
+
+Server function: `Requests.decide(requestId, action, note, 'DECIDE REQUEST')`.
+
+Before applying an approval the manager application:
+
+1. re-reads the task,
+2. revalidates the project and task identifiers,
+3. refuses a request that is already decided,
+4. compares the task revision captured at submission with the current revision
+   (owner + deadline + assignment version, published as an opaque hash),
+5. compares the deadline at submission with the current deadline,
+6. validates the requested date,
+7. then applies the decision with an audit record.
+
+If the task was reassigned or its deadline changed after submission, the request becomes
+`STALE` and nothing is overwritten. The manager decides again.
+
+### Approval effects (deadline change)
+
+* `TASKS.Due_Date` is set to the requested date.
+* `Planned_Start` is recalculated when a duration is known.
+* The previous deadline and start are written to `TASK_DEADLINE_HISTORY`.
+* `Assignment_Version` is incremented and `Assignment_Approved_At` cleared by the normal
+  task rules, so a stale assignment approval can never notify.
+* The active schedule confirmation is invalidated.
+* The project committed deadline is **not** touched.
+
+### Approval effects (completion report)
+
+* `TASKS.Status = Done` and `Progress_Percent = 100`.
+* `TASK_REQUESTS.Reported_Completion_At` keeps the worker-reported time;
+  `Accepted_Completion_At` records the manager acceptance time. They are always distinct.
+
+### Rejection and return
+
+Neither writes to the task. Only status, reviewer, decision time and note are recorded.
+
+## 5. Idempotency and recovery
+
+* Import is keyed on the permanent request ID, so a repeated import never duplicates a
+  request.
+* A decision first marks the request `PROCESSING`, then applies the effect, then finalises
+  the status. If the execution dies in between, a retry detects that the effect is already
+  present (`Due_Date` already equals the requested date, or the task is already done) and
+  finalises without applying it twice.
+* The deadline-history row uses a deterministic ID (`HIST-<requestId>`), so a resumed
+  decision cannot duplicate history.
+* The decision is mirrored to the inbox row (`Inbox_State`) so the worker receipt shows it.
+  A failure to write the inbox never rolls back an accepted decision.
+
+## 6. Notifications
+
+Three optional switches exist in `AUTOMATION_SETTINGS`, all **OFF** by default:
+
+* `DEADLINE_REQUEST_EMAIL_ENABLED`
+* `COMPLETION_REPORT_EMAIL_ENABLED`
+* `PENDING_REQUEST_REMINDER_ENABLED`
+
+They only take effect through the centralized gate in `src/Notifications.gs`: master mode
+`OFF` sends nothing, `PREVIEW` records previews without sending, `LIVE` requires the
+emergency stop to be off, an activated notification account, allowed recipient domains, the
+deduplication ledger and the per-run cap. Request text is never published to the dashboard;
+only a pending indicator (a boolean) is published for a task with an open request.
+
+## 7. Operator checklist
+
+1. Configure `REQUEST_INBOX_SPREADSHEET_ID` and run `initializeRequestInbox('INITIALIZE
+   REQUEST INBOX')` once as an administrator.
+2. Set `REQUEST_SUBMISSION_ENABLED` in the dashboard project (default: enabled once the
+   inbox is configured; set `false` to close submissions).
+3. Import with `importRequestInbox()` (or the manager sidebar button) before reviewing.
+4. Decide each request in the sidebar; approve only after checking the task.
+5. Publish the dashboard snapshot so approved deadlines appear for viewers.

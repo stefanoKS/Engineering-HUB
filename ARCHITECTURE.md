@@ -194,3 +194,35 @@ All spreadsheet-derived text is untrusted output: `UiSafe.html` renders with `te
 ## Evidence and limitations
 
 Local tests cover application behavior using mocks, not actual Google permission inheritance, OAuth consent, quotas, scheduling delays, or external delivery. No live verification, measured production throughput, previous prototype comparison, complete critical-path solver, or exactly-once guarantee is claimed.
+
+## V1.3 — planning, requests and localization
+
+Three additions keep the V1.1/V1.2 boundaries intact:
+
+```
+manager application (src/)
+  Planning.gs        pure deadline + duration calculation, warnings, task plan application
+  Requests.gs        inbox import, queue, idempotent decision, deadline history
+  I18n.html          generated translation dictionary (client side only)
+
+shared dashboard (dashboard-app/)
+  RequestService.gs  validated append to the separate request inbox (the only write path)
+  I18n.html          generated translation dictionary (identical copy)
+
+shared/i18n.js       canonical dictionary (one source of truth for both projects)
+```
+
+* `Planning.planFromDuration` is pure: it takes a deadline, a duration, a unit, a basis and
+  the holiday rows, and returns the derived start. `Tasks.validate` applies it so every write
+  path (UI, request approval, script) derives the same schedule.
+* `Requests` is the only module that reads the request inbox and the only one that turns a
+  request into an authoritative task change. The dashboard never sees the private workbook.
+* The published snapshot contract is `1.3`: `PUBLISHED_TASKS` gains the opaque
+  `revision` (staleness detection) and the boolean `pendingRequest` (indicator only).
+* Localization is a client concern. Server responses stay language-neutral (enum values and
+  `{kind, days}` deadline pairs); the browser renders localized labels from the dictionary.
+  Correctness does not depend on the selected language.
+* Schema `5` (`005_task_planning_and_requests`) is additive: TASKS planning columns plus
+  `TASK_REQUESTS` and `TASK_DEADLINE_HISTORY`. Generated sheets remain the only replaceable
+  output.
+

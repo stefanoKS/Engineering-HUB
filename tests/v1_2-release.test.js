@@ -77,7 +77,7 @@ test('the repository keeps deployment configuration out of version control', () 
   assert.equal(dashboardManifest.webapp.access, 'DOMAIN');
   assert.equal(dashboardManifest.webapp.executeAs, 'USER_DEPLOYING');
   assert.deepEqual(dashboardManifest.oauthScopes, [
-    'https://www.googleapis.com/auth/spreadsheets.readonly',
+    'https://www.googleapis.com/auth/spreadsheets',
     'https://www.googleapis.com/auth/userinfo.email'
   ]);
   const managerManifest = JSON.parse(read('src/appsscript.json'));
@@ -86,17 +86,27 @@ test('the repository keeps deployment configuration out of version control', () 
   assert.notDeepEqual(managerManifest.oauthScopes, dashboardManifest.oauthScopes);
 });
 
-test('the dashboard project contains no write, mail, calendar, trigger or fetch surface', () => {
+test('the dashboard project only appends validated requests and has no other write surface', () => {
   const files = fs.readdirSync(path.join(root, 'dashboard-app')).filter(name => name.endsWith('.gs'));
-  const source = files.map(name => fs.readFileSync(path.join(root, 'dashboard-app', name), 'utf8')).join('\n');
+  const sources = {};
+  files.forEach(name => { sources[name] = fs.readFileSync(path.join(root, 'dashboard-app', name), 'utf8'); });
+  const readOnly = files.filter(name => name !== 'RequestService.gs').map(name => sources[name]).join('\n');
+  const source = Object.values(sources).join('\n');
   [
-    /\.setValues?\(/, /\.appendRow\(/, /\.insertSheet\(/, /\.delete/,
     /MailApp/, /GmailApp/, /CalendarApp/, /ScriptApp/, /UrlFetchApp/, /DriveApp/,
     /getProperty\(\s*'SPREADSHEET_ID'\s*\)/,
-    /\bDatabase\./, /\bSchema\./, /\bAccess\./, /\bAutomationSettings\./
+    /\bDatabase\./, /\bSchema\./, /\bAccess\./, /\bAutomationSettings\./,
+    /\.delete/
   ].forEach(pattern => {
     assert.doesNotMatch(source, pattern, 'dashboard source must not contain ' + pattern);
   });
+  [
+    /\.setValues?\(/, /\.appendRow\(/, /\.insertSheet\(/, /\.setFormula/
+  ].forEach(pattern => {
+    assert.doesNotMatch(readOnly, pattern, 'only RequestService.gs may write, and only appended request rows');
+  });
+  assert.match(sources['RequestService.gs'], /REQUEST_INBOX_SPREADSHEET_ID/);
+  assert.match(sources['RequestService.gs'], /appendRow/);
   const html = fs.readdirSync(path.join(root, 'dashboard-app')).filter(name => name.endsWith('.html'))
     .map(name => fs.readFileSync(path.join(root, 'dashboard-app', name), 'utf8')).join('\n');
   assert.doesNotMatch(html, /\.(?:innerHTML|outerHTML)\s*=|insertAdjacentHTML|document\.write/);

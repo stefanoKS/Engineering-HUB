@@ -178,7 +178,7 @@ Use `healthCheck()` for binding/integration flags and `validateSystem()` for ope
 
 ## 7. Manager UI and manual verification
 
-- After `clasp push`, reload the spreadsheet and confirm the **Engineering HUB** menu appears (container-bound).
+- After `clasp push`, reload the spreadsheet and confirm the **設計・開発課 管理** menu appears (container-bound).
 - Review [docs/MANAGER_WORKFLOW.md](docs/MANAGER_WORKFLOW.md) for the operator steps.
 - Complete [docs/GOOGLE_WORKSPACE_SMOKE_TEST.md](docs/GOOGLE_WORKSPACE_SMOKE_TEST.md) in development before any
   production activation. That checklist is the only accepted evidence of live behaviour; this repository has not
@@ -372,3 +372,46 @@ git switch main
 
 Code rollback does not revert data. If data must be reverted, follow [Backup and restore](BACKUP_RESTORE.md): new
 copy, explicit rebinding, ledger reconciliation, operator sign-off.
+
+## V1.3 deployment steps (delta only)
+
+V1.3 does not change the binding rules: development and production stay in separate
+Apps Script projects, spreadsheets and clasp configurations, and every activation is explicit.
+
+1. **Upgrade the workbook (additive)**
+
+   ```js
+   // Script Properties (manager project)
+   APPROVED_MIGRATIONS = 002_task_assignment_safety,003_management_reliability,004_shared_dashboard,005_task_planning_and_requests
+   ```
+
+   Then run `upgradeExistingDatabase()`. Migration 005 takes a verified backup, appends the
+   TASKS planning columns and creates `TASK_REQUESTS` and `TASK_DEADLINE_HISTORY`. Existing
+   cells, formulas and custom columns are preserved; the migration refuses to run without the
+   approval entry.
+
+2. **Create the request inbox** (separate spreadsheet, never the master or the snapshot):
+   see [Request inbox deployment](docs/REQUEST_INBOX_DEPLOYMENT.md). Set
+   `REQUEST_INBOX_SPREADSHEET_ID` in **both** projects and run
+   `initializeRequestInbox('INITIALIZE REQUEST INBOX')` once as an administrator.
+
+3. **Dashboard project**: the manifest now requests
+   `https://www.googleapis.com/auth/spreadsheets` (snapshot read + inbox append) and
+   `userinfo.email`. Re-authorise the deployment, keep `access: DOMAIN` and
+   `executeAs: USER_DEPLOYING`, and publish a new version. Set
+   `REQUEST_SUBMISSION_ENABLED=false` to close submissions temporarily.
+
+4. **Publish the new contract**: run `publishSharedDashboard()` (or the sidebar action) so
+   the snapshot is written with contract `1.3`. An older snapshot keeps working until then;
+   the viewer refuses a contract it does not know.
+
+5. **Notification switches** (all default OFF):
+   `DEADLINE_REQUEST_EMAIL_ENABLED`, `COMPLETION_REPORT_EMAIL_ENABLED`,
+   `PENDING_REQUEST_REMINDER_ENABLED`. Enabling them never changes the master mode; real
+   mail still requires `LIVE`, no emergency stop, an activated notification account and
+   allowed recipient domains.
+
+6. **Verify**: `npm ci`, `npm run lint`, `npm test`, `npm run validate`. Then follow
+   [docs/dashboard/SMOKE_TEST.md](docs/dashboard/SMOKE_TEST.md) and the V1.3 gates; local
+   results are not Workspace evidence.
+

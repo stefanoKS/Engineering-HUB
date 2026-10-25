@@ -21,110 +21,128 @@
     #effective { font-weight: 600; }
     #history, #preview { font-size: 11px; max-height: 160px; overflow: auto; background: #f8f9fa; padding: 6px; border-radius: 4px; }
     .hint { color: #5f6368; font-size: 11px; }
+    .lang-switch { display: flex; align-items: center; gap: 4px; justify-content: flex-end; margin-bottom: 6px; font-size: 11px; }
+    .lang-label { color: #5f6368; }
+    .lang-option { margin: 0; padding: 2px 6px; background: #f1f3f4; color: #202124; border-radius: 4px; }
+    .lang-option.is-active { background: #1a73e8; color: #fff; }
+    .lang-sep { color: #bdc1c6; }
   </style>
 </head>
 <body>
-  <h2>自動化設定</h2>
-  <div class="hint">有効モード: <span id="effective">読み込み中...</span></div>
+  <?!= include('I18n') ?>
+  <?!= include('UiSafe') ?>
+  <?!= include('UiLang') ?>
+
+  <h2 data-i18n="settings.title">自動化設定</h2>
+  <div class="hint"><span data-i18n="settings.effective">有効モード</span>: <span id="effective" data-i18n="manager.loading">読み込み中...</span></div>
   <div class="hint" id="reason"></div>
 
   <fieldset>
-    <legend>メール通知</legend>
-    <label>配信モード</label>
+    <legend data-i18n="settings.legend.mail">メール通知</legend>
+    <label data-i18n="settings.mode">配信モード</label>
     <select id="emailMode">
-      <option value="OFF">OFF（送信しない）</option>
-      <option value="PREVIEW">PREVIEW（プレビューのみ）</option>
-      <option value="LIVE">LIVE（本番送信）</option>
+      <option value="OFF" data-i18n="settings.mode.OFF">OFF（送信しない）</option>
+      <option value="PREVIEW" data-i18n="settings.mode.PREVIEW">PREVIEW（プレビューのみ）</option>
+      <option value="LIVE" data-i18n="settings.mode.LIVE">LIVE（本番送信）</option>
     </select>
-    <label class="inline"><input id="emergencyStop" type="checkbox"> 緊急停止（すべての送信を止める）</label>
-    <label class="inline"><input id="assignmentEnabled" type="checkbox"> 担当依頼通知</label>
-    <label class="inline"><input id="reassignmentEnabled" type="checkbox"> 担当変更通知</label>
-    <label class="inline"><input id="deadlineChangeEnabled" type="checkbox"> 期限変更通知</label>
-    <label class="inline"><input id="deadlineReminderEnabled" type="checkbox"> 期限前通知</label>
-    <label class="inline"><input id="overdueEnabled" type="checkbox"> 期限超過通知</label>
-    <label class="inline"><input id="weeklyReportEnabled" type="checkbox"> 週次レポート</label>
+    <label class="inline"><input id="emergencyStop" type="checkbox"> <span data-i18n="settings.emergencyStop">緊急停止（すべての送信を止める）</span></label>
+    <label class="inline"><input id="assignmentEnabled" type="checkbox"> <span data-i18n="settings.assignment">担当依頼通知</span></label>
+    <label class="inline"><input id="reassignmentEnabled" type="checkbox"> <span data-i18n="settings.reassignment">担当変更通知</span></label>
+    <label class="inline"><input id="deadlineChangeEnabled" type="checkbox"> <span data-i18n="settings.deadlineChange">期限変更通知</span></label>
+    <label class="inline"><input id="deadlineReminderEnabled" type="checkbox"> <span data-i18n="settings.deadlineReminder">期限前通知</span></label>
+    <label class="inline"><input id="overdueEnabled" type="checkbox"> <span data-i18n="settings.overdue">期限超過通知</span></label>
+    <label class="inline"><input id="weeklyReportEnabled" type="checkbox"> <span data-i18n="settings.weeklyReport">週次レポート</span></label>
   </fieldset>
 
   <fieldset>
-    <legend>期限リマインダー</legend>
-    <label>期限前の日数（カンマ区切り）</label><input id="offsets" type="text" placeholder="7,2">
-    <label>キャッチアップ日数（取りこぼし時の猶予）</label><input id="catchup" type="number" min="0" max="31">
-    <label>期限超過の再通知間隔（日）</label><input id="overdueFrequency" type="number" min="1" max="90">
-    <label class="inline"><input id="weekdayOnly" type="checkbox"> 平日のみ送信</label>
-    <label>実行時間帯（開始 / 終了・JST）</label>
+    <legend data-i18n="settings.legend.requests">従業員申請の通知</legend>
+    <label class="inline"><input id="deadlineRequestEnabled" type="checkbox"> <span data-i18n="settings.deadlineRequestEmail">納期変更申請の通知</span></label>
+    <label class="inline"><input id="completionReportEnabled" type="checkbox"> <span data-i18n="settings.completionReportEmail">完了報告の通知</span></label>
+    <label class="inline"><input id="pendingReminderEnabled" type="checkbox"> <span data-i18n="settings.pendingReminder">承認待ちリマインダー</span></label>
+    <div class="hint" data-i18n="settings.hint.requests">いずれも既定はOFFで、配信モード・緊急停止・1回あたりの上限に従います。</div>
+  </fieldset>
+
+  <fieldset>
+    <legend data-i18n="settings.legend.reminder">期限リマインダー</legend>
+    <label data-i18n="settings.offsets">期限前の日数（カンマ区切り）</label><input id="offsets" type="text" placeholder="7,2">
+    <label data-i18n="settings.catchup">キャッチアップ日数（取りこぼし時の猶予）</label><input id="catchup" type="number" min="0" max="31">
+    <label data-i18n="settings.overdueFrequency">期限超過の再通知間隔（日）</label><input id="overdueFrequency" type="number" min="1" max="90">
+    <label class="inline"><input id="weekdayOnly" type="checkbox"> <span data-i18n="settings.weekdayOnly">平日のみ送信</span></label>
+    <label data-i18n="settings.window">実行時間帯（開始 / 終了・JST）</label>
     <div style="display:flex; gap:6px">
       <input id="windowStart" type="time"><input id="windowEnd" type="time">
     </div>
   </fieldset>
 
   <fieldset>
-    <legend>週次レポート</legend>
-    <label>送信先（カンマ区切り）</label><input id="recipients" type="text">
-    <label>曜日</label>
+    <legend data-i18n="settings.legend.weekly">週次レポート</legend>
+    <label data-i18n="settings.recipients">送信先（カンマ区切り）</label><input id="recipients" type="text">
+    <label data-i18n="settings.day">曜日</label>
     <select id="reportDay">
       <option>MONDAY</option><option>TUESDAY</option><option>WEDNESDAY</option>
       <option>THURSDAY</option><option>FRIDAY</option>
     </select>
-    <label>時刻（JST）</label><input id="reportTime" type="time">
+    <label data-i18n="settings.time">時刻（JST）</label><input id="reportTime" type="time">
   </fieldset>
 
   <fieldset>
-    <legend>カレンダー・バックアップ・ダッシュボード</legend>
-    <label class="inline"><input id="calendarEnabled" type="checkbox"> カレンダー同期</label>
-    <label class="inline"><input id="backupEnabled" type="checkbox"> 自動バックアップ</label>
-    <label class="inline"><input id="autoDashboard" type="checkbox"> ダッシュボード自動更新</label>
-    <label class="inline"><input id="autoWorkload" type="checkbox"> ワークロード自動更新</label>
-    <label class="inline"><input id="staleAlert" type="checkbox"> 更新停滞アラート</label>
-    <label>停滞判定日数</label><input id="staleDays" type="number" min="1" max="365">
-    <div class="hint">カレンダーID、スプレッドシートID、認証情報はScriptプロパティで管理し、この画面には表示しません。</div>
+    <legend data-i18n="settings.legend.integrations">カレンダー・バックアップ・ダッシュボード</legend>
+    <label class="inline"><input id="calendarEnabled" type="checkbox"> <span data-i18n="settings.calendar">カレンダー同期</span></label>
+    <label class="inline"><input id="backupEnabled" type="checkbox"> <span data-i18n="settings.backup">自動バックアップ</span></label>
+    <label class="inline"><input id="autoDashboard" type="checkbox"> <span data-i18n="settings.autoDashboard">ダッシュボード自動更新</span></label>
+    <label class="inline"><input id="autoWorkload" type="checkbox"> <span data-i18n="settings.autoWorkload">ワークロード自動更新</span></label>
+    <label class="inline"><input id="staleAlert" type="checkbox"> <span data-i18n="settings.staleAlert">更新停滞アラート</span></label>
+    <label data-i18n="settings.staleDays">停滞判定日数</label><input id="staleDays" type="number" min="1" max="365">
+    <div class="hint" data-i18n="settings.hint.secrets">カレンダーID、スプレッドシートID、認証情報はScriptプロパティで管理し、この画面には表示しません。</div>
   </fieldset>
 
   <fieldset>
-    <legend>共有ダッシュボード公開（閲覧専用アプリ）</legend>
-    <div class="hint" id="publicationInfo">読み込み中...</div>
-    <label class="inline"><input id="publishEnabled" type="checkbox"> 定期公開を有効にする（ADMIN・要確認入力）</label>
-    <label>公開間隔（分・5〜1440）</label><input id="publishInterval" type="number" min="5" max="1440">
+    <legend data-i18n="settings.legend.publication">共有ダッシュボード公開（閲覧専用アプリ）</legend>
+    <div class="hint" id="publicationInfo" data-i18n="manager.loading">読み込み中...</div>
+    <label class="inline"><input id="publishEnabled" type="checkbox"> <span data-i18n="settings.publishEnabled">定期公開を有効にする（ADMIN・要確認入力）</span></label>
+    <label data-i18n="settings.publishInterval">公開間隔（分・5〜1440）</label><input id="publishInterval" type="number" min="5" max="1440">
     <div style="display:flex; gap:6px; flex-wrap:wrap">
-      <button onclick="savePublication()">公開設定を保存</button>
-      <button class="secondary" onclick="publishNow()">今すぐ公開</button>
-      <button class="secondary" onclick="previewPublication()">公開差分を確認</button>
+      <button onclick="savePublication()" data-i18n="settings.savePublication">公開設定を保存</button>
+      <button class="secondary" onclick="publishNow()" data-i18n="settings.publishNow">今すぐ公開</button>
+      <button class="secondary" onclick="previewPublication()" data-i18n="settings.previewPublication">公開差分を確認</button>
     </div>
-    <div class="hint" id="publicationPreview">未実行</div>
-    <div class="hint">公開対象は「Dashboard_Visibility = INTERNAL」のプロジェクトのみです。公開先スプレッドシートIDはScriptプロパティで管理し、この画面には表示しません。</div>
+    <div class="hint" id="publicationPreview" data-i18n="settings.notRun">未実行</div>
+    <div class="hint" data-i18n="settings.hint.publication">公開対象は「Dashboard_Visibility = INTERNAL」のプロジェクトのみです。公開先スプレッドシートIDはScriptプロパティで管理し、この画面には表示しません。</div>
   </fieldset>
 
   <div style="display:flex; gap:6px; flex-wrap:wrap">
-    <button onclick="save()">設定を保存</button>
-    <button class="secondary" onclick="preview()">送信プレビュー</button>
-    <button class="secondary" onclick="refreshHistory()">履歴を表示</button>
-    <button class="secondary" onclick="restore()">安全な既定値に戻す</button>
-    <button class="danger" onclick="reconcile()">不確定配信を確認済みにする</button>
+    <button onclick="save()" data-i18n="settings.save">設定を保存</button>
+    <button class="secondary" onclick="preview()" data-i18n="settings.preview">送信プレビュー</button>
+    <button class="secondary" onclick="refreshHistory()" data-i18n="settings.history">履歴を表示</button>
+    <button class="secondary" onclick="restore()" data-i18n="settings.restore">安全な既定値に戻す</button>
+    <button class="danger" onclick="reconcile()" data-i18n="settings.reconcile">不確定配信を確認済みにする</button>
   </div>
 
   <div id="status"></div>
-  <h2>最近の実行結果</h2>
-  <div id="history">読み込み中...</div>
-  <h2>送信プレビュー</h2>
-  <div id="preview">未実行</div>
+  <h2 data-i18n="settings.historyHeading">最近の実行結果</h2>
+  <div id="history" data-i18n="manager.loading">読み込み中...</div>
+  <h2 data-i18n="settings.previewHeading">送信プレビュー</h2>
+  <div id="preview" data-i18n="settings.notRun">未実行</div>
 
-  <?!= include('UiSafe') ?>
   <script>
     var current = null;
+
+    function T(key, vars) { return EHLang.t(key, vars); }
 
     function setStatus(kind, message) { EH.setStatus(document.getElementById('status'), kind, message); }
 
     function call(fn, payload, onSuccess) {
-      setStatus('loading', '処理中...');
+      setStatus('loading', T('common.processing'));
       var runner = google.script.run
         .withSuccessHandler(function (result) {
           if (!result || result.ok !== true) {
-            setStatus('error', 'エラー: ' + ((result && result.error) || '不明なエラー'));
+            setStatus('error', T('common.error') + ': ' + EHLang.serverMessage((result && result.error) || T('common.unknown')));
             return;
           }
-          setStatus('ok', '完了しました');
+          setStatus('ok', T('common.done'));
           if (onSuccess) onSuccess(result.data);
         })
-        .withFailureHandler(function (error) { setStatus('error', 'エラー: ' + error.message); });
+        .withFailureHandler(function (error) { setStatus('error', T('common.error') + ': ' + error.message); });
       if (payload === undefined) runner[fn](); else runner[fn](payload);
     }
 
@@ -146,9 +164,9 @@
       current = data;
       var values = {};
       data.settings.forEach(function (item) { values[item.key] = item.value; });
-      document.getElementById('effective').textContent = data.status.mode + '（' + data.status.reason + '）';
-      document.getElementById('reason').textContent = data.status.configured ? '' :
-        '自動化設定が未保存です。保存するまではメール送信は無効です（旧設定の互換利用は明示的な設定が必要）。';
+      document.getElementById('effective').textContent = data.status.mode +
+        (data.status.reason ? ' [' + data.status.reason + ']' : '');
+      document.getElementById('reason').textContent = data.status.configured ? '' : T('settings.unconfigured');
       setValue('emailMode', values.EMAIL_MODE === 'LIVE' && !data.status.activated ? 'OFF' : values.EMAIL_MODE);
       setChecked('emergencyStop', values.EMERGENCY_STOP);
       setChecked('assignmentEnabled', values.ASSIGNMENT_EMAIL_ENABLED);
@@ -157,6 +175,9 @@
       setChecked('deadlineReminderEnabled', values.DEADLINE_REMINDER_ENABLED);
       setChecked('overdueEnabled', values.OVERDUE_REMINDER_ENABLED);
       setChecked('weeklyReportEnabled', values.WEEKLY_MANAGER_REPORT_ENABLED);
+      setChecked('deadlineRequestEnabled', values.DEADLINE_REQUEST_EMAIL_ENABLED);
+      setChecked('completionReportEnabled', values.COMPLETION_REPORT_EMAIL_ENABLED);
+      setChecked('pendingReminderEnabled', values.PENDING_REQUEST_REMINDER_ENABLED);
       setValue('offsets', (values.REMINDER_OFFSETS || []).join(','));
       setValue('catchup', values.REMINDER_CATCHUP_DAYS);
       setValue('overdueFrequency', values.OVERDUE_FREQUENCY_DAYS);
@@ -176,7 +197,7 @@
     }
 
     function renderHistory(rows) {
-      EH.renderRecords(document.getElementById('history'), rows, historyLine, '履歴はありません');
+      EH.renderRecords(document.getElementById('history'), rows, historyLine, T('settings.historyEmpty'));
     }
 
     function save() {
@@ -189,6 +210,9 @@
         DEADLINE_REMINDER_ENABLED: checked('deadlineReminderEnabled'),
         OVERDUE_REMINDER_ENABLED: checked('overdueEnabled'),
         WEEKLY_MANAGER_REPORT_ENABLED: checked('weeklyReportEnabled'),
+        DEADLINE_REQUEST_EMAIL_ENABLED: checked('deadlineRequestEnabled'),
+        COMPLETION_REPORT_EMAIL_ENABLED: checked('completionReportEnabled'),
+        PENDING_REQUEST_REMINDER_ENABLED: checked('pendingReminderEnabled'),
         REMINDER_OFFSETS: value('offsets'),
         REMINDER_CATCHUP_DAYS: value('catchup'),
         OVERDUE_FREQUENCY_DAYS: value('overdueFrequency'),
@@ -209,9 +233,9 @@
       // mode changes and when the emergency stop is cleared while LIVE is selected.
       var confirmation = '';
       if (changes.EMAIL_MODE === 'LIVE' && !changes.EMERGENCY_STOP) {
-        if (!EH.confirmAction('本番送信（LIVE）を有効にします。承認済みの通知のみ送信されます。続行しますか？')) return;
-        var typed = window.prompt('確認のため「ENABLE LIVE EMAIL」と入力してください');
-        if (typed !== 'ENABLE LIVE EMAIL') { setStatus('error', 'LIVE有効化は中止されました'); return; }
+        if (!EH.confirmAction(T('settings.confirmLive'))) return;
+        var typed = window.prompt(T('settings.promptLive'));
+        if (typed !== 'ENABLE LIVE EMAIL') { setStatus('error', T('settings.liveCancelled')); return; }
         confirmation = typed;
       }
       call('uiSaveAutomationSettings', {changes: changes, confirmation: confirmation},
@@ -220,19 +244,19 @@
 
     function preview() {
       call('uiPreviewNotifications', undefined, function (items) {
-        EH.renderRecords(document.getElementById('preview'), items, previewLine, '送信対象はありません');
+        EH.renderRecords(document.getElementById('preview'), items, previewLine, T('settings.previewEmpty'));
       });
     }
 
     function refreshHistory() { call('uiNotificationHistory', undefined, renderHistory); }
 
     function restore() {
-      if (!EH.confirmAction('すべての自動化設定を安全な既定値（メールOFF）に戻します。よろしいですか？')) return;
+      if (!EH.confirmAction(T('settings.confirmRestore'))) return;
       call('uiRestoreAutomationDefaults', {confirmation: 'RESTORE SAFE DEFAULTS'}, function () { load(); });
     }
 
     function reconcile() {
-      if (!EH.confirmAction('一定時間を超えたPENDING通知を「配信不確定」として記録します。再送は行いません。')) return;
+      if (!EH.confirmAction(T('settings.confirmReconcile'))) return;
       call('uiReconcileUncertain', {confirmation: 'RECONCILE DELIVERY'});
     }
 
@@ -243,14 +267,15 @@
     function renderPublication(status) {
       publication = status;
       var lines = [
-        '公開設定: ' + (status.enabled ? 'ON' : 'OFF'),
-        '公開先: ' + (status.destinationConfigured ? '設定済み' : '未設定'),
-        '最終成功: ' + (status.lastSuccessAt || 'なし'),
-        '最終結果: ' + (status.lastResult || 'なし') + (status.lastError ? '（' + status.lastError + '）' : ''),
-        'バージョン: ' + (status.lastVersion || '-'),
-        '公開データ: ' + (status.readable && status.snapshot
-          ? 'v' + status.snapshot.version + ' / ' + status.snapshot.publishedAt + ' / ' + status.snapshot.ageHours + '時間前'
-          : '未作成' + (status.error ? '（' + status.error + '）' : ''))
+        (status.enabled ? T('settings.publicationOn') : T('settings.publicationOff')),
+        T('settings.publishInterval') + ': ' + (status.intervalMinutes || '-'),
+        (status.destinationConfigured ? T('settings.publicationOn') : T('settings.notRun')),
+        (status.lastSuccessAt || T('common.none')) + ' / ' + (status.lastResult || T('common.none')) +
+          (status.lastError ? '（' + status.lastError + '）' : ''),
+        'v' + (status.lastVersion || '-'),
+        status.readable && status.snapshot
+          ? 'v' + status.snapshot.version + ' / ' + status.snapshot.publishedAt + ' / ' + status.snapshot.ageHours
+          : T('settings.notRun') + (status.error ? '（' + status.error + '）' : '')
       ];
       document.getElementById('publicationInfo').textContent = lines.join(' / ');
       setChecked('publishEnabled', status.enabled);
@@ -263,9 +288,9 @@
       var enable = checked('publishEnabled');
       var confirmation = '';
       if (enable && !(publication && publication.enabled)) {
-        if (!EH.confirmAction('共有ダッシュボードの公開を有効にします。INTERNALのプロジェクトが全社員に表示されます。続行しますか？')) return;
-        var typed = window.prompt('確認のため「ENABLE SHARED DASHBOARD PUBLICATION」と入力してください');
-        if (typed !== 'ENABLE SHARED DASHBOARD PUBLICATION') { setStatus('error', '公開の有効化は中止されました'); return; }
+        if (!EH.confirmAction(T('settings.confirmEnablePublication'))) return;
+        var typed = window.prompt(T('settings.promptPublication'));
+        if (typed !== 'ENABLE SHARED DASHBOARD PUBLICATION') { setStatus('error', T('settings.publicationCancelled')); return; }
         confirmation = typed;
       }
       call('uiSavePublicationSettings', {
@@ -278,12 +303,11 @@
     }
 
     function publishNow() {
-      if (!EH.confirmAction('現在の公開対象をスナップショットへ書き出します。よろしいですか？')) return;
+      if (!EH.confirmAction(T('settings.confirmPublishNow'))) return;
       call('uiPublishPublicationNow', undefined, function (result) {
         document.getElementById('publicationPreview').textContent =
-          'v' + result.version + ' を公開しました / ' + result.counts.projects + ' プロジェクト / ' +
-          result.counts.tasks + ' タスク / 除外 ' + result.excluded.projects + ' プロジェクト' +
-          (result.warnings.length ? ' / 警告: ' + result.warnings.join(',') : '');
+          'v' + result.version + ' / ' + result.counts.projects + ' / ' + result.counts.tasks + ' / ' +
+          result.excluded.projects + (result.warnings.length ? ' / ' + result.warnings.join(',') : '');
         loadPublication();
       });
     }
@@ -291,14 +315,15 @@
     function previewPublication() {
       call('uiPublicationPreview', undefined, function (result) {
         document.getElementById('publicationPreview').textContent =
-          (result.initialized ? '公開済み v' + result.publishedVersion : '未作成') +
-          ' / 対象 ' + result.counts.PROJECT_COUNT + ' プロジェクト・' + result.counts.TASK_COUNT + ' タスク' +
-          ' / 除外 ' + result.excluded.projects + ' プロジェクト' +
-          ' / 差分 ' + (result.unchanged ? 'なし' : 'あり') +
-          (result.warnings.length ? ' / 警告: ' + result.warnings.join(',') : '');
+          (result.initialized ? 'v' + result.publishedVersion : T('settings.notRun')) +
+          ' / ' + result.counts.PROJECT_COUNT + ' / ' + result.counts.TASK_COUNT +
+          ' / ' + result.excluded.projects +
+          ' / ' + (result.unchanged ? '=' : '≠') +
+          (result.warnings.length ? ' / ' + result.warnings.join(',') : '');
       });
     }
 
+    EHLang.wire(function () { if (current) render(current); });
     load();
     loadPublication();
   </script>

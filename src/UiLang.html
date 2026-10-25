@@ -1,0 +1,48 @@
+<!--
+  Visible language switch (日本語 | English) shared by every bound sidebar.
+  The preference is stored in the browser only (localStorage); it is never written to the
+  workbook and never uses server-side UserProperties.
+-->
+<div class="lang-switch">
+  <span class="lang-label" data-i18n="lang.group">表示言語</span>
+  <button type="button" class="lang-option" data-lang="ja">日本語</button>
+  <span class="lang-sep" aria-hidden="true">|</span>
+  <button type="button" class="lang-option" data-lang="en">English</button>
+</div>
+<script>
+  var EHLang = (function () {
+    var language = EH_I18N.read();
+
+    function t(key, vars) { return EH_I18N.t(language, key, vars); }
+    function current() { return language; }
+    function label(group, value) { return EH_I18N.label(language, group, value); }
+    function serverMessage(message) { return EH_I18N.serverMessage(language, message); }
+    function requestError(error) { return EH_I18N.errorMessage(language, error); }
+
+    function paint() {
+      EH_I18N.apply(language);
+      Array.prototype.forEach.call(document.querySelectorAll('.lang-option'), function (button) {
+        var active = button.getAttribute('data-lang') === language;
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+        button.className = 'lang-option' + (active ? ' is-active' : '');
+      });
+      document.title = EH_I18N.APP_NAME;
+    }
+
+    function set(value, rerender) {
+      language = EH_I18N.write(value);
+      paint();
+      if (rerender) rerender();
+    }
+
+    function wire(rerender) {
+      Array.prototype.forEach.call(document.querySelectorAll('.lang-option'), function (button) {
+        button.addEventListener('click', function () { set(button.getAttribute('data-lang'), rerender); });
+      });
+      paint();
+    }
+
+    return {t: t, current: current, label: label, serverMessage: serverMessage,
+      requestError: requestError, set: set, wire: wire, paint: paint};
+  }());
+</script>

@@ -152,3 +152,23 @@ All date arithmetic uses **Asia/Tokyo calendar dates**.
 | overdue | `<n>日超過` |
 | no due date | `期限未設定` |
 | otherwise | `あと<n>日` |
+
+## Contract 1.3
+
+Two fields are added to the published task table; no other field changes.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `revision` | opaque string (16 hex chars) | hash of task ID, owner, deadline and assignment version; used to detect a stale request |
+| `pendingRequest` | boolean (`TRUE`/`FALSE`) | a request is open for this task; no request text is published |
+
+`PUBLISHED_TASKS` therefore becomes:
+
+```
+taskId, projectId, subprojectId, name, ownerName, status, priority, plannedStart,
+dueDate, progress, publicNote, revision, pendingRequest
+```
+
+The viewer fails closed when `PUBLISHED_META.CONTRACT_VERSION` is not `1.3`, so an old
+deployment keeps reading an older snapshot until a new publication happens.
+

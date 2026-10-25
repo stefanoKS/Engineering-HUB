@@ -9,15 +9,41 @@
    * - Every stored string is inserted with textContent or DOM creation. There is no
    *   markup-string assignment path (the forbidden DOM APIs are rejected by validation),
    *   so spreadsheet text can never become markup.
-   * - Nothing is ever written back: the only server calls are the read-only
-   *   dashboardPortfolio / dashboardProject / dashboardTask functions.
+   * - Stored text (project, task and member names, notes, request explanations) is never
+   *   translated: only static labels and controlled enum labels come from the dictionary.
    * - Responses carry a request token, so a slow answer for an older search or project
    *   cannot overwrite a newer selection.
+   * - The only write calls are the validated request submissions; the dashboard never
+   *   updates operational rows.
    * ------------------------------------------------------------------ */
+
+  var I18n = window.EH_I18N;
+  var language = I18n.read();
+
+  function T(key, vars) { return I18n.t(language, key, vars); }
+  function statusText(value) { return I18n.label(language, 'status', value); }
+  function healthText(value) { return I18n.label(language, 'health', value); }
+  function priorityText(value) { return I18n.label(language, 'priority', value); }
+  function deadlineText(item) {
+    return I18n.deadline(language, item.deadlineKind, item.daysRemaining, item.status === 'Done');
+  }
+  function unset(value) { return value === '' || value === null || value === undefined ? T('common.unset') : String(value); }
 
   var RISK_ORDER = {RED: 0, YELLOW: 1, UNKNOWN: 2};
   var SEARCH_DEBOUNCE_MS = 280;
   var PRIORITY_RANK = {Critical: 4, High: 3, Medium: 2, Low: 1};
+  var CLIENT_TOKEN_KEY = 'eh.requestToken';
+
+  // Canonical stored reason values (Japanese) with their translation keys. The stored value
+  // is never translated; only the label shown in the form is localized.
+  var REASONS = [
+    {value: '部品・材料の納期遅延', key: 'request.reason.parts'},
+    {value: '技術的問題', key: 'request.reason.technical'},
+    {value: '工数不足・他業務', key: 'request.reason.capacity'},
+    {value: '仕様変更', key: 'request.reason.spec'},
+    {value: '工程間の依存関係', key: 'request.reason.dependency'},
+    {value: 'その他', key: 'request.reason.other'}
+  ];
 
   var state = {
     projects: [],
@@ -33,7 +59,9 @@
     currentProjectId: '',
     taskSort: {key: 'due', direction: 1},
     drawerOpen: false,
-    lastFocused: null
+    drawerData: null,
+    lastFocused: null,
+    requestConfig: {enabled: false}
   };
 
   /* ---------------- DOM helpers ---------------- */
@@ -43,6 +71,7 @@
     options = options || {};
     if (options.className) node.className = options.className;
     if (options.text !== undefined && options.text !== null) node.textContent = String(options.text);
+    if (options.id) node.id = options.id;
     if (options.attrs) {
       Object.keys(options.attrs).forEach(function (name) {
         var value = options.attrs[name];
@@ -94,12 +123,13 @@
     drawer: byId('task-drawer'),
     drawerBody: byId('drawer-body'),
     drawerTitle: byId('task-drawer-title'),
+    drawerBadge: byId('drawer-badge'),
     drawerClose: byId('drawer-close'),
     backdrop: byId('drawer-backdrop'),
     toast: byId('toast')
   };
 
-  /* ---------------- server access (read only) ---------------- */
+  /* ---------------- server access ---------------- */
 
   function hasAppsScript() {
     return typeof google !== 'undefined' && google && google.script && google.script.run;
@@ -122,12 +152,20 @@
     ? {
         portfolio: function (request) { return Promise.resolve(previewPortfolio(request)); },
         project: function (id) { return Promise.resolve(previewProject(id)); },
-        task: function (projectId, taskId) { return Promise.resolve(previewTask(projectId, taskId)); }
+        task: function (projectId, taskId) { return Promise.resolve(previewTask(projectId, taskId)); },
+        submitDeadline: function (payload) { return Promise.resolve(previewSubmit(payload, 'DEADLINE_CHANGE')); },
+        submitCompletion: function (payload) { return Promise.resolve(previewSubmit(payload, 'COMPLETION_REPORT')); },
+        requestStatus: function (id) { return Promise.resolve(previewStatus(id)); },
+        requestConfig: function () { return Promise.resolve({ok: true, data: {enabled: true}}); }
       }
     : {
         portfolio: function (request) { return callServer('dashboardPortfolio', [request]); },
         project: function (id) { return callServer('dashboardProject', [id]); },
-        task: function (projectId, taskId) { return callServer('dashboardTask', [projectId, taskId]); }
+        task: function (projectId, taskId) { return callServer('dashboardTask', [projectId, taskId]); },
+        submitDeadline: function (payload) { return callServer('submitDeadlineRequest', [payload]); },
+        submitCompletion: function (payload) { return callServer('submitCompletionReport', [payload]); },
+        requestStatus: function (id) { return callServer('requestSubmissionStatus', [id]); },
+        requestConfig: function () { return callServer('requestSubmissionConfig', []); }
       };
 
   function previewPortfolio(request) {
@@ -141,7 +179,7 @@
 
   function previewProject(id) {
     var data = PREVIEW.projects[id];
-    if (!data) return {ok: false, error: {code: 'NOT_FOUND', message: '対象のデータが見つかりませんでした。'}};
+    if (!data) return {ok: false, error: {code: 'NOT_FOUND', message: T('request.error.REQUEST_NOT_FOUND')}};
     return {ok: true, data: data};
   }
 
@@ -149,14 +187,32 @@
     var data = (PREVIEW.tasks || []).filter(function (item) {
       return item.task.taskId === taskId && item.project.projectId === projectId;
     })[0];
-    if (!data) return {ok: false, error: {code: 'NOT_FOUND', message: '対象のデータが見つかりませんでした。'}};
+    if (!data) return {ok: false, error: {code: 'NOT_FOUND', message: T('request.error.REQUEST_NOT_FOUND')}};
     return {ok: true, data: data};
+  }
+
+  var previewRequests = {};
+
+  function previewSubmit(payload, type) {
+    var id = 'REQ-PREVIEW-' + String(Object.keys(previewRequests).length + 1);
+    previewRequests[id] = {type: type, status: 'RECEIVED', taskId: (payload || {}).taskId || ''};
+    return {ok: true, data: {requestId: id, status: 'RECEIVED', duplicate: false}};
+  }
+
+  function previewStatus(id) {
+    if (!previewRequests[id]) return {ok: false, error: {code: 'REQUEST_NOT_FOUND'}};
+    return {ok: true, data: {requestId: id, status: 'RECEIVED', taskId: previewRequests[id].taskId}};
   }
 
   /* ---------------- formatting ---------------- */
 
   function percentText(value) {
-    return value === null || value === undefined ? '—' : Math.round(value) + '%';
+    return value === null || value === undefined ? T('common.none') : Math.round(value) + '%';
+  }
+
+  /** Japanese has no plural form; English needs "1 item" next to "2 items". */
+  function itemUnit(count) {
+    return Number(count) === 1 ? T('common.item') : T('common.items');
   }
 
   function healthClass(health) {
@@ -177,7 +233,7 @@
     var value = percent === null || percent === undefined ? 0 : Math.max(0, Math.min(100, percent));
     var track = el('div', {className: 'progress', attrs: {
       role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100',
-      'aria-valuenow': String(Math.round(value)), 'aria-label': label || '進捗'
+      'aria-valuenow': String(Math.round(value)), 'aria-label': label || T('dashboard.table.progress')
     }}, [el('div', {className: 'progress-fill', attrs: {style: 'width: ' + value + '%'}})]);
     return track;
   }
@@ -185,7 +241,7 @@
   function metaItem(label, value, valueClass) {
     return el('div', {className: 'meta-item'}, [
       el('span', {className: 'meta-label', text: label}),
-      el('span', {className: 'meta-value ' + (valueClass || ''), text: value === '' || value === null || value === undefined ? '—' : String(value)})
+      el('span', {className: 'meta-value ' + (valueClass || ''), text: unset(value)})
     ]);
   }
 
@@ -236,17 +292,18 @@
     dom.list.hidden = true;
     dom.empty.hidden = true;
     dom.error.hidden = false;
-    dom.errorDetail.textContent = result && result.error && result.error.message
-      ? result.error.message
-      : 'データを読み込めませんでした。時間をおいて再試行してください。';
-    dom.resultCount.textContent = '表示できません';
-    dom.sync.textContent = '最終同期: 取得できません';
+    dom.errorDetail.textContent = result && result.error
+      ? I18n.errorMessage(language, result.error)
+      : T('dashboard.notice.loadFailedBody');
+    dom.resultCount.textContent = T('dashboard.result.unavailable');
+    dom.sync.textContent = T('dashboard.sync.unavailable');
   }
 
   function renderSync() {
     if (!state.meta) return;
-    var label = state.meta.publishedAtLabel || '未同期';
-    dom.sync.textContent = '最終同期: ' + label + (state.meta.stale ? '（更新が遅れています）' : '');
+    var label = state.meta.publishedAtLabel || T('common.unknown');
+    dom.sync.textContent = T('dashboard.sync.label', {label: label}) +
+      (state.meta.stale ? T('dashboard.sync.staleSuffix') : '');
   }
 
   function renderNotices() {
@@ -254,16 +311,16 @@
     if (!state.meta) return;
     if (state.meta.stale) {
       dom.notices.appendChild(el('div', {className: 'notice notice-warn'}, [
-        el('span', {className: 'notice-strong', text: 'データが更新されていません。'}),
-        el('span', {
-          text: '最終同期は ' + (state.meta.publishedAtLabel || '不明') + '（' +
-            state.meta.ageHours + ' 時間前）です。最新の状況は管理者にご確認ください。'
-        })
+        el('span', {className: 'notice-strong', text: T('dashboard.notice.staleTitle')}),
+        el('span', {text: T('dashboard.notice.staleBody', {
+          label: state.meta.publishedAtLabel || T('common.unknown'),
+          hours: state.meta.ageHours
+        })})
       ]));
     }
     if (state.meta.ageHours === null) {
       dom.notices.appendChild(el('div', {className: 'notice notice-info'}, [
-        el('span', {text: '同期時刻を取得できませんでした。表示内容が最新とは限りません。'})
+        el('span', {text: T('dashboard.notice.noSync')})
       ]));
     }
   }
@@ -272,17 +329,17 @@
     clear(dom.kpis);
     if (!state.indicators) return;
     var items = [
-      {label: '進行中の案件', value: state.indicators.activeProjects, unit: '件', risk: false},
-      {label: '要注意の案件', value: state.indicators.atRiskProjects, unit: '件', risk: state.indicators.atRiskProjects > 0},
-      {label: '7日以内に期限', value: state.indicators.dueWithin7Days, unit: '件', risk: false},
-      {label: '期限超過タスク', value: state.indicators.overdueTasks, unit: '件', risk: state.indicators.overdueTasks > 0}
+      {label: T('dashboard.kpi.active'), value: state.indicators.activeProjects, risk: false},
+      {label: T('dashboard.kpi.atRisk'), value: state.indicators.atRiskProjects, risk: state.indicators.atRiskProjects > 0},
+      {label: T('dashboard.kpi.dueWithin7'), value: state.indicators.dueWithin7Days, risk: false},
+      {label: T('dashboard.kpi.overdueTasks'), value: state.indicators.overdueTasks, risk: state.indicators.overdueTasks > 0}
     ];
     items.forEach(function (item) {
       dom.kpis.appendChild(el('div', {className: 'kpi' + (item.risk ? ' is-risk' : '')}, [
         el('p', {className: 'kpi-label', text: item.label}),
         el('p', {className: 'kpi-value'}, [
           el('span', {text: String(item.value)}),
-          el('span', {className: 'kpi-unit', text: item.unit})
+          el('span', {className: 'kpi-unit', text: itemUnit(item.value)})
         ])
       ]));
     });
@@ -290,8 +347,8 @@
 
   function renderFilterOptions() {
     var options = state.filterOptions || {categories: [], owners: []};
-    fillSelect(dom.filterCategory, 'すべて', options.categories || [], state.filters.category, 'category');
-    fillSelect(dom.filterOwner, 'すべて', options.owners || [], state.filters.owner, 'owner');
+    fillSelect(dom.filterCategory, T('common.all'), options.categories || [], state.filters.category, 'category');
+    fillSelect(dom.filterOwner, T('common.all'), options.owners || [], state.filters.owner, 'owner');
   }
 
   function fillSelect(select, allLabel, values, current, key) {
@@ -365,15 +422,15 @@
 
     if (!list.length) {
       dom.emptyDetail.textContent = !total
-        ? (state.query
-          ? '検索条件に一致するプロジェクトがありません。検索語を変更してください。'
-          : '公開対象として承認されたプロジェクトがまだありません。管理者が公開設定を行うと表示されます。')
-        : '絞り込み条件に一致するプロジェクトがありません。「条件をクリア」で元に戻せます。';
+        ? (state.query ? T('dashboard.empty.query') : T('dashboard.empty.none'))
+        : T('dashboard.empty.filtered');
     }
 
     dom.resultCount.textContent = list.length
-      ? list.length + ' 件を表示' + (total !== list.length ? '（全 ' + total + ' 件）' : '')
-      : '0 件';
+      ? (total !== list.length
+        ? T('dashboard.result.countAll', {count: list.length, total: total})
+        : T('dashboard.result.count', {count: list.length}))
+      : T('dashboard.result.zero');
 
     list.forEach(function (project) {
       dom.list.appendChild(projectCard(project));
@@ -389,39 +446,39 @@
       attrs: {
         type: 'button',
         'data-project-id': project.projectId,
-        'aria-label': project.projectName + ' の詳細を表示'
+        'aria-label': T('dashboard.card.detailAria', {name: project.projectName})
       }
     });
 
     button.appendChild(el('div', {className: 'card-head'}, [
       el('div', {}, [
         el('p', {className: 'card-title', text: project.projectName}),
-        el('p', {className: 'card-sub', text: [project.category || 'カテゴリ未設定', project.statusLabel || project.status].join(' · ')})
+        el('p', {className: 'card-sub', text: [project.category || T('dashboard.card.categoryUnset'), statusText(project.status)].join(' · ')})
       ]),
-      el('span', {className: healthClass(project.health), text: project.healthLabel || project.health || '—'})
+      el('span', {className: healthClass(project.health), text: project.health ? healthText(project.health) : T('common.none')})
     ]));
 
     var dl = el('div', {className: 'card-meta'});
     button.appendChild(el('div', {className: 'card-body'}, [
       el('div', {className: 'progress-row'}, [
-        progressBar(project.progress, project.projectName + ' の進捗'),
+        progressBar(project.progress, T('dashboard.card.progressAria', {name: project.projectName})),
         el('span', {className: 'progress-value', text: percentText(project.progress)})
       ]),
       dl,
       el('div', {className: 'task-counts'}, [
-        el('span', {text: '未完了 '}),
+        el('span', {text: T('dashboard.card.openTasks')}),
         el('strong', {text: String(project.openTasks)}),
-        el('span', {text: ' · 期限超過 '}),
+        el('span', {text: T('dashboard.card.overdue')}),
         el('strong', {className: project.overdueTasks > 0 ? 'is-overdue' : '', text: String(project.overdueTasks)}),
-        el('span', {text: ' · 残り '}),
-        el('span', {className: deadlineClass(project), text: project.deadlineLabel || '—'})
+        el('span', {text: T('dashboard.card.remaining')}),
+        el('span', {className: deadlineClass(project), text: deadlineText(project)})
       ])
     ]));
 
-    dl.appendChild(metaItem('責任者', project.ownerName || '未設定'));
-    dl.appendChild(metaItem('確定期限', project.committedDeadline || '未設定'));
-    dl.appendChild(metaItem('予測完了', project.forecastDeadline || '未設定'));
-    dl.appendChild(metaItem('最終更新', project.lastUpdated || '未設定'));
+    dl.appendChild(metaItem(T('dashboard.card.owner'), project.ownerName));
+    dl.appendChild(metaItem(T('dashboard.card.committedDeadline'), project.committedDeadline));
+    dl.appendChild(metaItem(T('dashboard.card.forecastDeadline'), project.forecastDeadline));
+    dl.appendChild(metaItem(T('dashboard.card.lastUpdated'), project.lastUpdated));
 
     card.appendChild(button);
     return card;
@@ -434,7 +491,7 @@
     state.currentProjectId = projectId;
     dom.overview.hidden = true;
     dom.detail.hidden = false;
-    dom.detailTitle.textContent = '読み込み中…';
+    dom.detailTitle.textContent = T('common.loading');
     dom.detailSummary.textContent = '';
     clear(dom.detailFacts);
     clear(dom.detailCounts);
@@ -453,8 +510,8 @@
       if (!result || !result.ok) {
         clear(dom.detailGroups);
         dom.detailGroups.appendChild(el('div', {className: 'state state-error'}, [
-          el('h3', {text: '案件を表示できませんでした'}),
-          el('p', {text: result && result.error ? result.error.message : '一覧に戻って選び直してください。'})
+          el('h3', {text: T('dashboard.detail.loadFailed')}),
+          el('p', {text: result && result.error ? I18n.errorMessage(language, result.error) : T('dashboard.detail.loadFailedBody')})
         ]));
         return;
       }
@@ -465,8 +522,8 @@
       if (token !== state.detailToken) return;
       clear(dom.detailGroups);
       dom.detailGroups.appendChild(el('div', {className: 'state state-error'}, [
-        el('h3', {text: '案件を表示できませんでした'}),
-        el('p', {text: '通信に失敗しました。時間をおいて再試行してください。'})
+        el('h3', {text: T('dashboard.detail.loadFailed')}),
+        el('p', {text: T('dashboard.detail.commFailed')})
       ]));
     });
   }
@@ -486,44 +543,44 @@
     var project = detail.project;
 
     dom.detailTitle.textContent = project.projectName;
-    dom.detailSummary.textContent = project.summary || '公開用の概要は設定されていません。';
+    dom.detailSummary.textContent = project.summary || T('dashboard.detail.noSummary');
     clear(dom.detailFacts);
     var facts = [
-      ['責任者', project.ownerName || '未設定'],
-      ['状態', project.statusLabel || project.status],
-      ['進捗', percentText(project.progress)],
-      ['健全性', project.healthLabel || project.health],
-      ['確定期限', project.committedDeadline || '未設定'],
-      ['予測完了', project.forecastDeadline || '未設定'],
-      ['残り', project.deadlineLabel],
-      ['最終更新', project.lastUpdated || '未設定']
+      [T('dashboard.detail.owner'), unset(project.ownerName)],
+      [T('dashboard.detail.status'), statusText(project.status)],
+      [T('dashboard.detail.progress'), percentText(project.progress)],
+      [T('dashboard.detail.health'), project.health ? healthText(project.health) : T('common.none')],
+      [T('dashboard.detail.deadline'), unset(project.committedDeadline)],
+      [T('dashboard.detail.forecast'), unset(project.forecastDeadline)],
+      [T('dashboard.detail.remaining'), deadlineText(project)],
+      [T('dashboard.detail.updated'), unset(project.lastUpdated)]
     ];
-    facts.forEach(function (item) {
+    facts.forEach(function (item, index) {
       dom.detailFacts.appendChild(el('div', {}, [
         el('p', {className: 'fact-label', text: item[0]}),
-        el('p', {className: 'fact-value' + (item[0] === '残り' ? ' ' + deadlineClass(project) : ''), text: item[1]})
+        el('p', {className: 'fact-value' + (index === 6 ? ' ' + deadlineClass(project) : ''), text: item[1]})
       ]));
     });
 
     clear(dom.detailCounts);
     var counts = detail.counts || {total: 0, open: 0, done: 0, overdue: 0, blocked: 0};
     [
-      ['タスク', counts.total],
-      ['未完了', counts.open],
-      ['期限超過', counts.overdue],
-      ['ブロック', counts.blocked],
-      ['完了', counts.done]
+      [T('dashboard.detail.count.tasks'), counts.total, false],
+      [T('dashboard.detail.count.open'), counts.open, false],
+      [T('dashboard.detail.count.overdue'), counts.overdue, counts.overdue > 0],
+      [T('dashboard.detail.count.blocked'), counts.blocked, false],
+      [T('dashboard.detail.count.done'), counts.done, false]
     ].forEach(function (item) {
       dom.detailCounts.appendChild(el('span', {}, [
         el('span', {text: item[0] + ' '}),
-        el('strong', {className: item[0] === '期限超過' && item[1] > 0 ? 'is-overdue' : '', text: String(item[1])})
+        el('strong', {className: item[2] ? 'is-overdue' : '', text: String(item[1])})
       ]));
     });
 
     clear(dom.detailNotice);
     if (detail.truncated) {
       dom.detailNotice.appendChild(el('div', {className: 'notice notice-info'}, [
-        el('span', {text: 'タスクが多いため先頭 ' + detail.tasks.length + ' 件を表示しています（全 ' + detail.taskTotal + ' 件）。'})
+        el('span', {text: T('dashboard.detail.truncated', {shown: detail.tasks.length, total: detail.taskTotal})})
       ]));
     }
 
@@ -573,20 +630,21 @@
     groups.forEach(function (subproject) {
       var tasks = tasksFor(subproject.subprojectId);
       dom.detailGroups.appendChild(groupBlock(subproject.name, [
-        subproject.ownerName ? '担当 ' + subproject.ownerName : '',
-        subproject.statusLabel || subproject.status,
-        '進捗 ' + percentText(subproject.progress),
-        subproject.deadline ? '期限 ' + subproject.deadline : '',
-        tasks.length + ' 件'
-      ].filter(Boolean).join(' · '), tasks, subproject.name));
+        subproject.ownerName ? T('dashboard.table.owner') + ' ' + subproject.ownerName : '',
+        statusText(subproject.status),
+        T('dashboard.table.progress') + ' ' + percentText(subproject.progress),
+        subproject.deadline ? T('dashboard.table.deadline') + ' ' + subproject.deadline : '',
+        T('dashboard.count', {count: tasks.length})
+      ].filter(Boolean).join(' · '), tasks, subproject.name, subproject));
     });
 
     var ungrouped = (detail.tasks || []).filter(function (task) {
       return !task.subprojectId || !known[task.subprojectId];
     });
     if (ungrouped.length) {
-      dom.detailGroups.appendChild(groupBlock('全体タスク',
-        'サブプロジェクト未割当 · ' + ungrouped.length + ' 件', ungrouped, '全体タスク'));
+      dom.detailGroups.appendChild(groupBlock(T('dashboard.detail.ungrouped'),
+        T('dashboard.count', {count: ungrouped.length}),
+        ungrouped, T('dashboard.detail.ungrouped'), null));
     }
   }
 
@@ -600,23 +658,23 @@
     ]));
     var body = el('div', {className: 'group-body'});
     if (tasks.length) body.appendChild(taskTable(sortedTasks(tasks), caption));
-    else body.appendChild(el('p', {className: 'group-meta', text: 'このグループに公開タスクはありません。'}));
+    else body.appendChild(el('p', {className: 'group-meta', text: T('dashboard.detail.noTasksBody')}));
     details.appendChild(body);
     return details;
   }
 
   function taskTable(tasks, caption) {
     var table = el('table', {className: 'task-table'});
-    table.appendChild(el('caption', {className: 'visually-hidden', text: caption + ' のタスク一覧'}));
+    table.appendChild(el('caption', {className: 'visually-hidden', text: caption}));
 
     var columns = [
-      {key: 'name', label: 'タスク', sortKey: 'name'},
-      {key: 'ownerName', label: '担当', sortKey: 'ownerName'},
-      {key: 'statusLabel', label: '状態', sortKey: 'status'},
-      {key: 'priorityLabel', label: '優先度', sortKey: 'priority'},
-      {key: 'dueDate', label: '期限', sortKey: 'due'},
-      {key: 'deadlineLabel', label: '残り', sortKey: null},
-      {key: 'progress', label: '進捗', sortKey: 'progress'}
+      {key: 'name', label: T('dashboard.table.task'), sortKey: 'name'},
+      {key: 'ownerName', label: T('dashboard.table.owner'), sortKey: 'ownerName'},
+      {key: 'statusText', label: T('dashboard.table.status'), sortKey: 'status'},
+      {key: 'priorityText', label: T('dashboard.table.priority'), sortKey: 'priority'},
+      {key: 'dueDate', label: T('dashboard.table.deadline'), sortKey: 'due'},
+      {key: 'deadlineText', label: T('dashboard.table.remaining'), sortKey: null},
+      {key: 'progress', label: T('dashboard.table.progress'), sortKey: 'progress'}
     ];
 
     var head = el('thead');
@@ -627,7 +685,7 @@
         var active = state.taskSort.key === column.sortKey;
         var button = el('button', {
           className: 'sort-button',
-          attrs: {type: 'button', 'aria-label': column.label + 'で並べ替え'},
+          attrs: {type: 'button', 'aria-label': T('dashboard.table.sortAria', {label: column.label})},
           text: column.label + (active ? (state.taskSort.direction === 1 ? ' ▲' : ' ▼') : '')
         });
         button.addEventListener('click', function () {
@@ -651,25 +709,29 @@
       var row = el('tr', {attrs: {'data-task-id': task.taskId}});
 
       var nameCell = el('td', {className: 'cell-primary'}, [
-        el('span', {className: 'cell-label', text: 'タスク'})
+        el('span', {className: 'cell-label', text: T('dashboard.table.task')})
       ]);
       var nameButton = el('button', {
         className: 'task-name-button',
-        attrs: {type: 'button', 'data-open-task': task.taskId, 'aria-label': task.name + ' の詳細を表示'},
+        attrs: {type: 'button', 'data-open-task': task.taskId,
+          'aria-label': T('dashboard.table.openTaskAria', {name: task.name})},
         text: task.name
       });
       nameCell.appendChild(nameButton);
+      if (task.pendingRequest) {
+        nameCell.appendChild(el('span', {className: 'pending-badge', text: T('dashboard.card.pendingRequest')}));
+      }
       row.appendChild(nameCell);
 
-      row.appendChild(cell('担当', task.ownerName || '未設定'));
-      row.appendChild(cell('状態', task.statusLabel || task.status));
-      row.appendChild(cell('優先度', task.priorityLabel || '—'));
-      row.appendChild(cell('期限', task.dueDate || '未設定'));
-      row.appendChild(cell('残り', task.deadlineLabel, 'cell-remaining ' + deadlineClass(task)));
+      row.appendChild(cell(T('dashboard.table.owner'), unset(task.ownerName)));
+      row.appendChild(cell(T('dashboard.table.status'), statusText(task.status)));
+      row.appendChild(cell(T('dashboard.table.priority'), task.priority ? priorityText(task.priority) : T('common.none')));
+      row.appendChild(cell(T('dashboard.table.deadline'), unset(task.dueDate)));
+      row.appendChild(cell(T('dashboard.table.remaining'), deadlineText(task), 'cell-remaining ' + deadlineClass(task)));
 
-      var progressCell = el('td', {}, [el('span', {className: 'cell-label', text: '進捗'})]);
+      var progressCell = el('td', {}, [el('span', {className: 'cell-label', text: T('dashboard.table.progress')})]);
       progressCell.appendChild(el('div', {className: 'cell-progress'}, [
-        progressBar(task.progress, task.name + ' の進捗'),
+        progressBar(task.progress, T('dashboard.card.progressAria', {name: task.name})),
         el('span', {className: 'progress-value', text: percentText(task.progress)})
       ]));
       row.appendChild(progressCell);
@@ -686,7 +748,7 @@
     var node = el('td', {className: extraClass || ''}, [
       el('span', {className: 'cell-label', text: label})
     ]);
-    node.appendChild(el('span', {text: value === '' || value === null || value === undefined ? '—' : String(value)}));
+    node.appendChild(el('span', {text: value === '' || value === null || value === undefined ? T('common.none') : String(value)}));
     return node;
   }
 
@@ -699,7 +761,9 @@
         el('span', {text: milestone.name}),
         el('span', {
           className: milestone.reached ? 'pill pill-green' : 'pill pill-gray',
-          text: milestone.reached ? '達成 ' + milestone.actualDate : (milestone.targetDate || '日程未設定')
+          text: milestone.reached
+            ? T('deadline.done') + ' ' + milestone.actualDate
+            : (milestone.targetDate || T('deadline.none'))
         })
       ]));
     });
@@ -713,14 +777,15 @@
     api.task(projectId, taskId).then(function (result) {
       if (token !== state.drawerToken) return;
       if (!result || !result.ok) {
-        toast(result && result.error ? result.error.message : 'タスクを表示できませんでした。');
+        toast(result && result.error ? I18n.errorMessage(language, result.error) : T('dashboard.drawer.loadFailed'));
         return;
       }
+      state.drawerData = result.data;
       renderTaskDrawer(result.data);
       showDrawer();
     }).catch(function () {
       if (token !== state.drawerToken) return;
-      toast('タスクを表示できませんでした。');
+      toast(T('dashboard.drawer.loadFailed'));
     });
   }
 
@@ -731,39 +796,271 @@
 
     var facts = el('div', {className: 'drawer-facts'});
     [
-      ['タスクID', task.taskId],
-      ['プロジェクト', task.projectName],
-      ['サブプロジェクト', task.subprojectName || '未割当'],
-      ['担当', task.ownerName || '未設定'],
-      ['状態', task.statusLabel || task.status],
-      ['優先度', task.priorityLabel || '—'],
-      ['開始日', task.plannedStart || '未設定'],
-      ['期限', task.dueDate || '未設定'],
-      ['残り', task.deadlineLabel],
-      ['進捗', percentText(task.progress)]
+      [T('dashboard.drawer.taskId'), task.taskId, false],
+      [T('dashboard.drawer.project'), task.projectName, false],
+      [T('dashboard.drawer.subproject'), task.subprojectName || T('dashboard.drawer.noSubproject'), false],
+      [T('dashboard.drawer.owner'), unset(task.ownerName), false],
+      [T('dashboard.drawer.status'), statusText(task.status), false],
+      [T('dashboard.drawer.priority'), task.priority ? priorityText(task.priority) : T('common.none'), false],
+      [T('dashboard.drawer.start'), unset(task.plannedStart), false],
+      [T('dashboard.drawer.deadline'), unset(task.dueDate), false],
+      [T('dashboard.drawer.remaining'), deadlineText(task), true],
+      [T('dashboard.drawer.progress'), percentText(task.progress), false]
     ].forEach(function (item) {
       facts.appendChild(el('div', {}, [
         el('p', {className: 'fact-label', text: item[0]}),
-        el('p', {className: 'fact-value' + (item[0] === '残り' ? ' ' + deadlineClass(task) : ''), text: item[1]})
+        el('p', {className: 'fact-value' + (item[2] ? ' ' + deadlineClass(task) : ''), text: item[1]})
       ]));
     });
     dom.drawerBody.appendChild(facts);
 
+    if (task.pendingRequest) {
+      dom.drawerBody.appendChild(el('p', {}, [
+        el('span', {className: 'pending-badge', text: T('dashboard.card.pendingRequest')})
+      ]));
+    }
+
     dom.drawerBody.appendChild(el('div', {}, [
-      el('p', {className: 'fact-label', text: '公開メモ'}),
-      el('p', {className: 'note', text: task.publicNote || '公開メモはありません。'})
+      el('p', {className: 'fact-label', text: T('dashboard.drawer.publicNote')}),
+      el('p', {className: 'note', text: task.publicNote || T('dashboard.drawer.noNote')})
     ]));
 
     dom.drawerBody.appendChild(el('div', {className: 'progress-row'}, [
-      progressBar(task.progress, '進捗'),
+      progressBar(task.progress, T('dashboard.drawer.progress')),
       el('span', {className: 'progress-value', text: percentText(task.progress)})
     ]));
 
-    dom.drawerBody.appendChild(el('p', {
-      className: 'group-meta',
-      text: 'このダッシュボードは閲覧専用です。変更は管理者が管理アプリで行います。'
-    }));
+    dom.drawerBody.appendChild(el('p', {className: 'group-meta', text: T('dashboard.drawer.browseOnly')}));
+
+    dom.drawerBody.appendChild(requestSection(data));
   }
+
+  /* ---------------- worker requests ---------------- */
+
+  function clientToken() {
+    var token = '';
+    try { token = localStorage.getItem(CLIENT_TOKEN_KEY) || ''; } catch (error) { token = ''; }
+    if (!token) {
+      token = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : 'tok-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+      try { localStorage.setItem(CLIENT_TOKEN_KEY, token); } catch (error) { /* optional */ }
+    }
+    return token;
+  }
+
+  function requestSection(data) {
+    var task = data.task;
+    var section = el('div', {className: 'request-section'});
+
+    var actions = el('div', {className: 'request-actions'});
+    var deadlineButton = el('button', {
+      className: 'request-button primary', attrs: {type: 'button'}, text: T('request.action.deadline')
+    });
+    var completionButton = el('button', {
+      className: 'request-button', attrs: {type: 'button'}, text: T('request.action.completion')
+    });
+    actions.appendChild(deadlineButton);
+    actions.appendChild(completionButton);
+    section.appendChild(actions);
+
+    var area = el('div');
+    section.appendChild(area);
+
+    deadlineButton.addEventListener('click', function () {
+      clear(area);
+      area.appendChild(deadlineForm(data, area));
+    });
+    completionButton.addEventListener('click', function () {
+      clear(area);
+      area.appendChild(completionForm(data, area));
+    });
+
+    var statusWrap = el('div', {className: 'request-form'});
+    statusWrap.appendChild(el('h3', {text: T('request.status.title')}));
+    var statusLabel = el('label', {text: T('request.status.lookup')});
+    var statusInput = el('input', {attrs: {type: 'text', placeholder: T('request.status.placeholder'),
+      autocomplete: 'off', spellcheck: 'false'}});
+    statusWrap.appendChild(statusLabel);
+    statusWrap.appendChild(statusInput);
+    var statusButton = el('button', {className: 'request-button', attrs: {type: 'button'}, text: T('request.status.lookup')});
+    statusWrap.appendChild(statusButton);
+    var statusResult = el('div');
+    statusWrap.appendChild(statusResult);
+    section.appendChild(statusWrap);
+    statusButton.addEventListener('click', function () {
+      var id = statusInput.value.trim();
+      clear(statusResult);
+      if (!id) { statusResult.appendChild(el('p', {className: 'request-error', text: T('request.status.notFound')})); return; }
+      api.requestStatus(id).then(function (result) {
+        clear(statusResult);
+        if (!result || !result.ok) {
+          statusResult.appendChild(el('p', {className: 'request-error', text: I18n.errorMessage(language, result && result.error)}));
+          return;
+        }
+        statusResult.appendChild(receipt(result.data.requestId, result.data.status, false));
+      }).catch(function () {
+        clear(statusResult);
+        statusResult.appendChild(el('p', {className: 'request-error', text: T('request.error.REQUEST_UNEXPECTED')}));
+      });
+    });
+
+    return section;
+  }
+
+  function readOnlyField(label, value) {
+    var wrap = el('div');
+    wrap.appendChild(el('label', {text: label}));
+    wrap.appendChild(el('div', {className: 'readonly-value', text: value}));
+    return wrap;
+  }
+
+  function field(labelText, control) {
+    var wrap = el('div');
+    wrap.appendChild(el('label', {text: labelText}));
+    wrap.appendChild(control);
+    return wrap;
+  }
+
+  function receipt(requestId, status, completion) {
+    var box = el('div', {className: 'request-receipt'});
+    box.appendChild(el('h3', {
+      text: completion ? T('request.completion.heading') : T('request.confirm.heading')
+    }));
+    box.appendChild(el('p', {text: completion ? T('request.completion.body') : T('request.confirm.body')}));
+    var list = el('dl');
+    list.appendChild(el('dt', {text: T('request.confirm.id')}));
+    list.appendChild(el('dd', {text: requestId}));
+    list.appendChild(el('dt', {text: T('request.confirm.status')}));
+    list.appendChild(el('dd', {text: I18n.t(language, 'request.status.' + status)}));
+    box.appendChild(list);
+    box.appendChild(el('p', {className: 'request-hint', text: T('request.confirm.note')}));
+    return box;
+  }
+
+  function deadlineForm(data, area) {
+    var task = data.task;
+    var form = el('div', {className: 'request-form'});
+    form.appendChild(el('h3', {text: T('request.action.deadline')}));
+
+    var requested = el('input', {attrs: {type: 'date'}});
+    var reason = el('select');
+    REASONS.forEach(function (item) {
+      reason.appendChild(el('option', {text: T(item.key), attrs: {value: item.value}}));
+    });
+    var explanation = el('textarea');
+    var requester = el('input', {attrs: {type: 'text', maxlength: '120', autocomplete: 'off'}});
+
+    form.appendChild(readOnlyField(T('request.form.project'), task.projectName || T('common.none')));
+    form.appendChild(readOnlyField(T('request.form.task'), task.name || T('common.none')));
+    form.appendChild(readOnlyField(T('request.form.owner'), unset(task.ownerName)));
+    form.appendChild(readOnlyField(T('request.form.currentDeadline'), unset(task.dueDate)));
+    form.appendChild(field(T('request.form.requestedDeadline'), requested));
+    form.appendChild(field(T('request.form.reason'), reason));
+    form.appendChild(field(T('request.form.explanation'), explanation));
+    form.appendChild(field(T('request.form.requester'), requester));
+    form.appendChild(el('p', {className: 'request-hint', text: T('request.form.requiredNote')}));
+
+    var error = el('p', {className: 'request-error'});
+    var submit = el('button', {className: 'request-button primary', attrs: {type: 'button'}, text: T('request.form.submit')});
+    var cancel = el('button', {className: 'request-button', attrs: {type: 'button'}, text: T('request.form.cancel')});
+    var buttons = el('div', {className: 'request-actions'}, [submit, cancel]);
+    form.appendChild(buttons);
+    form.appendChild(error);
+    cancel.addEventListener('click', function () { clear(area); });
+
+    submit.addEventListener('click', function () {
+      clear(error);
+      if (!requested.value || !requester.value.trim()) {
+        error.textContent = !requested.value ? T('request.error.REQUEST_INVALID_DATE') : T('request.error.REQUEST_REQUESTER_REQUIRED');
+        return;
+      }
+      if (requested.value === task.dueDate) {
+        error.textContent = T('request.error.REQUEST_DATE_UNCHANGED');
+        return;
+      }
+      submit.disabled = true;
+      submit.textContent = T('request.form.submitting');
+      api.submitDeadline({
+        projectId: task.projectId,
+        taskId: task.taskId,
+        requestedDate: requested.value,
+        reason: reason.value,
+        explanation: explanation.value,
+        requesterName: requester.value.trim(),
+        clientToken: clientToken()
+      }).then(function (result) {
+        submit.disabled = false;
+        submit.textContent = T('request.form.submit');
+        if (!result || !result.ok) {
+          error.textContent = I18n.errorMessage(language, result && result.error);
+          return;
+        }
+        clear(area);
+        area.appendChild(receipt(result.data.requestId, result.data.status || 'RECEIVED', false));
+      }).catch(function () {
+        submit.disabled = false;
+        submit.textContent = T('request.form.submit');
+        error.textContent = T('request.error.REQUEST_UNEXPECTED');
+      });
+    });
+
+    return form;
+  }
+
+  function completionForm(data, area) {
+    var task = data.task;
+    var form = el('div', {className: 'request-form'});
+    form.appendChild(el('h3', {text: T('request.action.completion')}));
+
+    var reporter = el('input', {attrs: {type: 'text', maxlength: '120', autocomplete: 'off'}});
+    var note = el('textarea', {attrs: {maxlength: '500'}});
+
+    form.appendChild(readOnlyField(T('request.form.project'), task.projectName || T('common.none')));
+    form.appendChild(readOnlyField(T('request.form.task'), task.name || T('common.none')));
+    form.appendChild(readOnlyField(T('request.form.owner'), unset(task.ownerName)));
+    form.appendChild(field(T('request.completion.reporter'), reporter));
+    form.appendChild(field(T('request.completion.note'), note));
+    form.appendChild(el('p', {className: 'request-hint', text: T('request.form.requiredNote')}));
+
+    var error = el('p', {className: 'request-error'});
+    var submit = el('button', {className: 'request-button primary', attrs: {type: 'button'}, text: T('request.completion.button')});
+    var cancel = el('button', {className: 'request-button', attrs: {type: 'button'}, text: T('request.form.cancel')});
+    form.appendChild(el('div', {className: 'request-actions'}, [submit, cancel]));
+    form.appendChild(error);
+    cancel.addEventListener('click', function () { clear(area); });
+
+    submit.addEventListener('click', function () {
+      clear(error);
+      if (!reporter.value.trim()) { error.textContent = T('request.error.REQUEST_REQUESTER_REQUIRED'); return; }
+      submit.disabled = true;
+      submit.textContent = T('request.form.submitting');
+      api.submitCompletion({
+        projectId: task.projectId,
+        taskId: task.taskId,
+        note: note.value,
+        reporterName: reporter.value.trim(),
+        clientToken: clientToken()
+      }).then(function (result) {
+        submit.disabled = false;
+        submit.textContent = T('request.completion.button');
+        if (!result || !result.ok) {
+          error.textContent = I18n.errorMessage(language, result && result.error);
+          return;
+        }
+        clear(area);
+        area.appendChild(receipt(result.data.requestId, result.data.status || 'RECEIVED', true));
+      }).catch(function () {
+        submit.disabled = false;
+        submit.textContent = T('request.completion.button');
+        error.textContent = T('request.error.REQUEST_UNEXPECTED');
+      });
+    });
+
+    return form;
+  }
+
+  /* ---------------- drawer plumbing ---------------- */
 
   function showDrawer() {
     state.drawerOpen = true;
@@ -845,6 +1142,54 @@
     syncFilterState();
   }
 
+  /* ---------------- language ---------------- */
+
+  function setLanguage(next) {
+    language = I18n.write(next);
+    renderAll();
+  }
+
+  /**
+   * Re-renders every visible label from the current state without re-fetching and without
+   * losing the current project, task, filter or scroll position.
+   */
+  function renderAll() {
+    I18n.apply(language, document);
+    document.title = I18n.APP_NAME;
+    Array.prototype.forEach.call(document.querySelectorAll('.lang-option'), function (button) {
+      var active = button.getAttribute('data-lang') === language;
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+      button.className = 'lang-option' + (active ? ' is-active' : '');
+    });
+    document.title = I18n.APP_NAME;
+    renderSync();
+    renderNotices();
+    renderKpis();
+    renderFilterOptions();
+    renderProjects();
+    if (state.detail) renderDetail();
+    if (state.drawerData && state.drawerOpen) {
+      var scroll = dom.drawerBody.scrollTop;
+      renderTaskDrawer(state.drawerData);
+      dom.drawerBody.scrollTop = scroll;
+    }
+  }
+
+  function wireLanguage() {
+    Array.prototype.forEach.call(document.querySelectorAll('.lang-option'), function (button) {
+      button.addEventListener('click', function () { setLanguage(button.getAttribute('data-lang')); });
+    });
+    renderLanguageButtons();
+  }
+
+  function renderLanguageButtons() {
+    Array.prototype.forEach.call(document.querySelectorAll('.lang-option'), function (button) {
+      var active = button.getAttribute('data-lang') === language;
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
+      button.className = 'lang-option' + (active ? ' is-active' : '');
+    });
+  }
+
   function wireEvents() {
     dom.search.addEventListener('input', scheduleSearch);
     dom.search.addEventListener('keydown', function (event) {
@@ -886,7 +1231,15 @@
   }
 
   function boot() {
+    wireLanguage();
     wireEvents();
+    // The stored preference is applied to the static markup before the first render.
+    I18n.apply(language, document);
+    renderLanguageButtons();
+    renderSync();
+    api.requestConfig().then(function (result) {
+      state.requestConfig = (result && result.ok && result.data) ? result.data : {enabled: false};
+    }).catch(function () { state.requestConfig = {enabled: false}; });
     loadPortfolio('');
   }
 

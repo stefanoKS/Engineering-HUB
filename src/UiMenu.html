@@ -21,111 +21,147 @@
     .row { display: flex; gap: 6px; }
     .row > * { flex: 1; }
     #actor { font-size: 11px; color: #5f6368; }
+    .plan-preview { margin-top: 6px; padding: 6px; border-radius: 4px; background: #f1f3f4; font-weight: 600; }
+    .warnings { margin: 6px 0 0; padding-left: 18px; color: #b06000; }
+    .warnings:empty { display: none; }
+    .lang-switch { display: flex; align-items: center; gap: 4px; justify-content: flex-end; margin-bottom: 6px; font-size: 11px; }
+    .lang-label { color: #5f6368; }
+    .lang-option { margin: 0; padding: 2px 6px; background: #f1f3f4; color: #202124; border-radius: 4px; }
+    .lang-option.is-active { background: #1a73e8; color: #fff; }
+    .lang-sep { color: #bdc1c6; }
   </style>
 </head>
 <body>
-  <div id="actor">読み込み中...</div>
+  <?!= include('I18n') ?>
+  <?!= include('UiSafe') ?>
+  <?!= include('UiLang') ?>
+
+  <div id="actor" data-i18n="manager.loading">読み込み中...</div>
 
   <fieldset>
-    <legend>プロジェクト作成</legend>
-    <label>プロジェクト名 *</label><input id="projectName">
-    <label>責任者</label><select id="projectOwner"></select>
-    <label>確定期限</label><input id="projectDeadline" type="date">
-    <label>状態</label>
+    <legend data-i18n="manager.project.legend">プロジェクト作成</legend>
+    <label data-i18n="manager.project.name">プロジェクト名 *</label><input id="projectName">
+    <label data-i18n="manager.project.owner">責任者</label><select id="projectOwner"></select>
+    <label data-i18n="manager.project.deadline">確定期限</label><input id="projectDeadline" type="date">
+    <label data-i18n="manager.project.status">状態</label>
     <select id="projectStatus">
-      <option value="Planned">計画中</option><option value="Active">進行中</option>
-      <option value="On Hold">保留</option>
+      <option value="Planned" data-i18n="manager.status.Planned">計画中</option>
+      <option value="Active" data-i18n="manager.status.Active">進行中</option>
+      <option value="On Hold" data-i18n="manager.status.On Hold">保留</option>
     </select>
-    <button onclick="createProject()">作成</button>
+    <button onclick="createProject()" data-i18n="manager.project.create">作成</button>
   </fieldset>
 
   <fieldset>
-    <legend>サブプロジェクト作成</legend>
-    <label>プロジェクト *</label><select id="subProject"></select>
-    <label>サブプロジェクト名 *</label><input id="subName">
-    <label>担当者</label><select id="subOwner"></select>
-    <button onclick="createSubproject()">作成</button>
+    <legend data-i18n="manager.subproject.legend">サブプロジェクト作成</legend>
+    <label data-i18n="manager.subproject.project">プロジェクト *</label><select id="subProject"></select>
+    <label data-i18n="manager.subproject.name">サブプロジェクト名 *</label><input id="subName">
+    <label data-i18n="manager.subproject.owner">担当者</label><select id="subOwner"></select>
+    <button onclick="createSubproject()" data-i18n="manager.subproject.create">作成</button>
   </fieldset>
 
   <fieldset>
-    <legend>タスク割当（期限のみでも可）</legend>
-    <label>プロジェクト *</label><select id="taskProject"></select>
-    <label>サブプロジェクト（任意）</label><select id="taskSubproject"></select>
-    <label>タスク名 *</label><input id="taskName">
-    <label>担当者 *</label><select id="taskOwner"></select>
-    <label>期限 *</label><input id="taskDeadline" type="date">
-    <label>開始日（任意）</label><input id="taskStart" type="date">
-    <label>見積時間（任意・未入力は未見積のまま）</label><input id="taskEstimate" type="number" min="0" step="0.5">
-    <label>完了条件</label><textarea id="taskAcceptance"></textarea>
-    <label>優先度</label>
+    <legend data-i18n="manager.task.legend">タスク割当（完了期限と必要期間から開始日を計算）</legend>
+    <label data-i18n="manager.task.project">プロジェクト *</label><select id="taskProject"></select>
+    <label data-i18n="manager.task.subproject">サブプロジェクト（任意）</label><select id="taskSubproject"></select>
+    <label data-i18n="manager.task.name">タスク名 *</label><input id="taskName">
+    <label data-i18n="manager.task.owner">担当者 *</label><select id="taskOwner"></select>
+    <label data-i18n="manager.task.deadline">完了期限 *</label><input id="taskDeadline" type="date">
+    <label data-i18n="manager.task.duration">必要期間</label><input id="taskDuration" type="number" min="1" step="1">
+    <div class="row">
+      <div>
+        <label data-i18n="manager.task.unit">単位</label>
+        <select id="taskUnit">
+          <option value="DAY" data-i18n="manager.task.unit.DAY">日</option>
+          <option value="WEEK" data-i18n="manager.task.unit.WEEK">週</option>
+        </select>
+      </div>
+      <div>
+        <label data-i18n="manager.task.basis">計算方法</label>
+        <select id="taskBasis">
+          <option value="WORKING_DAYS" data-i18n="manager.task.basis.WORKING_DAYS">営業日</option>
+          <option value="CALENDAR_DAYS" data-i18n="manager.task.basis.CALENDAR_DAYS">暦日</option>
+        </select>
+      </div>
+    </div>
+    <div class="plan-preview" id="planPreview" data-i18n="manager.task.planEmpty">完了期限と必要期間を入力すると開始予定日を計算します。</div>
+    <ul class="warnings" id="planWarnings"></ul>
+    <label id="ackWrap" hidden><input id="taskAck" type="checkbox" style="width:auto"> <span data-i18n="manager.task.acknowledge">期限が稼働日でないことを確認しました</span></label>
+    <label data-i18n="manager.task.estimate">見積工数（時間・任意）</label><input id="taskEstimate" type="number" min="0" step="0.5">
+    <div class="hint" data-i18n="manager.task.estimateHint">必要期間は稼働時間ではありません。1営業日＝8時間とは換算しません。</div>
+    <label data-i18n="manager.task.acceptance">完了条件</label><textarea id="taskAcceptance"></textarea>
+    <label data-i18n="manager.task.priority">優先度</label>
     <select id="taskPriority">
       <option>Low</option><option selected>Medium</option><option>High</option><option>Critical</option>
     </select>
-    <label><input id="taskNotify" type="checkbox" style="width:auto"> メール通知を有効にする（送信は自動化設定に従います）</label>
-    <label><input id="taskApprove" type="checkbox" style="width:auto"> 割当を承認する</label>
-    <label><input id="taskConfirm" type="checkbox" style="width:auto"> 日程を確定する（期限と見積が必要）</label>
-    <button onclick="assignTask()">登録して確認</button>
-    <div class="hint">メールはUIから直接送信されません。承認済みの通知のみ、権限を持つアカウントの自動処理が送信します。</div>
+    <label><input id="taskNotify" type="checkbox" style="width:auto"> <span data-i18n="manager.task.notify">メール通知を有効にする（送信は自動化設定に従います）</span></label>
+    <label><input id="taskApprove" type="checkbox" style="width:auto"> <span data-i18n="manager.task.approve">割当を承認する</span></label>
+    <label><input id="taskConfirm" type="checkbox" style="width:auto"> <span data-i18n="manager.task.confirm">日程を確定する（期限と見積が必要）</span></label>
+    <button onclick="assignTask()" data-i18n="manager.task.submit">登録して確認</button>
+    <div class="hint" data-i18n="manager.task.hint">メールはUIから直接送信されません。承認済みの通知のみ、権限を持つアカウントの自動処理が送信します。</div>
   </fieldset>
 
   <fieldset>
-    <legend>進捗更新</legend>
-    <label>タスク *</label><select id="progressTask"></select>
-    <label>進捗率 (0-100) *</label><input id="progressValue" type="number" min="0" max="100">
-    <label>次のアクション</label><input id="progressNext">
-    <button onclick="updateProgress()">更新</button>
-    <div class="hint">自分の担当タスクのみ更新できます（管理者は管理範囲内）。</div>
+    <legend data-i18n="manager.progress.legend">進捗更新</legend>
+    <label data-i18n="manager.progress.task">タスク *</label><select id="progressTask"></select>
+    <label data-i18n="manager.progress.value">進捗率 (0-100) *</label><input id="progressValue" type="number" min="0" max="100">
+    <label data-i18n="manager.progress.next">次のアクション</label><input id="progressNext">
+    <button onclick="updateProgress()" data-i18n="manager.progress.update">更新</button>
+    <div class="hint" data-i18n="manager.progress.hint">自分の担当タスクのみ更新できます（管理者は管理範囲内）。</div>
   </fieldset>
 
   <fieldset>
-    <legend>メンバー</legend>
-    <div id="memberList" class="hint">読み込み中...</div>
-    <label>メンバーID（更新時）</label><input id="memberId">
-    <label>氏名 *</label><input id="memberName">
-    <label>メール *</label><input id="memberEmail">
-    <label>役割（ADMIN/MANAGERの変更はADMINのみ）</label>
+    <legend data-i18n="manager.member.legend">メンバー</legend>
+    <div id="memberList" class="hint" data-i18n="manager.loading">読み込み中...</div>
+    <label data-i18n="manager.member.id">メンバーID（更新時）</label><input id="memberId">
+    <label data-i18n="manager.member.name">氏名 *</label><input id="memberName">
+    <label data-i18n="manager.member.email">メール *</label><input id="memberEmail">
+    <label data-i18n="manager.member.role">役割（ADMIN/MANAGERの変更はADMINのみ）</label>
     <select id="memberRole"></select>
-    <label>週容量（時間）</label><input id="memberCapacity" type="number" min="0" step="0.5">
+    <label data-i18n="manager.member.capacity">週容量（時間）</label><input id="memberCapacity" type="number" min="0" step="0.5">
     <div class="row">
-      <button onclick="saveMember()">保存</button>
-      <button class="secondary" onclick="deactivateMember()">無効化</button>
+      <button onclick="saveMember()" data-i18n="common.save">保存</button>
+      <button class="secondary" onclick="deactivateMember()" data-i18n="manager.member.deactivate">無効化</button>
     </div>
   </fieldset>
 
   <fieldset>
-    <legend>スキル</legend>
-    <div id="skillList" class="hint">読み込み中...</div>
-    <label>メンバー *</label><select id="skillMember"></select>
-    <label>スキル *</label><select id="skillName"></select>
-    <label>レベル (0-4) *</label><input id="skillLevel" type="number" min="0" max="4">
-    <label>評価者</label><select id="skillAssessor"></select>
-    <label>根拠・証跡</label><input id="skillEvidence">
-    <label>次回レビュー日</label><input id="skillReview" type="date">
-    <button onclick="setSkill()">評価を保存</button>
+    <legend data-i18n="manager.skill.legend">スキル</legend>
+    <div id="skillList" class="hint" data-i18n="manager.loading">読み込み中...</div>
+    <label data-i18n="manager.skill.member">メンバー *</label><select id="skillMember"></select>
+    <label data-i18n="manager.skill.name">スキル *</label><select id="skillName"></select>
+    <label data-i18n="manager.skill.level">レベル (0-4) *</label><input id="skillLevel" type="number" min="0" max="4">
+    <label data-i18n="manager.skill.assessor">評価者</label><select id="skillAssessor"></select>
+    <label data-i18n="manager.skill.evidence">根拠・証跡</label><input id="skillEvidence">
+    <label data-i18n="manager.skill.review">次回レビュー日</label><input id="skillReview" type="date">
+    <button onclick="setSkill()" data-i18n="manager.skill.save">評価を保存</button>
   </fieldset>
 
   <div id="status"></div>
 
-  <?!= include('UiSafe') ?>
   <script>
     var context = null;
+    var previewTimer = null;
+    var lastWarnings = [];
+
+    function T(key, vars) { return EHLang.t(key, vars); }
 
     function statusNode() { return document.getElementById('status'); }
 
     function setStatus(kind, message) { EH.setStatus(statusNode(), kind, message); }
 
     function call(fn, payload, onSuccess) {
-      setStatus('loading', '処理中...');
+      setStatus('loading', T('common.processing'));
       var runner = google.script.run
         .withSuccessHandler(function (result) {
           if (!result || result.ok !== true) {
-            setStatus('error', 'エラー: ' + ((result && result.error) || '不明なエラー'));
+            setStatus('error', T('common.error') + ': ' + EHLang.serverMessage((result && result.error) || T('common.unknown')));
             return;
           }
-          setStatus('ok', '完了しました');
+          setStatus('ok', T('common.done'));
           if (onSuccess) onSuccess(result.data);
         })
-        .withFailureHandler(function (error) { setStatus('error', 'エラー: ' + error.message); });
+        .withFailureHandler(function (error) { setStatus('error', T('common.error') + ': ' + error.message); });
       if (payload === undefined) runner[fn](); else runner[fn](payload);
     }
 
@@ -138,24 +174,23 @@
 
     function render(data) {
       context = data;
-      document.getElementById('actor').textContent =
-        'ログイン: ' + data.actor.email + '（' + data.actor.role + '）';
+      document.getElementById('actor').textContent = T('manager.actor', {email: data.actor.email, role: data.actor.role});
       var activeMembers = data.members.filter(function (member) { return member.active; });
-      EH.fillSelect(document.getElementById('projectOwner'), activeMembers, 'id', 'name', '未設定');
+      EH.fillSelect(document.getElementById('projectOwner'), activeMembers, 'id', 'name', T('common.unset'));
       EH.fillSelect(document.getElementById('subProject'), data.projects, 'id', 'name', '');
-      EH.fillSelect(document.getElementById('subOwner'), activeMembers, 'id', 'name', '未設定');
+      EH.fillSelect(document.getElementById('subOwner'), activeMembers, 'id', 'name', T('common.unset'));
       EH.fillSelect(document.getElementById('taskProject'), data.projects, 'id', 'name', '');
       EH.fillSelect(document.getElementById('taskOwner'), activeMembers, 'id', 'name', '');
       EH.fillSelect(document.getElementById('progressTask'), data.tasks, 'id', 'name', '');
       EH.fillSelect(document.getElementById('skillMember'), activeMembers, 'id', 'name', '');
       EH.fillSelect(document.getElementById('skillName'), data.skills, 'id', 'name', '');
-      EH.fillSelect(document.getElementById('skillAssessor'), activeMembers, 'id', 'name', '未設定');
+      EH.fillSelect(document.getElementById('skillAssessor'), activeMembers, 'id', 'name', T('common.unset'));
       EH.fillSelect(document.getElementById('memberRole'), roleOptions(data.roles), 'id', 'name', null);
       EH.renderRecords(document.getElementById('memberList'), data.members, function (member) {
-        return member.id + ': ' + member.name + '（' + (member.role || 'VIEWER') + (member.active ? '' : '・無効') + '）';
-      }, 'メンバー未登録');
+        return member.id + ': ' + member.name + '（' + (member.role || 'VIEWER') + (member.active ? '' : '・' + T('manager.member.inactive')) + '）';
+      }, T('manager.member.empty'));
       var skillNames = data.skills.map(function (skill) { return skill.name; });
-      EH.renderLines(document.getElementById('skillList'), skillNames.length ? skillNames : ['スキル未登録'], 'hint');
+      EH.renderLines(document.getElementById('skillList'), skillNames.length ? skillNames : [T('manager.skill.empty')], 'hint');
       refreshSubprojects();
     }
 
@@ -163,7 +198,45 @@
       if (!context) return;
       var project = value('taskProject');
       var items = context.subprojects.filter(function (sub) { return sub.projectId === project; });
-      EH.fillSelect(document.getElementById('taskSubproject'), items, 'id', 'name', 'なし（プロジェクト直下）');
+      EH.fillSelect(document.getElementById('taskSubproject'), items, 'id', 'name', T('manager.subproject.none'));
+    }
+
+    function renderPlan(data) {
+      lastWarnings = (data && data.warnings) || [];
+      var node = document.getElementById('planPreview');
+      if (data && data.startDate) {
+        node.textContent = T('manager.task.planPreview') + ': ' + data.startDate + ' → ' + (data.endDate || '') +
+          (data.length ? '（' + T('manager.task.planLength', {days: data.length}) + '）' : '');
+      } else {
+        node.textContent = T('manager.task.planEmpty');
+      }
+      var list = document.getElementById('planWarnings');
+      EH.clear(list);
+      lastWarnings.forEach(function (warning) {
+        EH.append(list, 'li', T('manager.task.warning.' + warning.code, warning.params || {}));
+      });
+      var nonWorking = lastWarnings.some(function (warning) { return warning.code === 'NON_WORKING_DEADLINE'; });
+      document.getElementById('ackWrap').hidden = !nonWorking;
+      if (!nonWorking) document.getElementById('taskAck').checked = false;
+    }
+
+    function schedulePreview() {
+      if (previewTimer) window.clearTimeout(previewTimer);
+      previewTimer = window.setTimeout(function () {
+        var deadline = value('taskDeadline');
+        var duration = value('taskDuration');
+        if (!deadline || duration === '') { renderPlan(null); return; }
+        google.script.run
+          .withSuccessHandler(function (result) {
+            if (!result || result.ok !== true) { renderPlan(null); return; }
+            renderPlan(result.data);
+          })
+          .withFailureHandler(function () { renderPlan(null); })
+          .uiPlanPreview({
+            projectId: value('taskProject'), deadline: deadline, durationValue: duration,
+            durationUnit: value('taskUnit'), durationBasis: value('taskBasis')
+          });
+      }, 250);
     }
 
     function createProject() {
@@ -183,12 +256,18 @@
       var payload = {
         projectId: value('taskProject'), subprojectId: value('taskSubproject'),
         taskName: value('taskName'), ownerId: value('taskOwner'),
-        deadline: value('taskDeadline'), plannedStart: value('taskStart'),
+        deadline: value('taskDeadline'), durationValue: value('taskDuration'),
+        durationUnit: value('taskUnit'), durationBasis: value('taskBasis'),
         estimatedHours: value('taskEstimate'), acceptanceCriteria: value('taskAcceptance'),
         priority: value('taskPriority'), notify: checked('taskNotify'),
         approve: checked('taskApprove'), confirmSchedule: checked('taskConfirm')
       };
-      if (payload.confirmSchedule && !EH.confirmAction('日程を確定します。期限と見積が必須です。よろしいですか？')) return;
+      var nonWorking = lastWarnings.some(function (warning) { return warning.code === 'NON_WORKING_DEADLINE'; });
+      if (nonWorking && !checked('taskAck')) {
+        setStatus('error', T('manager.task.ackRequired'));
+        return;
+      }
+      if (payload.confirmSchedule && !EH.confirmAction(T('manager.task.confirmPrompt'))) return;
       call('uiAssignTask', payload, function () { call('uiContext', undefined, render); });
     }
 
@@ -206,7 +285,7 @@
     }
 
     function deactivateMember() {
-      if (!EH.confirmAction('メンバーを無効化します。未完了タスクがある場合は失敗します。よろしいですか？')) return;
+      if (!EH.confirmAction(T('manager.member.deactivatePrompt'))) return;
       call('uiDeactivateMember', {memberId: value('memberId')}, function () { call('uiContext', undefined, render); });
     }
 
@@ -219,6 +298,11 @@
     }
 
     document.getElementById('taskProject').addEventListener('change', refreshSubprojects);
+    ['taskDeadline', 'taskDuration', 'taskUnit', 'taskBasis'].forEach(function (id) {
+      document.getElementById(id).addEventListener('input', schedulePreview);
+      document.getElementById(id).addEventListener('change', schedulePreview);
+    });
+    EHLang.wire(function () { if (context) render(context); });
     call('uiContext', undefined, render);
   </script>
 </body>

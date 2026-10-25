@@ -7,7 +7,7 @@
  * actor and owner values supplied by the browser are never trusted for authorization.
  */
 var Ui = (function () {
-  var MENU = 'Engineering HUB';
+  var MENU = '設計・開発課 管理';
 
   function guard(action) {
     try {
@@ -119,7 +119,7 @@ var Ui = (function () {
     });
   }
 
-  /** Deadline-only assignment is valid; start date and estimate stay optional. */
+  /** Deadline and duration are the primary schedule inputs (V1.3); start is derived. */
   function assignTask(payload) {
     return guard(function () {
       payload = payload || {};
@@ -131,6 +131,10 @@ var Ui = (function () {
       } else {
         Access.requireProjectWrite(projectId, current.email);
       }
+      var durationValue = optionalNumber(payload.durationValue, '必要期間');
+      if (durationValue !== '' && (!Number.isInteger(durationValue) || durationValue <= 0)) {
+        throw new Error('必要期間は0より大きい数値で入力してください');
+      }
       var data = {
         Project_ID: projectId,
         Subproject_ID: payload.subprojectId || '',
@@ -140,21 +144,64 @@ var Ui = (function () {
         Status: payload.status || 'Assigned',
         Priority: payload.priority || 'Medium',
         Planned_Start: payload.plannedStart || '',
-        Due_Date: payload.deadline || '',
-        Estimated_Hours: optionalNumber(payload.estimatedHours, '見積時間'),
+        Due_Date: payload.deadline || '',        Estimated_Hours: optionalNumber(payload.estimatedHours, '見積時間'),
+        Planned_Duration_Value: durationValue,
+        Planned_Duration_Unit: durationValue === '' ? '' : (payload.durationUnit || 'DAY'),
+        Planned_Duration_Basis: durationValue === '' ? '' : (payload.durationBasis || 'WORKING_DAYS'),
         Acceptance_Criteria: payload.acceptanceCriteria || '',
         Next_Action: payload.nextAction || '',
         Required_Skill_ID: payload.requiredSkillId || '',
         Required_Skill_Level: payload.requiredSkillLevel === '' || payload.requiredSkillLevel === undefined ? '' : Number(payload.requiredSkillLevel),
         Notification_Enabled: payload.notify === true
       };
+      // An explicit start without a duration is a deliberate manual override.
+      if (payload.plannedStart && durationValue === '') data.Planned_Start_Source = 'MANUAL';
       var task = payload.taskId ? Tasks.update(payload.taskId, data) : Tasks.create(data);
       AuditLog.write('UI_TASK_ASSIGNED', 'TASK', task.Task_ID,
-        {owner: data.Owner_Member_ID, deadline: data.Due_Date, estimate: data.Estimated_Hours, notify: data.Notification_Enabled});
+        {owner: data.Owner_Member_ID, deadline: data.Due_Date, estimate: data.Estimated_Hours,
+          durationValue: data.Planned_Duration_Value, durationUnit: data.Planned_Duration_Unit,
+          durationBasis: data.Planned_Duration_Basis, plannedStart: task.Planned_Start,
+          plannedStartSource: task.Planned_Start_Source, notify: data.Notification_Enabled});
       if (payload.approve === true) Notifications.approveAssignment(task.Task_ID, current.email, 'APPROVE ASSIGNMENT');
       if (payload.confirmSchedule === true) Tasks.confirmSchedule(task.Task_ID, current.email, 'CONFIRM SCHEDULE');
       var refreshed = Dashboard.refresh();
       return {task: plain(Database.find('TASKS', task.Task_ID)), dashboard: refreshed};
+    });
+  }
+
+  /** Read-only planning preview: the calculation is pure and performs no write. */
+  function planPreview(payload) {
+    return guard(function () {
+      payload = payload || {};
+      Access.requireManager();
+      var holidays = Database.read('HOLIDAYS');
+      var milestones = payload.projectId
+        ? Database.read('MILESTONES').filter(function (row) { return row.Project_ID === payload.projectId; })
+        : [];
+      var warnings = Planning.planningWarnings({
+        deadline: payload.deadline || '',
+        durationValue: payload.durationValue,
+        durationUnit: payload.durationUnit || 'DAY',
+        durationBasis: payload.durationBasis || 'WORKING_DAYS',
+        holidays: holidays,
+        milestones: milestones
+      });
+      var plan = null;
+      if (payload.deadline && payload.durationValue !== '' && payload.durationValue !== undefined && payload.durationValue !== null) {
+        try {
+          plan = Planning.planFromDuration(payload.deadline, payload.durationValue,
+            payload.durationUnit || 'DAY', payload.durationBasis || 'WORKING_DAYS', holidays);
+        } catch (error) {
+          plan = null;
+        }
+      }
+      return {
+        startDate: plan ? plan.startDate : '',
+        endDate: plan ? plan.endDate : '',
+        plannedEnd: plan ? plan.plannedEnd : '',
+        length: plan ? plan.length : null,
+        warnings: warnings
+      };
     });
   }
 
@@ -419,6 +466,36 @@ var Ui = (function () {
     });
   }
 
+  /** Manager request queue: only aggregated, validated data leaves the server. */
+  function requests(payload) {
+    return guard(function () {
+      Access.requireManager();
+      var options = payload || {};
+      var summary = Requests.summary();
+      return {
+        configured: summary.inboxConfigured,
+        counts: summary.counts,
+        requests: Requests.queue({includeDecided: options.includeDecided === true}),
+        history: Requests.history(options.taskId || '').slice(0, 50)
+      };
+    });
+  }
+
+  function importRequests() {
+    return guard(function () {
+      Access.requireManager();
+      return Requests.importInbox(AuditLog.actor());
+    });
+  }
+
+  function decideRequest(payload) {
+    return guard(function () {
+      payload = payload || {};
+      Access.requireManager();
+      return plain(Requests.decide(payload.requestId, payload.action, payload.note, payload.confirmation));
+    });
+  }
+
   function refresh() {
     return guard(function () {
       Access.requireUiAccess();
@@ -440,6 +517,7 @@ var Ui = (function () {
     createProject: createProject,
     createSubproject: createSubproject,
     assignTask: assignTask,
+    planPreview: planPreview,
     updateProgress: updateProgress,
     approveAssignment: approveAssignment,
     confirmSchedule: confirmSchedule,
@@ -461,6 +539,9 @@ var Ui = (function () {
     publishPublicationNow: publishPublicationNow,
     notificationHistory: notificationHistory,
     reconcileUncertain: reconcileUncertain,
+    requests: requests,
+    importRequests: importRequests,
+    decideRequest: decideRequest,
     refresh: refresh,
     status: status
   };
@@ -486,20 +567,22 @@ function onOpen() {
       .addItem('メンバー', 'showManagerSidebar')
       .addItem('スキル', 'showManagerSidebar')
       .addItem('自動化設定', 'showAutomationSidebar')
+      .addItem('申請一覧', 'showRequestsSidebar')
       .addItem('ダッシュボード更新', 'refreshDashboardFromMenu')
       .addItem('システム状態', 'showSystemSidebar')
       .addToUi();
   } catch (error) {
-    console.warn('Engineering HUB menu requires a container-bound Apps Script project: ' + error.message);
+    console.warn('設計・開発課 管理 menu requires a container-bound Apps Script project: ' + error.message);
   }
 }
 function showManagerSidebar() { return Ui.show('UiMenu'); }
 function showAutomationSidebar() { return Ui.show('UiSettings'); }
+function showRequestsSidebar() { return Ui.show('UiRequests'); }
 function showSystemSidebar() { return Ui.show('UiSystem'); }
 function refreshDashboardFromMenu() {
   var result = Ui.refresh();
   try {
-    SpreadsheetApp.getActive().toast(result.ok ? 'ダッシュボードを更新しました' : String(result.error), 'Engineering HUB', 5);
+    SpreadsheetApp.getActive().toast(result.ok ? 'ダッシュボードを更新しました' : String(result.error), Ui.MENU, 5);
   } catch (error) { /* standalone execution has no active sheet */ }
   return result;
 }
@@ -509,6 +592,10 @@ function uiContext() { return Ui.context(); }
 function uiCreateProject(payload) { return Ui.createProject(payload); }
 function uiCreateSubproject(payload) { return Ui.createSubproject(payload); }
 function uiAssignTask(payload) { return Ui.assignTask(payload); }
+function uiPlanPreview(payload) { return Ui.planPreview(payload); }
+function uiRequests(payload) { return Ui.requests(payload); }
+function uiImportRequests() { return Ui.importRequests(); }
+function uiDecideRequest(payload) { return Ui.decideRequest(payload); }
 function uiUpdateProgress(payload) { return Ui.updateProgress(payload); }
 function uiApproveAssignment(payload) { return Ui.approveAssignment(payload); }
 function uiConfirmSchedule(payload) { return Ui.confirmSchedule(payload); }

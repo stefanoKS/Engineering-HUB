@@ -163,3 +163,42 @@ workbook is shared more widely than intended; a manager marks the wrong project 
 or nobody reviews publication freshness. Each has a documented mitigation in
 [dashboard/ACCESS_AND_SHARING.md](dashboard/ACCESS_AND_SHARING.md) and
 [dashboard/SMOKE_TEST.md](dashboard/SMOKE_TEST.md), and none has been verified live.
+
+## V1.3 — worker requests and localization
+
+### Trust boundaries
+
+| Boundary | Control |
+| --- | --- |
+| Browser → dashboard server | domain-restricted deployment, viewer check, whitelisted payload keys, length limits, rate limit, duplicate guard, script lock |
+| Dashboard → inbox workbook | the only permitted write is an appended, validated request row; the private workbook ID is never present in that project |
+| Inbox → manager application | the manager imports rows and revalidates every value; nothing from the inbox is treated as authority |
+| Manager → private workbook | the existing role check (`Roles.requireAtLeast('MANAGER')`), revision/staleness checks and an explicit `DECIDE REQUEST` confirmation |
+
+### What a request cannot do
+
+* A request cannot change a deadline. Only a manager approval can, once.
+* A request cannot carry a role, approval flag, owner ID or task version that the server
+  trusts.
+* A requester name is unverified self-reported text and is labelled as such in the UI.
+* A request never exposes request text on the shared dashboard: only a boolean pending
+  indicator is published.
+
+### Localization safety
+
+* Translation is a display concern: no server decision depends on the selected language.
+* Stored text, identifiers and enum values are never translated, so a language switch cannot
+  change data and cannot be used to smuggle content.
+* The dictionary is static, local and contains no network access, so no data leaves the
+  tenant through the UI.
+* No credential, token or account is introduced by the language feature; the preference is
+  browser-local only.
+
+### Residual risks
+
+* The dashboard deployment can append to the inbox; a compromised deployment or an
+  employee with editor rights on that spreadsheet could add rows. Manager review, revision
+  checks and rate limits bound the impact, and no row can change a task on its own.
+* Exactly-once mail delivery is not promised; ambiguous deliveries are recorded and resolved
+  manually.
+

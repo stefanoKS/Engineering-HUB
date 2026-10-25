@@ -119,3 +119,20 @@ Start-Process $env:TEMP\eh-dashboard-preview.html
 
 These captures prove rendering and layout, not Google Workspace behaviour. Live verification
 remains [UNVERIFIED](SMOKE_TEST.md).
+
+## V1.3 additions
+
+* Header: the official name `設計・開発課 管理` with the subtitle `案件進捗ダッシュボード`, and a
+  `日本語 | English` switch on the right of the sync label. The switch keeps its position and
+  never moves the rest of the layout.
+* Task rows and the task drawer show a compact `納期変更申請中` badge when a request is
+  pending. The deadline itself is unchanged.
+* Task drawer actions: `納期変更を申請` (primary) and `完了報告`, followed by the read-only facts,
+  the public note and the request status lookup.
+* Request forms are inline panels with a read-only context block (project, task, current
+  assignee, current deadline), the editable fields, an explicit self-reported-name note and
+  a green receipt block containing the request ID and state.
+* English labels are longer: keep the drawer scrollable and never truncate stored values.
+* Screenshots produced by `npm run preview:dashboard` are local review artefacts, not Google
+  Workspace behaviour, and stay **UNVERIFIED** until recorded.
+

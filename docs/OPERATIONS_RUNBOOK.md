@@ -1,18 +1,18 @@
 # Operations runbook
 
 Day-to-day operation of a deployed Engineering-HUB workbook. All screens are in the bound spreadsheet menu
-**Engineering HUB**. Never enable live mail in a workbook you are not responsible for.
+**設計・開発課 管理**. Never enable live mail in a workbook you are not responsible for.
 
 ## Daily routine
 
-1. Open the workbook and choose **Engineering HUB → ダッシュボード**.
+1. Open the workbook and choose **設計・開発課 管理 → ダッシュボード**.
 2. Read the dashboard attention block: 承認待ちタスク, 担当者未設定タスク, 日程不明プロジェクト, 期限超過タスク,
    ブロック中タスク, 重大未解決課題, 更新停滞プロジェクト, 要注意プロジェクト.
 3. Confirm 有効モード in **自動化設定** is the mode you expect (`OFF` / `PREVIEW` / `LIVE`).
 
 ## Dashboard refresh
 
-- **Engineering HUB → ダッシュボード更新** (or `refreshManagement()`) recalculates progress and health and
+- **設計・開発課 管理 → ダッシュボード更新** (or `refreshManagement()`) recalculates progress and health and
   rebuilds `DASHBOARD`, `PROJECT_OVERVIEW`, `TEAM_VIEW`, `GANTT_OVERVIEW`, `TIMELINE_DATA`, `WORKLOAD`,
   `SKILL_MATRIX`, `BACKPLAN`, `AUTOMATION_STATUS`.
 - Manual refresh always works, even when automatic refresh is disabled.
@@ -20,7 +20,7 @@ Day-to-day operation of a deployed Engineering-HUB workbook. All screens are in 
 
 ## Task assignment
 
-1. **Engineering HUB → タスク割当**: project → optional subproject → task name → owner → deadline.
+1. **設計・開発課 管理 → タスク割当**: project → optional subproject → task name → owner → deadline.
 2. Optional: start date, estimate, acceptance criteria, priority, notification switch.
 3. Save. A deadline-only assignment is valid; do not invent start dates or estimates.
 4. Approve (割当を承認) if the assignment is final; confirm the schedule (日程確定) only when the deadline *and*

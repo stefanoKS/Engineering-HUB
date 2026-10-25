@@ -99,20 +99,31 @@ if (manifest.timeZone !== 'Asia/Tokyo') throw new Error('Manifest timezone must 
  * must never reach the private management workbook.
  * ------------------------------------------------------------------ */
 
-const REQUIRED_DASHBOARD_FILES = ['App.gs', 'DataService.gs', 'Index.html', 'Styles.html', 'Client.html', 'appsscript.json'];
+const REQUIRED_DASHBOARD_FILES = ['App.gs', 'DataService.gs', 'RequestService.gs', 'I18n.html', 'Index.html', 'Styles.html', 'Client.html', 'appsscript.json'];
 REQUIRED_DASHBOARD_FILES.forEach(name => {
   assert(fs.existsSync(path.join(dashboardDir, name)), `dashboard-app/${name} is missing`);
 });
 
 const dashboardFiles = scripts(dashboardDir);
 assert(dashboardFiles.length, 'No dashboard Apps Script source files found');
+// V1.3 adds exactly one write surface: appending a validated request to the inbox.
+const INBOX_WRITER = 'RequestService.gs';
 const dashboardSources = dashboardFiles.map(name => {
   const source = read(dashboardDir, name);
   new vm.Script(source, { filename: `dashboard/${name}` });
 
-  // Read-only by construction: the viewer project has no spreadsheet write path.
+  // Read-only by construction, except for the narrow request-inbox writer.
   const writeApis = /\.(?:setValue|setValues|setFormula|setFormulas|setNumberFormat|setDataValidation|appendRow|insertRow|insertRows|insertColumn|insertColumns|insertSheet|copyTo)\(\s*/;
-  assert(!writeApis.test(source), `dashboard-app/${name}: spreadsheet writes are prohibited in the read-only dashboard`);
+  if (name === INBOX_WRITER) {
+    assert(/REQUEST_INBOX_SPREADSHEET_ID/.test(source),
+      `${INBOX_WRITER}: the only permitted write target must be the request inbox property`);
+    assert(!/SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID/.test(source),
+      `${INBOX_WRITER}: the request inbox writer must never open the published snapshot`);
+    assert(!/\.(?:setFormula|setFormulas|setDataValidation|insertSheet|insertRows?|insertColumns?|copyTo)\(\s*/.test(source),
+      `${INBOX_WRITER}: only appended request rows are permitted; no structural spreadsheet writes`);
+  } else {
+    assert(!writeApis.test(source), `dashboard-app/${name}: spreadsheet writes are prohibited in the read-only dashboard`);
+  }
   assert(!DESTRUCTIVE.test(source), `dashboard-app/${name}: destructive APIs are prohibited in the read-only dashboard`);
 
   // No outbound mail, Calendar, trigger or external request surface.
@@ -147,17 +158,94 @@ assert(dashboardManifest.webapp.access === 'DOMAIN',
 assert(dashboardManifest.webapp.executeAs === 'USER_DEPLOYING',
   'dashboard-app: the web app must execute as the authorized deployment account');
 const DASHBOARD_SCOPES = [
-  'https://www.googleapis.com/auth/spreadsheets.readonly',
+  'https://www.googleapis.com/auth/spreadsheets',
   'https://www.googleapis.com/auth/userinfo.email'
 ];
 (dashboardManifest.oauthScopes || []).forEach(scope => {
   assert(DASHBOARD_SCOPES.indexOf(scope) >= 0, `dashboard-app: unexpected OAuth scope ${scope}`);
 });
-assert((dashboardManifest.oauthScopes || []).indexOf('https://www.googleapis.com/auth/spreadsheets.readonly') >= 0,
-  'dashboard-app: the dashboard must request read-only spreadsheet access');
+assert((dashboardManifest.oauthScopes || []).indexOf('https://www.googleapis.com/auth/spreadsheets') >= 0,
+  'dashboard-app: the dashboard must request spreadsheet access (snapshot read + request inbox append)');
+assert((dashboardManifest.oauthScopes || []).indexOf('https://www.googleapis.com/auth/spreadsheets.readonly') < 0,
+  'dashboard-app: a single spreadsheet scope is required; do not mix read-only and read/write scopes');
+
+/* ------------------------------------------------------------------ *
+ * V1.3 localization
+ *
+ * The translation dictionary is the single source of truth; both
+ * Apps Script projects carry a generated copy. Stored spreadsheet text
+ * is never translated, so only static labels live in the dictionary.
+ * ------------------------------------------------------------------ */
+
+const sync = require('./sync-i18n.js');
+const i18nSource = fs.readFileSync(path.join(root, 'shared', 'i18n.js'), 'utf8');
+const sandbox = {module: {exports: {}}};
+vm.runInNewContext(i18nSource, sandbox, {filename: 'shared/i18n.js'});
+const i18n = sandbox.module.exports;
+assert(i18n && i18n.DICTIONARY, 'shared/i18n.js must export the EH_I18N dictionary');
+
+sync.TARGETS.forEach(target => {
+  const expected = sync.expected(target, i18nSource);
+  const actual = fs.existsSync(target.file) ? fs.readFileSync(target.file, 'utf8') : '';
+  assert(actual === expected,
+    `${path.relative(root, target.file)} is out of date; run "npm run sync:i18n"`);
+});
+
+const jaKeys = Object.keys(i18n.DICTIONARY.ja).sort();
+const enKeys = Object.keys(i18n.DICTIONARY.en).sort();
+assert(JSON.stringify(jaKeys) === JSON.stringify(enKeys),
+  'Every translation key must exist in both Japanese and English');
+jaKeys.forEach(key => {
+  const ja = i18n.DICTIONARY.ja[key];
+  const en = i18n.DICTIONARY.en[key];
+  assert(typeof ja === 'string' && ja.trim(), `Missing Japanese text for ${key}`);
+  assert(typeof en === 'string' && en.trim(), `Missing English text for ${key}`);
+});
+assert(i18n.DICTIONARY.ja['app.name'] === '設計・開発課 管理' && i18n.DICTIONARY.en['app.name'] === '設計・開発課 管理',
+  'The official application name must be identical in every language');
+assert(i18n.DEFAULT_LANGUAGE === 'ja', 'The default interface language must be Japanese');
+assert(i18n.LANGUAGES.join(',') === 'ja,en', 'Exactly Japanese and English are supported');
+
+// Every static key referenced by a template or client script must exist.
+function usedKeys(file) {
+  const content = fs.readFileSync(file, 'utf8');
+  const keys = new Set();
+  const attribute = /data-i18n(?:-aria|-title|-placeholder)?="([^"]+)"/g;
+  let match;
+  while ((match = attribute.exec(content)) !== null) keys.add(match[1]);
+  const literal = /(?:^|[^.\w])(?:T|t)\(\s*'([^']+)'\s*[,)]/g;
+  while ((match = literal.exec(content)) !== null) keys.add(match[1]);
+  return Array.from(keys);
+}
+[managerDir, dashboardDir].forEach(directory => {
+  htmls(directory).forEach(name => {
+    if (name === 'I18n.html') return;
+    usedKeys(path.join(directory, name)).forEach(key => {
+      assert(i18n.has(key), `${path.basename(directory)}/${name}: unknown translation key ${key}`);
+    });
+  });
+});
+
+// The obsolete English brand must not survive in any user-visible template.
+[managerDir, dashboardDir].forEach(directory => {
+  htmls(directory).forEach(name => {
+    const content = read(directory, name);
+    assert(!/Engineering HUB/.test(content), `${path.basename(directory)}/${name}: obsolete "Engineering HUB" brand remains`);
+  });
+});
+assert(/var TITLE = '設計・開発課 管理'/.test(read(dashboardDir, 'App.gs')),
+  'The dashboard document title must use the official application name');
+
+console.log(`Validated ${files.length} manager Apps Script files, ${dashboardFiles.length} dashboard files, both manifests and ${jaKeys.length} translation keys`);
 
 // The two Apps Script projects must stay isolated in their clasp configuration.
 const deploymentDoc = fs.readFileSync(path.join(root, 'DEPLOYMENT.md'), 'utf8');
 assert(/dashboard-app/.test(deploymentDoc), 'DEPLOYMENT.md must document the separate dashboard-app deployment');
-
-console.log(`Validated ${files.length} manager Apps Script files, ${dashboardFiles.length} dashboard files and both manifests`);
+assert(fs.existsSync(path.join(root, 'docs', 'UI_LOCALIZATION.md')),
+  'docs/UI_LOCALIZATION.md must document the localization architecture');
+assert(fs.existsSync(path.join(root, 'docs', 'DEADLINE_REQUEST_WORKFLOW.md')),
+  'docs/DEADLINE_REQUEST_WORKFLOW.md must document the request workflow');
+assert(fs.existsSync(path.join(root, 'docs', 'REQUEST_INBOX_DEPLOYMENT.md')),
+  'docs/REQUEST_INBOX_DEPLOYMENT.md must document the request inbox deployment');
+assert(fs.existsSync(path.join(root, 'docs', 'TASK_DURATION_POLICY.md')),
+  'docs/TASK_DURATION_POLICY.md must document the duration policy');
