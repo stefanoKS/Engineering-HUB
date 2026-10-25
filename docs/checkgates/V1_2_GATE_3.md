@@ -19,7 +19,7 @@
 | --- | --- | --- |
 | All portfolio projects are visually readable | PASS | Chromium capture at 1360 px: 3-column card grid, 6 of 7 projects shown (default status filter), indicator strip and result count. |
 | Selecting project opens correct details | PASS | `tests/v1_2-dashboard.test.js` client test clicks `PX1` and asserts the detail title is `検査装置`; Chromium capture shows summary, 8 facts, counts, 3 groups and milestones. |
-| Subproject grouping is correct | PASS | Server test asserts `subprojects` = `S1` with total 2; client test asserts groups `光学系設計`, `搬送系設計`, `全体タスク`. |
+| Subproject grouping is correct | PASS | Server test asserts `subprojects` = `S1` with total 2; the client test asserts the `試作` group and the `全体タスク` group both render; the Chromium capture of `PX1` shows `光学系設計`, `搬送系設計` and `全体タスク` with their own tables. |
 | Direct project tasks are visible | PASS | `ungrouped.total = 3` and the client renders the 全体タスク group. |
 | Task detail opens correctly | PASS | Client test opens `TX2`, asserts drawer visibility, title `搬送機構の詳細設計`, public note and `2日超過`. |
 | Days remaining calculation is correct | PASS | `DataService.deadline` unit assertions for 完了 / 本日期限 / X日超過 / 期限未設定 / あとN日, plus snapshot-derived task assertions (`2日超過`, `本日期限`, `期限未設定`, `完了`). |
