@@ -137,3 +137,28 @@ verified.
   the UI and the status sheet label this as `LEGACY_CONFIGURATION`.
 - Mail delivery, quota and trigger timing cannot be verified locally.
 - A trigger created by another account is invisible to a different editor; the sending account must own it.
+
+## Post-merge audit (production hardening)
+
+Previously undiscovered issues:
+
+1. **LIVE could be re-activated without authorization.** The LIVE check compared the stored mode only, so clearing
+   `EMERGENCY_STOP` while `EMAIL_MODE=LIVE` restarted delivery with no ADMIN check, confirmation or preflight. Fixed:
+   authorization is evaluated on the effective-state transition (`AutomationSettings.resolve` before/after), and
+   `EMAIL_LIVE_ACTIVATED` / `EMAIL_LIVE_DEACTIVATED` are audited.
+2. **Legacy configuration failed open.** An unconfigured workbook sent mail based on `EMAIL_ENABLED`/`DRY_RUN`.
+   Fixed: it now resolves to `OFF` (`LEGACY_CONFIGURATION_BLOCKED`); the old mapping requires the explicit
+   `ALLOW_LEGACY_EMAIL_CONFIG=true` opt-in.
+3. **Weekly report schedule ignored settings.** `Triggers.install` hardcoded 08:00, ignored `WEEKLY_REPORT_TIME` and
+   weekday changes, and never removed an obsolete weekly trigger. Fixed: the desired schedule is derived from
+   settings, drift is detected via `MANAGED_TRIGGER_SIGNATURE`, and managed triggers are recreated without touching
+   unrelated ones or creating duplicates.
+
+New regression tests: `tests/gate-b-automation-hardening.test.js` (LIVE/emergency-stop matrix, preflight failures,
+PREVIEW → LIVE confirmation, conflicting legacy properties, rescan after restart, day/time/enabled trigger drift,
+disabled-report suppression, installation confirmation).
+
+Preserved protections: OFF/PREVIEW/LIVE semantics, feature/project/task toggles, allowlists, per-run cap, ledger
+states and no blind retry.
+
+Remaining live verification: real mail delivery, quota, trigger timing and `nearMinute` behaviour (UNVERIFIED).

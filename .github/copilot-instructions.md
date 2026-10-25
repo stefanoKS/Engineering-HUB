@@ -1,20 +1,34 @@
 # Engineering-HUB instructions
 
-Read and follow all twenty-four rules in `/AGENTS.md` before changing this repository.
+Read and follow all thirty-three rules in [AGENTS.md](../AGENTS.md) before changing this repository.
 
 This is a Google Apps Script application backed by Google Sheets. Treat code, spreadsheet data, Drive backups, Script Properties, installable triggers and the workbook `AUTOMATION_SETTINGS` table as separate operational state. Follow `/DATA_SCHEMA.md` for data contracts and `/DEPLOYMENT.md` for environment binding and explicit activation.
 
-Keep changes narrow and testable. Do not add real IDs, credentials, destructive resets, automatic backup deletion, or automatic restore operations. Initialization must never be used to upgrade an existing database. Preserve conservative notification defaults, versioned assignment approval, and the separate schedule confirmation.
+## Security (non-negotiable)
 
-Use the existing Node.js 22 tools: `npm ci`, `npm run lint`, `npm test`, and `npm run validate`. Local test results are not evidence of live Workspace verification.
+- Identity comes only from `Session.getActiveUser()`; role, actor, owner and confirmation values from the browser are data, never authority. Every write path calls `Access`/`Roles` server-side.
+- Only ADMIN may grant or revoke `ADMIN`/`MANAGER`; nobody may change their own role; the last active administrator can never be demoted or deactivated.
+- Task writes: MEMBER only own tasks, MANAGER only their projects/subprojects and own tasks, ADMIN all, VIEWER none.
+- Stored spreadsheet text is untrusted output: use `textContent`/DOM creation. `innerHTML`, `outerHTML`, `insertAdjacentHTML` and `document.write` are prohibited in `src/*.html` and fail `npm run validate`.
+- The first administrator is created once by `bootstrapFirstAdministrator` (deployment allowlist + exact confirmation + audit). Never add another bootstrap route.
+- Google Sheets editor access is not a security boundary. Do not claim production-grade role separation; see [docs/SECURITY_MODEL.md](../docs/SECURITY_MODEL.md).
 
-V1.1 rules:
+## Migration and data preservation
 
-- Outbound mail, Calendar sync and automatic refresh default to OFF; legacy `EMAIL_ENABLED` / `DRY_RUN` flags can never activate LIVE mail on their own once settings are configured.
-- Only `src/Notifications.gs` may call `MailApp.sendEmail`; every notification, reminder and report passes that single gate.
-- Manager preferences persist in `AUTOMATION_SETTINGS`, never as source constants, and every change is audited.
-- The manager UI is container-bound; `Ui.gs` and `src/Ui*.html` must call validated domain services with server-side role checks and must never send mail from a browser callback.
-- Generated sheets alone may be cleared (`Schema.generated`); operational tables, custom columns and formulas must survive every refresh.
-- Notification changes require regression tests for the OFF/PREVIEW/LIVE matrix, per-project and per-task switches, deduplication and uncertain delivery.
+- Additive migrations only, reviewed IDs in `APPROVED_MIGRATIONS`, verified backup first, cell-by-cell preservation checks before recording success.
+- Never initialize, reset or clear an existing workbook; never delete operational rows, backups or history.
+- Only `Schema.generated` sheets may be cleared; operational tables, custom columns and formulas must survive every refresh.
 
-Update the corresponding English/Japanese overview and operating documentation (including `docs/`) when changing public behavior.
+## Notification safety
+
+- Only `src/Notifications.gs` may call `MailApp.sendEmail`. Every notification, reminder and report passes that gate.
+- OFF by default, emergency stop on, unconfigured workbooks fail closed. Any transition to an effective LIVE state requires ADMIN, `ENABLE LIVE EMAIL` and a passing preflight.
+- Ledger states `PENDING`/`SENT`/`PREVIEW`/`DELIVERY_UNCERTAIN`; never auto-retry an ambiguous delivery; never replay history.
+- Notification changes require regression tests for the OFF/PREVIEW/LIVE matrix, per-project/per-task switches, deduplication and uncertain delivery.
+- Manager preferences live in `AUTOMATION_SETTINGS` (never source constants) and every change is audited.
+
+## Testing and release
+
+- Use the Node.js 22 tools: `npm ci`, `npm run lint`, `npm test`, `npm run validate`. Never delete or weaken a test to make a gate pass, and keep earlier gate records intact.
+- Local mocks are not live verification. [docs/PRODUCTION_READINESS.md](../docs/PRODUCTION_READINESS.md) stays **NOT APPROVED FOR PRODUCTION** until recorded Workspace evidence exists; never fabricate it.
+- Update the English/Japanese overviews and the operating docs (including `docs/`) with every behavioural change.

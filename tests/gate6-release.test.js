@@ -156,11 +156,19 @@ test('source and repository stay free of credentials, live identifiers and stray
 
   const required = [
     'docs/AUTOMATION_SETTINGS.md', 'docs/MANAGER_WORKFLOW.md', 'docs/GOOGLE_WORKSPACE_SMOKE_TEST.md',
+    'docs/PRODUCTION_READINESS.md', 'docs/SECURITY_MODEL.md', 'docs/OPERATIONS_RUNBOOK.md',
     'docs/checkgates/GATE_1.md', 'docs/checkgates/GATE_2.md', 'docs/checkgates/GATE_3.md',
     'docs/checkgates/GATE_4.md', 'docs/checkgates/GATE_5.md', 'docs/checkgates/GATE_6.md',
+    'docs/checkgates/SECURITY_HARDENING.md', 'docs/checkgates/AUTOMATION_HARDENING.md',
+    'docs/checkgates/CORRECTNESS_HARDENING.md',
     'AGENTS.md', 'ARCHITECTURE.md', 'DATA_SCHEMA.md', 'DEPLOYMENT.md', 'BACKUP_RESTORE.md', 'CHANGELOG.md'
   ];
   for (const file of required) assert.ok(fs.existsSync(path.join(root, file)), `missing documentation: ${file}`);
+
+  // Documentation must not claim live verification that never happened.
+  const readiness = fs.readFileSync(path.join(root, 'docs/PRODUCTION_READINESS.md'), 'utf8');
+  assert.match(readiness, /NOT APPROVED FOR PRODUCTION/);
+  assert.match(readiness, /UNVERIFIED/);
 });
 
 test('default configuration stays conservative for a fresh workbook', () => {

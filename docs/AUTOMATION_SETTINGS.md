@@ -4,21 +4,87 @@ Manager-controlled automation lives in the `AUTOMATION_SETTINGS` worksheet. The 
 `git pull`, `clasp push`, and redeployments never reset it. Script Properties still hold environment bindings and
 Google resource identifiers, which are deliberately not editable from the UI.
 
-## Effective mail mode
+## Desired versus effective mode
 
-One resolver decides the mode (`AutomationSettings.emailState`):
+`EMAIL_MODE` is the **desired** mode stored in the workbook. The **effective** mode is what the application will
+actually do, after the safety checks:
 
-| Situation | Effective mode | Reason |
-| --- | --- | --- |
-| `EMERGENCY_STOP = true` (configured workbook) | `OFF` | `EMERGENCY_STOP` |
-| `EMAIL_MODE = OFF` | `OFF` | `EMAIL_MODE_OFF` |
-| `EMAIL_MODE = PREVIEW` | `PREVIEW` | preview only |
-| `EMAIL_MODE = LIVE` with legacy `EMAIL_ENABLED` false or `DRY_RUN` true | `OFF` | `LEGACY_SAFETY_FLAGS_BLOCK_LIVE` |
-| `EMAIL_MODE = LIVE` with legacy flags allowing sends | `LIVE` | — |
-| No `EMAIL_MODE` row (not yet configured) | legacy mapping of `EMAIL_ENABLED` + `DRY_RUN` | `LEGACY_CONFIGURATION` |
+| Desired | Condition | Effective | Reason code |
+| --- | --- | --- | --- |
+| any | `EMERGENCY_STOP = true` | `OFF` | `EMERGENCY_STOP` |
+| `OFF` | — | `OFF` | `EMAIL_MODE_OFF` |
+| `PREVIEW` | — | `PREVIEW` | — |
+| `LIVE` | legacy `EMAIL_ENABLED` false or `DRY_RUN` true | `OFF` | `LEGACY_SAFETY_FLAGS_BLOCK_LIVE` |
+| `LIVE` | legacy flags allow sending | `LIVE` | — |
+| (no `EMAIL_MODE` row) | `ALLOW_LEGACY_EMAIL_CONFIG` not set | `OFF` | `LEGACY_CONFIGURATION_BLOCKED` |
+| (no `EMAIL_MODE` row) | `ALLOW_LEGACY_EMAIL_CONFIG=true` | legacy flags decide | `LEGACY_CONFIGURATION_OPT_IN` |
 
-`LIVE` additionally requires: ADMIN role, the exact confirmation `ENABLE LIVE EMAIL`, the emergency stop off, and a
-passing preflight (legacy flags, allowed recipient domains, notification activation, execution window order).
+The effective mode and its reason are shown in **自動化設定**, in `AUTOMATION_STATUS` and in `healthCheck()`.
+
+## LIVE authorization and safe reactivation
+
+A LIVE authorization is required whenever an operation makes the effective mode `LIVE`. That includes the obvious
+`OFF → LIVE` / `PREVIEW → LIVE` change **and** clearing the emergency stop while `EMAIL_MODE` is already `LIVE`
+(the hardening fix). It requires all of:
+
+1. a verified active `ADMIN` member (a MANAGER is refused);
+2. the exact confirmation text `ENABLE LIVE EMAIL`;
+3. the emergency stop off;
+4. a passing preflight: `EMAIL_ENABLED=true`, `DRY_RUN=false`, non-empty `ALLOWED_RECIPIENT_DOMAINS`,
+   activated notifications, a bound spreadsheet, execution window end after start.
+
+Each activation/deactivation writes `EMAIL_LIVE_ACTIVATED` / `EMAIL_LIVE_DEACTIVATED` to `AUDIT_LOG`.
+
+## Emergency stop and immediate shutdown
+
+`EMERGENCY_STOP` (default `true`) forces `OFF` for every feature regardless of the other switches. Setting it, or
+setting the mode to `OFF`, needs no confirmation and is available to any MANAGER. It takes effect on the next scan
+even while triggers remain installed, and it never deletes notification history.
+
+## Individual settings
+
+See the key table above. Behavioural notes:
+
+- Feature switches are ANDed with the project switch (`PROJECTS.Notification_Enabled`, blank = allowed) and the
+  task switch (`TASKS.Notification_Enabled`, must be `true`). The most restrictive wins.
+- `REMINDER_OFFSETS` must be unique integers 1–365 (max five). `REMINDER_CATCHUP_DAYS` bounds the catch-up: only
+  the most relevant unsent stage is sent, never several stale stages at once.
+- `WEEKDAY_ONLY_SENDING` and the JST execution window apply to reminders and the overdue summary.
+- `MANAGEMENT_REPORT_RECIPIENTS` must use allowed domains and are re-validated (active member + domain) at send
+  time.
+
+## Weekly report timing and trigger reinstallation
+
+- `WEEKLY_REPORT_DAY` and `WEEKLY_REPORT_TIME` define the installed weekly trigger (one trigger for all
+  recipients, not one per recipient). Apps Script fires time-based triggers approximately, so the minute is a
+  target.
+- Changing the day, the time, or enabling/disabling the report changes the desired schedule. `Triggers.install`
+  compares the stored `MANAGED_TRIGGER_SIGNATURE` plus the installed handlers, then recreates only the managed
+  triggers when they drifted, are duplicated, are missing, or are obsolete. Unrelated triggers are never touched.
+- システム状態 / `Triggers.diagnostics()` shows `トリガー設定の一致` (`scheduleMatches`). If it is false after a
+  settings change, run the installation again with the authorised sending account.
+- A disabled weekly report sends nothing even if its handler still fires (`WEEKLY_REPORT_DISABLED`).
+
+## Notification reconciliation
+
+- Ledger states: `PENDING` (reserved before send), `SENT`, `PREVIEW`, `DELIVERY_UNCERTAIN`, legacy `DRY_RUN`.
+- An ambiguous failure leaves `PENDING`. `reconcileUncertainDeliveries(actor, 'RECONCILE DELIVERY')` marks rows
+  older than ~15 minutes as `DELIVERY_UNCERTAIN` with actor/timestamp. Nothing is resent automatically; decide
+  manually whether a follow-up is needed.
+- Preview rows are prefixed `PREVIEW:` and never consume live dedupe keys.
+
+## Audit records
+
+| Action | Written when |
+| --- | --- |
+| `SETTING_CHANGED` | Every saved key, with old/new value and actor |
+| `EMAIL_LIVE_ACTIVATED` / `EMAIL_LIVE_DEACTIVATED` | Effective-mode transitions |
+| `TRIGGERS_INSTALLED` | Every installation, including the recreation reason |
+| `DELIVERY_RECONCILED` | Each row marked uncertain |
+| `ASSIGNMENT_APPROVED`, `SCHEDULE_CONFIRMED`, `SCHEDULE_CONFIRMATION_INVALIDATED` | Assignment/schedule workflow |
+| `ADMIN_BOOTSTRAPPED` | One-time first administrator |
+
+`AUDIT_LOG` is application history, not tamper-proof evidence: spreadsheet editors can modify it.
 
 ## Keys
 

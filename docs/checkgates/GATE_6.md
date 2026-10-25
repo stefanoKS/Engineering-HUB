@@ -144,3 +144,25 @@ overwrite of operational data, and mandatory check gates for future large upgrad
 - Installed triggers run as their creator; another editor may not see or repair them.
 - A bound spreadsheet shared with untrusted editors cannot separate roles securely; V1.1 assumes trusted managers.
 - Native Google Sheets Timeline is not created automatically.
+
+## Post-merge audit (production hardening)
+
+The local PASS results recorded above are unchanged, but they describe **local mocks only**. They were never, and
+must not be presented as, live Google Workspace acceptance.
+
+Previously undiscovered issues: the security defects in Gate 4 (role escalation, task ownership, unsafe HTML,
+member visibility), the automation defects in Gate 5 (unauthorized LIVE reactivation, fail-open legacy
+configuration, hardcoded weekly schedule), and the correctness defects in Gates 2–3 (`Health.staleDays`,
+`projectsUnknownSchedule`).
+
+Corrections shipped with regression tests (105 passing locally, 84 before):
+
+- `src/Access.gs`, `src/Members.gs`, `src/Ui.gs`, `src/UiSafe.html`, template inclusion and source validation.
+- `src/AutomationSettings.gs` effective-state resolver, `src/Triggers.gs` schedule derivation and drift detection.
+- `src/Health.gs` result structure, `src/Dashboard.gs` attention categories.
+- New suites: `tests/gate-a-security.test.js`, `tests/gate-b-automation-hardening.test.js`,
+  `tests/gate-c-correctness.test.js`.
+
+Release status: [docs/PRODUCTION_READINESS.md](../PRODUCTION_READINESS.md) remains **NOT APPROVED FOR PRODUCTION**.
+Remaining requirement: execute [docs/GOOGLE_WORKSPACE_SMOKE_TEST.md](../GOOGLE_WORKSPACE_SMOKE_TEST.md) and record
+evidence; no live test has been performed.

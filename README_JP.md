@@ -2,7 +2,23 @@
 
 Google スプレッドシートをデータベース、Google Apps Script をアプリケーション、GitHub をソースコードの履歴管理に使用する、エンジニアリング向けのプロジェクト管理システムです。
 
-[English](README.md) · [設計](ARCHITECTURE.md) · [データ構造](DATA_SCHEMA.md) · [デプロイ](DEPLOYMENT.md) · [バックアップと復元](BACKUP_RESTORE.md) · [管理者向け手順](docs/MANAGER_WORKFLOW.md) · [自動化設定](docs/AUTOMATION_SETTINGS.md) · [Workspace実機確認](docs/GOOGLE_WORKSPACE_SMOKE_TEST.md)
+[English](README.md) · [設計](ARCHITECTURE.md) · [データ構造](DATA_SCHEMA.md) · [デプロイ](DEPLOYMENT.md) · [バックアップと復元](BACKUP_RESTORE.md) · [管理者向け手順](docs/MANAGER_WORKFLOW.md) · [自動化設定](docs/AUTOMATION_SETTINGS.md) · [Workspace実機確認](docs/GOOGLE_WORKSPACE_SMOKE_TEST.md) · [セキュリティモデル](docs/SECURITY_MODEL.md) · [運用ランブック](docs/OPERATIONS_RUNBOOK.md)
+
+## リリース状況 — 本番承認前
+
+| 項目 | 内容 |
+| --- | --- |
+| リリース | V1.1（管理の使いやすさ・信頼性・自動化制御）＋本番向け堅牢化 |
+| バージョン | `1.1.0` |
+| ローカルテスト | **105件すべて成功**（`npm test`）。`npm run lint` と `npm run validate` も成功 |
+| スキーマバージョン | **3**（`003_management_reliability`。追加のみ） |
+| ローカルで確認済み | 未見積とゼロの区別、期限のみの割当、割当承認と日程確定の分離、対象判定、工数加重の進捗、決定的な健全性判定、ダッシュボード・Gantt・作業負荷、ロール制御（ADMIN/MANAGER/MEMBER/VIEWER）、安全なDOM描画、初回管理者ブートストラップ、OFF/PREVIEW/LIVE の全組み合わせ、期限前通知の日数設定とキャッチアップ、週次レポート、トリガー設定の再作成、通知台帳の状態、移行時のデータ保持 |
+| 本番の阻害要因 | Google Workspace での実機確認が未実施、開発/本番プロジェクトが未作成、移行後のロールが空欄で初期管理者の設定が必要、実シートでのクォータ・性能が未測定、リポジトリ公開範囲が未決定 |
+| Google Workspace 検証 | **未検証**。本リポジトリは実環境で実行していません |
+
+正式なリリース判定は [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) に記録します。実機の証跡が揃うまで
+**本番承認前**のままとし、CIの成功だけでは状態を変更しません。
+
 
 ## 最初に確認すること
 
@@ -37,12 +53,41 @@ npm run validate
 - **工数加重の進捗と決定的な健全性判定。** 進捗は計算列のみを更新します。健全性は文書化されたヒューリスティックで、しきい値は設定可能です（`GREEN`/`YELLOW`/`RED` と `UNKNOWN`/`PLANNED`/`ON_HOLD`/`COMPLETED`/`CANCELLED`/`ARCHIVED`）。
 - **日本語の管理UI**（コンテナバインド）。メニュー、タスク割当、進捗、メンバー、スキル、課題、マイルストーン、自動化設定、システム状態。書き込みはすべて検証済みのドメインサービス経由です。
 - **自動化設定センター。** OFF/PREVIEW/LIVE の配信モード、機能別スイッチ、プロジェクト別・タスク別スイッチ、期限前通知日数と限定的なキャッチアップ、週次管理レポート、カレンダー・バックアップ・ダッシュボード自動更新の切替、状態の永続化と監査記録。[自動化設定](docs/AUTOMATION_SETTINGS.md) を参照してください。
-- **ロール:** `ADMIN` > `MANAGER` > `MEMBER` > `VIEWER`。検証済みの Google アカウントから判定します。移行直後の空欄ロールは `VIEWER` として扱うため、管理者が明示的に設定してください。
+- **ロール:** `ADMIN` > `MANAGER` > `MEMBER` > `VIEWER`。検証済みの Google アカウントから判定し、サーバー側で強制します。
+  移行直後の空欄ロールは `VIEWER` として扱うため、管理者が明示的に設定してください。サイドバーは既定で管理者専用で、
+  `ALLOW_MEMBER_SELF_SERVICE=true` の場合のみ MEMBER が自分の範囲で利用できます（機密性の境界にはなりません）。
+  詳細は [セキュリティモデル](docs/SECURITY_MODEL.md) を参照してください。
 - **逆算計画** はプロジェクト単位で `PROJECT_PHASES` に版管理して保存します。あるプロジェクトの再計画が他プロジェクトの計画を置き換えることはありません。
 - **信頼性:** 送信前に `PENDING` を記録し、配信不確定の通知を自動再送しません。管理作業で `DELIVERY_UNCERTAIN` に整理でき、プレビューは本番の重複防止キーを消費しません。
 
 ゲートごとの証跡は [docs/checkgates](docs/checkgates/GATE_1.md)、Google Workspace 実機確認の手順は
 [docs/GOOGLE_WORKSPACE_SMOKE_TEST.md](docs/GOOGLE_WORKSPACE_SMOKE_TEST.md) にあります。実機確認は本リポジトリでは実施していません。
+
+### 本番向け堅牢化（マージ後監査）
+
+初回V1.1マージ後に確認された5件の不具合を修正し、それぞれ回帰テストを追加しました。
+
+1. **権限昇格** — MANAGER が `ADMIN` を付与でき、ブラウザのペイロードでロールを変更できました。現在はサーバー側
+   （`Members.guardRoleChange` と `Access`）で制御し、自分のロール変更を禁止し、最後の有効な管理者を降格・無効化
+   できません。
+2. **タスク所有権** — 進捗更新がブラウザから渡されたタスクIDを信頼していました。MEMBER は自分のタスクのみ、
+   MANAGER は自分が責任者または担当のプロジェクト/サブプロジェクトのみ、ADMIN は全件、VIEWER は不可としました。
+3. **安全でないHTML挿入** — サイドバーがシート由来の文字列を `innerHTML` に挿入していました。DOM生成と
+   `textContent`（`src/UiSafe.html`）に統一し、`npm run validate` がテンプレート内の危険なAPIを拒否します。
+4. **LIVE送信の再開** — `EMAIL_MODE=LIVE` のまま緊急停止を解除すると、管理者確認なしで送信が再開していました。
+   現在は「有効状態が LIVE へ遷移する操作」に対して ADMIN・確認文字列・プリフライトを要求します。未移行のブックは
+   `ALLOW_LEGACY_EMAIL_CONFIG=true` を明示しない限り送信しません（フェイルクローズ）。
+5. **週次レポートのスケジュール** — トリガーが `WEEKLY_REPORT_TIME` と曜日変更を無視していました。現在は設定から
+   スケジュールを導出し、署名の比較で差分を検出して、管理対象トリガーのみを安全に再作成します。
+
+あわせて管理指標の誤りを2件修正しました。`Health.staleDays` がしきい値オブジェクトを返していた点と、ダッシュボードが
+健全性の低いすべてのプロジェクトを「日程不明」と数えていた点です。詳細は
+[SECURITY_HARDENING.md](docs/checkgates/SECURITY_HARDENING.md)、
+[AUTOMATION_HARDENING.md](docs/checkgates/AUTOMATION_HARDENING.md)、
+[CORRECTNESS_HARDENING.md](docs/checkgates/CORRECTNESS_HARDENING.md) を参照してください。
+
+セキュリティ上の前提と残存リスクは [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md)、日次運用は
+[docs/OPERATIONS_RUNBOOK.md](docs/OPERATIONS_RUNBOOK.md) にまとめています。
 
 ## 機能と制約
 

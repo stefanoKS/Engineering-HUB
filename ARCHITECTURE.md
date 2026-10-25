@@ -28,6 +28,7 @@ Git / reviewed source → clasp push → environment-specific Apps Script projec
 | `Backup.gs` | Private Drive snapshot, content/formula verification, backup result log. |
 | `AutomationSettings.gs` | Persisted manager preferences, validation, audit records, effective mail-mode resolver, safe defaults. |
 | `Roles.gs` | Server-side role resolution (`ADMIN`/`MANAGER`/`MEMBER`/`VIEWER`) from the verified Google account. |
+| `Access.gs` | Authorization policy: identity, member/manager/admin gates, task and project scope, member directory and skill visibility, one-time administrator bootstrap. |
 | `Eligibility.gs` | One policy for active work, notification eligibility and archived/cancelled exclusion. |
 | `Estimates.gs` | Known versus unknown effort; unknown is never coerced to zero. |
 | `Progress.gs` | Effort-weighted task/subproject/project rollup with the documented fallback weight 1. |
@@ -42,6 +43,7 @@ Git / reviewed source → clasp push → environment-specific Apps Script projec
 | `CalendarSync.gs` | Opt-in milestone synchronization to a dedicated secondary calendar. |
 | `Triggers.gs`, `Main.gs` | Explicit authorized trigger installation, diagnostics and manual/scheduled entrypoints. |
 | `Ui.gs`, `UiMenu.html`, `UiSettings.html`, `UiSystem.html` | Container-bound Japanese manager UI; delegates every write to domain services. |
+| `UiSafe.html` | Shared client-side renderer; builds DOM nodes with `textContent` only and never interpolates markup. |
 | `AuditLog.gs` | Actor identity and append-oriented audit history. |
 
 Apps Script loads `.gs` files into one global runtime; there is no module bundler or database server. The manifest defines runtime, timezone, and OAuth scopes. Local tooling executes source with mocked Google services; it is not a Workspace emulator. `npm run validate` additionally enforces that only `Notifications.gs` calls `MailApp.sendEmail` and that HTML templates are packaged by `.claspignore`.
@@ -99,6 +101,70 @@ Weekly workload apportions remaining estimated hours across working days, report
 The manager UI requires a container-bound Apps Script project. `onOpen` adds a menu only; it never installs triggers. Every sidebar action calls a `google.script.run` bridge in `Ui.gs`, which performs a server-side role check and then calls the same validated domain service used by the editor and triggers. Mail is never sent from a browser callback.
 
 Google Sheets editor access is not an administrator boundary: an editor can change the workbook and, if allowed, the bound script. V1.1 therefore assumes trusted managers, keeps private assessment details out of member-level views, and does not claim production-grade role separation.
+
+## GitHub versus live state
+
+| Concern | Source of truth | Changed by |
+| --- | --- | --- |
+| Application source | This Git repository | Reviewed commits + `clasp push` |
+| Operational records (projects, tasks, members, skills, issues, milestones, phases) | Workbook sheets | Domain services, or direct spreadsheet edits |
+| Manager automation preferences | Workbook `AUTOMATION_SETTINGS` | UI / `AutomationSettings.save` (audited) |
+| Environment binding, IDs, master safety flags, bootstrap allowlist, trigger signature | Script Properties | Deployment operator only |
+| Installable triggers | Apps Script project, owned by their creator | `Triggers.install` |
+| Backups | Restricted Drive folder | Manual or scheduled `Backup.create` |
+| Notification/audit evidence | `NOTIFICATION_LOG`, `AUDIT_LOG` | Application only (editable by spreadsheet editors) |
+
+`clasp push` replaces code only. It never migrates data, never changes Script Properties, never installs triggers
+and never resets automation settings. A code rollback is not a data rollback.
+
+## Authorization architecture (hardening)
+
+- Identity is read only from `Session.getActiveUser()`. `Roles.describe` resolves the member record, role and
+  active flag; a blank role is `VIEWER`.
+- `Access.gs` is the single policy layer. UI bridges call `Access.requireUiAccess`, `requireManager`,
+  `requireTaskWrite` or `requireProjectWrite` *before* touching a record, then delegate to the validated domain
+  service. No bridge reads a role, actor or owner from `google.script.run` arguments for authorization.
+- Scope: ADMIN → all; MANAGER → tasks they own plus projects/subprojects they own; MEMBER → only tasks they own
+  (and only when `ALLOW_MEMBER_SELF_SERVICE=true`); VIEWER → no sidebar surfaces.
+- Privilege changes: only ADMIN may grant/revoke `ADMIN`/`MANAGER`; nobody may change their own role; the last
+  active administrator cannot be demoted or deactivated.
+- The first ADMIN is created only by `bootstrapFirstAdministrator`, which needs a deployment allowlist, the exact
+  confirmation, an initialized current-schema workbook and no prior bootstrap/activation.
+
+## Trust limits of the bound UI
+
+A Sheets-bound Apps Script project is **not** an administrative security boundary: anyone who can edit the
+spreadsheet can change operational cells (including roles and the audit log), and anyone who can edit the bound
+script can bypass the application entirely. V1.1 therefore restricts the UI to trusted managers, hides other
+people's assessment details from MEMBER callers *within the application*, and documents that per-employee
+separation requires a separate access-controlled application. See [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md).
+
+All spreadsheet-derived text is untrusted output: `UiSafe.html` renders with `textContent`, and
+`npm run validate` rejects `innerHTML`/`outerHTML`/`insertAdjacentHTML`/`document.write` in `src/*.html`.
+
+## Trigger ownership and execution account
+
+- Triggers execute as their creator. `Triggers.install` requires the active and effective accounts to match and
+  refuses to run for a different account.
+- The desired schedule is derived from settings (hourly scan, hourly management refresh, daily backup at 02:00, and
+  a weekly report only when enabled). It is serialised into `MANAGED_TRIGGER_SIGNATURE`; a mismatch, duplicate,
+  missing or obsolete managed handler causes a full managed-trigger recreation. Unrelated triggers are never
+  touched.
+- Apps Script fires time-based triggers approximately; the configured minute is a target.
+- Disabling a feature suppresses its side effects even while the trigger still exists (the handlers re-check the
+  settings), and the obsolete weekly trigger is removed on the next installation.
+
+## Failure modes and preservation
+
+- A process can stop between cell writes; a script lock does not protect against simultaneous human edits. Partial
+  writes are inspected, not rolled back automatically.
+- Only generated sheets are cleared on refresh. Operational tables, custom columns and formulas are preserved;
+  migrations verify cell values and formulas before recording success.
+- A migration always creates a verified backup; the daily-backup switch cannot bypass it.
+- Mail delivery is at-most-once from the application's perspective: `PENDING` before send, `SENT` on return,
+  `DELIVERY_UNCERTAIN` after administrative reconciliation. Nothing is retried automatically.
+- An unconfigured (pre-V1.1) workbook resolves to `OFF` and sends nothing; the legacy flag path requires the
+  explicit `ALLOW_LEGACY_EMAIL_CONFIG=true` opt-in.
 
 ## Evidence and limitations
 
