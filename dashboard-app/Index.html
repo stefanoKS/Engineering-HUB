@@ -123,7 +123,14 @@
         <h2 class="drawer-title" id="task-drawer-title" data-i18n="dashboard.drawer.title">タスク</h2>
         <span class="readonly-badge" id="drawer-badge" data-i18n="dashboard.drawer.readonly">閲覧のみ</span>
       </div>
-      <button class="drawer-close" id="drawer-close" type="button" data-i18n-aria="common.close" aria-label="閉じる">×</button>
+      <div class="drawer-head-tools">
+        <div class="lang-switch" role="group" data-i18n-aria="lang.group" aria-label="表示言語">
+          <button type="button" class="lang-option" data-lang="ja">日本語</button>
+          <span class="lang-sep" aria-hidden="true">|</span>
+          <button type="button" class="lang-option" data-lang="en">English</button>
+        </div>
+        <button class="drawer-close" id="drawer-close" type="button" data-i18n-aria="common.close" aria-label="閉じる">×</button>
+      </div>
     </div>
     <div class="drawer-body" id="drawer-body"></div>
   </aside>
