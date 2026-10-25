@@ -204,5 +204,8 @@ publication and re-run `installAuthorizedTriggers`.
    deploy a new version.
 4. Publish a snapshot with contract `1.3` after upgrading the workbook; the viewer refuses
    an unknown contract.
-5. Set `REQUEST_SUBMISSION_ENABLED=false` to close submissions without redeploying.
+5. Set `REQUEST_SUBMISSION_ENABLED=true` **after** the inbox is ready. Since V1.3.1 an absent
+   property (or any value other than `true`) keeps submissions closed; verify the state with
+   `requestSubmissionConfig()` in the dashboard project and set it to `false` to close
+   submissions without redeploying.
 

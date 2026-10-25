@@ -61,3 +61,24 @@ Follow `/AGENTS.md` rules 35–48 in addition to the rules above.
 - Run `npm ci`, `npm run lint`, `npm test` and `npm run validate` before opening a PR, and
   record the V1.3 check gates.
 
+## V1.3.1 rules (pre-trial stabilization)
+
+Follow `/AGENTS.md` rules 49–56. These protect the first trial installation.
+
+- Create and edit share one form per record type. An edit is a **partial patch**: a field the
+  manager did not address is never rewritten with a blank, default or recomputed value.
+- `Project_ID`, `Task_ID`, `Original_Deadline`, `Created_At` and the audit/migration
+  identifiers are never editable. An edit never recreates a record.
+- `Ui.updateProject` and `Ui.assignTask` refuse an update whose loaded timestamp no longer
+  matches the stored row, and never write through a browser-supplied role.
+- A new project is `RESTRICTED` until a manager selects `INTERNAL`; only the allowlisted
+  sanitized snapshot is published, and the UI must state that a visibility change appears at
+  the next publication. Never imply the shared dashboard updates instantly.
+- A project created without an owner belongs to the verified creating manager; never invent an
+  owner ID.
+- Opening 申請一覧 imports new inbox rows under the script lock with the inbox request ID as the
+  permanent ID. An import failure is a warning: it must never hide already imported requests
+  or claim success.
+- `REQUEST_SUBMISSION_ENABLED` must be exactly `true` for the dashboard to accept a request;
+  absent means closed and the UI state must match.
+

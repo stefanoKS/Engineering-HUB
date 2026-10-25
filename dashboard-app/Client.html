@@ -145,7 +145,10 @@
   }
 
   // Static offline preview (screenshots and local review only). In a deployed Apps Script
-  // page `google.script.run` always exists, so this branch is unreachable there.
+  // page `google.script.run` always exists, so this branch is unreachable there. The preview
+  // reports submissions as enabled only so the request form can be reviewed; the real page
+  // reads requestSubmissionConfig() and stays disabled unless the operator sets
+  // REQUEST_SUBMISSION_ENABLED=true.
   var PREVIEW = (!hasAppsScript() && typeof window !== 'undefined' && window.__DASHBOARD_PREVIEW__) || null;
 
   var api = PREVIEW

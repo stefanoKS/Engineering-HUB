@@ -4,7 +4,7 @@ V1.3 ships one bilingual interface for both deployments:
 
 | Deployment | Screens | Default language |
 | --- | --- | --- |
-| Manager application (container-bound, `src/`) | manager sidebar, request queue, automation settings, system status | 日本語 |
+| Manager application (container-bound, `src/`) | manager sidebar (project create/edit, task assign/edit, progress, members, skills), request queue, automation settings, system status | 日本語 |
 | Shared dashboard (`dashboard-app/`) | project dashboard, project detail, task detail, deadline change request, completion report | 日本語 |
 
 The official application name is **設計・開発課 管理** and is identical in every language.
@@ -81,6 +81,9 @@ value as one created from the Japanese UI.
 * Selecting English re-renders every visible label immediately (`renderAll()`), without a
   server round trip, without reloading the page and without losing the current project,
   task, filter, drawer or scroll position.
+* In the manager sidebar (V1.3.1) the switch also preserves **unsaved form input**: the
+  template captures every field value, re-renders the generated labels and the select
+  options, then restores what the manager typed. An edit form keeps the record selected.
 * The choice is stored per browser under the `eh.lang` key in `localStorage`.
 * If storage is unavailable (private mode, restricted browser), the UI falls back to
   Japanese on the next session and never raises an application error.

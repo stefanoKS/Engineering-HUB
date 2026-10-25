@@ -39,17 +39,35 @@
   <div id="actor" data-i18n="manager.loading">読み込み中...</div>
 
   <fieldset>
-    <legend data-i18n="manager.project.legend">プロジェクト作成</legend>
+    <legend data-i18n="manager.project.legend">プロジェクト作成 / 編集</legend>
+    <label data-i18n="manager.project.pick">編集するプロジェクト</label>
+    <select id="projectPick"></select>
+    <div class="hint" data-i18n="manager.project.editHint">既存の案件を選ぶと編集できます。案件IDは変更されません。</div>
     <label data-i18n="manager.project.name">プロジェクト名 *</label><input id="projectName">
     <label data-i18n="manager.project.owner">責任者</label><select id="projectOwner"></select>
+    <div class="hint" data-i18n="manager.project.ownerDefault">未選択の場合は自分のメンバーIDが責任者になります。</div>
+    <label data-i18n="manager.project.category">カテゴリ</label><input id="projectCategory">
     <label data-i18n="manager.project.deadline">確定期限</label><input id="projectDeadline" type="date">
     <label data-i18n="manager.project.status">状態</label>
     <select id="projectStatus">
       <option value="Planned" data-i18n="manager.status.Planned">計画中</option>
       <option value="Active" data-i18n="manager.status.Active">進行中</option>
       <option value="On Hold" data-i18n="manager.status.On Hold">保留</option>
+      <option value="Completed" data-i18n="manager.status.Completed">完了</option>
+      <option value="Cancelled" data-i18n="manager.status.Cancelled">中止</option>
     </select>
-    <button onclick="createProject()" data-i18n="manager.project.create">作成</button>
+    <label data-i18n="manager.project.visibility">社内ダッシュボードに表示する</label>
+    <select id="projectVisibility">
+      <option value="RESTRICTED" selected data-i18n="manager.project.visibility.RESTRICTED">表示しない（社内のみ）</option>
+      <option value="INTERNAL" data-i18n="manager.project.visibility.INTERNAL">表示する（社内ダッシュボード）</option>
+    </select>
+    <div class="hint" data-i18n="manager.project.visibilityHint">「表示する」を選んだ案件だけが共有ダッシュボードに公開されます。</div>
+    <label data-i18n="manager.project.summary">共有用概要</label><textarea id="projectSummary"></textarea>
+    <div class="hint" data-i18n="manager.project.summaryHint">共有用概要だけが公開されます。説明・完了条件・社内メモは公開されません。</div>
+    <label data-i18n="manager.project.description">説明（社内のみ）</label><textarea id="projectDescription"></textarea>
+    <button id="projectSubmit" onclick="saveProject()" data-i18n="manager.project.create">作成</button>
+    <button class="secondary" onclick="publishDashboard()" data-i18n="manager.project.publish">共有ダッシュボードを今すぐ公開</button>
+    <div class="hint" id="visibilityNote" hidden data-i18n="manager.project.updated">変更内容は次回のダッシュボード公開時に反映されます。</div>
   </fieldset>
 
   <fieldset>
@@ -61,7 +79,11 @@
   </fieldset>
 
   <fieldset>
-    <legend data-i18n="manager.task.legend">タスク割当（完了期限と必要期間から開始日を計算）</legend>
+    <legend data-i18n="manager.task.legend">タスク割当 / 編集（完了期限と必要期間から開始日を計算）</legend>
+    <label data-i18n="manager.task.pick">編集するタスク</label>
+    <select id="taskPick"></select>
+    <div class="hint" data-i18n="manager.task.editHint">既存のタスクを選ぶと編集できます。タスクIDは変更されません。</div>
+    <div class="hint" id="taskProgressNote"></div>
     <label data-i18n="manager.task.project">プロジェクト *</label><select id="taskProject"></select>
     <label data-i18n="manager.task.subproject">サブプロジェクト（任意）</label><select id="taskSubproject"></select>
     <label data-i18n="manager.task.name">タスク名 *</label><input id="taskName">
@@ -97,7 +119,7 @@
     <label><input id="taskNotify" type="checkbox" style="width:auto"> <span data-i18n="manager.task.notify">メール通知を有効にする（送信は自動化設定に従います）</span></label>
     <label><input id="taskApprove" type="checkbox" style="width:auto"> <span data-i18n="manager.task.approve">割当を承認する</span></label>
     <label><input id="taskConfirm" type="checkbox" style="width:auto"> <span data-i18n="manager.task.confirm">日程を確定する（期限と見積が必要）</span></label>
-    <button onclick="assignTask()" data-i18n="manager.task.submit">登録して確認</button>
+    <button id="taskSubmit" onclick="assignTask()" data-i18n="manager.task.submit">登録して確認</button>
     <div class="hint" data-i18n="manager.task.hint">メールはUIから直接送信されません。承認済みの通知のみ、権限を持つアカウントの自動処理が送信します。</div>
   </fieldset>
 
@@ -143,6 +165,10 @@
     var context = null;
     var previewTimer = null;
     var lastWarnings = [];
+    // Editing state: an empty id means "create". The loaded timestamp guards against
+    // overwriting a record that somebody else saved after this form was filled.
+    var projectState = {id: '', updatedAt: '', deadline: ''};
+    var taskState = {id: '', updatedAt: ''};
 
     function T(key, vars) { return EHLang.t(key, vars); }
 
@@ -150,18 +176,24 @@
 
     function setStatus(kind, message) { EH.setStatus(statusNode(), kind, message); }
 
-    function call(fn, payload, onSuccess) {
+    function call(fn, payload, onSuccess, onAlways, quiet) {
       setStatus('loading', T('common.processing'));
       var runner = google.script.run
         .withSuccessHandler(function (result) {
           if (!result || result.ok !== true) {
             setStatus('error', T('common.error') + ': ' + EHLang.serverMessage((result && result.error) || T('common.unknown')));
+            if (onAlways) onAlways();
             return;
           }
-          setStatus('ok', T('common.done'));
+          // A plain load is not a completed action, so it must not claim success.
+          if (quiet) setStatus('', ''); else setStatus('ok', T('common.done'));
           if (onSuccess) onSuccess(result.data);
+          if (onAlways) onAlways();
         })
-        .withFailureHandler(function (error) { setStatus('error', T('common.error') + ': ' + error.message); });
+        .withFailureHandler(function (error) {
+          setStatus('error', T('common.error') + ': ' + error.message);
+          if (onAlways) onAlways();
+        });
       if (payload === undefined) runner[fn](); else runner[fn](payload);
     }
 
@@ -176,9 +208,11 @@
       context = data;
       document.getElementById('actor').textContent = T('manager.actor', {email: data.actor.email, role: data.actor.role});
       var activeMembers = data.members.filter(function (member) { return member.active; });
+      EH.fillSelect(document.getElementById('projectPick'), editableProjects(), 'id', 'name', T('manager.project.new'));
       EH.fillSelect(document.getElementById('projectOwner'), activeMembers, 'id', 'name', T('common.unset'));
       EH.fillSelect(document.getElementById('subProject'), data.projects, 'id', 'name', '');
       EH.fillSelect(document.getElementById('subOwner'), activeMembers, 'id', 'name', T('common.unset'));
+      EH.fillSelect(document.getElementById('taskPick'), editableTasks(), 'id', 'name', T('manager.task.new'));
       EH.fillSelect(document.getElementById('taskProject'), data.projects, 'id', 'name', '');
       EH.fillSelect(document.getElementById('taskOwner'), activeMembers, 'id', 'name', '');
       EH.fillSelect(document.getElementById('progressTask'), data.tasks, 'id', 'name', '');
@@ -192,6 +226,150 @@
       var skillNames = data.skills.map(function (skill) { return skill.name; });
       EH.renderLines(document.getElementById('skillList'), skillNames.length ? skillNames : [T('manager.skill.empty')], 'hint');
       refreshSubprojects();
+      syncSelections();
+    }
+
+    /**
+     * Re-selects the record being edited after a re-render, or leaves the create form
+     * untouched. User-entered values are preserved separately (see captureForms) so a
+     * language switch never rewrites what the manager typed.
+     */
+    function syncSelections() {
+      var project = projectState.id ? recordById(context.projects, projectState.id) : null;
+      if (project && project.canEdit) { setSelectValue('projectPick', project.id); loadProject(true); }
+      else if (projectState.id) clearProject();
+      var task = taskState.id ? recordById(context.tasks, taskState.id) : null;
+      if (task && task.canEdit) { setSelectValue('taskPick', task.id); loadTask(true); }
+      else if (taskState.id) clearTask();
+      setButtonLabel('projectSubmit', projectState.id ? 'manager.project.save' : 'manager.project.create');
+      setButtonLabel('taskSubmit', taskState.id ? 'common.save' : 'manager.task.submit');
+    }
+
+    var FORM_FIELDS = ['projectPick', 'projectName', 'projectOwner', 'projectCategory', 'projectDeadline',
+      'projectStatus', 'projectVisibility', 'projectSummary', 'projectDescription', 'taskPick',
+      'taskProject', 'taskSubproject', 'taskName', 'taskOwner', 'taskDeadline', 'taskDuration',
+      'taskUnit', 'taskBasis', 'taskEstimate', 'taskAcceptance', 'taskPriority'];
+    var FORM_CHECKS = ['taskNotify', 'taskApprove', 'taskConfirm', 'taskAck'];
+
+    function captureForms() {
+      var kept = {values: {}, checked: {}, hidden: {}};
+      FORM_FIELDS.forEach(function (id) { kept.values[id] = value(id); });
+      FORM_CHECKS.forEach(function (id) { kept.checked[id] = checked(id) === true; });
+      kept.hidden.visibilityNote = document.getElementById('visibilityNote').hidden === true;
+      kept.hidden.ackWrap = document.getElementById('ackWrap').hidden === true;
+      return kept;
+    }
+
+    function applyForms(kept) {
+      FORM_FIELDS.forEach(function (id) { document.getElementById(id).value = kept.values[id]; });
+      FORM_CHECKS.forEach(function (id) { document.getElementById(id).checked = kept.checked[id]; });
+      document.getElementById('visibilityNote').hidden = kept.hidden.visibilityNote;
+      document.getElementById('ackWrap').hidden = kept.hidden.ackWrap;
+    }
+
+    function editableProjects() {
+      if (!context) return [];
+      return (context.projects || []).filter(function (project) { return project.canEdit; });
+    }
+
+    function editableTasks() {
+      if (!context) return [];
+      return (context.tasks || []).filter(function (task) { return task.canEdit; });
+    }
+
+    function recordById(list, id) {
+      if (!id) return null;
+      return (list || []).filter(function (item) { return item.id === id; })[0] || null;
+    }
+
+    function setSelectValue(id, selected) {
+      document.getElementById(id).value = selected === undefined || selected === null ? '' : String(selected);
+    }
+
+    function setButtonLabel(id, key) {
+      var node = document.getElementById(id);
+      node.setAttribute('data-i18n', key);
+      node.textContent = T(key);
+    }
+
+    function clearProject() {
+      projectState = {id: '', updatedAt: '', deadline: ''};
+      setSelectValue('projectPick', '');
+      document.getElementById('projectName').value = '';
+      setSelectValue('projectOwner', '');
+      document.getElementById('projectCategory').value = '';
+      document.getElementById('projectDeadline').value = '';
+      setSelectValue('projectStatus', 'Planned');
+      setSelectValue('projectVisibility', 'RESTRICTED');
+      document.getElementById('projectSummary').value = '';
+      document.getElementById('projectDescription').value = '';
+      document.getElementById('visibilityNote').hidden = true;
+      setButtonLabel('projectSubmit', 'manager.project.create');
+    }
+
+    function loadProject(quiet) {
+      var project = recordById(context ? context.projects : [], value('projectPick'));
+      if (!project) { clearProject(); return; }
+      projectState = {id: project.id, updatedAt: project.updatedAt, deadline: project.deadline};
+      setSelectValue('projectOwner', project.ownerId);
+      document.getElementById('projectName').value = project.name;
+      document.getElementById('projectCategory').value = project.category;
+      document.getElementById('projectDeadline').value = project.deadline;
+      setSelectValue('projectStatus', project.status);
+      setSelectValue('projectVisibility', project.visibility);
+      document.getElementById('projectSummary').value = project.summary;
+      document.getElementById('projectDescription').value = project.description;
+      document.getElementById('visibilityNote').hidden = true;
+      setButtonLabel('projectSubmit', 'manager.project.save');
+      if (!quiet) setStatus('ok', T('manager.project.loaded', {name: project.name}));
+    }
+
+    function clearTask() {
+      taskState = {id: '', updatedAt: ''};
+      setSelectValue('taskPick', '');
+      document.getElementById('taskName').value = '';
+      document.getElementById('taskDeadline').value = '';
+      document.getElementById('taskDuration').value = '';
+      setSelectValue('taskUnit', 'DAY');
+      setSelectValue('taskBasis', 'WORKING_DAYS');
+      document.getElementById('taskEstimate').value = '';
+      document.getElementById('taskAcceptance').value = '';
+      setSelectValue('taskPriority', 'Medium');
+      document.getElementById('taskNotify').checked = false;
+      document.getElementById('taskApprove').checked = false;
+      document.getElementById('taskConfirm').checked = false;
+      document.getElementById('taskProgressNote').textContent = '';
+      document.getElementById('ackWrap').hidden = true;
+      renderPlan(null);
+      setButtonLabel('taskSubmit', 'manager.task.submit');
+    }
+
+    function loadTask(quiet) {
+      var task = recordById(context ? context.tasks : [], value('taskPick'));
+      if (!task) { clearTask(); return; }
+      taskState = {id: task.id, updatedAt: task.updatedAt};
+      setSelectValue('taskProject', task.projectId);
+      refreshSubprojects();
+      setSelectValue('taskSubproject', task.subprojectId);
+      document.getElementById('taskName').value = task.name;
+      setSelectValue('taskOwner', task.ownerId);
+      document.getElementById('taskDeadline').value = task.due;
+      document.getElementById('taskDuration').value = task.durationValue === '' || task.durationValue === null || task.durationValue === undefined ? '' : task.durationValue;
+      setSelectValue('taskUnit', task.durationUnit || 'DAY');
+      setSelectValue('taskBasis', task.durationBasis || 'WORKING_DAYS');
+      document.getElementById('taskEstimate').value = task.estimated === '' || task.estimated === null || task.estimated === undefined ? '' : task.estimated;
+      document.getElementById('taskAcceptance').value = task.acceptance;
+      setSelectValue('taskPriority', task.priority || 'Medium');
+      document.getElementById('taskNotify').checked = task.notify === true;
+      document.getElementById('taskApprove').checked = false;
+      document.getElementById('taskConfirm').checked = false;
+      document.getElementById('taskProgressNote').textContent = T('manager.task.progressNote', {
+        progress: task.progress === '' || task.progress === null || task.progress === undefined ? T('common.none') : task.progress,
+        status: EHLang.label('status', task.status)
+      });
+      setButtonLabel('taskSubmit', 'common.save');
+      renderPlan(null);
+      if (!quiet) setStatus('ok', T('manager.task.loaded', {name: task.name}));
     }
 
     function refreshSubprojects() {
@@ -239,11 +417,46 @@
       }, 250);
     }
 
-    function createProject() {
-      call('uiCreateProject', {
-        name: value('projectName'), ownerId: value('projectOwner'),
-        deadline: value('projectDeadline'), status: value('projectStatus')
-      }, function () { call('uiContext', undefined, render); });
+    function saveProject() {
+      var submit = document.getElementById('projectSubmit');
+      if (submit.disabled) return;
+      var payload = {
+        name: value('projectName'),
+        category: value('projectCategory'), deadline: value('projectDeadline'),
+        status: value('projectStatus'), visibility: value('projectVisibility'),
+        summary: value('projectSummary'), description: value('projectDescription')
+      };
+      // An inactive owner cannot be listed: omitting the field keeps the stored owner
+      // instead of failing or silently clearing it.
+      if (value('projectOwner')) payload.ownerId = value('projectOwner');
+      if (projectState.id) {
+        payload.projectId = projectState.id;
+        payload.updatedAt = projectState.updatedAt;
+        if (String(payload.deadline || '') !== String(projectState.deadline || '')) {
+          if (!EH.confirmAction(T('manager.project.deadlineConfirm'))) return;
+          payload.confirmDeadlineChange = true;
+        }
+      }
+      submit.disabled = true;
+      var editing = !!projectState.id;
+      call(editing ? 'uiUpdateProject' : 'uiCreateProject', payload, function () {
+        call('uiContext', undefined, function (data) {
+          render(data);
+          // The shared dashboard is a snapshot: say so instead of implying it is live.
+          if (!editing) clearProject();
+          document.getElementById('visibilityNote').hidden = false;
+        });
+      }, function () { submit.disabled = false; });
+    }
+
+    function publishDashboard() {
+      if (!EH.confirmAction(T('settings.confirmPublishNow'))) return;
+      call('uiPublishPublicationNow', undefined, function (result) {
+        var counts = (result && result.counts) || {};
+        setStatus('ok', T('manager.project.published', {
+          projects: counts.projects || 0, tasks: counts.tasks || 0
+        }));
+      });
     }
 
     function createSubproject() {
@@ -253,6 +466,8 @@
     }
 
     function assignTask() {
+      var submit = document.getElementById('taskSubmit');
+      if (submit.disabled) return;
       var payload = {
         projectId: value('taskProject'), subprojectId: value('taskSubproject'),
         taskName: value('taskName'), ownerId: value('taskOwner'),
@@ -262,13 +477,26 @@
         priority: value('taskPriority'), notify: checked('taskNotify'),
         approve: checked('taskApprove'), confirmSchedule: checked('taskConfirm')
       };
+      if (taskState.id) {
+        payload.taskId = taskState.id;
+        payload.updatedAt = taskState.updatedAt;
+      }
       var nonWorking = lastWarnings.some(function (warning) { return warning.code === 'NON_WORKING_DEADLINE'; });
       if (nonWorking && !checked('taskAck')) {
         setStatus('error', T('manager.task.ackRequired'));
         return;
       }
       if (payload.confirmSchedule && !EH.confirmAction(T('manager.task.confirmPrompt'))) return;
-      call('uiAssignTask', payload, function () { call('uiContext', undefined, render); });
+      submit.disabled = true;
+      var editing = !!taskState.id;
+      call('uiAssignTask', payload, function () {
+        call('uiContext', undefined, function (data) {
+          render(data);
+          // A second accidental submission would create another task, so the create form
+          // is cleared only after the task was saved successfully.
+          if (!editing) clearTask();
+        });
+      }, function () { submit.disabled = false; });
     }
 
     function updateProgress() {
@@ -297,13 +525,21 @@
       });
     }
 
+    document.getElementById('projectPick').addEventListener('change', function () { loadProject(); });
+    document.getElementById('taskPick').addEventListener('change', function () { loadTask(); });
     document.getElementById('taskProject').addEventListener('change', refreshSubprojects);
     ['taskDeadline', 'taskDuration', 'taskUnit', 'taskBasis'].forEach(function (id) {
       document.getElementById(id).addEventListener('input', schedulePreview);
       document.getElementById(id).addEventListener('change', schedulePreview);
     });
-    EHLang.wire(function () { if (context) render(context); });
-    call('uiContext', undefined, render);
+    EHLang.wire(function () {
+      if (!context) return;
+      // Re-render the generated labels, then put the manager's typed values back.
+      var kept = captureForms();
+      render(context);
+      applyForms(kept);
+    });
+    call('uiContext', undefined, render, null, true);
   </script>
 </body>
 </html>

@@ -49,6 +49,9 @@ Required: `Project_Name`, `Status`. `Project_Owner_ID` references `MEMBERS`.
   nothing is published until a manager reviews the project.
 - `Dashboard_Summary` is the approved public summary. `Description`, `Next_Action` and `Next_Milestone` are never
   published. See [docs/dashboard/DATA_CONTRACT.md](docs/dashboard/DATA_CONTRACT.md).
+- Since V1.3.1 the manager sidebar edits `Dashboard_Visibility` and `Dashboard_Summary` directly through
+  `Ui.updateProject` → `Projects.update`. Every change is audited (`UI_PROJECT_UPDATED`) and only appears in the
+  shared dashboard at the next publication; the API does not touch the snapshot.
 
 ### SUBPROJECTS
 
@@ -86,6 +89,9 @@ the domain layer rejects missing, cross-project, and cyclic dependencies.
 - A deadline-only task (no `Planned_Start`, no `Estimated_Hours`) is valid.
 - `Public_Note` is the only task free text that may be published to the shared dashboard. `Description`,
   `Acceptance_Criteria`, `Next_Action`, `Dependency_IDs`, `Estimated_Hours` and `Actual_Hours` are never published.
+- `Last_Updated` is stamped by `Tasks.update` on every task write (V1.3.1). The manager sidebar echoes the value it
+  loaded and `Ui.assignTask` refuses an update when the stored value changed, so an editing form cannot overwrite a
+  newer save. It is not a published field.
 
 ### SCHEDULE_CONFIRMATIONS
 

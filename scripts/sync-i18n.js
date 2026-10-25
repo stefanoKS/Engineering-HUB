@@ -41,6 +41,18 @@ function expected(target, source) {
   return HEADER + '\n' + source;
 }
 
+/**
+ * Content comparison ignores the checkout line ending: the copies are generated with LF,
+ * while a Windows working tree may hold CRLF. Drift is about content, not EOL style.
+ */
+function normalizeNewlines(value) {
+  return String(value === undefined || value === null ? '' : value).replace(/\r\n/g, '\n');
+}
+
+function matches(target, source, actual) {
+  return normalizeNewlines(actual) === normalizeNewlines(expected(target, source));
+}
+
 function main(argv) {
   const check = argv.includes('--check');
   const source = readSource();
@@ -51,7 +63,7 @@ function main(argv) {
     const relative = path.relative(ROOT, target.file).split(path.sep).join('/');
     if (check) {
       const current = fs.existsSync(target.file) ? fs.readFileSync(target.file, 'utf8') : '';
-      if (current !== content) problems.push(relative);
+      if (!matches(target, source, current)) problems.push(relative);
       return;
     }
     fs.mkdirSync(path.dirname(target.file), {recursive: true});
@@ -72,4 +84,5 @@ function main(argv) {
 
 if (require.main === module) process.exitCode = main(process.argv.slice(2));
 
-module.exports = {TARGETS: TARGETS, HEADER: HEADER, expected: expected, main: main};
+module.exports = {TARGETS: TARGETS, HEADER: HEADER, expected: expected, matches: matches,
+  normalizeNewlines: normalizeNewlines, main: main};

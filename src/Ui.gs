@@ -19,6 +19,53 @@ var Ui = (function () {
 
   function plain(value) { return value === undefined ? null : JSON.parse(JSON.stringify(value)); }
 
+  function dateText(value) {
+    if (value === undefined || value === null || value === '') return '';
+    if (value instanceof Date) return Utilities.formatDate(value, 'Asia/Tokyo', 'yyyy-MM-dd');
+    var result = String(value);
+    return /^\d{4}-\d{2}-\d{2}/.test(result) ? result.slice(0, 10) : '';
+  }
+
+  /**
+   * Optimistic-concurrency marker. The browser sends the value it loaded; a different
+   * stored value means somebody saved the record first, so the edit is refused instead
+   * of silently overwriting newer data.
+   */
+  function timestamp(value) {
+    if (value === undefined || value === null || value === '') return '';
+    if (value instanceof Date) return value.toISOString();
+    return String(value);
+  }
+
+  function stampChanged(loaded, stored) {
+    if (!loaded) return false;
+    return timestamp(loaded) !== timestamp(stored);
+  }
+
+  /** Visibility is an explicit manager decision; blank or unknown values stay private. */
+  function visibilityValue(value) {
+    var normalized = String(value === undefined || value === null ? '' : value).trim().toUpperCase();
+    if (normalized === '' || normalized === 'RESTRICTED') return 'RESTRICTED';
+    if (normalized === 'INTERNAL') return 'INTERNAL';
+    throw new Error('ダッシュボード表示は INTERNAL または RESTRICTED を指定してください');
+  }
+
+  /** Statuses a manager may select; archival uses Projects.archive instead. */
+  var PROJECT_STATUSES = ['Planned', 'Active', 'On Hold', 'Completed', 'Cancelled'];
+
+  function projectStatus(value) {
+    var status = text(value, '状態');
+    if (PROJECT_STATUSES.indexOf(status) < 0) {
+      throw new Error('状態は ' + PROJECT_STATUSES.join(' / ') + ' から選択してください');
+    }
+    return status;
+  }
+
+  function canManageProject(current, project) {
+    if (current.role === 'ADMIN') return true;
+    return current.role === 'MANAGER' && !!project.Project_Owner_ID && project.Project_Owner_ID === current.memberId;
+  }
+
   function text(value, label) {
     var result = String(value === undefined || value === null ? '' : value).trim();
     if (!result) throw new Error(label + 'を入力してください');
@@ -52,6 +99,7 @@ var Ui = (function () {
       var current = Access.requireUiAccess();
       var tasks = Access.visibleTasks(current);
       var projects = Access.visibleProjects(current, tasks);
+      var managedProjects = Access.managedProjectIds(current);
       var projectIds = Object.create(null);
       projects.forEach(function (project) { projectIds[project.Project_ID] = true; });
       var subprojects = Database.read('SUBPROJECTS').filter(function (subproject) { return !!projectIds[subproject.Project_ID]; });
@@ -61,7 +109,20 @@ var Ui = (function () {
         canManage: current.role === 'ADMIN' || current.role === 'MANAGER',
         canAdminister: current.role === 'ADMIN',
         projects: projects.map(function (project) {
-          return {id: project.Project_ID, name: project.Project_Name, status: project.Status};
+          return {
+            id: project.Project_ID,
+            name: project.Project_Name,
+            status: project.Status || 'Planned',
+            ownerId: project.Project_Owner_ID || '',
+            category: project.Category || '',
+            priority: project.Priority || 'Medium',
+            deadline: dateText(project.Committed_Deadline),
+            description: project.Description || '',
+            summary: project.Dashboard_Summary || '',
+            visibility: SharedDashboardModel.visibility(project),
+            updatedAt: timestamp(project.Last_Updated),
+            canEdit: canManageProject(current, project)
+          };
         }),
         subprojects: subprojects.map(function (subproject) {
           return {id: subproject.Subproject_ID, projectId: subproject.Project_ID, name: subproject.Subproject_Name, status: subproject.Status};
@@ -74,9 +135,19 @@ var Ui = (function () {
         tasks: tasks.slice(0, 300).map(function (task) {
           return {
             id: task.Task_ID, name: task.Task_Name, projectId: task.Project_ID,
-            ownerId: task.Owner_Member_ID, status: task.Status,
-            progress: task.Progress_Percent, due: task.Due_Date || '',
-            estimated: task.Estimated_Hours, approved: !!task.Assignment_Approved_At
+            subprojectId: task.Subproject_ID || '', ownerId: task.Owner_Member_ID,
+            status: task.Status, priority: task.Priority || 'Medium',
+            progress: task.Progress_Percent, due: dateText(task.Due_Date),
+            plannedStart: dateText(task.Planned_Start),
+            durationValue: task.Planned_Duration_Value === '' || task.Planned_Duration_Value === undefined ? '' : task.Planned_Duration_Value,
+            durationUnit: task.Planned_Duration_Unit || 'DAY',
+            durationBasis: task.Planned_Duration_Basis || 'WORKING_DAYS',
+            acceptance: task.Acceptance_Criteria || '',
+            estimated: task.Estimated_Hours,
+            notify: task.Notification_Enabled === true,
+            approved: !!task.Assignment_Approved_At,
+            updatedAt: timestamp(task.Last_Updated),
+            canEdit: Access.canEditTask(current, task, {managedProjects: managedProjects})
           };
         })
       };
@@ -85,20 +156,81 @@ var Ui = (function () {
 
   function createProject(payload) {
     return guard(function () {
-      Access.requireManager();
+      var current = Access.requireManager();
       payload = payload || {};
+      // The verified manager becomes the owner unless another owner is chosen explicitly.
+      var owner = String(payload.ownerId === undefined || payload.ownerId === null ? '' : payload.ownerId).trim();
+      if (!owner) owner = current.memberId;
+      if (!owner) throw new Error('責任者を指定してください');
+      var status = payload.status === undefined || payload.status === '' ? 'Planned' : projectStatus(payload.status);
+      if (status === 'Completed') throw new Error('新規プロジェクトは完了状態で作成できません');
       var project = Projects.create({
         Project_Name: text(payload.name, 'プロジェクト名'),
         Description: payload.description || '',
         Category: payload.category || '',
-        Project_Owner_ID: payload.ownerId || '',
-        Status: payload.status || 'Planned',
+        Project_Owner_ID: owner,
+        Status: status,
         Priority: payload.priority || 'Medium',
         Planned_Start: payload.plannedStart || '',
-        Committed_Deadline: payload.deadline || ''
+        Committed_Deadline: payload.deadline || '',
+        Dashboard_Visibility: visibilityValue(payload.visibility),
+        Dashboard_Summary: payload.summary || ''
       });
-      AuditLog.write('UI_PROJECT_CREATED', 'PROJECT', project.Project_ID, {status: project.Status});
-      return plain(project);
+      AuditLog.write('UI_PROJECT_CREATED', 'PROJECT', project.Project_ID,
+        {status: project.Status, owner: project.Project_Owner_ID, visibility: project.Dashboard_Visibility});
+      return plain(Database.find('PROJECTS', project.Project_ID));
+    });
+  }
+
+  /**
+   * Edits an existing project with a partial patch.
+   *
+   * Only the fields present in the payload are written, so an edit of one field never
+   * blanks another. Project_ID, Original_Deadline, Created_At and the migration/audit
+   * identifiers are not editable here.
+   */
+  function updateProject(payload) {
+    return guard(function () {
+      var current = Access.requireManager();
+      payload = payload || {};
+      var projectId = text(payload.projectId, 'プロジェクト');
+      Access.requireProjectWrite(projectId, current.email);
+      var before = Database.find('PROJECTS', projectId);
+      if (!before) throw new Error('Unknown project: ' + projectId);
+      if (stampChanged(payload.updatedAt, before.Last_Updated)) {
+        throw new Error('このプロジェクトは読み込み後に更新されています。再読み込みしてから保存してください');
+      }
+      var patch = {};
+      if (payload.name !== undefined) patch.Project_Name = text(payload.name, 'プロジェクト名');
+      if (payload.ownerId !== undefined) patch.Project_Owner_ID = text(payload.ownerId, '責任者');
+      if (payload.status !== undefined) patch.Status = projectStatus(payload.status);
+      if (payload.category !== undefined) patch.Category = String(payload.category).trim();
+      if (payload.priority !== undefined) patch.Priority = text(payload.priority, '優先度');
+      if (payload.description !== undefined) patch.Description = String(payload.description);
+      if (payload.summary !== undefined) patch.Dashboard_Summary = String(payload.summary);
+      if (payload.visibility !== undefined) patch.Dashboard_Visibility = visibilityValue(payload.visibility);
+      if (payload.deadline !== undefined) {
+        var deadline = String(payload.deadline || '').trim();
+        if (deadline !== dateText(before.Committed_Deadline) && payload.confirmDeadlineChange !== true) {
+          throw new Error('確定期限の変更には確認が必要です');
+        }
+        patch.Committed_Deadline = deadline;
+      }
+      if (!Object.keys(patch).length) throw new Error('変更する項目がありません');
+      if (patch.Status === 'Completed') {
+        var rolled = Progress.rollup(Database.read('TASKS').filter(function (task) { return task.Project_ID === projectId; }));
+        if (!rolled.calculated || rolled.percent !== 100) {
+          throw new Error('全てのタスクが完了していないため、プロジェクトを完了にできません');
+        }
+        patch.Progress_Percent = 100;
+      }
+      var project = Projects.update(projectId, patch);
+      AuditLog.write('UI_PROJECT_UPDATED', 'PROJECT', projectId, {
+        fields: Object.keys(patch).join(','), owner: project.Project_Owner_ID,
+        status: project.Status, visibility: project.Dashboard_Visibility,
+        deadline: dateText(project.Committed_Deadline)
+      });
+      return plain(Database.find('PROJECTS', projectId));
     });
   }
 
@@ -119,49 +251,105 @@ var Ui = (function () {
     });
   }
 
-  /** Deadline and duration are the primary schedule inputs (V1.3); start is derived. */
-  function assignTask(payload) {
-    return guard(function () {
-      payload = payload || {};
-      var current = Access.requireManager();
-      var projectId = text(payload.projectId, 'プロジェクト');
-      if (payload.taskId) {
-        // Updating an existing task: the caller must own the task or manage its project.
-        Access.requireTaskWrite(payload.taskId, current.email);
-      } else {
-        Access.requireProjectWrite(projectId, current.email);
-      }
+  /**
+   * Builds a partial task patch from the edit payload.
+   *
+   * A key that is absent from the payload is never written, so an edit cannot blank an
+   * unrelated column. An explicit empty value (for example an empty duration) is a
+   * deliberate clear and is written.
+   */
+  function taskPatch(payload, existing) {
+    var patch = {};
+    if (payload.projectId !== undefined) patch.Project_ID = text(payload.projectId, 'プロジェクト');
+    if (payload.subprojectId !== undefined) patch.Subproject_ID = String(payload.subprojectId).trim();
+    if (payload.taskName !== undefined) patch.Task_Name = text(payload.taskName, 'タスク名');
+    if (payload.description !== undefined) patch.Description = String(payload.description);
+    if (payload.ownerId !== undefined) patch.Owner_Member_ID = text(payload.ownerId, '担当者');
+    if (payload.status !== undefined) patch.Status = text(payload.status, '状態');
+    if (payload.priority !== undefined) patch.Priority = text(payload.priority, '優先度');
+    if (payload.plannedStart !== undefined) patch.Planned_Start = String(payload.plannedStart).trim();
+    if (payload.deadline !== undefined) patch.Due_Date = String(payload.deadline || '').trim();
+    if (payload.estimatedHours !== undefined) patch.Estimated_Hours = optionalNumber(payload.estimatedHours, '見積時間');
+    if (payload.acceptanceCriteria !== undefined) patch.Acceptance_Criteria = String(payload.acceptanceCriteria);
+    if (payload.nextAction !== undefined) patch.Next_Action = String(payload.nextAction);
+    if (payload.requiredSkillId !== undefined) patch.Required_Skill_ID = String(payload.requiredSkillId).trim();
+    if (payload.requiredSkillLevel !== undefined) {
+      patch.Required_Skill_Level = payload.requiredSkillLevel === '' || payload.requiredSkillLevel === null ? '' : Number(payload.requiredSkillLevel);
+    }
+    if (typeof payload.notify === 'boolean') patch.Notification_Enabled = payload.notify;
+    if (payload.durationValue !== undefined) {
       var durationValue = optionalNumber(payload.durationValue, '必要期間');
       if (durationValue !== '' && (!Number.isInteger(durationValue) || durationValue <= 0)) {
         throw new Error('必要期間は0より大きい数値で入力してください');
       }
-      var data = {
-        Project_ID: projectId,
-        Subproject_ID: payload.subprojectId || '',
-        Task_Name: text(payload.taskName, 'タスク名'),
-        Description: payload.description || '',
-        Owner_Member_ID: text(payload.ownerId, '担当者'),
-        Status: payload.status || 'Assigned',
-        Priority: payload.priority || 'Medium',
-        Planned_Start: payload.plannedStart || '',
-        Due_Date: payload.deadline || '',        Estimated_Hours: optionalNumber(payload.estimatedHours, '見積時間'),
-        Planned_Duration_Value: durationValue,
-        Planned_Duration_Unit: durationValue === '' ? '' : (payload.durationUnit || 'DAY'),
-        Planned_Duration_Basis: durationValue === '' ? '' : (payload.durationBasis || 'WORKING_DAYS'),
-        Acceptance_Criteria: payload.acceptanceCriteria || '',
-        Next_Action: payload.nextAction || '',
-        Required_Skill_ID: payload.requiredSkillId || '',
-        Required_Skill_Level: payload.requiredSkillLevel === '' || payload.requiredSkillLevel === undefined ? '' : Number(payload.requiredSkillLevel),
-        Notification_Enabled: payload.notify === true
-      };
-      // An explicit start without a duration is a deliberate manual override.
-      if (payload.plannedStart && durationValue === '') data.Planned_Start_Source = 'MANUAL';
-      var task = payload.taskId ? Tasks.update(payload.taskId, data) : Tasks.create(data);
-      AuditLog.write('UI_TASK_ASSIGNED', 'TASK', task.Task_ID,
-        {owner: data.Owner_Member_ID, deadline: data.Due_Date, estimate: data.Estimated_Hours,
-          durationValue: data.Planned_Duration_Value, durationUnit: data.Planned_Duration_Unit,
-          durationBasis: data.Planned_Duration_Basis, plannedStart: task.Planned_Start,
-          plannedStartSource: task.Planned_Start_Source, notify: data.Notification_Enabled});
+      patch.Planned_Duration_Value = durationValue;
+      patch.Planned_Duration_Unit = durationValue === '' ? '' : (payload.durationUnit || 'DAY');
+      patch.Planned_Duration_Basis = durationValue === '' ? '' : (payload.durationBasis || 'WORKING_DAYS');
+    }
+    var effectiveDuration = patch.Planned_Duration_Value !== undefined
+      ? patch.Planned_Duration_Value : existing.Planned_Duration_Value;
+    var noDuration = effectiveDuration === '' || effectiveDuration === null || effectiveDuration === undefined;
+    if (patch.Planned_Start && noDuration) patch.Planned_Start_Source = 'MANUAL';
+    if (!Object.keys(patch).length) throw new Error('変更する項目がありません');
+    return patch;
+  }
+
+  /**
+   * Creates or edits a task. Deadline and required duration stay the primary schedule
+   * inputs; the planned start is derived by Tasks.validate / Planning.applyTaskPlan.
+   */
+  function assignTask(payload) {
+    return guard(function () {
+      payload = payload || {};
+      var current = Access.requireManager();
+      var task;
+      if (payload.taskId) {
+        var existing = Access.requireTaskWrite(payload.taskId, current.email).task;
+        if (stampChanged(payload.updatedAt, existing.Last_Updated)) {
+          throw new Error('このタスクは読み込み後に更新されています。再読み込みしてから保存してください');
+        }
+        var patch = taskPatch(payload, existing);
+        // Moving a task into another project requires rights on the destination project.
+        if (patch.Project_ID && patch.Project_ID !== existing.Project_ID) {
+          Access.requireProjectWrite(patch.Project_ID, current.email);
+        }
+        task = Tasks.update(payload.taskId, patch);
+      } else {
+        var projectId = text(payload.projectId, 'プロジェクト');
+        Access.requireProjectWrite(projectId, current.email);
+        var durationValue = optionalNumber(payload.durationValue, '必要期間');
+        if (durationValue !== '' && (!Number.isInteger(durationValue) || durationValue <= 0)) {
+          throw new Error('必要期間は0より大きい数値で入力してください');
+        }
+        var data = {
+          Project_ID: projectId,
+          Subproject_ID: payload.subprojectId || '',
+          Task_Name: text(payload.taskName, 'タスク名'),
+          Description: payload.description || '',
+          Owner_Member_ID: text(payload.ownerId, '担当者'),
+          Status: payload.status || 'Assigned',
+          Priority: payload.priority || 'Medium',
+          Planned_Start: payload.plannedStart || '',
+          Due_Date: payload.deadline || '',
+          Estimated_Hours: optionalNumber(payload.estimatedHours, '見積時間'),
+          Planned_Duration_Value: durationValue,
+          Planned_Duration_Unit: durationValue === '' ? '' : (payload.durationUnit || 'DAY'),
+          Planned_Duration_Basis: durationValue === '' ? '' : (payload.durationBasis || 'WORKING_DAYS'),
+          Acceptance_Criteria: payload.acceptanceCriteria || '',
+          Next_Action: payload.nextAction || '',
+          Required_Skill_ID: payload.requiredSkillId || '',
+          Required_Skill_Level: payload.requiredSkillLevel === '' || payload.requiredSkillLevel === undefined ? '' : Number(payload.requiredSkillLevel),
+          Notification_Enabled: payload.notify === true
+        };
+        // An explicit start without a duration is a deliberate manual override.
+        if (payload.plannedStart && durationValue === '') data.Planned_Start_Source = 'MANUAL';
+        task = Tasks.create(data);
+      }
+      AuditLog.write(payload.taskId ? 'UI_TASK_UPDATED' : 'UI_TASK_ASSIGNED', 'TASK', task.Task_ID,
+        {owner: task.Owner_Member_ID, deadline: dateText(task.Due_Date), estimate: task.Estimated_Hours,
+          durationValue: task.Planned_Duration_Value, durationUnit: task.Planned_Duration_Unit,
+          durationBasis: task.Planned_Duration_Basis, plannedStart: dateText(task.Planned_Start),
+          plannedStartSource: task.Planned_Start_Source, notify: task.Notification_Enabled === true});
       if (payload.approve === true) Notifications.approveAssignment(task.Task_ID, current.email, 'APPROVE ASSIGNMENT');
       if (payload.confirmSchedule === true) Tasks.confirmSchedule(task.Task_ID, current.email, 'CONFIRM SCHEDULE');
       var refreshed = Dashboard.refresh();
@@ -471,9 +659,23 @@ var Ui = (function () {
     return guard(function () {
       Access.requireManager();
       var options = payload || {};
+      // Opening the queue imports new inbox rows first. A broken inbox is reported as a
+      // warning and never hides the requests that were already imported.
+      var imported = null, importError = '';
+      if (options.import !== false) {
+        try {
+          var result = Requests.importInbox(AuditLog.actor());
+          if (result && result.error) importError = result.error;
+          if (result) imported = {imported: result.imported || 0, skipped: result.skipped || 0, rejected: result.rejected || 0};
+        } catch (error) {
+          importError = String(error && error.message ? error.message : error);
+        }
+      }
       var summary = Requests.summary();
       return {
         configured: summary.inboxConfigured,
+        imported: imported,
+        importError: importError,
         counts: summary.counts,
         requests: Requests.queue({includeDecided: options.includeDecided === true}),
         history: Requests.history(options.taskId || '').slice(0, 50)
@@ -515,6 +717,7 @@ var Ui = (function () {
     show: show,
     context: context,
     createProject: createProject,
+    updateProject: updateProject,
     createSubproject: createSubproject,
     assignTask: assignTask,
     planPreview: planPreview,
@@ -590,6 +793,7 @@ function refreshDashboardFromMenu() {
 /** google.script.run bridges. */
 function uiContext() { return Ui.context(); }
 function uiCreateProject(payload) { return Ui.createProject(payload); }
+function uiUpdateProject(payload) { return Ui.updateProject(payload); }
 function uiCreateSubproject(payload) { return Ui.createSubproject(payload); }
 function uiAssignTask(payload) { return Ui.assignTask(payload); }
 function uiPlanPreview(payload) { return Ui.planPreview(payload); }

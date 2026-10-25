@@ -2,22 +2,24 @@
 
 Engineering project management using Google Sheets as the database, Google Apps Script as the application, and GitHub as the source-code history.
 
-[日本語](README_JP.md) · [Architecture](ARCHITECTURE.md) · [Data schema](DATA_SCHEMA.md) · [Deployment](DEPLOYMENT.md) · [Backup and restore](BACKUP_RESTORE.md) · [Manager workflow](docs/MANAGER_WORKFLOW.md) · [Automation settings](docs/AUTOMATION_SETTINGS.md) · [Shared dashboard](docs/dashboard/ARCHITECTURE.md) · [Dashboard data contract](docs/dashboard/DATA_CONTRACT.md) · [Workspace smoke test](docs/GOOGLE_WORKSPACE_SMOKE_TEST.md) · [Security model](docs/SECURITY_MODEL.md) · [Operations runbook](docs/OPERATIONS_RUNBOOK.md)
+[日本語](README_JP.md) · [Architecture](ARCHITECTURE.md) · [Data schema](DATA_SCHEMA.md) · [Deployment](DEPLOYMENT.md) · [Backup and restore](BACKUP_RESTORE.md) · [Pre-trial checklist](docs/PRE_TRIAL_CHECKLIST.md) · [Manager workflow](docs/MANAGER_WORKFLOW.md) · [Automation settings](docs/AUTOMATION_SETTINGS.md) · [Shared dashboard](docs/dashboard/ARCHITECTURE.md) · [Dashboard data contract](docs/dashboard/DATA_CONTRACT.md) · [Workspace smoke test](docs/GOOGLE_WORKSPACE_SMOKE_TEST.md) · [Security model](docs/SECURITY_MODEL.md) · [Operations runbook](docs/OPERATIONS_RUNBOOK.md)
 
 ## Release status — NOT APPROVED FOR PRODUCTION
 
 | Field | Value |
 | --- | --- |
-| Release | V1.2 (shared read-only employee dashboard) on top of V1.1 (management usability, reliability & automation controls) + production hardening |
-| Version | `1.2.0` |
-| Local test count | **149 passing** (`npm test`), 0 failing; `npm run lint` and `npm run validate` pass |
-| Schema version | **4** — `004_shared_dashboard` (additive only; approval + verified backup required) |
-| Verified locally | Unknown-vs-zero estimates, deadline-only assignment, separated approval/schedule confirmation, eligibility policy, weighted progress, deterministic health, dashboard/Gantt/workload views, role enforcement (ADMIN/MANAGER/MEMBER/VIEWER), safe DOM rendering, first-admin bootstrap, OFF/PREVIEW/LIVE matrix, reminder offsets and catch-up, weekly report, trigger drift recreation, ledger states, data preservation on upgrade, sanitized dashboard DTO allowlist, `INTERNAL`-only publication, A/B snapshot commit and rollback-on-failure, read-only viewer API, deadline wording in Asia/Tokyo |
-| Known production blockers | No live Google Workspace execution of any kind; development/production projects not created; roles blank after migration until bootstrap; real Sheets quota/performance unmeasured; repository visibility undecided; dashboard deployment ACL, Drive ACLs and scheduled publication unverified |
+| Release | V1.3.1 (final pre-trial stabilization) on top of V1.3 (planning, requests, Japanese/English UI), V1.2 (shared read-only dashboard) and V1.1 + production hardening |
+| Version | `1.3.1` |
+| Local test count | **256 passing** (`npm test`), 0 failing; `npm run lint` and `npm run validate` pass |
+| Schema version | **5** — `005_task_planning_and_requests` (additive only; approval + verified backup required). V1.3.1 adds **no** schema change |
+| Verified locally | Project visibility controls and manager ownership default, project/task edit modes with partial patches, stale-edit refusal, automatic request import with idempotency and lock, unknown-vs-zero estimates, deadline-only assignment, separated approval/schedule confirmation, eligibility policy, weighted progress, deterministic health, role enforcement (ADMIN/MANAGER/MEMBER/VIEWER), safe DOM rendering, first-admin bootstrap, OFF/PREVIEW/LIVE matrix, reminder offsets and catch-up, weekly report, trigger drift recreation, ledger states, data preservation on upgrade, sanitized dashboard DTO allowlist, `INTERNAL`-only publication, A/B snapshot commit and rollback-on-failure, read-only viewer API, deadline wording in Asia/Tokyo |
+| Known production blockers | No live Google Workspace execution of any kind; development/production projects not created; roles blank after migration until bootstrap; real Sheets quota/performance unmeasured; repository visibility undecided; dashboard deployment ACL, Drive ACLs and scheduled publication unverified; request submission flag intentionally OFF until the operator enables it |
 | Google Workspace verification | **UNVERIFIED** — nothing in this repository has been run against a real Workspace |
 
 The canonical release gate is [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md). It stays at
 **NOT APPROVED FOR PRODUCTION** until recorded live evidence exists; a green CI run cannot change it.
+
+For a first installation, follow [docs/PRE_TRIAL_CHECKLIST.md](docs/PRE_TRIAL_CHECKLIST.md) step by step.
 
 ## Two applications
 
@@ -208,4 +210,40 @@ overlapping assignments. The manager decides whether a schedule is feasible.
 Schema **5** adds `005_task_planning_and_requests`: the TASKS planning fields plus the
 `TASK_REQUESTS` and `TASK_DEADLINE_HISTORY` tables. The migration is additive and requires
 explicit approval; existing rows, dates, formulas and custom columns are preserved.
+
+## V1.3.1 — final pre-trial stabilization
+
+No schema change. V1.3.1 makes the existing features usable and safe for a first trial.
+
+1. **Project visibility is a manager decision.** The project panel now carries
+   社内ダッシュボードに表示する / *Show on internal dashboard* (`RESTRICTED` by default,
+   `INTERNAL` only when a manager selects it) and 共有用概要 / *Dashboard summary*. The
+   private `Description`, acceptance criteria, notes, skills and logs are still never
+   published; only the allowlisted sanitized snapshot is. A save states that the change
+   appears after the next publication, and the panel offers 共有ダッシュボードを今すぐ公開 /
+   *Publish the shared dashboard now*, which calls the same `SharedDashboardPublisher.publish`
+   that the automation settings screen uses (manual publication needs no activation switch;
+   the scheduled trigger still requires ADMIN plus `ENABLE SHARED DASHBOARD PUBLICATION`).
+2. **New projects have an owner.** A manager who creates a project without choosing an owner
+   becomes the owner (their verified `Member_ID`). Another owner can still be selected; the
+   server never invents an owner and never trusts a browser-supplied role.
+3. **Projects and tasks can be edited.** 案件編集 / *Edit project* and タスク編集 / *Edit task*
+   load the current values into the same form. The record ID is preserved, `Original_Deadline`
+   is immutable, and `Projects.update` / `Tasks.update` receive a **partial patch**: an
+   untouched field (owner, dates, duration, estimate, notification preference, actual hours,
+   progress, completion state) is never overwritten with a blank default. A record that
+   changed after the form was loaded is refused with a reload message instead of being
+   overwritten. A committed-deadline change needs an explicit confirmation.
+4. **The request queue imports by itself.** Opening 申請一覧 / *Pending requests* imports new
+   inbox rows first, under the script lock, with the inbox request ID as the permanent ID, so
+   repeated or simultaneous opens never duplicate a request. An unavailable inbox produces a
+   warning and never hides requests that were already imported. 申請を取り込む / *Import
+   requests* remains as the manual fallback.
+5. **Request submission is explicitly OFF.** A configured inbox is no longer permission to
+   accept submissions: the dashboard project must set `REQUEST_SUBMISSION_ENABLED=true`
+   deliberately. See [Request inbox deployment](docs/REQUEST_INBOX_DEPLOYMENT.md).
+
+Gate evidence: [docs/checkgates/V1_3_1_GATE_1.md](docs/checkgates/V1_3_1_GATE_1.md) … 
+[V1_3_1_GATE_7.md](docs/checkgates/V1_3_1_GATE_7.md). Installation steps:
+[docs/PRE_TRIAL_CHECKLIST.md](docs/PRE_TRIAL_CHECKLIST.md).
 

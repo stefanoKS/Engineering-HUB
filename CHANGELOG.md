@@ -1,4 +1,68 @@
 # Changelog
+## V1.3.1 — final pre-trial stabilization
+
+No schema change: the workbook stays at version **5**. V1.3.1 makes the existing features
+usable and safe for a first Google Workspace development trial. Work was done directly on
+`main`; nothing was pushed or deployed.
+
+Project creation and visibility
+
+- The プロジェクト作成 / 編集 panel exposes 社内ダッシュボードに表示する
+  (`Dashboard_Visibility`: `RESTRICTED` by default, `INTERNAL` only when a manager selects it)
+  and 共有用概要 (`Dashboard_Summary`). `Description` stays private.
+- Saving states 「変更内容は次回のダッシュボード公開時に反映されます。」 and the panel offers
+  **共有ダッシュボードを今すぐ公開** (`uiPublishPublicationNow`), which reuses
+  `SharedDashboardPublisher.publish`. Scheduled publication still requires ADMIN plus the
+  typed confirmation.
+- A project created without an owner belongs to the verified creating manager's `Member_ID`;
+  another owner can still be chosen and is honoured by the authorization scope.
+
+Project and task editing
+
+- New 案件編集 / タスク編集 modes load existing values into the same form and preserve the record
+  ID. `Ui.updateProject` and `Ui.assignTask` are authorized by `Access.requireProjectWrite` /
+  `Access.requireTaskWrite` (moving a task to another project also needs rights on the
+  destination).
+- Updates are partial patches: untouched fields are never rewritten. `Project_ID`,
+  `Original_Deadline`, `Created_At` and audit/migration identifiers are not editable.
+- A committed-deadline change needs an explicit confirmation; a project can only be marked
+  `Completed` when its tasks are all done.
+- `Tasks.update` now stamps `Last_Updated` and both edit paths compare the loaded timestamp
+  with the stored row, refusing a stale save instead of overwriting newer data.
+- The sidebar prevents accidental double submission and no longer clears a form before a
+  successful save. Switching 日本語 | English keeps every typed value.
+
+Request handling
+
+- Opening 申請一覧 imports new inbox rows automatically (`Ui.requests` →
+  `Requests.importInbox`). The import runs under `Database.withLock`, uses the inbox request ID
+  as the permanent key and counts a duplicate-ID collision as skipped, so concurrent or
+  repeated opens never duplicate a request.
+- An unavailable inbox is reported as a warning and the already imported requests stay
+  visible; it never claims success. **申請を取り込む** remains as the manual fallback.
+
+Safety and configuration
+
+- `REQUEST_SUBMISSION_ENABLED` must be exactly `true` in the dashboard project for a request
+  to be accepted. An absent property (the previous default) now means closed, and
+  `requestSubmissionConfig()` reports the same state the page renders.
+- `scripts/sync-i18n.js` and `npm run validate` compare the generated dictionaries
+  newline-insensitively, so a Windows CRLF checkout no longer reports false drift.
+
+Documentation
+
+- New `docs/PRE_TRIAL_CHECKLIST.md` (27 steps from prerequisites to stopping the trial) and
+  `docs/checkgates/V1_3_1_GATE_1..7.md`; updated README/README_JP, ARCHITECTURE, DATA_SCHEMA,
+  DEPLOYMENT, AGENTS, `.github/copilot-instructions.md`, PRODUCTION_READINESS,
+  MANAGER_WORKFLOW, DEADLINE_REQUEST_WORKFLOW, REQUEST_INBOX_DEPLOYMENT,
+  dashboard/DEPLOYMENT and dashboard/SMOKE_TEST.
+
+Tests
+
+- 256 local tests pass (`npm test`), 0 failing; `npm run lint` and `npm run validate` pass.
+  New suites: `tests/v1_3_1-stabilization.test.js` (24) and `tests/v1_3_1-ui.test.js` (15,
+  including a sidebar client harness). Local mocks are not Workspace verification.
+
 ## V1.3 planning, worker requests and Japanese/English UI
 
 Schema version **5** — additive migration `005_task_planning_and_requests` (approval and

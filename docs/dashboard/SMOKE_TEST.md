@@ -90,3 +90,21 @@ never changes the release status.
 8. Record the result in `docs/checkgates/V1_3_GATE_7.md`. Nothing here is verified until it
    has actually been run.
 
+## V1.3.1 smoke test (project visibility, editing, import)
+
+| # | Check | Expected | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| E1 | Create a project and leave 社内ダッシュボードに表示する at 表示しない | `Dashboard_Visibility = RESTRICTED`; the project never appears in the snapshot | UNVERIFIED | |
+| E2 | Edit the project → 表示する → 保存, then 共有ダッシュボードを今すぐ公開 | The note 「変更内容は次回のダッシュボード公開時に反映されます。」 appears, and after the publication the project is visible | UNVERIFIED | |
+| E3 | Edit it back to 表示しない and publish again | Project, its subprojects and its tasks disappear from the active slot | UNVERIFIED | |
+| E4 | Enter 共有用概要 and a private 説明, publish | The summary appears; no cell of the snapshot contains the private text | UNVERIFIED | |
+| E5 | Create a project without choosing 責任者 | The creating manager's `Member_ID` becomes the owner | UNVERIFIED | |
+| E6 | Edit a task name only, then inspect the row | Owner, deadline, duration, estimate, actual hours, progress and notification preference are unchanged; `Assignment_Version` incremented | UNVERIFIED | |
+| E7 | Change the deadline or duration of an existing task | `Planned_Start` is recalculated and the source reads `DERIVED` | UNVERIFIED | |
+| E8 | Load a project/task, save it in another browser, then save the first form | Refused with a reload message; the newer values are kept | UNVERIFIED | |
+| E9 | `REQUEST_SUBMISSION_ENABLED` removed from the dashboard project | The request form is unavailable and a submission fails with `REQUEST_DISABLED` | UNVERIFIED | |
+| E10 | Set it to `true`, submit a request, then open 申請一覧 twice | The first open imports once; the second reports 0 imported / 1 skipped, and only one `TASK_REQUESTS` row exists | UNVERIFIED | |
+| E11 | Break the inbox header and open 申請一覧 | Warning shown, previously imported requests still listed, `TASK_REQUESTS` unchanged | UNVERIFIED | |
+
+Record the results in `docs/checkgates/V1_3_1_GATE_7.md`.
+

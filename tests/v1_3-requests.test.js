@@ -37,7 +37,8 @@ function scenario() {
     spreadsheet: snapshot,
     properties: {
       SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID: SNAPSHOT_ID,
-      REQUEST_INBOX_SPREADSHEET_ID: INBOX_ID
+      REQUEST_INBOX_SPREADSHEET_ID: INBOX_ID,
+      REQUEST_SUBMISSION_ENABLED: 'true'
     }
   });
   viewer.spreadsheets.set(INBOX_ID, inbox);

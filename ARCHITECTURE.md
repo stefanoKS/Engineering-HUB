@@ -226,3 +226,39 @@ shared/i18n.js       canonical dictionary (one source of truth for both projects
   `TASK_REQUESTS` and `TASK_DEADLINE_HISTORY`. Generated sheets remain the only replaceable
   output.
 
+## V1.3.1 — create/edit symmetry and implicit import
+
+V1.3.1 keeps the same modules and adds no schema. It closes four usability gaps without
+introducing a new write path.
+
+```
+manager sidebar (UiMenu.html)
+  project form      create + edit (projectPick selects a record)   -> uiCreateProject / uiUpdateProject
+  task form         create + edit (taskPick selects a record)      -> uiAssignTask
+  publish button    manual snapshot publication                    -> uiPublishPublicationNow
+  request sidebar   imports on open, then lists the queue          -> uiRequests -> Requests.importInbox
+```
+
+* **One adapter per record type.** `Ui.createProject` and `Ui.updateProject` both end in the
+  validated `Projects` service; `Ui.assignTask` ends in `Tasks.create` or `Tasks.update`.
+  Authorization stays server-side: `Access.requireManager`, `Access.requireProjectWrite` and
+  `Access.requireTaskWrite`. Moving a task into another project additionally requires write
+  rights on the destination project, so a task edit cannot be used to escape a scope.
+* **Partial patches.** `taskPatch()` (and the field-by-field patch in `updateProject`) only
+  include the keys the caller supplied. `Domain.save` merges the patch over the stored row,
+  so an untouched owner, date, duration, estimate, notification preference, actual hours,
+  progress or completion state is never rewritten. `Tasks.update` now stamps `Last_Updated`,
+  which is what the optimistic-concurrency check compares.
+* **Staleness guard.** The DTOs returned to the sidebar carry `updatedAt`. A save echoes it
+  back; `Ui.updateProject` / `Ui.assignTask` refuse the write when the stored value changed,
+  so a second manager cannot be silently overwritten.
+* **Visibility is explicit.** `SharedDashboardModel.visibility()` treats blank/unknown as
+  `RESTRICTED`; the sidebar exposes the decision (`Dashboard_Visibility`) and the public text
+  (`Dashboard_Summary`) separately from the private `Description`. Publication still runs
+  through the unchanged `SharedDashboardPublisher` A/B commit, and the UI states that a
+  change appears at the next publication.
+* **Import on open.** `Ui.requests()` calls `Requests.importInbox()` before reading the queue.
+  The import runs inside `Database.withLock`, treats the inbox `Request_ID` as the permanent
+  key, and converts a duplicate-ID collision into "skipped". A read failure is returned as
+  `importError`; the queue is still rendered from the workbook.
+

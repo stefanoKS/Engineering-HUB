@@ -34,11 +34,15 @@ Dashboard project (`dashboard-app/`):
 | Property | Value |
 | --- | --- |
 | `REQUEST_INBOX_SPREADSHEET_ID` | same inbox spreadsheet ID |
-| `REQUEST_SUBMISSION_ENABLED` | optional; `false` closes submissions, otherwise enabled once the inbox is configured |
+| `REQUEST_SUBMISSION_ENABLED` | **`true` to accept submissions**. Since V1.3.1 anything other than an explicit `true` (including an unset property) keeps submissions closed, and the dashboard shows the request form as unavailable. |
 | `SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID` | unchanged (read-only snapshot) |
 | `SHARED_DASHBOARD_ALLOWED_DOMAIN` | unchanged |
 
 Never commit these values. They are not returned to any browser.
+
+The configured inbox and the user-visible state always agree: `requestSubmissionConfig()` in
+the dashboard project reports `{enabled:false}` until the property is exactly `true`, and the
+submission functions fail with `REQUEST_DISABLED` rather than silently accepting a row.
 
 ## 3. Initialise the sheet layout
 
@@ -87,11 +91,16 @@ Because the dashboard can now write one row per submission, confirm:
 
 | Task | How |
 | --- | --- |
-| Import new requests | manager sidebar **申請一覧 → 申請を取り込む**, or `importRequestInbox()` |
+| Import new requests | manager sidebar **申請一覧**: opening the screen imports automatically; **申請を取り込む** retries manually; `importRequestInbox()` is the same import |
 | Review and decide | manager sidebar **申請一覧 / 承認待ち** |
-| Close submissions temporarily | set `REQUEST_SUBMISSION_ENABLED=false` in the dashboard project |
-| Re-open submissions | delete the property or set it to `true` |
+| Close submissions temporarily | set `REQUEST_SUBMISSION_ENABLED=false` (or delete the property) in the dashboard project |
+| Re-open submissions | set `REQUEST_SUBMISSION_ENABLED=true` in the dashboard project |
 | Inspect a worker's receipt | `requestSubmissionStatus('<request id>')` in the dashboard project |
+
+The import is serialized with the script lock and keyed by the inbox `Request_ID`, so two
+managers opening the queue at the same moment cannot create a duplicate request row. When the
+inbox cannot be read, the sidebar shows a warning and keeps listing the requests that were
+already imported; it never claims the import succeeded.
 
 The inbox is append-only from the dashboard side. The manager application only writes the
 `Inbox_State` cell to mirror a decision; it never deletes or rewrites request content.

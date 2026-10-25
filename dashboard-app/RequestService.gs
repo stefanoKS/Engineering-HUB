@@ -56,9 +56,14 @@ var DashboardRequests = (function () {
 
   function inboxId() { return property(INBOX_PROPERTY); }
 
+  /**
+   * Request submission is explicitly OFF by default (V1.3.1 trial rule): a configured
+   * inbox alone is not permission to accept submissions. An operator must set
+   * REQUEST_SUBMISSION_ENABLED=true on the dashboard project after the inbox is ready.
+   */
   function enabled() {
     if (!inboxId()) return false;
-    return property(ENABLED_PROPERTY).toLowerCase() !== 'false';
+    return property(ENABLED_PROPERTY).toLowerCase() === 'true';
   }
 
   function fail(code) { throw new Error(code); }

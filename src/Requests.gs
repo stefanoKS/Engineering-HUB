@@ -150,33 +150,46 @@ var Requests = (function () {
     } catch (error) {
       return {configured: true, imported: 0, skipped: 0, rejected: 0, error: error.message};
     }
-    var existing = Object.create(null);
-    Database.read('TASK_REQUESTS').forEach(function (request) { existing[text(request.Inbox_Request_ID)] = true; });
-    var imported = 0, skipped = 0, rejected = 0, created = [];
-    rows.forEach(function (row) {
-      var id = clip(row.Request_ID, 80);
-      if (!id || existing[id]) { skipped++; return; }
-      var normalized = normalize(row);
-      if (normalized.skipped) { rejected++; return; }
-      Database.insert('TASK_REQUESTS', normalized.row);
-      existing[id] = true;
-      created.push(normalized.row);
-      imported++;
-    });
-    if (imported) {
-      AuditLog.write('REQUEST_IMPORTED', 'TASK_REQUESTS', String(imported),
-        {imported: imported, skipped: skipped, rejected: rejected, actor: identity.email});
-      AutomationSettings.setStatus('LAST_REQUEST_IMPORT_AT', Domain.now());
-      created.forEach(function (request) {
+    // Serialized so two managers opening the queue at the same moment cannot both claim
+    // the same inbox row. The inbox request ID is the permanent request ID.
+    var result = Database.withLock(function () {
+      var existing = Object.create(null);
+      Database.read('TASK_REQUESTS').forEach(function (request) { existing[text(request.Inbox_Request_ID)] = true; });
+      var imported = 0, skipped = 0, rejected = 0, created = [];
+      rows.forEach(function (row) {
+        var id = clip(row.Request_ID, 80);
+        if (!id || existing[id]) { skipped++; return; }
+        var normalized = normalize(row);
+        if (normalized.skipped) { rejected++; return; }
         try {
-          Notifications.notifyRequestSubmitted(request);
+          Database.insert('TASK_REQUESTS', normalized.row);
         } catch (error) {
-          // Mail problems never roll back an accepted import.
-          console.warn('Request notification failed: ' + error.message);
+          // A repeated or concurrent import must never duplicate a request.
+          if (!/Duplicate/.test(String(error && error.message))) throw error;
+          skipped++;
+          existing[id] = true;
+          return;
         }
+        existing[id] = true;
+        created.push(normalized.row);
+        imported++;
       });
-    }
-    return {configured: true, imported: imported, skipped: skipped, rejected: rejected};
+      if (imported) {
+        AuditLog.write('REQUEST_IMPORTED', 'TASK_REQUESTS', String(imported),
+          {imported: imported, skipped: skipped, rejected: rejected, actor: identity.email});
+        AutomationSettings.setStatus('LAST_REQUEST_IMPORT_AT', Domain.now());
+      }
+      return {imported: imported, skipped: skipped, rejected: rejected, created: created};
+    });
+    result.created.forEach(function (request) {
+      try {
+        Notifications.notifyRequestSubmitted(request);
+      } catch (error) {
+        // Mail problems never roll back an accepted import.
+        console.warn('Request notification failed: ' + error.message);
+      }
+    });
+    return {configured: true, imported: result.imported, skipped: result.skipped, rejected: result.rejected};
   }
 
   function memberNames() {

@@ -2,22 +2,24 @@
 
 Google スプレッドシートをデータベース、Google Apps Script をアプリケーション、GitHub をソースコードの履歴管理に使用する、エンジニアリング向けのプロジェクト管理システムです。
 
-[English](README.md) · [設計](ARCHITECTURE.md) · [データ構造](DATA_SCHEMA.md) · [デプロイ](DEPLOYMENT.md) · [バックアップと復元](BACKUP_RESTORE.md) · [管理者向け手順](docs/MANAGER_WORKFLOW.md) · [自動化設定](docs/AUTOMATION_SETTINGS.md) · [共有ダッシュボード](docs/dashboard/ARCHITECTURE.md) · [公開データ契約](docs/dashboard/DATA_CONTRACT.md) · [Workspace実機確認](docs/GOOGLE_WORKSPACE_SMOKE_TEST.md) · [セキュリティモデル](docs/SECURITY_MODEL.md) · [運用ランブック](docs/OPERATIONS_RUNBOOK.md)
+[English](README.md) · [設計](ARCHITECTURE.md) · [データ構造](DATA_SCHEMA.md) · [デプロイ](DEPLOYMENT.md) · [バックアップと復元](BACKUP_RESTORE.md) · [導入前チェックリスト](docs/PRE_TRIAL_CHECKLIST.md) · [管理者向け手順](docs/MANAGER_WORKFLOW.md) · [自動化設定](docs/AUTOMATION_SETTINGS.md) · [共有ダッシュボード](docs/dashboard/ARCHITECTURE.md) · [公開データ契約](docs/dashboard/DATA_CONTRACT.md) · [Workspace実機確認](docs/GOOGLE_WORKSPACE_SMOKE_TEST.md) · [セキュリティモデル](docs/SECURITY_MODEL.md) · [運用ランブック](docs/OPERATIONS_RUNBOOK.md)
 
 ## リリース状況 — 本番承認前
 
 | 項目 | 内容 |
 | --- | --- |
-| リリース | V1.2（全社員向け・閲覧専用の共有ダッシュボード）／V1.1（管理の使いやすさ・信頼性・自動化制御）＋本番向け堅牢化 |
-| バージョン | `1.2.0` |
-| ローカルテスト | **149件すべて成功**（`npm test`）。`npm run lint` と `npm run validate` も成功 |
-| スキーマバージョン | **4**（`004_shared_dashboard`。追加のみ・承認と検証済みバックアップが必要） |
-| ローカルで確認済み | 未見積とゼロの区別、期限のみの割当、割当承認と日程確定の分離、対象判定、工数加重の進捗、決定的な健全性判定、ダッシュボード・Gantt・作業負荷、ロール制御（ADMIN/MANAGER/MEMBER/VIEWER）、安全なDOM描画、初回管理者ブートストラップ、OFF/PREVIEW/LIVE の全組み合わせ、期限前通知の日数設定とキャッチアップ、週次レポート、トリガー設定の再作成、通知台帳の状態、移行時のデータ保持、公開項目の許可リスト、`INTERNAL` のみの公開、A/Bスナップショットの確定と失敗時の保持、閲覧専用API、Asia/Tokyo の期限表記 |
-| 本番の阻害要因 | Google Workspace での実機確認が未実施、開発/本番プロジェクトが未作成、移行後のロールが空欄で初期管理者の設定が必要、実シートでのクォータ・性能が未測定、リポジトリ公開範囲が未決定、ダッシュボードの公開設定・Drive ACL・定期公開が未検証 |
+| リリース | V1.3.1（試験運用前の最終安定化）／V1.3（計画・申請・日本語/英語UI）／V1.2（全社員向け共有ダッシュボード）／V1.1＋本番向け堅牢化 |
+| バージョン | `1.3.1` |
+| ローカルテスト | **256件すべて成功**（`npm test`）。`npm run lint` と `npm run validate` も成功 |
+| スキーマバージョン | **5**（`005_task_planning_and_requests`。追加のみ・承認と検証済みバックアップが必要）。V1.3.1 はスキーマ変更なし |
+| ローカルで確認済み | 案件の公開設定と責任者の既定値、案件・タスクの編集（部分更新）、古い画面からの上書き拒否、申請の自動取り込み（冪等・排他）、未見積とゼロの区別、期限のみの割当、割当承認と日程確定の分離、対象判定、工数加重の進捗、決定的な健全性判定、ロール制御（ADMIN/MANAGER/MEMBER/VIEWER）、安全なDOM描画、初回管理者ブートストラップ、OFF/PREVIEW/LIVE の全組み合わせ、期限前通知の日数設定とキャッチアップ、週次レポート、トリガー設定の再作成、通知台帳の状態、移行時のデータ保持、公開項目の許可リスト、`INTERNAL` のみの公開、A/Bスナップショットの確定と失敗時の保持、閲覧専用API、Asia/Tokyo の期限表記 |
+| 本番の阻害要因 | Google Workspace での実機確認が未実施、開発/本番プロジェクトが未作成、移行後のロールが空欄で初期管理者の設定が必要、実シートでのクォータ・性能が未測定、リポジトリ公開範囲が未決定、ダッシュボードの公開設定・Drive ACL・定期公開が未検証、申請の受付は運用者が明示的に有効化するまで停止 |
 | Google Workspace 検証 | **未検証**。本リポジトリは実環境で実行していません |
 
 正式なリリース判定は [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) に記録します。実機の証跡が揃うまで
 **本番承認前**のままとし、CIの成功だけでは状態を変更しません。
+
+初回の導入手順は [docs/PRE_TRIAL_CHECKLIST.md](docs/PRE_TRIAL_CHECKLIST.md) の順に進めてください。
 
 ## 2つのアプリケーション
 
@@ -155,4 +157,32 @@ V1.3 で行わないこと: ログイン/パスワードの追加、工数重複
 
 スキーマ **5** は `005_task_planning_and_requests` を追加します（TASKS の計画項目、
 `TASK_REQUESTS`、`TASK_DEADLINE_HISTORY`）。追加のみの移行で、明示的な承認が必要です。
+
+## V1.3.1 — 試験運用前の最終安定化
+
+スキーマ変更はありません。既存機能を「安心して使える・導入しやすい」状態にします。
+
+1. **案件の公開は管理者の判断**: 案件パネルに「社内ダッシュボードに表示する」
+   （既定は `RESTRICTED`、明示的に `INTERNAL` を選んだときだけ公開）と「共有用概要」を
+   追加しました。説明・完了条件・社内メモ・スキル・ログは引き続き公開しません。保存時に
+   「変更内容は次回のダッシュボード公開時に反映されます」と表示し、「共有ダッシュボードを
+   今すぐ公開」から手動公開できます（定期公開の有効化は従来どおり ADMIN と確認文字列が
+   必要です）。
+2. **新規案件の責任者**: 責任者を選ばずに作成した場合、作成した管理者自身の `Member_ID`
+   が責任者になります。他の責任者も選択できます。存在しないIDを作ることはありません。
+3. **案件・タスクの編集**: 案件編集 / タスク編集モードを追加し、既存の値をフォームへ
+   読み込みます。IDは変わらず、`Original_Deadline` は不変です。更新は**部分更新**で、
+   触れていない項目（担当者・期限・期間・見積・通知設定・実績・進捗・完了状態）を
+   空値で上書きしません。読み込み後に他の人が保存した場合は上書きせず再読み込みを促します。
+   確定期限の変更には確認が必要です。
+4. **申請一覧の自動取り込み**: 申請一覧を開くと新しい申請を自動で取り込みます。ロックと
+   申請IDにより、同時に開いても重複しません。受信箱に接続できない場合は警告を表示し、
+   取り込み済みの申請は表示し続けます（「申請を取り込む」は手動の代替手段として残ります）。
+5. **申請の受付は明示的に有効化**: 受信箱を設定しただけでは受付を開始しません。
+   ダッシュボードプロジェクトで `REQUEST_SUBMISSION_ENABLED=true` を設定してください。
+   [申請受信箱の展開](docs/REQUEST_INBOX_DEPLOYMENT.md) を参照してください。
+
+ゲートの記録は [docs/checkgates/V1_3_1_GATE_1.md](docs/checkgates/V1_3_1_GATE_1.md) 〜
+[V1_3_1_GATE_7.md](docs/checkgates/V1_3_1_GATE_7.md)、導入手順は
+[docs/PRE_TRIAL_CHECKLIST.md](docs/PRE_TRIAL_CHECKLIST.md) を参照してください。
 

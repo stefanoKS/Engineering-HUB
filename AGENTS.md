@@ -69,3 +69,14 @@
 47. The language preference is browser-local (`localStorage`). Do not store it in the workbook and do not rely on server-side `UserProperties` for the shared dashboard.
 48. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_3_GATE_<n>.md`, and keep live Workspace verification separate from local results.
 
+## V1.3.1 mandatory rules (pre-trial stabilization)
+
+49. Keep one form per record type: creation and editing share it. An edit sends a partial patch, so a field the manager did not address keeps its stored value. Never recreate a record to change a field, and never rewrite an unrelated column with a blank or default.
+50. `Project_ID`, `Task_ID`, `Original_Deadline`, `Created_At` and the audit/migration identifiers are immutable. `Ui.updateProject` and `Ui.assignTask` verify the stored `Last_Updated` against the value the editor loaded and refuse a stale save instead of overwriting newer data.
+51. New projects are `RESTRICTED` unless a manager deliberately selects `INTERNAL`, and only the allowlisted snapshot is published. A visibility change is announced as taking effect at the next publication; the UI must never suggest the shared dashboard is live.
+52. A project created without an owner belongs to the verified creating manager's `Member_ID`. Never invent an owner ID and never treat a browser-supplied role, actor or owner as authorization.
+53. Opening 申請一覧 imports the inbox automatically under the script lock, keyed by the permanent inbox request ID. Repeated or simultaneous opens must not duplicate a request. A failed import is a warning that keeps the imported requests visible and never claims success.
+54. `REQUEST_SUBMISSION_ENABLED` must be exactly `true` in the dashboard project before a request is accepted; an absent property means closed, and the user-visible state must agree with it.
+55. A committed deadline change requires an explicit confirmation, and a project can only be marked `Completed` when its tasks are all done.
+56. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_3_1_GATE_<n>.md` for this release, and keep live Workspace verification separate from local results.
+

@@ -90,12 +90,38 @@ confirmation). The last active administrator can never be demoted or deactivated
 ## Create a project
 
 1. **設計・開発課 管理 → 新規プロジェクト**.
-2. Enter プロジェクト名, 責任者, 確定期限, 状態.
-3. **作成**. The stable `Project_ID` is generated, the audit log records `UI_PROJECT_CREATED`, and the dashboard
+2. Enter プロジェクト名, 責任者, カテゴリ, 確定期限, 状態.
+3. Choose 社内ダッシュボードに表示する (see [Edit a project](#edit-a-project)) and enter the
+   共有用概要 that may be published.
+4. **作成**. The stable `Project_ID` is generated, the audit log records `UI_PROJECT_CREATED`, and the dashboard
    refreshes automatically.
 
-The original deadline is captured once (`Original_Deadline`) and is immutable; later deadline changes update
-`Committed_Deadline` only.
+When you leave 責任者 empty, **you become the owner** (your verified `Member_ID`). Another
+owner can be selected; after that, only that owner (or an administrator) can edit the project.
+The original deadline is captured once (`Original_Deadline`) and is immutable; later deadline
+changes update `Committed_Deadline` only.
+
+## Edit a project
+
+1. **プロジェクト作成 / 編集 → 編集するプロジェクト** → select the project. The form loads the stored
+   name, owner, category, deadline, status, visibility, summary and private description; the button changes to
+   **保存**.
+2. Change only what is needed and press **保存** (`uiUpdateProject` → `Projects.update`).
+   * Only the fields you leave in the form are written. Nothing else is blanked.
+   * The `Project_ID`, the original deadline and the created timestamp never change.
+   * A committed-deadline change asks for confirmation first.
+   * If somebody saved the project after you loaded it, the save is refused: reload the project and re-apply.
+3. `社内ダッシュボードに表示する` controls publication:
+   * **表示しない（社内のみ）** keeps the project (and its subprojects and tasks) private. This is the default
+     for every new project.
+   * **表示する（社内ダッシュボード）** publishes it at the *next* publication. The form says so; the shared
+     dashboard never updates instantly.
+4. `共有用概要` is the only project free text that is published. The private `説明`, acceptance criteria, notes,
+   skills and logs are never published.
+5. To refresh the shared dashboard immediately, press **共有ダッシュボードを今すぐ公開**
+   (`uiPublishPublicationNow` → `SharedDashboardPublisher.publish`). It requires an initialized snapshot workbook
+   and reports how many projects/tasks were written. Scheduled publication still needs ADMIN and the typed
+   confirmation.
 
 ## Create a subproject
 
@@ -117,6 +143,22 @@ Rules:
 - 日程確定 (schedule confirmation) additionally requires a deadline and a known estimate. Changing dates or the
   estimate supersedes the confirmation (history is retained).
 - Mail is queued, never sent from the sidebar. Delivery follows [AUTOMATION_SETTINGS.md](AUTOMATION_SETTINGS.md).
+
+## Edit a task
+
+1. **タスク割当 / 編集 → 編集するタスク** → select the task. Every supported value loads into the form and the
+   button changes to **保存**.
+2. Change what is needed and press **保存** (`uiAssignTask` → `Tasks.update`).
+   * The update is a partial patch: owner, dates, duration, estimate, notification preference, actual hours,
+     progress and completion state are kept unless you change them.
+   * `Task_ID` never changes and no task is recreated.
+   * Changing the deadline or the duration recalculates `Planned_Start`; you never type a start date while a
+     duration exists.
+   * Renaming a task, changing the owner/priority/acceptance criteria or changing the schedule bumps
+     `Assignment_Version` and invalidates a previous assignment approval by design. Re-approve when you are ready.
+   * If somebody saved the task after you loaded it, the save is refused and asks you to reload.
+3. `メール通知を有効にする` is only changed when you toggle it; leaving it as loaded keeps the stored preference.
+   No mail is sent from the sidebar.
 
 ## Update progress
 
@@ -203,8 +245,11 @@ Overlapping assignments are allowed: the manager decides whether the schedule is
 
 ### Process worker requests
 
-1. **設計・開発課 管理 → 申請一覧**.
-2. Press **申請を取り込む** to import new rows from the request inbox.
+1. **設計・開発課 管理 → 申請一覧**. Opening the screen imports new inbox rows automatically
+   and reports 「N 件を取り込みました」.
+2. If the inbox cannot be read, the screen shows a warning (「申請を取り込めませんでした…」) and
+   keeps listing the requests that were already imported. **申請を取り込む** retries the import.
+   Repeated opens and two managers opening the queue at the same time never duplicate a request.
 3. Review each card: request ID, project, task, current assignee, self-reported requester,
    current and requested deadline, difference, reason and explanation.
 4. Enter a decision note and press **承認**, **却下** or **差戻し** and confirm.

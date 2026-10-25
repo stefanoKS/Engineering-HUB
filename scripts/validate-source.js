@@ -185,9 +185,8 @@ const i18n = sandbox.module.exports;
 assert(i18n && i18n.DICTIONARY, 'shared/i18n.js must export the EH_I18N dictionary');
 
 sync.TARGETS.forEach(target => {
-  const expected = sync.expected(target, i18nSource);
   const actual = fs.existsSync(target.file) ? fs.readFileSync(target.file, 'utf8') : '';
-  assert(actual === expected,
+  assert(sync.matches(target, i18nSource, actual),
     `${path.relative(root, target.file)} is out of date; run "npm run sync:i18n"`);
 });
 

@@ -398,8 +398,8 @@ Apps Script projects, spreadsheets and clasp configurations, and every activatio
 3. **Dashboard project**: the manifest now requests
    `https://www.googleapis.com/auth/spreadsheets` (snapshot read + inbox append) and
    `userinfo.email`. Re-authorise the deployment, keep `access: DOMAIN` and
-   `executeAs: USER_DEPLOYING`, and publish a new version. Set
-   `REQUEST_SUBMISSION_ENABLED=false` to close submissions temporarily.
+   `executeAs: USER_DEPLOYING`, and publish a new version. `REQUEST_SUBMISSION_ENABLED` must
+   be exactly `true` to accept submissions; since V1.3.1 an unset property means closed.
 
 4. **Publish the new contract**: run `publishSharedDashboard()` (or the sidebar action) so
    the snapshot is written with contract `1.3`. An older snapshot keeps working until then;
@@ -414,4 +414,32 @@ Apps Script projects, spreadsheets and clasp configurations, and every activatio
 6. **Verify**: `npm ci`, `npm run lint`, `npm test`, `npm run validate`. Then follow
    [docs/dashboard/SMOKE_TEST.md](docs/dashboard/SMOKE_TEST.md) and the V1.3 gates; local
    results are not Workspace evidence.
+
+## V1.3.1 deployment (delta only)
+
+V1.3.1 changes no schema, no Script Property name and no deployment binding. It is a code
+and documentation release, so an upgrade is:
+
+1. `npm ci && npm run lint && npm test && npm run validate` in the repository.
+2. Push the reviewed source to the manager project (container-bound) and, if the dashboard
+   sources changed, to the standalone dashboard project.
+3. Re-authorise nothing: no new OAuth scope is requested.
+4. If the request inbox has already been used, decide whether submissions stay open:
+   `REQUEST_SUBMISSION_ENABLED` must be exactly `true` in the **dashboard** project for the
+   form to accept a request. Absence now means closed, which is the intended trial default.
+5. Publish once (`publishSharedDashboard()` or 共有ダッシュボードを今すぐ公開) so the snapshot
+   reflects the reviewed visibility of each project. Visibility edits are not live.
+6. Record the result in [docs/checkgates/V1_3_1_GATE_7.md](docs/checkgates/V1_3_1_GATE_7.md)
+   and, for a first installation, follow
+   [docs/PRE_TRIAL_CHECKLIST.md](docs/PRE_TRIAL_CHECKLIST.md).
+
+New in V1.3.1 that a deployment must know about:
+
+| Behaviour | Where | Server entry point |
+| --- | --- | --- |
+| Create a project (with visibility, summary, owner default) | manager sidebar プロジェクト作成 / 編集 | `Ui.createProject` (`uiCreateProject`) |
+| Edit an existing project (partial patch, staleness guard) | manager sidebar プロジェクト作成 / 編集 | `Ui.updateProject` (`uiUpdateProject`) |
+| Create or edit a task (partial patch) | manager sidebar タスク割当 / 編集 | `Ui.assignTask` (`uiAssignTask`) |
+| Publish the snapshot manually | manager sidebar 共有ダッシュボードを今すぐ公開 | `Ui.publishPublicationNow` (`uiPublishPublicationNow`) → `SharedDashboardPublisher.publish` |
+| Import and review requests | manager sidebar 申請一覧 (imports on open) | `Ui.requests` (`uiRequests`) → `Requests.importInbox` |
 

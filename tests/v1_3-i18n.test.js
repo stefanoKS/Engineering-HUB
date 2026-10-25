@@ -79,7 +79,7 @@ test('controlled enums and deadline wording are localized, unknown values pass t
 test('the generated copies match the canonical dictionary', () => {
   const source = read('shared/i18n.js');
   sync.TARGETS.forEach(target => {
-    assert.equal(read(path.relative(root, target.file)), sync.expected(target, source),
+    assert.equal(sync.matches(target, source, read(path.relative(root, target.file))), true,
       path.relative(root, target.file) + ' is out of date; run npm run sync:i18n');
   });
 });

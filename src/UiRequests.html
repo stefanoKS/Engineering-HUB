@@ -43,11 +43,13 @@
   <fieldset>
     <legend data-i18n="manager.requests.legend">申請一覧 / 承認待ち</legend>
     <div class="hint" data-i18n="manager.requests.hint">承認すると期限が更新され、予定開始日を再計算し、旧日程確認と割当承認を無効化します。却下・差戻しは期限を変更しません。</div>
+    <div class="hint" data-i18n="manager.requests.autoImportHint">画面を開くと新しい申請を自動で取り込みます。取り込めない場合は下のボタンで再試行してください。</div>
     <div class="row">
       <button id="import" data-i18n="manager.requests.sync">申請を取り込む</button>
       <button id="refresh" class="secondary" data-i18n="common.retry">再試行</button>
     </div>
     <div class="hint" id="summary"></div>
+    <div class="hint" id="importNote"></div>
     <div id="requests"></div>
   </fieldset>
 
@@ -173,6 +175,20 @@
         pending: counts.PENDING || 0, stale: counts.STALE || 0, approved: counts.APPROVED || 0,
         rejected: counts.REJECTED || 0
       }) + (data.configured ? '' : ' ' + T('manager.requests.inboxMissing'));
+      var imported = data.imported || null;
+      var note = byId('importNote');
+      if (data.importError) {
+        note.className = 'hint';
+        note.textContent = T('manager.requests.importFailed', {message: EHLang.serverMessage(data.importError)});
+      } else if (imported && imported.imported) {
+        note.className = 'hint';
+        note.textContent = T('manager.requests.imported', {
+          imported: imported.imported, skipped: imported.skipped || 0, rejected: imported.rejected || 0
+        });
+      } else {
+        note.className = 'hint';
+        note.textContent = '';
+      }
       if (!data.requests.length) {
         EH.append(container, 'div', T('manager.requests.empty'), 'hint');
       } else {

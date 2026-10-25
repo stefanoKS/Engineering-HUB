@@ -62,6 +62,13 @@ removes the overdue indicator on the dashboard.
 
 Server function: `Requests.decide(requestId, action, note, 'DECIDE REQUEST')`.
 
+New rows reach the manager application when the queue is opened: `Ui.requests()` calls
+`Requests.importInbox()` before it lists the queue. The import runs inside
+`Database.withLock`, so two managers opening **申請一覧** at the same moment cannot both claim
+the same inbox row, and the inbox `Request_ID` is the permanent key. A failed import is
+reported as a warning while the already imported requests stay visible; the manual
+**申請を取り込む** button (`importRequestInbox()`) retries it.
+
 Before applying an approval the manager application:
 
 1. re-reads the task,
@@ -127,8 +134,10 @@ only a pending indicator (a boolean) is published for a task with an open reques
 
 1. Configure `REQUEST_INBOX_SPREADSHEET_ID` and run `initializeRequestInbox('INITIALIZE
    REQUEST INBOX')` once as an administrator.
-2. Set `REQUEST_SUBMISSION_ENABLED` in the dashboard project (default: enabled once the
-   inbox is configured; set `false` to close submissions).
-3. Import with `importRequestInbox()` (or the manager sidebar button) before reviewing.
+2. Set `REQUEST_SUBMISSION_ENABLED=true` in the dashboard project. Since V1.3.1 an absent
+   property (or any value other than `true`) means submissions are closed, and
+   `requestSubmissionConfig()` reports that state to the page.
+3. Open the manager sidebar **申請一覧** (it imports automatically) or run
+   `importRequestInbox()` before reviewing.
 4. Decide each request in the sidebar; approve only after checking the task.
 5. Publish the dashboard snapshot so approved deadlines appear for viewers.

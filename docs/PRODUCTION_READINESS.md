@@ -2,18 +2,18 @@
 
 **Release status: NOT APPROVED FOR PRODUCTION**
 
-This is the canonical release gate for Engineering-HUB V1.1. The status may only be changed after recorded
+This is the canonical release gate for Engineering-HUB V1.3.1. The status may only be changed after recorded
 evidence below supports it. A green local test run is **not** sufficient.
 
 ## 1. Identity
 
 | Field | Value |
 | --- | --- |
-| Version | 1.2.0 (feature branch `feature/v1.2-shared-dashboard`) |
-| Audited baseline SHA | `cc5b836002146632dbdfdf4f2c292082fb7573db` (V1.2 baseline) |
-| Schema version | 4 (`004_shared_dashboard`, additive; approval + verified backup required) |
-| Hardening commit | see the `fix/v1.1-production-hardening` branch head; recorded in the pull request |
-| Date prepared | 2026-10-25 |
+| Version | 1.3.1 (pre-trial stabilization on `main`) |
+| Audited baseline SHA | `27d38e3dcaff3cedadeb0626226a2bb7b5c8e10e` (V1.3 merge, reviewed before V1.3.1) |
+| Schema version | 5 (`005_task_planning_and_requests`, additive; approval + verified backup required). V1.3.1 changes no schema |
+| Hardening commit | see the local V1.3.1 working-tree changes recorded in the V1.3.1 check gates |
+| Date prepared | 2026-10-26 |
 
 ## 2. Deployment environment
 
@@ -29,8 +29,8 @@ No real Google Workspace resource was created, changed or inspected while prepar
 ```text
 npm ci            -> lockfile install, 0 vulnerabilities
 npm run lint      -> pass
-npm test          -> 105 tests, 105 pass, 0 fail (84 before hardening + 21 new)
-npm run validate  -> 29 Apps Script files and manifest validated
+npm test          -> 256 tests, 256 pass, 0 fail (V1.3.1 adds 39: 24 stabilization + 15 sidebar wiring)
+npm run validate  -> 32 Apps Script files, 3 dashboard files, both manifests and 452 translation keys validated
 ```
 
 Local validation covers mocked Google services only. It does not prove OAuth consent, permission inheritance,
@@ -50,6 +50,14 @@ quota behaviour, trigger timing, or mail delivery.
 | V1.2-3 | Visual web dashboard | PASS (local) / LIVE UNVERIFIED | [V1_2_GATE_3.md](checkgates/V1_2_GATE_3.md) |
 | V1.2-4 | Security and integration | LOCAL PASS / WORKSPACE UNVERIFIED | [V1_2_GATE_4.md](checkgates/V1_2_GATE_4.md) |
 | V1.2-5 | Tests, documentation and deployment | PASS (local) | [V1_2_GATE_5.md](checkgates/V1_2_GATE_5.md) |
+| V1.3-1 … V1.3-7 | Planning, requests, localization, release | PASS (local) | `checkgates/V1_3_GATE_1..7.md` |
+| V1.3.1-1 | Project creation and visibility | PASS (local) | [V1_3_1_GATE_1.md](checkgates/V1_3_1_GATE_1.md) |
+| V1.3.1-2 | Project and task editing | PASS (local) | [V1_3_1_GATE_2.md](checkgates/V1_3_1_GATE_2.md) |
+| V1.3.1-3 | Request import simplification | PASS (local) | [V1_3_1_GATE_3.md](checkgates/V1_3_1_GATE_3.md) |
+| V1.3.1-4 | Safety and trial configuration | PASS (local) / LIVE UNVERIFIED | [V1_3_1_GATE_4.md](checkgates/V1_3_1_GATE_4.md) |
+| V1.3.1-5 | UI polish | PASS (local) / browser-unverified | [V1_3_1_GATE_5.md](checkgates/V1_3_1_GATE_5.md) |
+| V1.3.1-6 | Installation and trial documentation | PASS (files updated) | [V1_3_1_GATE_6.md](checkgates/V1_3_1_GATE_6.md) |
+| V1.3.1-7 | Final automated verification | PASS (local) / Workspace UNVERIFIED | [V1_3_1_GATE_7.md](checkgates/V1_3_1_GATE_7.md) |
 
 ## 5. Security gate status
 
@@ -70,6 +78,9 @@ quota behaviour, trigger timing, or mail delivery.
 - Only generated sheets are replaceable; operational tables are never cleared. The V1.2 snapshot workbook is a
   separate spreadsheet and is written only through the A/B publication path.
 - Migration backups remain unconditional and cannot be bypassed by the daily-backup switch.
+- V1.3.1 editing is additive: `Ui.updateProject` and `Ui.assignTask` write partial patches through the validated
+  domain services, keep every ID and the original deadline, and refuse a save when the record changed after the
+  form was loaded. No new table, column or migration was added.
 
 ## 7. Automation gate status
 
@@ -115,6 +126,8 @@ Record each item in [dashboard/SMOKE_TEST.md](dashboard/SMOKE_TEST.md).
 | 7 | No project has been reviewed for `Dashboard_Visibility = INTERNAL` | Manager | Review each project and its `Dashboard_Summary` before enabling publication |
 | 8 | Dashboard access model (domain ACL, execute-as-deployer identity) unverified | Deployment owner | Complete [dashboard/SMOKE_TEST.md](dashboard/SMOKE_TEST.md) sections A and C |
 | 9 | Publication failure/recovery drill not executed live | Deployment owner | Execute smoke test section D |
+| 10 | Request submissions are closed by default (`REQUEST_SUBMISSION_ENABLED` absent) | Operator | Enable submissions only after the inbox is initialized and reviewed |
+| 11 | V1.3.1 sidebar behaviours (visibility controls, edit modes, auto-import) unverified in a real Workspace | Deployment owner | Execute `dashboard/SMOKE_TEST.md` E1–E11 and record evidence |
 
 ## 10. Backup and rollback readiness
 

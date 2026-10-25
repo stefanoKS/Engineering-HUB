@@ -134,7 +134,7 @@ var Tasks = (function () {
   }
 
   function update(id, patch) {
-    return Domain.save('TASKS', id, patch, validate, null, function (row, before) {
+    return Domain.save('TASKS', id, Object.assign({Last_Updated: Domain.now()}, patch), validate, null, function (row, before) {
       if (before && before.Project_ID !== row.Project_ID) Projects.touch(before.Project_ID);
       Projects.touch(row.Project_ID);
     });
