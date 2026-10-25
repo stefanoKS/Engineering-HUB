@@ -40,3 +40,14 @@
 32. Reopen a failed check gate instead of working around it. Record PASS, FAIL or BLOCKED plus evidence; keep earlier PASS records as historical local results.
 33. Never fabricate live test evidence. Local mocks are not Workspace verification; `docs/PRODUCTION_READINESS.md` stays NOT APPROVED until recorded live evidence exists.
 
+## V1.2 shared dashboard rules
+
+34. Keep the two applications separate: the manager project (`src/`, container-bound) and the shared dashboard project (`dashboard-app/`, standalone web app) use different clasp targets, different Script Properties and different deployments. Never push one root directory into the other project, and never reuse the manager project as the employee-facing app.
+35. The dashboard is read-only. It must contain no create/update/delete path, no `MailApp`, `GmailApp`, `CalendarApp`, `ScriptApp`, `UrlFetchApp` or `DriveApp` usage, and no import of manager modules. `npm run validate` rejects all of them.
+36. The dashboard may read only the sanitized snapshot workbook named by `SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID`. It has no access to the management workbook, and publication refuses the management workbook as a destination.
+37. Publish only allowlisted fields. `SharedDashboardModel` constructs explicit DTOs; raw source rows, e-mail addresses, skills assessments, capacity/HR data, logs, settings, OAuth tokens, private descriptions, acceptance criteria and internal error details must never reach the snapshot or a viewer response.
+38. Projects are published only when `Dashboard_Visibility` is exactly `INTERNAL`; blank and unknown values are `RESTRICTED`. Migration `004_shared_dashboard` must publish nothing and must preserve every existing cell, formula, custom column and ID behind a verified backup.
+39. Publication must stay transactional: write the inactive A/B slot, verify headers, row counts and the content hash, then commit by a single `PUBLISHED_META` write. A failure must leave the previously committed snapshot readable and be recorded in `AUTOMATION_SETTINGS` and `AUDIT_LOG`.
+40. Publication defaults to OFF (`SHARED_DASHBOARD_PUBLISH_ENABLED = false`), is independent of the mail mode, requires ADMIN plus `ENABLE SHARED DASHBOARD PUBLICATION` to enable, and installs a trigger only while it is ON. The destination spreadsheet ID stays in Script Properties and is never returned by an API or UI.
+41. Never present browser-side hiding as access control. Access comes from the deployment ACL (`access: DOMAIN`, execute as deployer, read-only scope) plus a server-side domain check. Do not claim live Workspace verification for the dashboard: `docs/dashboard/SMOKE_TEST.md` starts UNVERIFIED.
+

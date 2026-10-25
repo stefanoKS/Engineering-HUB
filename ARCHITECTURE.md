@@ -45,8 +45,33 @@ Git / reviewed source → clasp push → environment-specific Apps Script projec
 | `Ui.gs`, `UiMenu.html`, `UiSettings.html`, `UiSystem.html` | Container-bound Japanese manager UI; delegates every write to domain services. |
 | `UiSafe.html` | Shared client-side renderer; builds DOM nodes with `textContent` only and never interpolates markup. |
 | `AuditLog.gs` | Actor identity and append-oriented audit history. |
+| `SharedDashboardModel.gs` | V1.2. Pure projection from operational rows to allowlisted public DTOs: visibility, reference integrity, aggregates, content hash. |
+| `SharedDashboardPublisher.gs` | V1.2. Snapshot destination guard, serialized publication into A/B slots, read-back verification, metadata commit, status/preview/settings, snapshot initialization. |
+| `dashboard-app/` | V1.2. **Separate** read-only Apps Script web app (`App.gs`, `DataService.gs`, `Index.html`, `Styles.html`, `Client.html`). Reads only the sanitized snapshot workbook. |
 
 Apps Script loads `.gs` files into one global runtime; there is no module bundler or database server. The manifest defines runtime, timezone, and OAuth scopes. Local tooling executes source with mocked Google services; it is not a Workspace emulator. `npm run validate` additionally enforces that only `Notifications.gs` calls `MailApp.sendEmail` and that HTML templates are packaged by `.claspignore`.
+
+## Two applications, one operational database (V1.2)
+
+```text
+manager project (src/, container-bound)
+        │  reads
+        ▼
+management workbook  ──▶  SharedDashboardModel (allowlist)  ──▶  snapshot workbook
+                                                                  PUBLISHED_*_A / _B + META
+                                                                          │ read-only
+                                                                          ▼
+                                                          dashboard-app (separate web app)
+```
+
+The management workbook stays the only operational database. The snapshot workbook is a
+derived projection of allowlisted fields, written into the inactive of two data slots and
+committed by a single metadata write, so readers never see a partial publication. The
+dashboard project has no code path to the management workbook, no write API and no mail,
+Calendar, Drive or trigger access; `npm run validate` enforces those constraints.
+
+Details: [docs/dashboard/ARCHITECTURE.md](docs/dashboard/ARCHITECTURE.md) ·
+[docs/dashboard/DATA_CONTRACT.md](docs/dashboard/DATA_CONTRACT.md).
 
 ## Data safety and concurrency
 

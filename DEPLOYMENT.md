@@ -81,6 +81,7 @@ In **Project Settings → Script Properties**, enter the following string values
 | `ALLOW_MEMBER_SELF_SERVICE` | Optional, default unset (`false`). `true` lets a `MEMBER` open the sidebar with own-task scope. It does not make the workbook confidential (a member with spreadsheet access can read every sheet). |
 | `NOTIFICATION_ACTIVATION_AT` | Application-written activation timestamp; do not manually prepopulate it. |
 | `NOTIFICATION_AUTHORIZED_BY` | Application-written activating account; do not manually forge it. |
+| `SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID` | V1.2. ID of the **sanitized snapshot** workbook used by the shared dashboard. Must never be the management workbook; publication refuses that. Never exposed by a UI or API. |
 
 Manager-editable automation preferences (mail mode, feature switches, reminder offsets, recipients, backup and
 dashboard switches) are **not** Script Properties. They live in the workbook `AUTOMATION_SETTINGS` table and are
@@ -182,6 +183,41 @@ Use `healthCheck()` for binding/integration flags and `validateSystem()` for ope
 - Complete [docs/GOOGLE_WORKSPACE_SMOKE_TEST.md](docs/GOOGLE_WORKSPACE_SMOKE_TEST.md) in development before any
   production activation. That checklist is the only accepted evidence of live behaviour; this repository has not
   executed it.
+
+## 8. V1.2 shared dashboard (separate Apps Script project)
+
+V1.2 adds a second, independent application: `dashboard-app/`. It is a **read-only** web app
+that reads only the sanitized snapshot workbook and never the management workbook.
+
+| Concern | Manager application | Shared dashboard |
+| --- | --- | --- |
+| Source directory | `src/` | `dashboard-app/` |
+| clasp target | one project per environment | a different project per environment |
+| Workbook read | the management workbook | the sanitized snapshot only |
+| Write APIs | full domain API | none |
+| Mail / Calendar / triggers | yes | no |
+| Deployment | container-bound, sidebars | standalone web app, `access: DOMAIN` |
+
+```powershell
+@'
+{ "scriptId": "REPLACE_WITH_DASHBOARD_DEV_SCRIPT_ID", "rootDir": "dashboard-app" }
+'@ | Set-Content -Encoding ascii .clasp.dashboard-dev.json
+
+Copy-Item .clasp.dashboard-dev.json .clasp.json -Force
+Get-Content .clasp.json      # confirm rootDir = dashboard-app before pushing
+npx clasp push
+```
+
+The dashboard project needs its own Script Properties (`SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID`,
+optional `SHARED_DASHBOARD_ALLOWED_DOMAIN` / `SHARED_DASHBOARD_REQUIRE_EMAIL` /
+`SHARED_DASHBOARD_STALE_HOURS`) and must never contain `SPREADSHEET_ID`; `npm run validate`
+rejects that. The version 3 → 4 upgrade (`004_shared_dashboard`) must be approved and backed up
+like any other migration and publishes nothing by itself.
+
+Full procedure, activation, emergency disable and rollback:
+[docs/dashboard/DEPLOYMENT.md](docs/dashboard/DEPLOYMENT.md). Access model:
+[docs/dashboard/ACCESS_AND_SHARING.md](docs/dashboard/ACCESS_AND_SHARING.md). Nothing in it has
+been executed against a real Workspace tenant.
 
 ## Rollback
 

@@ -1,5 +1,62 @@
 # Changelog
 
+## V1.2 shared dashboard (employee-facing read-only web app)
+
+Schema version **4** — additive migration `004_shared_dashboard` (approval and verified
+backup required; no existing cell, formula, custom column or ID is modified).
+
+Shared dashboard
+
+- New separate read-only Apps Script web app (`dashboard-app/`) for every authorised company
+  viewer: Japanese-first portfolio, project drill-down, task drawer, search, filters and
+  Asia/Tokyo deadline wording (`完了` / `本日期限` / `X日超過` / `期限未設定`).
+- `doGet()` serves a single page; the only server functions are `dashboardPortfolio`,
+  `dashboardProject` and `dashboardTask`. There is no write path, no mail, no Calendar and no
+  trigger API in that project.
+- Deployment restricted to the Workspace domain and executed as the deployer
+  (`appsscript.json`), with read-only spreadsheet scope; `npm run validate` enforces both.
+
+Publication
+
+- `SharedDashboardModel` builds explicit allowlisted DTOs from operational rows; source rows
+  are never forwarded and e-mail addresses, skills, HR capacity, logs and settings are
+  excluded by construction.
+- `SharedDashboardPublisher` copies the projection into a sanitized snapshot workbook using
+  two data slots (A/B) plus `PUBLISHED_META`. Data is written to the inactive slot, verified
+  (headers, row counts, SHA-256 content hash) and only then committed by one metadata write,
+  so a failed publication leaves the previous snapshot readable.
+- New entrypoints: `publishSharedDashboard()`, `previewSharedDashboardPublication()`,
+  `sharedDashboardPublicationStatus()`, `saveSharedDashboardSettings()`,
+  `initializeSharedDashboardSnapshot()`, `scheduledSharedDashboardPublish()`.
+- Destination guard refuses the private master workbook and any workbook that looks
+  operational (`PROJECTS`, `MEMBERS`, `AUTOMATION_SETTINGS`, `NOTIFICATION_LOG`, `AUDIT_LOG`).
+- Publication is serialized with the script lock, idempotent for readers, blanks stale
+  trailing rows, and records `SHARED_DASHBOARD_PUBLISHED` / `SHARED_DASHBOARD_PUBLICATION_FAILED`.
+
+Visibility and schema
+
+- `PROJECTS.Dashboard_Visibility` (`INTERNAL` / `RESTRICTED`, default `RESTRICTED`) and
+  `PROJECTS.Dashboard_Summary`; `TASKS.Public_Note` is the only publishable task free text.
+- Migrated projects keep a blank visibility and are therefore **not** published until a
+  manager reviews them.
+
+Settings and scheduling
+
+- `AUTOMATION_SETTINGS` gains `SHARED_DASHBOARD_PUBLISH_ENABLED` (default **false**),
+  `SHARED_DASHBOARD_PUBLISH_INTERVAL_MINUTES` and publication status keys. Publication
+  never affects the mail mode.
+- The optional `scheduledSharedDashboardPublish` trigger exists only while publication is ON.
+
+Tooling and documentation
+
+- `npm run validate` now also validates the dashboard project: no spreadsheet writes, no mail
+  / Calendar / trigger / Drive APIs, no manager modules, no `SPREADSHEET_ID` property, and a
+  domain-restricted, read-only manifest.
+- New `scripts/dashboard-preview.js` builds an offline static preview from fictional data for
+  browser review and visual regression.
+- New documentation: `docs/dashboard/*` (architecture, data contract, access and sharing,
+  deployment, smoke test, visual spec) and `docs/checkgates/V1_2_GATE_1..5.md`.
+
 ## V1.1 production hardening (security fixes, release gates, documentation)
 
 Schema version stays **3** (no migration required for this release).

@@ -143,3 +143,23 @@ Out of scope (deployment-level):
 | Health/progress heuristics mislead | Documented thresholds, unknown counts reported separately, human review |
 | Legacy compatibility path still allows unmigrated workbooks to send | Only with explicit `ALLOW_LEGACY_EMAIL_CONFIG=true`; default is fail-closed |
 | No live Workspace verification in this repository | See [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) |
+
+## 10. Shared dashboard (V1.2)
+
+The employee-facing dashboard is a **separate** application with a deliberately smaller
+surface.
+
+| Control | Implementation | Limit |
+| --- | --- | --- |
+| No write path | The dashboard project contains no spreadsheet write, mail, Calendar, Drive, trigger or fetch call; `npm run validate` rejects them, and the only client-callable functions are `dashboardPortfolio`, `dashboardProject`, `dashboardTask`. | A person with Apps Script edit access to the dashboard project could add code. Restrict project access. |
+| No management workbook access | The dashboard reads only `SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID`; the master property is not readable from that project and is rejected by validation. | The deployment account must not otherwise hold edit rights on the master workbook — an organisational control. |
+| Data minimisation | Explicit allowlisted DTOs; e-mail addresses, skills, capacity/HR data, logs, settings, private descriptions and acceptance criteria are excluded by construction and asserted by tests. | A future field added to the allowlist needs review. |
+| Publication safety | A/B slots, read-back verification (headers, counts, SHA-256), single metadata commit, script lock, master-workbook refusal, `INTERNAL`-only visibility, ADMIN + exact confirmation to enable. | Publication is a projection; it cannot fix a wrong visibility decision. |
+| Viewer access | Web app ACL `access: DOMAIN`, execute as deployer, read-only scope. An optional server-side domain check adds defence in depth. | `Session.getActiveUser().getEmail()` may be empty for execute-as-deployer apps, so the ACL is the real control. Client-side hiding is never used. |
+| Viewer identity | The address stays server-side; the API returns only `{ok}`. | Per-user filtering is intentionally **not** implemented: every authorised viewer sees the same approved portfolio. |
+
+Residual dashboard risks: the deployment ACL is misconfigured to "Anyone"; the snapshot
+workbook is shared more widely than intended; a manager marks the wrong project `INTERNAL`;
+or nobody reviews publication freshness. Each has a documented mitigation in
+[dashboard/ACCESS_AND_SHARING.md](dashboard/ACCESS_AND_SHARING.md) and
+[dashboard/SMOKE_TEST.md](dashboard/SMOKE_TEST.md), and none has been verified live.

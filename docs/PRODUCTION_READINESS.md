@@ -9,9 +9,9 @@ evidence below supports it. A green local test run is **not** sufficient.
 
 | Field | Value |
 | --- | --- |
-| Version | 1.1.0 (hardening branch `fix/v1.1-production-hardening`) |
-| Audited baseline SHA | `05d42b667ed8490d360301a961a4cbd6a6f6fa05` (merge of PR #2) |
-| Schema version | 3 (`003_management_reliability`) |
+| Version | 1.2.0 (feature branch `feature/v1.2-shared-dashboard`) |
+| Audited baseline SHA | `cc5b836002146632dbdfdf4f2c292082fb7573db` (V1.2 baseline) |
+| Schema version | 4 (`004_shared_dashboard`, additive; approval + verified backup required) |
 | Hardening commit | see the `fix/v1.1-production-hardening` branch head; recorded in the pull request |
 | Date prepared | 2026-10-25 |
 
@@ -45,6 +45,11 @@ quota behaviour, trigger timing, or mail delivery.
 | C | Management correctness | PASS (local) | [CORRECTNESS_HARDENING.md](checkgates/CORRECTNESS_HARDENING.md) |
 | D | Documentation | PASS (files updated/created, none verified live) | this document and the linked guides |
 | E | Final release assessment | LOCAL PASS / LIVE UNVERIFIED | below |
+| V1.2-1 | Architecture and data contract | PASS (local) | [V1_2_GATE_1.md](checkgates/V1_2_GATE_1.md) |
+| V1.2-2 | Snapshot publication | PASS (local) | [V1_2_GATE_2.md](checkgates/V1_2_GATE_2.md) |
+| V1.2-3 | Visual web dashboard | PASS (local) / LIVE UNVERIFIED | [V1_2_GATE_3.md](checkgates/V1_2_GATE_3.md) |
+| V1.2-4 | Security and integration | LOCAL PASS / WORKSPACE UNVERIFIED | [V1_2_GATE_4.md](checkgates/V1_2_GATE_4.md) |
+| V1.2-5 | Tests, documentation and deployment | PASS (local) | [V1_2_GATE_5.md](checkgates/V1_2_GATE_5.md) |
 
 ## 5. Security gate status
 
@@ -59,7 +64,11 @@ quota behaviour, trigger timing, or mail delivery.
 
 - Version 2 → 3 upgrade preserves every pre-existing operational cell, ID, skill record, notification row,
   custom column and formula (asserted cell by cell, twice: wide fixture and populated fixture).
-- Only generated sheets are replaceable; operational tables are never cleared.
+- Version 3 → 4 (`004_shared_dashboard`) is additive and is covered by the same cell-by-cell preservation
+  assertions in `tests/core.test.js`, `tests/gate-c-correctness.test.js`, `tests/gate6-release.test.js` and
+  `tests/v1_2-model.test.js`. It publishes nothing: migrated projects stay `RESTRICTED` until reviewed.
+- Only generated sheets are replaceable; operational tables are never cleared. The V1.2 snapshot workbook is a
+  separate spreadsheet and is written only through the A/B publication path.
 - Migration backups remain unconditional and cannot be bypassed by the daily-backup switch.
 
 ## 7. Automation gate status
@@ -78,6 +87,21 @@ quota behaviour, trigger timing, or mail delivery.
 [GOOGLE_WORKSPACE_SMOKE_TEST.md](GOOGLE_WORKSPACE_SMOKE_TEST.md) in the development environment and record the
 results there. Every item starts as UNVERIFIED.
 
+### 8.1 Shared dashboard (V1.2)
+
+The dashboard is designed, unit-tested with mocked Google services and rendered in a real
+Chromium session from a static preview. **No Workspace behaviour is verified:**
+
+- Deployment ACL (`access: DOMAIN`), execute-as-deployer behaviour and viewer identity
+  resolution: UNVERIFIED.
+- Drive ACLs for the snapshot workbook and the deployment account: UNVERIFIED.
+- Scheduled publication trigger, publication latency and CacheService behaviour: UNVERIFIED.
+- Real payload size and latency at 100 projects / 5 000 tasks: UNVERIFIED (mock measurements
+  are not evidence).
+- Emergency disable, rollback and failure recovery in a live deployment: UNVERIFIED.
+
+Record each item in [dashboard/SMOKE_TEST.md](dashboard/SMOKE_TEST.md).
+
 ## 9. Unresolved blockers
 
 | # | Blocker | Owner | Resolution |
@@ -87,6 +111,10 @@ results there. Every item starts as UNVERIFIED.
 | 3 | Roles are blank after migration (`VIEWER` by default) | Deployment owner | Bootstrap the first ADMIN, then assign roles |
 | 4 | Scale/quota behaviour on real Sheets is unmeasured | Deployment owner | Measure dashboard refresh and notification scan in development |
 | 5 | Repository visibility not reviewed | Repository owner | Decide public/private; see [SECURITY_MODEL.md](SECURITY_MODEL.md) |
+| 6 | Snapshot workbook, dashboard project and dashboard deployment do not exist | Deployment owner | Create per [dashboard/DEPLOYMENT.md](dashboard/DEPLOYMENT.md) |
+| 7 | No project has been reviewed for `Dashboard_Visibility = INTERNAL` | Manager | Review each project and its `Dashboard_Summary` before enabling publication |
+| 8 | Dashboard access model (domain ACL, execute-as-deployer identity) unverified | Deployment owner | Complete [dashboard/SMOKE_TEST.md](dashboard/SMOKE_TEST.md) sections A and C |
+| 9 | Publication failure/recovery drill not executed live | Deployment owner | Execute smoke test section D |
 
 ## 10. Backup and rollback readiness
 
@@ -107,8 +135,8 @@ results there. Every item starts as UNVERIFIED.
 ## 12. Go / No-Go
 
 **NO-GO.** The application is locally validated but has no live Google Workspace evidence. Do not enable LIVE
-email, install triggers against production, or migrate a production workbook until the blockers above are
-resolved and this document is updated with recorded evidence.
+email, publish the shared dashboard, install triggers against production, or migrate a production workbook until
+the blockers above are resolved and this document is updated with recorded evidence.
 
 Changing this document's status requires: a completed smoke test with results, a verified backup reference, a
 completed restore drill, and a named approver.
