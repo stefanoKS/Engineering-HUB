@@ -301,10 +301,10 @@ test('calendar and daily backup switches are independent and never bypass migrat
   fixtures.settings(migrationApp, { DAILY_BACKUP_ENABLED: false });
   const backupsBefore = migrationApp.backups.length;
   // A migration always takes its verified backup, regardless of the daily schedule switch.
-  migrationApp.properties.setProperty('APPROVED_MIGRATIONS', '003_management_reliability');
+  migrationApp.properties.setProperty('APPROVED_MIGRATIONS', '004_shared_dashboard');
   const history = migrationApp.book.getSheetByName('SCHEMA_MIGRATIONS');
-  history.rows = [history.rows[0], ['INITIALIZE_V2', new Date().toISOString(), 0, 2, 'SUCCESS', 'NEW_EMPTY_DATABASE']];
-  migrationApp.context.Migrations.upgrade();
+  history.rows = [history.rows[0], ['INITIALIZE_V3', new Date().toISOString(), 0, 3, 'SUCCESS', 'NEW_EMPTY_DATABASE']];
+  assert.equal(migrationApp.context.Migrations.upgrade(), 4);
   assert.equal(migrationApp.backups.length, backupsBefore + 1);
   assert.equal(migrationApp.context.AutomationSettings.get().DAILY_BACKUP_ENABLED, false);
 });

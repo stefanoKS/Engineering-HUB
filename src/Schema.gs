@@ -23,11 +23,13 @@ var Schema = (function () {
     }) };
   }
   var projectStates = ['Planned', 'Active', 'On Hold', 'Completed', 'Cancelled', 'Archived'];
-  table('PROJECTS', 'Project_ID', 'Project_ID Project_Name Description Category Project_Owner_ID Status Priority Planned_Start Forecast_End Committed_Deadline Original_Deadline Actual_Completion Progress_Percent Health Next_Milestone Next_Action Last_Updated Created_At Archived_At Notification_Enabled',
-    { Notification_Enabled: 'boolean' }, ['Project_Name', 'Status'], { Project_Owner_ID: 'MEMBERS' }, { Status: projectStates, Priority: ['Low', 'Medium', 'High', 'Critical'] });
+  table('PROJECTS', 'Project_ID', 'Project_ID Project_Name Description Category Project_Owner_ID Status Priority Planned_Start Forecast_End Committed_Deadline Original_Deadline Actual_Completion Progress_Percent Health Next_Milestone Next_Action Last_Updated Created_At Archived_At Notification_Enabled Dashboard_Visibility Dashboard_Summary',
+    { Notification_Enabled: 'boolean' }, ['Project_Name', 'Status'], { Project_Owner_ID: 'MEMBERS' },
+    { Status: projectStates, Priority: ['Low', 'Medium', 'High', 'Critical'],
+      Dashboard_Visibility: ['INTERNAL', 'RESTRICTED'] });
   table('SUBPROJECTS', 'Subproject_ID', 'Subproject_ID Project_ID Subproject_Name Owner_ID Status Planned_Start Planned_End Deadline Progress_Percent Estimated_Hours Next_Action Last_Updated',
     {}, ['Project_ID', 'Subproject_Name', 'Status'], { Project_ID: 'PROJECTS', Owner_ID: 'MEMBERS' }, { Status: projectStates });
-  table('TASKS', 'Task_ID', 'Task_ID Project_ID Subproject_ID Task_Name Description Owner_Member_ID Status Priority Planned_Start Due_Date Estimated_Hours Actual_Hours Progress_Percent Dependency_IDs Acceptance_Criteria Next_Action Required_Skill_ID Required_Skill_Level Assignment_Version Assignment_Approved_At Notification_Enabled Notification_Baseline Created_At Last_Updated Completed_At',
+  table('TASKS', 'Task_ID', 'Task_ID Project_ID Subproject_ID Task_Name Description Owner_Member_ID Status Priority Planned_Start Due_Date Estimated_Hours Actual_Hours Progress_Percent Dependency_IDs Acceptance_Criteria Next_Action Required_Skill_ID Required_Skill_Level Assignment_Version Assignment_Approved_At Notification_Enabled Notification_Baseline Created_At Last_Updated Completed_At Public_Note',
     { Assignment_Version: 'number', Notification_Enabled: 'boolean' }, ['Project_ID', 'Task_Name', 'Owner_Member_ID', 'Status'],
     { Project_ID: 'PROJECTS', Subproject_ID: 'SUBPROJECTS', Owner_Member_ID: 'MEMBERS', Required_Skill_ID: 'SKILLS' },
     { Status: ['Not Started', 'Assigned', 'In Progress', 'Blocked', 'On Hold', 'Done', 'Cancelled'], Priority: ['Low', 'Medium', 'High', 'Critical'] });
@@ -80,7 +82,9 @@ var Schema = (function () {
   set('SCHEDULE_CONFIRMATIONS', 'Active', { defaultValue: true });
   set('SCHEDULE_CONFIRMATIONS', 'Version', { defaultValue: 1, min: 1, integer: true });
   set('SCHEDULE_CONFIRMATIONS', 'Estimated_Hours', { defaultValue: '', min: 0 });
-  return { version: 3, tables: tables,
+  // V1.2: nothing is published until a manager reviews the project. Blank stays restricted.
+  set('PROJECTS', 'Dashboard_Visibility', { defaultValue: 'RESTRICTED' });
+  return { version: 4, tables: tables,
     generated: ['DASHBOARD', 'PROJECT_OVERVIEW', 'TEAM_VIEW', 'GANTT_OVERVIEW', 'TIMELINE_DATA',
       'WORKLOAD', 'SKILL_MATRIX', 'BACKPLAN', 'AUTOMATION_STATUS'],
     field: field };
