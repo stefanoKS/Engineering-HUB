@@ -55,5 +55,27 @@ var Roles = (function () {
     try { requireAtLeast(minimum, actorEmail); return true; } catch (error) { return false; }
   }
 
-  return {ORDER: ORDER, NAMES: NAMES, normalize: normalize, describe: describe, requireAtLeast: requireAtLeast, can: can, verifiedEmail: verifiedEmail};
+  function isAdmin(identity) { return !!identity && identity.active === true && identity.role === 'ADMIN'; }
+
+  function isManager(identity) {
+    return !!identity && identity.active === true && (identity.role === 'ADMIN' || identity.role === 'MANAGER');
+  }
+
+  function activeAdministrators() {
+    return Database.read('MEMBERS').filter(function (member) {
+      return member.Active === true && normalize(member.Role) === 'ADMIN';
+    });
+  }
+
+  /** Validates and normalizes a stored role value without silently downgrading unknown text. */
+  function requireValidRole(value) {
+    if (value === '' || value === null || value === undefined) return '';
+    var role = String(value).trim().toUpperCase();
+    if (NAMES.indexOf(role) < 0) throw new Error('Role must be one of ' + NAMES.join(', '));
+    return role;
+  }
+
+  return {ORDER: ORDER, NAMES: NAMES, normalize: normalize, describe: describe, requireAtLeast: requireAtLeast,
+    can: can, verifiedEmail: verifiedEmail, isAdmin: isAdmin, isManager: isManager,
+    activeAdministrators: activeAdministrators, requireValidRole: requireValidRole};
 }());

@@ -209,6 +209,8 @@ function createGoogleMocks(options = {}) {
   const folders = new Map();
   const files = new Map();
   const actor = options.actor === undefined ? 'admin@example.test' : options.actor;
+  // Tests may switch the simulated signed-in account without rebuilding the workbook.
+  const identity = { current: actor };
   const lock = {
     held: false,
     tryLock() { if (options.lockAvailable === false || this.held) return false; this.held = true; return true; },
@@ -332,8 +334,8 @@ function createGoogleMocks(options = {}) {
     },
     LockService: { getScriptLock: () => lock, getDocumentLock: () => lock },
     Session: {
-      getActiveUser: () => ({ getEmail: () => actor }),
-      getEffectiveUser: () => ({ getEmail: () => options.effectiveActor || actor }),
+      getActiveUser: () => ({ getEmail: () => identity.current }),
+      getEffectiveUser: () => ({ getEmail: () => options.effectiveActor || identity.current }),
       getScriptTimeZone: () => 'Asia/Tokyo'
     },
     Utilities: {
@@ -414,7 +416,23 @@ function createGoogleMocks(options = {}) {
         return output;
       },
       createTemplateFromFile(name) {
-        const output = globals.HtmlService.createHtmlOutputFromFile(name);
+        // Resolve <?!= include('Partial') ?> scriptlets so tests see the real assembled page.
+        const read = templateName => {
+          const file = path.join(__dirname, '../../src', `${templateName}.html`);
+          if (!fs.existsSync(file)) throw new Error(`Unknown HTML template: ${templateName}`);
+          return fs.readFileSync(file, 'utf8').replace(/<\?!=\s*include\('([^']+)'\)\s*\?>/g, (match, partial) => read(partial));
+        };
+        const content = read(name);
+        let output = null;
+        output = {
+          getContent: () => content,
+          getTitle: () => output.title || '',
+          setTitle(value) { output.title = value; return output; },
+          setWidth() { return output; },
+          setHeight() { return output; },
+          setSandboxMode() { return output; },
+          append() { return output; }
+        };
         return { evaluate: () => output };
       }
     },
@@ -422,7 +440,9 @@ function createGoogleMocks(options = {}) {
     Logger: { log() {} }
   };
   return { globals, spreadsheet, book: spreadsheet, properties, sentEmails, calendars,
-    calendarEvents, backups, triggers, folders, files, spreadsheets, lock, addFolder, addCalendar, uiSidebars };
+    calendarEvents, backups, triggers, folders, files, spreadsheets, lock, addFolder, addCalendar, uiSidebars,
+    setActor(value) { identity.current = value; return identity.current; },
+    getActor() { return identity.current; } };
 }
 
 module.exports = { createGoogleMocks, MockSpreadsheet, MockSheet, MockRange };

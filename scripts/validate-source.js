@@ -34,18 +34,33 @@ files.forEach(name => {
 const htmlFiles = fs.readdirSync(sourceDir).filter(name => name.endsWith('.html'));
 if (!htmlFiles.length) throw new Error('No HTML templates found for the bound manager UI');
 const templates = new Set();
+const partials = new Set();
 files.forEach(name => {
   const source = fs.readFileSync(path.join(sourceDir, name), 'utf8');
   const pattern = /createHtmlOutputFromFile\(\s*'([^']+)'\s*\)/g;
   let match;
   while ((match = pattern.exec(source)) !== null) templates.add(match[1]);
 });
+htmlFiles.forEach(name => {
+  const content = fs.readFileSync(path.join(sourceDir, name), 'utf8');
+  const pattern = /include\(\s*'([^']+)'\s*\)/g;
+  let match;
+  while ((match = pattern.exec(content)) !== null) partials.add(match[1]);
+});
 templates.forEach(template => {
   if (!htmlFiles.includes(`${template}.html`)) throw new Error(`Missing HTML template: ${template}.html`);
 });
+partials.forEach(template => {
+  if (!htmlFiles.includes(`${template}.html`)) throw new Error(`Missing HTML include: ${template}.html`);
+});
 htmlFiles.forEach(name => {
   const content = fs.readFileSync(path.join(sourceDir, name), 'utf8');
-  if (!/<!DOCTYPE html>/i.test(content)) throw new Error(`${name}: HTML document expected`);
+  const isPartial = partials.has(name.replace(/\.html$/, ''));
+  if (!isPartial && !/<!DOCTYPE html>/i.test(content)) throw new Error(`${name}: HTML document expected`);
+  // Stored spreadsheet text is untrusted: templates must never build markup from data.
+  if (/\.(?:innerHTML|outerHTML)\s*=/.test(content) || /insertAdjacentHTML|document\.write/.test(content)) {
+    throw new Error(`${name}: unsafe HTML insertion is prohibited; use textContent/DOM creation`);
+  }
 });
 const claspIgnore = fs.readFileSync(path.join(root, '.claspignore'), 'utf8');
 if (!/\*\*\/\*\.html/.test(claspIgnore)) throw new Error('.claspignore must include HTML templates in the push payload');
