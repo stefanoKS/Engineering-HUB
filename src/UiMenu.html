@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    body { font-family: "Hiragino Sans", "Yu Gothic", sans-serif; font-size: 12px; margin: 8px; color: #202124; }
+    h2 { font-size: 14px; margin: 12px 0 6px; }
+    fieldset { border: 1px solid #dadce0; border-radius: 6px; margin: 0 0 10px; padding: 8px; }
+    legend { font-weight: 600; padding: 0 4px; }
+    label { display: block; margin: 6px 0 2px; }
+    input, select, textarea { width: 100%; box-sizing: border-box; padding: 4px; border: 1px solid #bdc1c6; border-radius: 4px; font-size: 12px; }
+    textarea { min-height: 44px; }
+    button { margin-top: 8px; padding: 6px 10px; border: 0; border-radius: 4px; background: #1a73e8; color: #fff; cursor: pointer; }
+    button.secondary { background: #5f6368; }
+    #status { margin-top: 10px; padding: 8px; border-radius: 4px; display: none; white-space: pre-wrap; }
+    #status.loading { display: block; background: #e8f0fe; }
+    #status.error { display: block; background: #fce8e6; color: #b3261e; }
+    #status.ok { display: block; background: #e6f4ea; color: #137333; }
+    .hint { color: #5f6368; font-size: 11px; margin-top: 2px; }
+    .row { display: flex; gap: 6px; }
+    .row > * { flex: 1; }
+    #actor { font-size: 11px; color: #5f6368; }
+  </style>
+</head>
+<body>
+  <div id="actor">読み込み中...</div>
+
+  <fieldset>
+    <legend>プロジェクト作成</legend>
+    <label>プロジェクト名 *</label><input id="projectName">
+    <label>責任者</label><select id="projectOwner"></select>
+    <label>確定期限</label><input id="projectDeadline" type="date">
+    <label>状態</label>
+    <select id="projectStatus">
+      <option value="Planned">計画中</option><option value="Active">進行中</option>
+      <option value="On Hold">保留</option>
+    </select>
+    <button onclick="createProject()">作成</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>サブプロジェクト作成</legend>
+    <label>プロジェクト *</label><select id="subProject"></select>
+    <label>サブプロジェクト名 *</label><input id="subName">
+    <label>担当者</label><select id="subOwner"></select>
+    <button onclick="createSubproject()">作成</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>タスク割当（期限のみでも可）</legend>
+    <label>プロジェクト *</label><select id="taskProject"></select>
+    <label>サブプロジェクト（任意）</label><select id="taskSubproject"></select>
+    <label>タスク名 *</label><input id="taskName">
+    <label>担当者 *</label><select id="taskOwner"></select>
+    <label>期限 *</label><input id="taskDeadline" type="date">
+    <label>開始日（任意）</label><input id="taskStart" type="date">
+    <label>見積時間（任意・未入力は未見積のまま）</label><input id="taskEstimate" type="number" min="0" step="0.5">
+    <label>完了条件</label><textarea id="taskAcceptance"></textarea>
+    <label>優先度</label>
+    <select id="taskPriority">
+      <option>Low</option><option selected>Medium</option><option>High</option><option>Critical</option>
+    </select>
+    <label><input id="taskNotify" type="checkbox" style="width:auto"> メール通知を有効にする（送信は自動化設定に従います）</label>
+    <label><input id="taskApprove" type="checkbox" style="width:auto"> 割当を承認する</label>
+    <label><input id="taskConfirm" type="checkbox" style="width:auto"> 日程を確定する（期限と見積が必要）</label>
+    <button onclick="assignTask()">登録して確認</button>
+    <div class="hint">メールはUIから直接送信されません。承認済みの通知のみ、権限を持つアカウントの自動処理が送信します。</div>
+  </fieldset>
+
+  <fieldset>
+    <legend>進捗更新</legend>
+    <label>タスク *</label><select id="progressTask"></select>
+    <label>進捗率 (0-100) *</label><input id="progressValue" type="number" min="0" max="100">
+    <label>次のアクション</label><input id="progressNext">
+    <button onclick="updateProgress()">更新</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>メンバー</legend>
+    <div id="memberList" class="hint">読み込み中...</div>
+    <label>メンバーID（更新時）</label><input id="memberId">
+    <label>氏名 *</label><input id="memberName">
+    <label>メール *</label><input id="memberEmail">
+    <label>役割</label>
+    <select id="memberRole">
+      <option value="MEMBER">MEMBER</option><option value="MANAGER">MANAGER</option>
+      <option value="ADMIN">ADMIN</option><option value="VIEWER">VIEWER</option>
+    </select>
+    <label>週容量（時間）</label><input id="memberCapacity" type="number" min="0" step="0.5">
+    <div class="row">
+      <button onclick="saveMember()">保存</button>
+      <button class="secondary" onclick="deactivateMember()">無効化</button>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>スキル</legend>
+    <div id="skillList" class="hint">読み込み中...</div>
+    <label>メンバー *</label><select id="skillMember"></select>
+    <label>スキル *</label><select id="skillName"></select>
+    <label>レベル (0-4) *</label><input id="skillLevel" type="number" min="0" max="4">
+    <label>評価者</label><select id="skillAssessor"></select>
+    <label>根拠・証跡</label><input id="skillEvidence">
+    <label>次回レビュー日</label><input id="skillReview" type="date">
+    <button onclick="setSkill()">評価を保存</button>
+  </fieldset>
+
+  <div id="status"></div>
+
+  <script>
+    var context = null;
+
+    function setStatus(kind, message) {
+      var node = document.getElementById('status');
+      node.className = kind;
+      node.textContent = message;
+    }
+
+    function call(fn, payload, onSuccess) {
+      setStatus('loading', '処理中...');
+      var runner = google.script.run
+        .withSuccessHandler(function (result) {
+          if (!result || result.ok !== true) {
+            setStatus('error', 'エラー: ' + ((result && result.error) || '不明なエラー'));
+            return;
+          }
+          setStatus('ok', '完了しました');
+          if (onSuccess) onSuccess(result.data);
+        })
+        .withFailureHandler(function (error) { setStatus('error', 'エラー: ' + error.message); });
+      if (payload === undefined) runner[fn](); else runner[fn](payload);
+    }
+
+    function fill(select, items, valueKey, labelKey, blankLabel) {
+      select.innerHTML = '';
+      if (blankLabel) {
+        var option = document.createElement('option');
+        option.value = '';
+        option.textContent = blankLabel;
+        select.appendChild(option);
+      }
+      items.forEach(function (item) {
+        var node = document.createElement('option');
+        node.value = item[valueKey];
+        node.textContent = item[labelKey];
+        select.appendChild(node);
+      });
+    }
+
+    function value(id) { return document.getElementById(id).value; }
+    function checked(id) { return document.getElementById(id).checked; }
+
+    function render(data) {
+      context = data;
+      document.getElementById('actor').textContent =
+        'ログイン: ' + data.actor.email + '（' + data.actor.role + '）';
+      var activeMembers = data.members.filter(function (member) { return member.active; });
+      fill(document.getElementById('projectOwner'), activeMembers, 'id', 'name', '未設定');
+      fill(document.getElementById('subProject'), data.projects, 'id', 'name', '');
+      fill(document.getElementById('subOwner'), activeMembers, 'id', 'name', '未設定');
+      fill(document.getElementById('taskProject'), data.projects, 'id', 'name', '');
+      fill(document.getElementById('taskOwner'), activeMembers, 'id', 'name', '');
+      fill(document.getElementById('progressTask'), data.tasks, 'id', 'name', '');
+      fill(document.getElementById('skillMember'), activeMembers, 'id', 'name', '');
+      fill(document.getElementById('skillName'), data.skills, 'id', 'name', '');
+      fill(document.getElementById('skillAssessor'), activeMembers, 'id', 'name', '未設定');
+      var memberList = data.members.map(function (member) {
+        return member.id + ': ' + member.name + '（' + member.role + (member.active ? '' : '・無効') + '）';
+      }).join('<br>');
+      document.getElementById('memberList').innerHTML = memberList || 'メンバー未登録';
+      document.getElementById('skillList').textContent =
+        data.skills.map(function (skill) { return skill.name; }).join(' / ') || 'スキル未登録';
+      refreshSubprojects();
+    }
+
+    function refreshSubprojects() {
+      if (!context) return;
+      var project = value('taskProject');
+      var items = context.subprojects.filter(function (sub) { return sub.projectId === project; });
+      fill(document.getElementById('taskSubproject'), items, 'id', 'name', 'なし（プロジェクト直下）');
+    }
+
+    function createProject() {
+      call('uiCreateProject', {
+        name: value('projectName'), ownerId: value('projectOwner'),
+        deadline: value('projectDeadline'), status: value('projectStatus')
+      }, function () { call('uiContext', undefined, render); });
+    }
+
+    function createSubproject() {
+      call('uiCreateSubproject', {
+        projectId: value('subProject'), name: value('subName'), ownerId: value('subOwner')
+      }, function () { call('uiContext', undefined, render); });
+    }
+
+    function assignTask() {
+      var payload = {
+        projectId: value('taskProject'), subprojectId: value('taskSubproject'),
+        taskName: value('taskName'), ownerId: value('taskOwner'),
+        deadline: value('taskDeadline'), plannedStart: value('taskStart'),
+        estimatedHours: value('taskEstimate'), acceptanceCriteria: value('taskAcceptance'),
+        priority: value('taskPriority'), notify: checked('taskNotify'),
+        approve: checked('taskApprove'), confirmSchedule: checked('taskConfirm')
+      };
+      if (payload.confirmSchedule && !window.confirm('日程を確定します。期限と見積が必須です。よろしいですか？')) return;
+      call('uiAssignTask', payload, function () { call('uiContext', undefined, render); });
+    }
+
+    function updateProgress() {
+      call('uiUpdateProgress', {
+        taskId: value('progressTask'), progress: value('progressValue'), nextAction: value('progressNext')
+      }, function () { call('uiContext', undefined, render); });
+    }
+
+    function saveMember() {
+      call('uiSaveMember', {
+        memberId: value('memberId'), name: value('memberName'), email: value('memberEmail'),
+        role: value('memberRole'), capacity: value('memberCapacity'), active: true
+      }, function () { call('uiContext', undefined, render); });
+    }
+
+    function deactivateMember() {
+      if (!window.confirm('メンバーを無効化します。未完了タスクがある場合は失敗します。よろしいですか？')) return;
+      call('uiDeactivateMember', {memberId: value('memberId')}, function () { call('uiContext', undefined, render); });
+    }
+
+    function setSkill() {
+      call('uiSetSkill', {
+        memberId: value('skillMember'), skillId: value('skillName'), level: value('skillLevel'),
+        assessedBy: value('skillAssessor'), evidence: value('skillEvidence'),
+        nextReviewDate: value('skillReview')
+      });
+    }
+
+    document.getElementById('taskProject').addEventListener('change', refreshSubprojects);
+    call('uiContext', undefined, render);
+  </script>
+</body>
+</html>

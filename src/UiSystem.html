@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    body { font-family: "Hiragino Sans", "Yu Gothic", sans-serif; font-size: 12px; margin: 8px; color: #202124; }
+    h2 { font-size: 14px; margin: 10px 0 6px; }
+    pre { background: #f8f9fa; padding: 8px; border-radius: 4px; white-space: pre-wrap; word-break: break-word; font-size: 11px; }
+    button { padding: 6px 10px; border: 0; border-radius: 4px; background: #1a73e8; color: #fff; cursor: pointer; }
+    #status { margin-top: 8px; color: #b3261e; }
+  </style>
+</head>
+<body>
+  <h2>システム状態</h2>
+  <button onclick="load()">再読み込み</button>
+  <div id="status"></div>
+  <pre id="output">読み込み中...</pre>
+  <script>
+    function load() {
+      document.getElementById('status').textContent = '';
+      google.script.run
+        .withSuccessHandler(function (result) {
+          if (!result || result.ok !== true) {
+            document.getElementById('status').textContent = 'エラー: ' + ((result && result.error) || '不明なエラー');
+            return;
+          }
+          var data = result.data;
+          var lines = [];
+          lines.push('環境: ' + data.health.environment);
+          lines.push('有効メールモード: ' + data.health.emailMode + ' (' + data.health.emailModeReason + ')');
+          lines.push('自動化設定の保存: ' + (data.health.automationConfigured ? 'あり' : '旧設定互換'));
+          lines.push('通知の有効化: ' + (data.health.notificationsActivated ? 'あり' : 'なし'));
+          lines.push('カレンダー: ' + (data.health.calendarEnabled ? '有効' : '無効'));
+          lines.push('データ検証: ' + (data.valid ? 'OK' : 'エラー ' + data.errorCount + '件'));
+          lines.push('トリガー: ' + data.triggers.installed.join(', '));
+          if (data.triggers.missing.length) lines.push('未導入トリガー: ' + data.triggers.missing.join(', '));
+          if (data.triggers.duplicates.length) lines.push('重複トリガー: ' + data.triggers.duplicates.length + '件');
+          lines.push('行数: ' + Object.keys(data.rowCounts).map(function (key) {
+            return key + '=' + data.rowCounts[key];
+          }).join(', '));
+          if (data.errors.length) {
+            lines.push('');
+            lines.push('検証エラー:');
+            data.errors.forEach(function (error) { lines.push('- ' + error); });
+          }
+          document.getElementById('output').textContent = lines.join('\n');
+        })
+        .withFailureHandler(function (error) {
+          document.getElementById('status').textContent = 'エラー: ' + error.message;
+        })
+        .uiSystemStatus();
+    }
+    load();
+  </script>
+</body>
+</html>

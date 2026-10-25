@@ -1,10 +1,17 @@
 var Tasks = (function () {
-  var assignmentFields = ['Owner_Member_ID', 'Project_ID', 'Subproject_ID', 'Planned_Start', 'Due_Date', 'Estimated_Hours', 'Task_Name', 'Dependency_IDs'];
+  // Material assignment details: changing any of these invalidates stale approval.
+  var assignmentFields = ['Owner_Member_ID', 'Project_ID', 'Subproject_ID', 'Planned_Start', 'Due_Date',
+    'Estimated_Hours', 'Task_Name', 'Dependency_IDs', 'Priority', 'Acceptance_Criteria',
+    'Required_Skill_ID', 'Required_Skill_Level'];
+  // Progress updates must not revoke approval; date/effort changes must revoke schedule confirmation.
+  var scheduleFields = ['Planned_Start', 'Due_Date', 'Estimated_Hours'];
+
   function dependencies(value) {
     if (!value) return [];
     var values = Array.isArray(value) ? value : String(value).split(',');
     return values.map(function (id) { return String(id).trim(); }).filter(function (id, i, all) { return id && all.indexOf(id) === i; });
   }
+
   function validateGraph(rows) {
     var map = Object.create(null), visited = Object.create(null), visiting = Object.create(null);
     rows.forEach(function (row) { map[row.Task_ID] = row; });
@@ -25,6 +32,7 @@ var Tasks = (function () {
     Object.keys(map).forEach(visit);
     return true;
   }
+
   function validate(row, before) {
     Domain.projectLink(row);
     Domain.dates(row);
@@ -52,27 +60,108 @@ var Tasks = (function () {
       row.Assignment_Version = before.Assignment_Version;
       row.Assignment_Approved_At = before.Assignment_Approved_At;
     }
+    if (before && scheduleFields.some(function (field) { return row[field] !== before[field]; })) {
+      ScheduleConfirmations.invalidate(before.Task_ID, 'SCHEDULE_CHANGED');
+    }
   }
+
+  /** Shared assignment validation: no date or effort fabrication is required to assign work. */
+  function requireAssignable(row) {
+    if (!row.Task_Name) Domain.fail('Assignment requires a task name');
+    Domain.projectLink(row);
+    if (!row.Owner_Member_ID) Domain.fail('Assignment approval requires an owner');
+    var owner = Domain.required('MEMBERS', row.Owner_Member_ID);
+    if (owner.Active !== true) Domain.fail('Assignment approval requires an active owner');
+    return row;
+  }
+
   function approvalPatch(before) {
     var row = Object.assign({}, before);
-    if (!row.Owner_Member_ID || !row.Planned_Start || !row.Due_Date || row.Estimated_Hours === '' || row.Estimated_Hours === undefined || row.Estimated_Hours === null) Domain.fail('Approval requires owner, dates and an estimate');
-    validate(row, before);
+    requireAssignable(row);
     var actor = AuditLog.actor();
     if (!actor) Domain.fail('Assignment approval requires a verified active account');
-    row.Assignment_Approved_At = Domain.now();
+    var approvedAt = new Date();
+    row.Assignment_Approved_At = approvedAt;
     if (typeof Notifications !== 'undefined' && Notifications.snapshot) row.Notification_Baseline = Notifications.snapshot(row);
-    var patch = {};
-    ['Assignment_Approved_At', 'Notification_Baseline'].forEach(function (field) {
-      if (row[field] !== before[field]) patch[field] = row[field];
-    });
-    return patch;
+    return {Assignment_Approved_At: approvedAt, Notification_Baseline: row.Notification_Baseline};
   }
+
+  function confirmSchedule(taskId, actorEmail, confirmation) {
+    if (confirmation !== 'CONFIRM SCHEDULE') throw new Error('Explicit schedule confirmation required');
+    var actor = AuditLog.actor();
+    var requested = String(actorEmail || '').trim().toLowerCase();
+    if (!actor || (requested && requested !== actor)) throw new Error('Schedule confirmation requires a verified account');
+    return Database.withLock(function () {
+      var task = Database.find('TASKS', taskId);
+      if (!task) Domain.fail('Unknown task');
+      requireAssignable(task);
+      if (!task.Due_Date) Domain.fail('Schedule confirmation requires a deadline');
+      if (!Estimates.known(task.Estimated_Hours)) Domain.fail('Schedule confirmation requires a known effort estimate');
+      return ScheduleConfirmations.confirm(task, actor, 'manual confirmation');
+    });
+  }
+
+  function list(filter) {
+    filter = filter || {};
+    var projects = Object.create(null), subprojects = Object.create(null);
+    Database.read('PROJECTS').forEach(function (project) { projects[project.Project_ID] = project; });
+    Database.read('SUBPROJECTS').forEach(function (subproject) { subprojects[subproject.Subproject_ID] = subproject; });
+    var query = String(filter.query || '').toLowerCase();
+    var statuses = filter.status ? (Array.isArray(filter.status) ? filter.status : [filter.status]) : null;
+    return Database.read('TASKS').filter(function (task) {
+      if (filter.projectId && task.Project_ID !== filter.projectId) return false;
+      if (filter.subprojectId !== undefined && String(task.Subproject_ID || '') !== String(filter.subprojectId || '')) return false;
+      if (filter.ownerId && task.Owner_Member_ID !== filter.ownerId) return false;
+      if (statuses && statuses.indexOf(task.Status) < 0) return false;
+      if (filter.activeOnly && !Eligibility.taskInActiveWork(task, projects, subprojects)) return false;
+      if (filter.overdueOn && !(task.Due_Date && task.Due_Date < Domain.date(filter.overdueOn) && task.Status !== 'Done' && task.Status !== 'Cancelled')) return false;
+      if (query) {
+        var haystack = [task.Task_ID, task.Task_Name, task.Description, task.Acceptance_Criteria].join(' ').toLowerCase();
+        if (haystack.indexOf(query) < 0) return false;
+      }
+      return true;
+    });
+  }
+
+  function create(data) {
+    return Domain.save('TASKS', null, Object.assign({ Status: 'Not Started', Progress_Percent: 0 }, data), validate, null, function (row) {
+      Projects.touch(row.Project_ID);
+    });
+  }
+
+  function update(id, patch) {
+    return Domain.save('TASKS', id, patch, validate, null, function (row, before) {
+      if (before && before.Project_ID !== row.Project_ID) Projects.touch(before.Project_ID);
+      Projects.touch(row.Project_ID);
+    });
+  }
+
+  function reassign(id, ownerId) { return update(id, { Owner_Member_ID: ownerId }); }
+
+  function complete(id) { return update(id, { Status: 'Done', Progress_Percent: 100 }); }
+
+  function recordBlocker(id, note) {
+    return update(id, { Status: 'Blocked', Next_Action: note || 'ブロッカー対応' });
+  }
+
   return {
-    create: function (data) { return Domain.save('TASKS', null, Object.assign({ Status: 'Not Started', Progress_Percent: 0 }, data), validate); },
-    update: function (id, patch) { return Domain.save('TASKS', id, patch, validate); },
-    approvalPatch: approvalPatch, dependencies: dependencies, validateGraph: validateGraph
+    create: create,
+    update: update,
+    approvalPatch: approvalPatch,
+    confirmSchedule: confirmSchedule,
+    dependencies: dependencies,
+    validateGraph: validateGraph,
+    list: list,
+    reassign: reassign,
+    complete: complete,
+    recordBlocker: recordBlocker
   };
 })();
 function createTask(data) { return Tasks.create(data); }
 function updateTask(id, patch) { return Tasks.update(id, patch); }
 function approveTaskAssignment(id, actorEmail, confirmation) { return Notifications.approveAssignment(id, actorEmail, confirmation); }
+function confirmTaskSchedule(id, actorEmail, confirmation) { return Tasks.confirmSchedule(id, actorEmail, confirmation); }
+function reassignTask(id, ownerMemberId) { return Tasks.reassign(id, ownerMemberId); }
+function completeTask(id) { return Tasks.complete(id); }
+function recordTaskBlocker(id, note) { return Tasks.recordBlocker(id, note); }
+function listTasks(filter) { return Tasks.list(filter); }

@@ -1,6 +1,8 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 
 function chainBuilder() {
   return new Proxy({}, {
@@ -202,7 +204,7 @@ function createGoogleMocks(options = {}) {
   };
   const spreadsheet = options.spreadsheet || options.book || new MockSpreadsheet(options.spreadsheetId || 'test-db', options.sheets);
   const spreadsheets = new Map([[spreadsheet.getId(), spreadsheet]]);
-  const sentEmails = [], backups = [], triggers = [], calendarEvents = [];
+  const sentEmails = [], backups = [], triggers = [], calendarEvents = [], uiSidebars = [];
   const calendars = new Map();
   const folders = new Map();
   const files = new Map();
@@ -316,6 +318,9 @@ function createGoogleMocks(options = {}) {
       WrapStrategy: { WRAP: 'WRAP' },
       getUi: () => ({
         createMenu: () => chainBuilder(),
+        showSidebar: output => { uiSidebars.push(output); return output; },
+        showModalDialog: output => { uiSidebars.push(output); return output; },
+        toast: () => {},
         alert: () => 'YES', Button: { YES: 'YES', NO: 'NO' },
         ButtonSet: { YES_NO: 'YES_NO', OK: 'OK' }
       })
@@ -372,6 +377,7 @@ function createGoogleMocks(options = {}) {
         const builder = {
           timeBased() { return this; },
           everyDays(value) { details.everyDays = value; return this; },
+          everyWeeks(value) { details.everyWeeks = value; return this; },
           everyHours(value) { details.everyHours = value; return this; },
           atHour(value) { details.hour = value; return this; },
           nearMinute(value) { details.minute = value; return this; },
@@ -384,13 +390,39 @@ function createGoogleMocks(options = {}) {
         };
         return builder;
       },
-      WeekDay: { MONDAY: 'MONDAY', TUESDAY: 'TUESDAY', FRIDAY: 'FRIDAY' }
+      WeekDay: { SUNDAY: 'SUNDAY', MONDAY: 'MONDAY', TUESDAY: 'TUESDAY', WEDNESDAY: 'WEDNESDAY',
+        THURSDAY: 'THURSDAY', FRIDAY: 'FRIDAY', SATURDAY: 'SATURDAY' }
+    },
+    HtmlService: {
+      createHtmlOutputFromFile(name) {
+        const file = path.join(__dirname, '../../src', `${name}.html`);
+        if (!fs.existsSync(file)) throw new Error(`Unknown HTML template: ${name}`);
+        const content = fs.readFileSync(file, 'utf8');
+        const output = {
+          getContent: () => content,
+          getTitle: () => output.title || '',
+          setTitle(value) { output.title = value; return output; },
+          setWidth() { return output; },
+          setHeight() { return output; },
+          setSandboxMode() { return output; },
+          append() { return output; }
+        };
+        return output;
+      },
+      createHtmlOutput(content) {
+        const output = { getContent: () => content, setTitle() { return output; }, setWidth() { return output; }, setHeight() { return output; } };
+        return output;
+      },
+      createTemplateFromFile(name) {
+        const output = globals.HtmlService.createHtmlOutputFromFile(name);
+        return { evaluate: () => output };
+      }
     },
     Charts: { ChartType: { COLUMN: 'COLUMN', BAR: 'BAR', PIE: 'PIE', LINE: 'LINE' } },
     Logger: { log() {} }
   };
   return { globals, spreadsheet, book: spreadsheet, properties, sentEmails, calendars,
-    calendarEvents, backups, triggers, folders, files, spreadsheets, lock, addFolder, addCalendar };
+    calendarEvents, backups, triggers, folders, files, spreadsheets, lock, addFolder, addCalendar, uiSidebars };
 }
 
 module.exports = { createGoogleMocks, MockSpreadsheet, MockSheet, MockRange };

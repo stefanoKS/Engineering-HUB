@@ -1,11 +1,23 @@
 /** Opt-in sync uses stored event IDs plus a private ownership marker. */
 var CalendarSync = (function () {
   function enabled(value) { return value === true || String(value).toLowerCase() === 'true'; }
+
+  /** Most restrictive resolution: the legacy master switch AND the persisted toggle. */
+  function enabledBySettings() {
+    if (!enabled(Config.get().calendarEnabled)) return false;
+    if (!AutomationSettings.configured()) return true;
+    return AutomationSettings.get().CALENDAR_SYNC_ENABLED === true;
+  }
+
   function sync() {
     Config.require('SPREADSHEET_ID');
     Config.require('ENVIRONMENT');
     var config = Config.get();
-    if (!enabled(config.calendarEnabled)) return {created: 0, updated: 0, skipped: 0, disabled: true};
+    if (!enabledBySettings()) {
+      AutomationSettings.setStatus('CALENDAR_LAST_SYNC_AT', Domain.now());
+      AutomationSettings.setStatus('CALENDAR_LAST_SYNC_STATUS', 'SKIPPED_DISABLED');
+      return {created: 0, updated: 0, skipped: 0, disabled: true};
+    }
     var calendarId = Config.require('CALENDAR_ID');
     if (calendarId === 'primary' || String(calendarId).indexOf('@group.calendar.google.com') === -1) {
       throw new Error('A dedicated secondary calendar is required');
@@ -53,8 +65,11 @@ var CalendarSync = (function () {
           result.updated++;
         }
       });
+      AutomationSettings.setStatus('CALENDAR_LAST_SYNC_AT', Domain.now());
+      AutomationSettings.setStatus('CALENDAR_LAST_SYNC_STATUS',
+        'OK created=' + result.created + ' updated=' + result.updated + ' skipped=' + result.skipped);
       return result;
     });
   }
-  return {sync: sync};
+  return {sync: sync, enabledBySettings: enabledBySettings};
 })();

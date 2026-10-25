@@ -21,6 +21,35 @@ const sources = files.map(name => {
   return source;
 });
 new vm.Script(sources.join('\n;\n'), { filename: 'combined-app.gs' });
+
+// Mail authorization must stay centralized: only the notification service may send.
+files.forEach(name => {
+  const source = fs.readFileSync(path.join(sourceDir, name), 'utf8');
+  if (name !== 'Notifications.gs' && /MailApp\s*\.\s*sendEmail\s*\(/.test(source)) {
+    throw new Error(`${name}: MailApp.sendEmail is only allowed in Notifications.gs`);
+  }
+});
+
+// HTML templates must exist and be referenced, and clasp must package them.
+const htmlFiles = fs.readdirSync(sourceDir).filter(name => name.endsWith('.html'));
+if (!htmlFiles.length) throw new Error('No HTML templates found for the bound manager UI');
+const templates = new Set();
+files.forEach(name => {
+  const source = fs.readFileSync(path.join(sourceDir, name), 'utf8');
+  const pattern = /createHtmlOutputFromFile\(\s*'([^']+)'\s*\)/g;
+  let match;
+  while ((match = pattern.exec(source)) !== null) templates.add(match[1]);
+});
+templates.forEach(template => {
+  if (!htmlFiles.includes(`${template}.html`)) throw new Error(`Missing HTML template: ${template}.html`);
+});
+htmlFiles.forEach(name => {
+  const content = fs.readFileSync(path.join(sourceDir, name), 'utf8');
+  if (!/<!DOCTYPE html>/i.test(content)) throw new Error(`${name}: HTML document expected`);
+});
+const claspIgnore = fs.readFileSync(path.join(root, '.claspignore'), 'utf8');
+if (!/\*\*\/\*\.html/.test(claspIgnore)) throw new Error('.claspignore must include HTML templates in the push payload');
+
 const manifest = JSON.parse(fs.readFileSync(path.join(sourceDir, 'appsscript.json'), 'utf8'));
 if (manifest.runtimeVersion !== 'V8') throw new Error('Apps Script V8 runtime is required');
 if (manifest.timeZone !== 'Asia/Tokyo') throw new Error('Manifest timezone must be Asia/Tokyo');
