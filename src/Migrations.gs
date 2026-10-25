@@ -1,5 +1,8 @@
 var Migrations = (function () {
-  var registry = [{ id: '002_task_assignment_safety', from: 1, to: 2 }];
+  var registry = [
+    { id: '002_task_assignment_safety', from: 1, to: 2 },
+    { id: '003_management_reliability', from: 2, to: 3 }
+  ];
   function currentVersion() {
     var sheet = Database.book().getSheetByName('SCHEMA_MIGRATIONS');
     if (!sheet) return 0;
@@ -87,6 +90,8 @@ var Migrations = (function () {
           addSchema();
           verifyPreserved(before);
           assertSchema();
+          // Safe automation defaults are seeded once. Live mail is never enabled by a migration.
+          if (m.id === '003_management_reliability') AutomationSettings.seedDefaults();
           Database.insert('SCHEMA_MIGRATIONS', { Migration_ID: m.id, Applied_At: new Date().toISOString(),
             Previous_Version: version, New_Version: m.to, Result: 'SUCCESS', Backup_Reference: reference });
           version = m.to;
@@ -124,7 +129,8 @@ function initializeNewDatabase(confirmation) {
     Migrations.addSchema();
     Database.insert('SETTINGS', { Setting_ID: 'DATABASE_ENVIRONMENT', Name: config.environment,
       Description: 'Environment binding. Do not edit or copy between development and production.' });
-    Database.insert('SCHEMA_MIGRATIONS', { Migration_ID: 'INITIALIZE_V2', Applied_At: new Date().toISOString(),
+    AutomationSettings.seedDefaults();
+    Database.insert('SCHEMA_MIGRATIONS', { Migration_ID: 'INITIALIZE_V' + Schema.version, Applied_At: new Date().toISOString(),
       Previous_Version: 0, New_Version: Schema.version, Result: 'SUCCESS', Backup_Reference: 'NEW_EMPTY_DATABASE' });
     PropertiesService.getScriptProperties().deleteProperty('INITIALIZATION_SPREADSHEET_ID');
     return Schema.version;

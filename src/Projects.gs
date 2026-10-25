@@ -37,7 +37,7 @@ var Domain = (function () {
       if (!row.Project_ID || sub.Project_ID !== row.Project_ID) fail('Subproject must belong to the selected project');
     }
   }
-  function save(table, id, data, validate, action) {
+  function save(table, id, data, validate, action, after) {
     return Database.withLock(function () {
       var before = id ? required(table, id) : null;
       var row = Object.assign({}, before || {}, data);
@@ -49,6 +49,7 @@ var Domain = (function () {
       });
       var result = id ? Database.update(table, id, changed) : Database.insert(table, row);
       AuditLog.record(table, result[Schema.tables[table].id], action || (id ? 'UPDATE' : 'CREATE'), before, result, 'SUCCESS');
+      if (after) after(result, before);
       return result;
     });
   }
@@ -62,23 +63,57 @@ var Projects = (function () {
   function validate(row) {
     Domain.dates(row);
     if (row.Project_Owner_ID) Domain.required('MEMBERS', row.Project_Owner_ID);
+    if (row.Archived_At && row.Status !== 'Archived') Domain.fail('Archived_At is only valid for archived projects');
   }
+
+  /** Application-managed "last meaningful update"; dashboard refreshes never call this. */
+  function touch(projectId) {
+    if (!projectId) return null;
+    var project = Database.find('PROJECTS', projectId);
+    if (!project) return null;
+    if (project.Status === 'Archived') return project;
+    return Database.update('PROJECTS', projectId, {Last_Updated: Domain.now()});
+  }
+
+  function list(filter) {
+    filter = filter || {};
+    var statuses = filter.status ? (Array.isArray(filter.status) ? filter.status : [filter.status]) : null;
+    var query = String(filter.query || '').toLowerCase();
+    return Database.read('PROJECTS').filter(function (project) {
+      if (statuses && statuses.indexOf(project.Status) < 0) return false;
+      if (filter.ownerId && project.Project_Owner_ID !== filter.ownerId) return false;
+      if (filter.activeOnly && !Eligibility.projectContributesWorkload(project)) return false;
+      if (query) {
+        var haystack = [project.Project_ID, project.Project_Name, project.Description, project.Category].join(' ').toLowerCase();
+        if (haystack.indexOf(query) < 0) return false;
+      }
+      return true;
+    });
+  }
+
   return {
     create: function (data) {
       var row = Object.assign({ Status: 'Planned' }, data);
       if (row.Original_Deadline) Domain.fail('Original deadline is set by project creation');
       row.Original_Deadline = row.Committed_Deadline || '';
+      row.Last_Updated = Domain.now();
       return Domain.save('PROJECTS', null, row, validate);
     },
     update: function (id, patch) {
-      return Domain.save('PROJECTS', id, patch, function (row, before) {
+      var data = Object.assign({}, patch, {Last_Updated: Domain.now()});
+      return Domain.save('PROJECTS', id, data, function (row, before) {
         if (row.Original_Deadline !== before.Original_Deadline) Domain.fail('Original deadline is immutable');
         validate(row);
       });
     },
-    archive: function (id) { return Domain.save('PROJECTS', id, { Status: 'Archived', Archived_At: Domain.now() }, validate, 'ARCHIVE'); }
+    archive: function (id) {
+      return Domain.save('PROJECTS', id, {Status: 'Archived', Archived_At: Domain.now(), Last_Updated: Domain.now()}, validate, 'ARCHIVE');
+    },
+    touch: touch,
+    list: list
   };
 })();
 function createProject(data) { return Projects.create(data); }
 function updateProject(id, patch) { return Projects.update(id, patch); }
 function archiveProject(id) { return Projects.archive(id); }
+function listProjects(filter) { return Projects.list(filter); }
