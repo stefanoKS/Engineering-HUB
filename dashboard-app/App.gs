@@ -1,16 +1,18 @@
 /**
- * Shared employee dashboard — web application entry point (READ ONLY).
+ * Shared employee dashboard — web application entry point.
  *
  * This is a *separate* Apps Script project from the manager application. It has no
  * access to the private management workbook: it reads only the sanitized snapshot
  * spreadsheet named by SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID.
  *
- * There is no create/update/delete API here, no mail sending, no Calendar access and no
- * trigger installation. The functions at the bottom of this file are the complete
- * client-callable server surface.
+ * V1.3 adds one narrowly scoped write capability: appending a validated request row to the
+ * separate request inbox named by REQUEST_INBOX_SPREADSHEET_ID (see RequestService.gs).
+ * There is still no update or delete path, no mail sending, no Calendar access and no
+ * trigger installation. The functions at the bottom of the files in this project are the
+ * complete client-callable server surface.
  */
 var DashboardApp = (function () {
-  var TITLE = 'Engineering HUB — 案件進捗';
+  var TITLE = '設計・開発課 管理';
   var DEFAULT_STALE_HOURS = 24;
   var MAX_QUERY_LENGTH = 80;
 

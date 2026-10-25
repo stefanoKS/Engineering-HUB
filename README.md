@@ -175,3 +175,37 @@ For reverse planning, populate `PHASE_TEMPLATES` and `HOLIDAYS`, then call `reve
 6. Activate notifications and scheduled work only after the production checks in [Deployment](DEPLOYMENT.md).
 
 See [AGENTS.md](AGENTS.md) for mandatory contributor safety rules and [CHANGELOG.md](CHANGELOG.md) for release notes.
+
+## V1.3 — deadline + duration planning, worker requests and Japanese/English UI
+
+V1.3 keeps the V1.2 architecture and adds five things:
+
+1. **Branding**: every user-visible name is exactly `設計・開発課 管理` (browser title, dashboard
+   heading, Sheets menu, settings and system screens). Internal identifiers are unchanged.
+2. **Deadline + duration planning**: the manager enters a deadline, a required duration, the
+   unit (days/weeks) and the basis (working days/calendar days). The planned start is
+   calculated; the start date is no longer a primary input. The range is inclusive of the
+   deadline, holidays are respected and the committed deadline is never changed silently.
+   Duration is **not** labour hours. See [Task duration policy](docs/TASK_DURATION_POLICY.md).
+3. **Worker requests**: any viewer of the internal dashboard may request a deadline change
+   (earlier or later) or report completion for **any published task**. Submissions are
+   validated and appended to a separate request inbox spreadsheet; the private workbook is
+   never reachable from the dashboard. See
+   [Deadline request workflow](docs/DEADLINE_REQUEST_WORKFLOW.md) and
+   [Request inbox deployment](docs/REQUEST_INBOX_DEPLOYMENT.md).
+4. **Manager approval**: the sidebar queue **申請一覧 / 承認待ち** imports, approves, rejects or
+   returns requests. Only an approval changes `Due_Date`; every change is recorded in
+   `TASK_DEADLINE_HISTORY` and audited. A request submitted before a newer change becomes
+   `STALE` and cannot overwrite it.
+5. **Japanese/English UI**: Japanese is the default, `日本語 | English` switches every static
+   label immediately, and stored spreadsheet text is never translated. See
+   [UI localization](docs/UI_LOCALIZATION.md).
+
+What V1.3 deliberately does **not** do: no login or password system, no workload-overlap
+validation, no duration-based capacity limits, no automatic reassignment and no blocking of
+overlapping assignments. The manager decides whether a schedule is feasible.
+
+Schema **5** adds `005_task_planning_and_requests`: the TASKS planning fields plus the
+`TASK_REQUESTS` and `TASK_DEADLINE_HISTORY` tables. The migration is additive and requires
+explicit approval; existing rows, dates, formulas and custom columns are preserved.
+

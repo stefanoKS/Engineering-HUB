@@ -2,7 +2,8 @@ var Migrations = (function () {
   var registry = [
     { id: '002_task_assignment_safety', from: 1, to: 2 },
     { id: '003_management_reliability', from: 2, to: 3 },
-    { id: '004_shared_dashboard', from: 3, to: 4 }
+    { id: '004_shared_dashboard', from: 3, to: 4 },
+    { id: '005_task_planning_and_requests', from: 4, to: 5 }
   ];
   function currentVersion() {
     var sheet = Database.book().getSheetByName('SCHEMA_MIGRATIONS');

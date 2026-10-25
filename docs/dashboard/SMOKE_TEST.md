@@ -72,3 +72,21 @@ Environment: `DEVELOPMENT` only. Never run this against production data.
 Completing this checklist updates [../PRODUCTION_READINESS.md](../PRODUCTION_READINESS.md)
 evidence only when the recorded results and screenshots are attached. Passing local tests
 never changes the release status.
+
+## V1.3 smoke test
+
+1. Open the dashboard in a company account: the title and heading read `設計・開発課 管理`.
+2. Switch to English and back: every label changes, the open project stays open and project
+   and task names remain exactly as stored.
+3. Open a published task and submit a deadline change with a different date and a reason.
+   A request ID is shown; the deadline on the dashboard does not change.
+4. Submit a completion report for another task.
+5. In the manager application open **申請一覧**, import, and approve the deadline change.
+   Confirm the task deadline changed once, the planned start recalculated and the deadline
+   history contains one row.
+6. Reject the completion report and confirm the task stays open.
+7. Re-open the dashboard after the next publication: the approved deadline is visible and a
+   pending request shows only the `納期変更申請中` badge.
+8. Record the result in `docs/checkgates/V1_3_GATE_7.md`. Nothing here is verified until it
+   has actually been run.
+

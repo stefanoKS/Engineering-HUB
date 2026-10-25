@@ -239,7 +239,7 @@ test('publication settings stay independent of the mail mode and from the snapsh
   assert.equal(app.triggers.length, 0, 'publication installs no trigger by itself');
 
   const snapshot = app.spreadsheets.get(SNAPSHOT_ID);
-  assert.equal(metaValue(snapshot, 'CONTRACT_VERSION'), '1.2');
+  assert.equal(metaValue(snapshot, 'CONTRACT_VERSION'), '1.3');
   assert.equal(metaValue(snapshot, 'RESULT'), 'SUCCESS');
   assert.equal(metaValue(snapshot, 'AS_OF').length, 10);
 });

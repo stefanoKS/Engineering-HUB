@@ -80,3 +80,16 @@ reader never sees a half-written projection.
 - [Visual specification](VISUAL_SPEC.md)
 - [Manager application architecture](../../ARCHITECTURE.md)
 - [Security model](../SECURITY_MODEL.md)
+
+## V1.3 additions
+
+* The project gains a single, narrowly scoped write path in `RequestService.gs`: a validated
+  request row appended to the separate request inbox workbook. Nothing else in the dashboard
+  may write, and the snapshot stays read-only.
+* `DashboardData.requestTarget(taskId)` resolves a published task (project, deadline, opaque
+  revision) so a request can be validated without trusting the browser.
+* The published contract becomes `1.3`: `PUBLISHED_TASKS` gains `revision` and
+  `pendingRequest`. No request text is published.
+* `I18n.html` is a generated copy of `shared/i18n.js`; the client renders Japanese or
+  English labels and never translates stored text.
+

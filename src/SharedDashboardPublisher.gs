@@ -19,7 +19,7 @@
  *   duplicates tasks.
  */
 var SharedDashboardPublisher = (function () {
-  var PUBLISHER_VERSION = '1.2.0';
+  var PUBLISHER_VERSION = '1.3.0';
   var CONTRACT_VERSION = SharedDashboardModel.CONTRACT_VERSION;
   var DESTINATION_PROPERTY = 'SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID';
   var META_SHEET = 'PUBLISHED_META';
@@ -224,8 +224,18 @@ var SharedDashboardPublisher = (function () {
       milestones: Database.read('MILESTONES'),
       members: Database.read('MEMBERS'),
       issues: Database.read('ISSUES'),
-      limits: Health.thresholds()
+      limits: Health.thresholds(),
+      pendingRequests: pendingRequests()
     };
+  }
+
+  /** A boolean pending-request indicator only; request text never leaves the workbook. */
+  function pendingRequests() {
+    try {
+      return Requests.pendingByTask();
+    } catch (error) {
+      return Object.create(null);
+    }
   }
 
   /** Manager or administrator, verified server-side. Scheduled runs use the trigger owner. */

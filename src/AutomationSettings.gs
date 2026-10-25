@@ -44,6 +44,11 @@ var AutomationSettings = (function () {
     // V1.2 shared dashboard publication. OFF until a manager reviews the snapshot.
     SHARED_DASHBOARD_PUBLISH_ENABLED: false,
     SHARED_DASHBOARD_PUBLISH_INTERVAL_MINUTES: 30,
+    // V1.3 worker requests. Every request notification defaults to OFF and still obeys
+    // the master OFF / PREVIEW / LIVE mode, the emergency stop and the per-run cap.
+    DEADLINE_REQUEST_EMAIL_ENABLED: false,
+    COMPLETION_REPORT_EMAIL_ENABLED: false,
+    PENDING_REQUEST_REMINDER_ENABLED: false,
     LAST_DASHBOARD_REFRESH_AT: '',
     LAST_WORKLOAD_REFRESH_AT: '',
     LAST_BACKUP_TIME: '',
@@ -55,14 +60,16 @@ var AutomationSettings = (function () {
     LAST_SHARED_DASHBOARD_PUBLISH_RESULT: '',
     LAST_SHARED_DASHBOARD_PUBLISH_VERSION: '',
     LAST_SHARED_DASHBOARD_PUBLISH_ERROR: '',
-    SHARED_DASHBOARD_PUBLISH_APPROVED_BY: ''
+    SHARED_DASHBOARD_PUBLISH_APPROVED_BY: '',
+    LAST_REQUEST_IMPORT_AT: '',
+    LAST_PENDING_REQUEST_REMINDER_AT: ''
   };
 
   var STATUS_KEYS = ['LAST_DASHBOARD_REFRESH_AT', 'LAST_WORKLOAD_REFRESH_AT', 'LAST_BACKUP_TIME',
     'LAST_BACKUP_RESULT', 'CALENDAR_LAST_SYNC_AT', 'CALENDAR_LAST_SYNC_STATUS', 'LAST_WEEKLY_REPORT_AT',
     'LAST_SHARED_DASHBOARD_PUBLISH_AT', 'LAST_SHARED_DASHBOARD_PUBLISH_RESULT',
     'LAST_SHARED_DASHBOARD_PUBLISH_VERSION', 'LAST_SHARED_DASHBOARD_PUBLISH_ERROR',
-    'SHARED_DASHBOARD_PUBLISH_APPROVED_BY'];
+    'SHARED_DASHBOARD_PUBLISH_APPROVED_BY', 'LAST_REQUEST_IMPORT_AT', 'LAST_PENDING_REQUEST_REMINDER_AT'];
 
   var DESCRIPTIONS = {
     EMAIL_MODE: 'Outgoing mail mode: OFF / PREVIEW / LIVE.',
@@ -96,7 +103,12 @@ var AutomationSettings = (function () {
     LAST_SHARED_DASHBOARD_PUBLISH_RESULT: 'Result of the last shared dashboard publication attempt.',
     LAST_SHARED_DASHBOARD_PUBLISH_VERSION: 'Snapshot version currently published.',
     LAST_SHARED_DASHBOARD_PUBLISH_ERROR: 'Last publication failure, truncated.',
-    SHARED_DASHBOARD_PUBLISH_APPROVED_BY: 'Verified account that last enabled publication.'
+    SHARED_DASHBOARD_PUBLISH_APPROVED_BY: 'Verified account that last enabled publication.',
+    DEADLINE_REQUEST_EMAIL_ENABLED: 'Notify managers when a deadline change request is imported.',
+    COMPLETION_REPORT_EMAIL_ENABLED: 'Notify managers when a completion report is imported.',
+    PENDING_REQUEST_REMINDER_ENABLED: 'Send a bounded reminder about requests still pending approval.',
+    LAST_REQUEST_IMPORT_AT: 'Last request inbox import (Asia/Tokyo).',
+    LAST_PENDING_REQUEST_REMINDER_AT: 'Last pending-request reminder (Asia/Tokyo).'
   };
 
   function clone(value) { return JSON.parse(JSON.stringify(value)); }
@@ -353,7 +365,10 @@ var AutomationSettings = (function () {
       DEADLINE: isConfigured ? values.DEADLINE_REMINDER_ENABLED === true : legacyToggles,
       OVERDUE: isConfigured ? values.OVERDUE_REMINDER_ENABLED === true : legacyToggles,
       OVERDUE_SUMMARY: isConfigured ? values.OVERDUE_REMINDER_ENABLED === true : legacyToggles,
-      WEEKLY_REPORT: isConfigured ? values.WEEKLY_MANAGER_REPORT_ENABLED === true : false
+      WEEKLY_REPORT: isConfigured ? values.WEEKLY_MANAGER_REPORT_ENABLED === true : false,
+      DEADLINE_REQUEST: isConfigured ? values.DEADLINE_REQUEST_EMAIL_ENABLED === true : false,
+      COMPLETION_REPORT: isConfigured ? values.COMPLETION_REPORT_EMAIL_ENABLED === true : false,
+      PENDING_REQUEST_REMINDER: isConfigured ? values.PENDING_REQUEST_REMINDER_ENABLED === true : false
     };
     var mode, reason = '';
     if (isConfigured && values.EMERGENCY_STOP === true) {

@@ -9,36 +9,46 @@
     pre { background: #f8f9fa; padding: 8px; border-radius: 4px; white-space: pre-wrap; word-break: break-word; font-size: 11px; }
     button { padding: 6px 10px; border: 0; border-radius: 4px; background: #1a73e8; color: #fff; cursor: pointer; }
     #status { margin-top: 8px; color: #b3261e; }
+    .lang-switch { display: flex; align-items: center; gap: 4px; justify-content: flex-end; margin-bottom: 6px; font-size: 11px; }
+    .lang-label { color: #5f6368; }
+    .lang-option { margin: 0; padding: 2px 6px; background: #f1f3f4; color: #202124; border-radius: 4px; }
+    .lang-option.is-active { background: #1a73e8; color: #fff; }
+    .lang-sep { color: #bdc1c6; }
   </style>
 </head>
 <body>
-  <h2>システム状態</h2>
-  <button onclick="load()">再読み込み</button>
-  <div id="status"></div>
-  <pre id="output">読み込み中...</pre>
+  <?!= include('I18n') ?>
   <?!= include('UiSafe') ?>
+  <?!= include('UiLang') ?>
+
+  <h2 data-i18n="manager.menu.system">システム状態</h2>
+  <button onclick="load()" data-i18n="common.retry">再読み込み</button>
+  <div id="status"></div>
+  <pre id="output" data-i18n="manager.loading">読み込み中...</pre>
+
   <script>
+    function T(key, vars) { return EHLang.t(key, vars); }
     function setStatus(message) { document.getElementById('status').textContent = message; }
 
     function render(data) {
       var lines = [];
-      lines.push('環境: ' + data.health.environment);
-      lines.push('有効メールモード: ' + data.health.emailMode + ' (' + data.health.emailModeReason + ')');
-      lines.push('自動化設定の保存: ' + (data.health.automationConfigured ? 'あり' : '未保存'));
-      lines.push('通知の有効化: ' + (data.health.notificationsActivated ? 'あり' : 'なし'));
-      lines.push('カレンダー: ' + (data.health.calendarEnabled ? '有効' : '無効'));
-      lines.push('データ検証: ' + (data.valid ? 'OK' : 'エラー ' + data.errorCount + '件'));
-      lines.push('トリガー: ' + data.triggers.installed.join(', '));
-      lines.push('トリガー設定の一致: ' + (data.triggers.scheduleMatches ? '一致' : '再インストールが必要'));
-      if (data.triggers.missing.length) lines.push('未導入トリガー: ' + data.triggers.missing.join(', '));
-      if (data.triggers.obsolete.length) lines.push('不要トリガー: ' + data.triggers.obsolete.join(', '));
-      if (data.triggers.duplicates.length) lines.push('重複トリガー: ' + data.triggers.duplicates.length + '件');
-      lines.push('行数: ' + Object.keys(data.rowCounts).map(function (key) {
+      lines.push(T('system.environment') + ': ' + data.health.environment);
+      lines.push(T('system.emailMode') + ': ' + data.health.emailMode + ' (' + data.health.emailModeReason + ')');
+      lines.push(T('system.automationConfigured') + ': ' + (data.health.automationConfigured ? T('common.yes') : T('common.no')));
+      lines.push(T('system.notificationsActivated') + ': ' + (data.health.notificationsActivated ? T('common.yes') : T('common.no')));
+      lines.push(T('system.calendar') + ': ' + (data.health.calendarEnabled ? T('system.enabled') : T('system.disabled')));
+      lines.push(T('system.validation') + ': ' + (data.valid ? 'OK' : T('system.error') + ' ' + data.errorCount + T('common.items')));
+      lines.push(T('system.triggers') + ': ' + data.triggers.installed.join(', '));
+      lines.push(T('system.triggerMatch') + ': ' + (data.triggers.scheduleMatches ? T('system.matches') : T('system.reinstall')));
+      if (data.triggers.missing.length) lines.push(T('system.missingTriggers') + ': ' + data.triggers.missing.join(', '));
+      if (data.triggers.obsolete.length) lines.push(T('system.obsoleteTriggers') + ': ' + data.triggers.obsolete.join(', '));
+      if (data.triggers.duplicates.length) lines.push(T('system.duplicateTriggers') + ': ' + data.triggers.duplicates.length + T('common.items'));
+      lines.push(T('system.rows') + ': ' + Object.keys(data.rowCounts).map(function (key) {
         return key + '=' + data.rowCounts[key];
       }).join(', '));
       if (data.errors.length) {
         lines.push('');
-        lines.push('検証エラー:');
+        lines.push(T('system.validationErrors') + ':');
         data.errors.forEach(function (error) { lines.push('- ' + error); });
       }
       document.getElementById('output').textContent = lines.join('\n');
@@ -49,14 +59,15 @@
       google.script.run
         .withSuccessHandler(function (result) {
           if (!result || result.ok !== true) {
-            setStatus('エラー: ' + ((result && result.error) || '不明なエラー'));
+            setStatus(T('common.error') + ': ' + EHLang.serverMessage((result && result.error) || T('common.unknown')));
             return;
           }
           render(result.data);
         })
-        .withFailureHandler(function (error) { setStatus('エラー: ' + error.message); })
+        .withFailureHandler(function (error) { setStatus(T('common.error') + ': ' + error.message); })
         .uiSystemStatus();
     }
+    EHLang.wire(load);
     load();
   </script>
 </body>

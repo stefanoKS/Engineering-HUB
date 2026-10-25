@@ -1,4 +1,64 @@
 # Changelog
+## V1.3 planning, worker requests and Japanese/English UI
+
+Schema version **5** — additive migration `005_task_planning_and_requests` (approval and
+verified backup required; no existing cell, formula or custom column is modified).
+
+Branding
+
+- Every user-visible name is exactly `設計・開発課 管理` (browser title, dashboard heading, Sheets
+  menu, settings and system screens). Internal identifiers, worksheet names and migration
+  history are unchanged.
+
+Deadline + duration planning
+
+- The manager enters a deadline, a required duration, a unit (days/weeks) and a basis
+  (working days/calendar days); `Planned_Start` is derived by the pure
+  `Planning.planFromDuration`. Ranges are inclusive of the deadline and respect weekends and
+  `HOLIDAYS`.
+- Duration is a schedule length, not labour hours: `Estimated_Hours` is never derived from it.
+- Warnings cover a missing deadline or duration, a past deadline, a past start, a non-working
+  deadline and related milestones. A non-working deadline requires explicit acknowledgement
+  and is never moved automatically.
+- Legacy rows keep their stored start; no historical duration is inferred and no overlap
+  validation, capacity limit or automatic reassignment exists.
+
+Worker requests
+
+- Any viewer of the internal dashboard can request a deadline change (earlier or later) or
+  report completion for any published task, with a self-reported requester name, a permanent
+  request ID and a receipt/status lookup.
+- Submissions are validated against the active published snapshot, length-limited, rate
+  limited, duplicate-guarded, serialized with the script lock and appended to a **separate**
+  request inbox spreadsheet. The dashboard never receives the private workbook ID and has no
+  update or delete path.
+- New manager sidebar **申請一覧 / 承認待ち**: import, review and decide. Approval applies the
+  requested deadline once (recalculating the derived start and invalidating stale approvals
+  and schedule confirmations) and records `TASK_DEADLINE_HISTORY`; rejection and return never
+  change a task. A task changed after submission makes the request `STALE`.
+- Completion reports mark a task `Done`/`100%` only after manager approval, with the reported
+  and accepted timestamps kept distinct.
+- New switches `DEADLINE_REQUEST_EMAIL_ENABLED`, `COMPLETION_REPORT_EMAIL_ENABLED` and
+  `PENDING_REQUEST_REMINDER_ENABLED` default to OFF and obey the centralized send gate.
+- The snapshot contract becomes `1.3` and adds the opaque task `revision` and a boolean
+  `pendingRequest`; no request text is published.
+
+Localization
+
+- Japanese is the default interface language; `日本語 | English` switches every static label
+  immediately on the dashboard, project/task detail, request forms, manager sidebar, approval
+  queue, automation settings and system status without losing the current screen state.
+- The dictionary lives in `shared/i18n.js` and is copied into both projects by
+  `npm run sync:i18n`; `npm run validate` rejects drift, missing keys or a missing translation.
+- Stored spreadsheet text, identifiers and enum values are never translated.
+- The preference is stored in `localStorage`; no login, password or `UserProperties` is added.
+
+Documentation
+
+- New: `docs/UI_LOCALIZATION.md`, `docs/TASK_DURATION_POLICY.md`,
+  `docs/DEADLINE_REQUEST_WORKFLOW.md`, `docs/REQUEST_INBOX_DEPLOYMENT.md` and
+  `docs/checkgates/V1_3_GATE_1..7.md`.
+
 
 ## V1.2 shared dashboard (employee-facing read-only web app)
 

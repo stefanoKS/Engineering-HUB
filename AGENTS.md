@@ -51,3 +51,21 @@
 40. Publication defaults to OFF (`SHARED_DASHBOARD_PUBLISH_ENABLED = false`), is independent of the mail mode, requires ADMIN plus `ENABLE SHARED DASHBOARD PUBLICATION` to enable, and installs a trigger only while it is ON. The destination spreadsheet ID stays in Script Properties and is never returned by an API or UI.
 41. Never present browser-side hiding as access control. Access comes from the deployment ACL (`access: DOMAIN`, execute as deployer, read-only scope) plus a server-side domain check. Do not claim live Workspace verification for the dashboard: `docs/dashboard/SMOKE_TEST.md` starts UNVERIFIED.
 
+
+## V1.3 mandatory rules
+
+35. Keep the user-visible application name exactly `設計・開発課 管理`. Never rename internal identifiers (worksheets, functions, Script Properties, migration history, public APIs) for branding.
+36. Deadline + required duration are the primary task schedule inputs; the planned start is derived. Duration is a schedule length, never labour hours, and `Estimated_Hours` is never derived from it.
+37. Never add workload-overlap validation, duration-based capacity limits, automatic reassignment or conflict blocking. The manager decides whether a deadline and duration are feasible, and overlapping assignments must remain possible.
+38. A committed deadline is never changed silently. A non-working deadline raises a warning and requires explicit acknowledgement; it is not moved automatically.
+39. Only `src/Notifications.gs` may send mail. Request notifications default to OFF and obey the master mode, the emergency stop, allowed domains, the ledger and the per-run cap.
+40. The dashboard project may only append validated request rows to the separate request inbox. It must never read the private workbook or write to the published snapshot; `npm run validate` enforces both.
+41. Any published task may receive a request from any internal viewer. Never add an owner-match check, a login form, a password, a personal token or an employee account for requests.
+42. A pending, rejected or returned request never changes `Due_Date`. Only a manager approval applies a change, at most once, with history and audit records.
+43. Detect staleness: when the task revision or deadline changed after submission, mark the request `STALE` instead of overwriting the newer value.
+44. Never publish request text. Only a boolean pending indicator may appear on the shared dashboard.
+45. Translation lives in `shared/i18n.js` and is copied into both projects by `npm run sync:i18n`. Never translate stored spreadsheet text, identifiers or enum values; only display labels are localized.
+46. Japanese is the default UI language. The `日本語 | English` switch must exist on every screen listed in `docs/UI_LOCALIZATION.md` and must preserve the current screen, project, task and filter state.
+47. The language preference is browser-local (`localStorage`). Do not store it in the workbook and do not rely on server-side `UserProperties` for the shared dashboard.
+48. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_3_GATE_<n>.md`, and keep live Workspace verification separate from local results.
+

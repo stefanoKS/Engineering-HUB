@@ -316,3 +316,56 @@ Native Timeline creation is manual and edition-dependent: select the timeline so
 **Insert → Timeline** if available, and map start/end/title/group columns. Verify that Google recognizes the
 start/end columns as dates; use a separate derived range if conversion is needed so a view refresh does not
 overwrite manual work. Otherwise use `TIMELINE_DATA` and `GANTT_OVERVIEW` as ordinary sheets.
+
+## Schema version 5 — task planning and worker requests
+
+Migration `005_task_planning_and_requests` (from 4 to 5) is additive. It appends columns and
+tables, takes a verified backup first, and requires explicit approval through
+`APPROVED_MIGRATIONS`. No existing cell, formula or custom column is rewritten, and no
+historical duration is inferred from old dates.
+
+### TASKS (added columns)
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `Planned_Duration_Value` | integer ≥ 0, blank allowed | required duration; blank means unknown |
+| `Planned_Duration_Unit` | `DAY` / `WEEK` | duration unit |
+| `Planned_Duration_Basis` | `WORKING_DAYS` / `CALENDAR_DAYS` | calendar basis |
+| `Planned_Start_Source` | `DERIVED` / `LEGACY` / `MANUAL` / blank | how `Planned_Start` was produced |
+
+`Planned_Start` is recalculated only when a duration and a deadline are present. A blank
+source on a pre-V5 row means `LEGACY`: the stored start stays valid and is not relabelled by
+an unrelated update.
+
+### TASK_REQUESTS (new)
+
+| Column | Meaning |
+| --- | --- |
+| `Request_ID` | permanent ID, equal to the inbox request ID |
+| `Request_Type` | `DEADLINE_CHANGE` or `COMPLETION_REPORT` |
+| `Task_ID`, `Project_ID` | targets (validated references) |
+| `Requester_Name` | unverified self-reported name |
+| `Submitted_At` | submission timestamp (from the dashboard) |
+| `Original_Due_Date`, `Requested_Due_Date` | deadline at submission and requested deadline |
+| `Reason`, `Explanation`, `Completion_Note` | stored free text, never translated |
+| `Status` | `PENDING`, `PROCESSING`, `APPROVED`, `REJECTED`, `RETURNED`, `WITHDRAWN`, `STALE` |
+| `Reviewer`, `Decided_At`, `Decision_Note` | decision record |
+| `Task_Revision_At_Submission` | opaque task revision for staleness detection |
+| `Due_Date_At_Submission` | deadline at import time |
+| `Reported_Completion_At`, `Accepted_Completion_At` | worker report vs manager acceptance |
+| `Inbox_Request_ID`, `Imported_At`, `Snapshot_Version` | idempotent import bookkeeping |
+
+`PROCESSING` is an internal recovery marker, not a user-facing state.
+
+### TASK_DEADLINE_HISTORY (new)
+
+`History_ID`, `Task_ID`, `Request_ID`, `Previous_Due_Date`, `New_Due_Date`,
+`Previous_Planned_Start`, `New_Planned_Start`, `Reason`, `Changed_At`, `Changed_By`,
+`Source`. Rows are never deleted; superseded history is retained.
+
+### Automation settings
+
+`DEADLINE_REQUEST_EMAIL_ENABLED`, `COMPLETION_REPORT_EMAIL_ENABLED` and
+`PENDING_REQUEST_REMINDER_ENABLED` default to `false`, plus the status keys
+`LAST_REQUEST_IMPORT_AT` and `LAST_PENDING_REQUEST_REMINDER_AT`.
+

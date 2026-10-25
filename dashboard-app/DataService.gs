@@ -11,7 +11,7 @@
  * task row to the browser.
  */
 var DashboardData = (function () {
-  var CONTRACT_VERSION = '1.2';
+  var CONTRACT_VERSION = '1.3';
   var META_SHEET = 'PUBLISHED_META';
   var CACHE_TTL_SECONDS = 300;
   var CACHE_MAX_CHARS = 90000;
@@ -29,7 +29,7 @@ var DashboardData = (function () {
     subprojects: {sheet: 'PUBLISHED_SUBPROJECTS', fields: ['subprojectId', 'projectId', 'name', 'ownerName',
       'status', 'progress', 'deadline', 'terminal']},
     tasks: {sheet: 'PUBLISHED_TASKS', fields: ['taskId', 'projectId', 'subprojectId', 'name', 'ownerName',
-      'status', 'priority', 'plannedStart', 'dueDate', 'progress', 'publicNote']},
+      'status', 'priority', 'plannedStart', 'dueDate', 'progress', 'publicNote', 'revision', 'pendingRequest']},
     milestones: {sheet: 'PUBLISHED_MILESTONES', fields: ['milestoneId', 'projectId', 'subprojectId', 'name',
       'targetDate', 'actualDate', 'status']}
   };
@@ -235,6 +235,8 @@ var DashboardData = (function () {
       dueDate: text(task.dueDate),
       progress: number(task.progress),
       publicNote: text(task.publicNote),
+      revision: text(task.revision),
+      pendingRequest: bool(task.pendingRequest),
       daysRemaining: remaining.days,
       deadlineKind: remaining.kind,
       deadlineLabel: remaining.label
@@ -359,6 +361,7 @@ var DashboardData = (function () {
       var subprojects = snapshot.tables.subprojects
         .filter(function (subproject) { return text(subproject.projectId) === id; })
         .map(function (subproject) {
+          var remaining = deadline(text(subproject.deadline), bool(subproject.terminal), today);
           var subProjectSummary = {
             subprojectId: text(subproject.subprojectId),
             name: text(subproject.name),
@@ -367,7 +370,9 @@ var DashboardData = (function () {
             statusLabel: label('status', text(subproject.status)),
             progress: number(subproject.progress),
             deadline: text(subproject.deadline),
-            deadlineLabel: deadline(text(subproject.deadline), bool(subproject.terminal), today).label,
+            daysRemaining: remaining.days,
+            deadlineKind: remaining.kind,
+            deadlineLabel: remaining.label,
             total: 0
           };
           subprojectNames[subProjectSummary.subprojectId] = subProjectSummary.name;
@@ -465,6 +470,27 @@ var DashboardData = (function () {
     });
   }
 
+  /**
+   * Published identity of one task, used to validate a request submission.
+   *
+   * Only published rows resolve, so a restricted project can never receive a request. The
+   * revision is an opaque string: it contains no member IDs or internal version numbers.
+   */
+  function requestTarget(taskId) {
+    var key = text(taskId).trim();
+    if (!key) return null;
+    var snapshot = openTab();
+    var record = snapshot.tables.tasks.filter(function (row) { return text(row.taskId) === key; })[0];
+    if (!record) return null;
+    return {
+      taskId: text(record.taskId),
+      projectId: text(record.projectId),
+      dueDate: text(record.dueDate),
+      revision: text(record.revision),
+      snapshotVersion: text(snapshot.meta.SNAPSHOT_VERSION)
+    };
+  }
+
   return {
     CONTRACT_VERSION: CONTRACT_VERSION,
     TABLES: TABLES,
@@ -472,6 +498,7 @@ var DashboardData = (function () {
     MAX_PROJECT_TASKS: MAX_PROJECT_TASKS,
     DUE_SOON_DAYS: DUE_SOON_DAYS,
     deadline: deadline,
+    requestTarget: requestTarget,
     portfolio: portfolio,
     project: project,
     task: task

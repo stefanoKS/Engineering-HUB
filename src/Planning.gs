@@ -175,13 +175,141 @@ var Planning = (function () {
     return {members: result, rows: rows, weekStart: monday, workingDays: days.length};
   }
 
+  /**
+   * Deadline + duration planning (V1.3).
+   *
+   * The manager enters a deadline and a required duration; the planned start is derived.
+   * The range is inclusive of the deadline date, and the committed deadline is never
+   * altered: a deadline that falls on a non-working day is reported as a warning only.
+   *
+   * Working days skip weekends and HOLIDAYS; calendar days count every date. One week is
+   * five working days (working-day basis) or seven calendar days (calendar-day basis).
+   * Duration is a schedule length, never labour hours.
+   *
+   * @param {string} deadline ISO date (yyyy-MM-dd)
+   * @param {number|string} value duration amount
+   * @param {string} unit DAY or WEEK
+   * @param {string} basis WORKING_DAYS or CALENDAR_DAYS
+   * @param {Array} holidays HOLIDAYS rows
+   * @returns {object} derived plan
+   */
+  function planFromDuration(deadline, value, unit, basis, holidays) {
+    var end = Domain.date(deadline);
+    if (!end) throw new Error('完了期限を入力してください');
+    var amount = Number(value);
+    if (!isFinite(amount) || amount <= 0 || Math.floor(amount) !== amount) {
+      throw new Error('必要期間は0より大きい数値で入力してください');
+    }
+    var normalizedUnit = String(unit || 'DAY').toUpperCase();
+    if (normalizedUnit !== 'DAY' && normalizedUnit !== 'WEEK') throw new Error('Duration unit must be DAY or WEEK');
+    var normalizedBasis = String(basis || 'WORKING_DAYS').toUpperCase();
+    if (normalizedBasis !== 'WORKING_DAYS' && normalizedBasis !== 'CALENDAR_DAYS') {
+      throw new Error('Duration basis must be WORKING_DAYS or CALENDAR_DAYS');
+    }
+    var cal = calendar(holidays || []);
+    var length = normalizedUnit === 'WEEK'
+      ? amount * (normalizedBasis === 'WORKING_DAYS' ? 5 : 7)
+      : amount;
+    var start, plannedEnd;
+    if (normalizedBasis === 'WORKING_DAYS') {
+      plannedEnd = cal.previous(end, true);
+      start = plannedEnd;
+      for (var i = 1; i < length; i++) start = cal.previous(start, false);
+    } else {
+      plannedEnd = end;
+      start = shift(end, -(length - 1));
+    }
+    return {
+      startDate: start,
+      endDate: end,
+      plannedEnd: plannedEnd,
+      durationValue: amount,
+      durationUnit: normalizedUnit,
+      durationBasis: normalizedBasis,
+      length: length,
+      deadlineIsWorkingDay: cal.working(end)
+    };
+  }
+
+  /** Planning warnings; every code maps to a translated message in the UI. */
+  function planningWarnings(input) {
+    input = input || {};
+    var warnings = [];
+    var today = Domain.date(input.today || Domain.today());
+    var deadline = Domain.date(input.deadline);
+    var cal = calendar(input.holidays || []);
+    if (!deadline) {
+      warnings.push({code: 'MISSING_DEADLINE'});
+      return warnings;
+    }
+    if (today && deadline < today) warnings.push({code: 'PAST_DEADLINE'});
+    if (!cal.working(deadline)) warnings.push({code: 'NON_WORKING_DEADLINE'});
+    var duration = Number(input.durationValue);
+    if (!isFinite(duration) || duration <= 0) {
+      warnings.push({code: 'MISSING_DURATION'});
+      return warnings;
+    }
+    var plan;
+    try {
+      plan = planFromDuration(deadline, duration, input.durationUnit, input.durationBasis, input.holidays);
+    } catch (error) {
+      warnings.push({code: 'MISSING_DURATION'});
+      return warnings;
+    }
+    if (today && plan.startDate < today) warnings.push({code: 'PAST_START'});
+    (input.milestones || []).forEach(function (milestone) {
+      var target = Domain.date(milestone.Target_Date);
+      if (!target) return;
+      if (target >= plan.startDate && target <= plan.plannedEnd) {
+        warnings.push({code: 'MILESTONE_OVERLAP', params: {name: milestone.Milestone_Name || milestone.Milestone_ID || ''}});
+      }
+    });
+    return warnings;
+  }
+
+  /**
+   * Applies the derived plan to a task row (mutates `row`).
+   *
+   * Only a manager-entered duration and deadline produce a DERIVED planned start. Legacy
+   * rows keep their stored start: durations are never inferred from historical dates, and
+   * a blank duration never invents an estimate.
+   */
+  function applyTaskPlan(row, options) {
+    options = options || {};
+    var duration = Number(row.Planned_Duration_Value);
+    var known = row.Planned_Duration_Value !== '' && row.Planned_Duration_Value !== null &&
+      row.Planned_Duration_Value !== undefined && isFinite(duration) && duration > 0;
+    var deadline = Domain.date(row.Due_Date);
+    if (known && deadline) {
+      var plan = planFromDuration(deadline, duration, row.Planned_Duration_Unit,
+        row.Planned_Duration_Basis, options.holidays || []);
+      row.Planned_Start = plan.startDate;
+      row.Planned_Start_Source = 'DERIVED';
+      return plan;
+    }
+    if (!known) {
+      row.Planned_Duration_Value = '';
+      row.Planned_Duration_Unit = '';
+      row.Planned_Duration_Basis = '';
+    }
+    if (!row.Planned_Start) {
+      // A derived start cannot survive without its deadline or duration.
+      if (row.Planned_Start_Source === 'DERIVED') row.Planned_Start_Source = '';
+    }
+    // A legacy start keeps its blank source: it stays valid and is not re-labelled by an
+    // unrelated update. Only an explicit manager override marks a row MANUAL.
+    return null;
+  }
+
   function workload(asOf) {
     var data = workloadData(asOf);
     Database.writeGenerated('WORKLOAD', data.rows);
     return data.members;
   }
 
-  return { reverse: reverse, workload: workload, workloadData: workloadData, calendar: calendar, shift: shift, backplanRows: backplanRows };
+  return { reverse: reverse, workload: workload, workloadData: workloadData, calendar: calendar, shift: shift,
+    backplanRows: backplanRows, planFromDuration: planFromDuration, planningWarnings: planningWarnings,
+    applyTaskPlan: applyTaskPlan };
 })();
 function reversePlan(projectId, deadline, phases) { return Planning.reverse(projectId, deadline, phases); }
 function refreshWorkload(asOf) { return Planning.workload(asOf); }

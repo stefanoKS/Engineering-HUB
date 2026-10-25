@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    body { font-family: "Hiragino Sans", "Yu Gothic", sans-serif; font-size: 12px; margin: 8px; color: #202124; }
+    h2 { font-size: 14px; margin: 10px 0 6px; }
+    fieldset { border: 1px solid #dadce0; border-radius: 6px; margin: 0 0 10px; padding: 8px; }
+    legend { font-weight: 600; padding: 0 4px; }
+    label { display: block; margin: 6px 0 2px; }
+    input, select, textarea { width: 100%; box-sizing: border-box; padding: 4px; border: 1px solid #bdc1c6; border-radius: 4px; font-size: 12px; }
+    button { margin: 6px 4px 0 0; padding: 5px 9px; border: 0; border-radius: 4px; background: #1a73e8; color: #fff; cursor: pointer; }
+    button.secondary { background: #5f6368; }
+    button.reject { background: #b3261e; }
+    .hint { color: #5f6368; font-size: 11px; margin-top: 2px; }
+    .request { border: 1px solid #dadce0; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
+    .request.is-stale { border-color: #e37400; background: #fef7e0; }
+    .request-head { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
+    .request-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; margin: 6px 0; }
+    .field-label { color: #5f6368; font-size: 11px; }
+    .field-value { word-break: break-word; }
+    .status-PENDING { color: #1a73e8; }
+    .status-STALE { color: #b06000; }
+    .status-APPROVED { color: #137333; }
+    .status-REJECTED, .status-RETURNED { color: #b3261e; }
+    #status { margin-top: 10px; padding: 8px; border-radius: 4px; display: none; white-space: pre-wrap; }
+    #status.loading { display: block; background: #e8f0fe; }
+    #status.error { display: block; background: #fce8e6; color: #b3261e; }
+    #status.ok { display: block; background: #e6f4ea; color: #137333; }
+    .lang-switch { display: flex; align-items: center; gap: 4px; justify-content: flex-end; margin-bottom: 6px; font-size: 11px; }
+    .lang-label { color: #5f6368; }
+    .lang-option { margin: 0; padding: 2px 6px; background: #f1f3f4; color: #202124; border-radius: 4px; }
+    .lang-option.is-active { background: #1a73e8; color: #fff; }
+    .lang-sep { color: #bdc1c6; }
+  </style>
+</head>
+<body>
+  <?!= include('I18n') ?>
+  <?!= include('UiSafe') ?>
+  <?!= include('UiLang') ?>
+
+  <fieldset>
+    <legend data-i18n="manager.requests.legend">申請一覧 / 承認待ち</legend>
+    <div class="hint" data-i18n="manager.requests.hint">承認すると期限が更新され、予定開始日を再計算し、旧日程確認と割当承認を無効化します。却下・差戻しは期限を変更しません。</div>
+    <div class="row">
+      <button id="import" data-i18n="manager.requests.sync">申請を取り込む</button>
+      <button id="refresh" class="secondary" data-i18n="common.retry">再試行</button>
+    </div>
+    <div class="hint" id="summary"></div>
+    <div id="requests"></div>
+  </fieldset>
+
+  <fieldset>
+    <legend data-i18n="manager.requests.history">期限変更履歴</legend>
+    <div id="history" class="hint" data-i18n="manager.loading">読み込み中...</div>
+  </fieldset>
+
+  <div id="status"></div>
+
+  <script>
+    var state = {data: null};
+
+    function T(key, vars) { return EHLang.t(key, vars); }
+    function byId(id) { return document.getElementById(id); }
+    function setStatus(kind, message) { EH.setStatus(byId('status'), kind, message); }
+
+    function call(fn, payload, onSuccess) {
+      setStatus('loading', T('common.processing'));
+      var runner = google.script.run
+        .withSuccessHandler(function (result) {
+          if (!result || result.ok !== true) {
+            setStatus('error', T('common.error') + ': ' + EHLang.serverMessage((result && result.error) || T('common.unknown')));
+            return;
+          }
+          setStatus('ok', T('common.done'));
+          if (onSuccess) onSuccess(result.data);
+        })
+        .withFailureHandler(function (error) { setStatus('error', T('common.error') + ': ' + error.message); });
+      if (payload === undefined) runner[fn](); else runner[fn](payload);
+    }
+
+    function load() {
+      call('uiRequests', {includeDecided: false}, function (data) {
+        state.data = data;
+        render();
+      });
+    }
+
+    function field(label, value) {
+      var wrap = EH.element('div');
+      EH.append(wrap, 'div', label, 'field-label');
+      EH.append(wrap, 'div', value === '' || value === null || value === undefined ? T('common.none') : value, 'field-value');
+      return wrap;
+    }
+
+    function difference(request) {
+      if (request.differenceDays === null || request.differenceDays === undefined) return T('common.none');
+      var value = Number(request.differenceDays);
+      return (value > 0 ? '+' : '') + value + T('manager.requests.daysSuffix');
+    }
+
+    function decide(request, action) {
+      if (!EH.confirmAction(T('manager.requests.confirmPrompt', {action: T('manager.requests.' + action.toLowerCase())}))) return;
+      var note = byId('note-' + request.requestId);
+      call('uiDecideRequest', {
+        requestId: request.requestId,
+        action: action,
+        note: note ? note.value : '',
+        confirmation: 'DECIDE REQUEST'
+      }, function () { load(); });
+    }
+
+    function renderRequest(request) {
+      var card = EH.element('div', 'request' + (request.stale ? ' is-stale' : ''));
+      var head = EH.element('div', 'request-head');
+      EH.append(head, 'span', T('manager.requests.' + (request.type === 'COMPLETION_REPORT' ? 'type.COMPLETION_REPORT' : 'type.DEADLINE_CHANGE')) +
+        ' — ' + request.requestId);
+      EH.append(head, 'span', T('request.status.' + request.status), 'status-' + request.status);
+      card.appendChild(head);
+
+      var grid = EH.element('div', 'request-grid');
+      grid.appendChild(field(T('manager.requests.project'), request.projectName + (request.projectId ? ' (' + request.projectId + ')' : '')));
+      grid.appendChild(field(T('manager.requests.task'), request.taskName + (request.taskId ? ' (' + request.taskId + ')' : '')));
+      grid.appendChild(field(T('manager.requests.owner'), request.ownerName));
+      grid.appendChild(field(T('manager.requests.requester'), request.requesterName));
+      if (request.type === 'DEADLINE_CHANGE') {
+        grid.appendChild(field(T('manager.requests.currentDeadline'), request.currentDeadline));
+        grid.appendChild(field(T('manager.requests.requestedDeadline'), request.requestedDeadline));
+        grid.appendChild(field(T('manager.requests.difference'), difference(request)));
+        grid.appendChild(field(T('manager.requests.reason'), request.reason));
+        grid.appendChild(field(T('manager.requests.explanation'), request.explanation));
+      } else {
+        grid.appendChild(field(T('manager.requests.currentDeadline'), request.currentDeadline));
+        grid.appendChild(field(T('request.completion.note'), request.completionNote));
+        grid.appendChild(field(T('manager.requests.submittedAt'), request.submittedAt));
+      }
+      grid.appendChild(field(T('manager.requests.submittedAt'), request.submittedAt));
+      card.appendChild(grid);
+
+      if (request.stale) {
+        EH.append(card, 'div', T('manager.requests.stale'), 'hint');
+      }
+
+      if (request.status === 'PENDING' || request.status === 'STALE') {
+        var noteLabel = EH.append(card, 'label', T('manager.requests.decisionNote'));
+        noteLabel.setAttribute('for', 'note-' + request.requestId);
+        var note = EH.element('input');
+        note.id = 'note-' + request.requestId;
+        card.appendChild(note);
+        var approve = EH.append(card, 'button', T('manager.requests.approve'));
+        approve.setAttribute('type', 'button');
+        approve.addEventListener('click', function () { decide(request, 'APPROVE'); });
+        var reject = EH.append(card, 'button', T('manager.requests.reject'), 'reject');
+        reject.setAttribute('type', 'button');
+        reject.addEventListener('click', function () { decide(request, 'REJECT'); });
+        var returned = EH.append(card, 'button', T('manager.requests.return'), 'secondary');
+        returned.setAttribute('type', 'button');
+        returned.addEventListener('click', function () { decide(request, 'RETURN'); });
+      } else {
+        EH.append(card, 'div', T('manager.requests.decisionNote') + ': ' + (request.decisionNote || T('common.none')), 'hint');
+        EH.append(card, 'div', T('manager.requests.submittedAt') + ': ' + (request.decidedAt || T('common.none')), 'hint');
+      }
+      return card;
+    }
+
+    function render() {
+      var data = state.data || {requests: [], history: [], counts: {}, configured: false};
+      var container = byId('requests');
+      EH.clear(container);
+      var counts = data.counts || {};
+      byId('summary').textContent = T('manager.requests.summary', {
+        pending: counts.PENDING || 0, stale: counts.STALE || 0, approved: counts.APPROVED || 0,
+        rejected: counts.REJECTED || 0
+      }) + (data.configured ? '' : ' ' + T('manager.requests.inboxMissing'));
+      if (!data.requests.length) {
+        EH.append(container, 'div', T('manager.requests.empty'), 'hint');
+      } else {
+        data.requests.forEach(function (request) { container.appendChild(renderRequest(request)); });
+      }
+
+      var history = byId('history');
+      EH.clear(history);
+      if (!data.history.length) {
+        EH.append(history, 'div', T('manager.requests.historyEmpty'), 'hint');
+      } else {
+        data.history.forEach(function (row) {
+          EH.append(history, 'div', row.previousDeadline + ' → ' + row.newDeadline + '  ' +
+            (row.previousStart || '-') + ' → ' + (row.newStart || '-') + '  ' + row.changedAt + '  ' + (row.changedBy || ''));
+        });
+      }
+    }
+
+    byId('import').addEventListener('click', function () {
+      call('uiImportRequests', undefined, function (result) {
+        setStatus('ok', T('manager.requests.imported', {imported: result.imported, skipped: result.skipped, rejected: result.rejected}));
+        load();
+      });
+    });
+    byId('refresh').addEventListener('click', load);
+
+    EHLang.wire(function () { render(); });
+    load();
+  </script>
+</body>
+</html>

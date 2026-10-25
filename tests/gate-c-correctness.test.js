@@ -172,8 +172,8 @@ test('upgrade preserves skill records, notification history, custom columns and 
   history.rows = [history.rows[0], ['INITIALIZE_V2', new Date().toISOString(), 0, 2, 'SUCCESS', 'NEW_EMPTY_DATABASE']];
 
   const before = JSON.parse(JSON.stringify(context.Backup.snapshot(app.book)));
-  app.properties.setProperty('APPROVED_MIGRATIONS', '003_management_reliability,004_shared_dashboard');
-  assert.equal(context.upgradeExistingDatabase(), 4);
+  app.properties.setProperty('APPROVED_MIGRATIONS', '003_management_reliability,004_shared_dashboard,005_task_planning_and_requests');
+  assert.equal(context.upgradeExistingDatabase(), 5);
 
   for (const old of before) {
     if (['SCHEMA_MIGRATIONS', 'BACKUP_LOG', 'AUTOMATION_SETTINGS'].includes(old.name)) continue;
@@ -190,5 +190,5 @@ test('upgrade preserves skill records, notification history, custom columns and 
   assert.equal(db.find('TASKS', 'T1').Manual_Note, '=1+1');
   assert.equal(db.find('TASKS', 'T2').Manual_Note, 'keep');
   assert.deepEqual(db.read('TASKS').map(row => row.Task_ID).sort(), ['T1', 'T2', 'T3']);
-  assert.equal(app.backups.length, 2);
+  assert.equal(app.backups.length, 3);
 });

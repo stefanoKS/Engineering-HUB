@@ -29,10 +29,12 @@ var Schema = (function () {
       Dashboard_Visibility: ['INTERNAL', 'RESTRICTED'] });
   table('SUBPROJECTS', 'Subproject_ID', 'Subproject_ID Project_ID Subproject_Name Owner_ID Status Planned_Start Planned_End Deadline Progress_Percent Estimated_Hours Next_Action Last_Updated',
     {}, ['Project_ID', 'Subproject_Name', 'Status'], { Project_ID: 'PROJECTS', Owner_ID: 'MEMBERS' }, { Status: projectStates });
-  table('TASKS', 'Task_ID', 'Task_ID Project_ID Subproject_ID Task_Name Description Owner_Member_ID Status Priority Planned_Start Due_Date Estimated_Hours Actual_Hours Progress_Percent Dependency_IDs Acceptance_Criteria Next_Action Required_Skill_ID Required_Skill_Level Assignment_Version Assignment_Approved_At Notification_Enabled Notification_Baseline Created_At Last_Updated Completed_At Public_Note',
+  table('TASKS', 'Task_ID', 'Task_ID Project_ID Subproject_ID Task_Name Description Owner_Member_ID Status Priority Planned_Start Due_Date Estimated_Hours Actual_Hours Progress_Percent Dependency_IDs Acceptance_Criteria Next_Action Required_Skill_ID Required_Skill_Level Assignment_Version Assignment_Approved_At Notification_Enabled Notification_Baseline Created_At Last_Updated Completed_At Public_Note Planned_Duration_Value Planned_Duration_Unit Planned_Duration_Basis Planned_Start_Source',
     { Assignment_Version: 'number', Notification_Enabled: 'boolean' }, ['Project_ID', 'Task_Name', 'Owner_Member_ID', 'Status'],
     { Project_ID: 'PROJECTS', Subproject_ID: 'SUBPROJECTS', Owner_Member_ID: 'MEMBERS', Required_Skill_ID: 'SKILLS' },
-    { Status: ['Not Started', 'Assigned', 'In Progress', 'Blocked', 'On Hold', 'Done', 'Cancelled'], Priority: ['Low', 'Medium', 'High', 'Critical'] });
+    { Status: ['Not Started', 'Assigned', 'In Progress', 'Blocked', 'On Hold', 'Done', 'Cancelled'], Priority: ['Low', 'Medium', 'High', 'Critical'],
+      Planned_Duration_Unit: ['DAY', 'WEEK'], Planned_Duration_Basis: ['WORKING_DAYS', 'CALENDAR_DAYS'],
+      Planned_Start_Source: ['DERIVED', 'LEGACY', 'MANUAL'] });
   table('MILESTONES', 'Milestone_ID', 'Milestone_ID Project_ID Subproject_ID Milestone_Name Owner_ID Target_Date Actual_Date Gate_Type Status Acceptance_Criteria Verification_Result Calendar_Event_ID Calendar_Sync_Hash',
     {}, ['Project_ID', 'Milestone_Name'], { Project_ID: 'PROJECTS', Subproject_ID: 'SUBPROJECTS', Owner_ID: 'MEMBERS' });
   table('MEMBERS', 'Member_ID', 'Member_ID Name Email Department Position Active Manager_ID Weekly_Capacity_Hours Role',
@@ -59,6 +61,14 @@ var Schema = (function () {
     { Project_ID: 'PROJECTS' }, { Status: ['DRAFT', 'PLANNED'] });
   table('SCHEDULE_CONFIRMATIONS', 'Schedule_Confirmation_ID', 'Schedule_Confirmation_ID Task_ID Active Version Planned_Start Due_Date Estimated_Hours Confirmed_At Confirmed_By Notes',
     { Active: 'boolean', Version: 'number' }, ['Task_ID', 'Confirmed_At'], { Task_ID: 'TASKS' });
+  // V1.3 worker requests. The dashboard application may only append validated rows to the
+  // separate request inbox; the manager application imports them here idempotently.
+  table('TASK_REQUESTS', 'Request_ID', 'Request_ID Request_Type Task_ID Project_ID Requester_Name Submitted_At Original_Due_Date Requested_Due_Date Reason Explanation Completion_Note Status Reviewer Decided_At Decision_Note Task_Revision_At_Submission Due_Date_At_Submission Reported_Completion_At Accepted_Completion_At Inbox_Request_ID Imported_At Snapshot_Version',
+    {}, ['Request_Type', 'Task_ID', 'Status'], { Task_ID: 'TASKS', Project_ID: 'PROJECTS' },
+    { Request_Type: ['DEADLINE_CHANGE', 'COMPLETION_REPORT'],
+      Status: ['PENDING', 'PROCESSING', 'APPROVED', 'REJECTED', 'RETURNED', 'WITHDRAWN', 'STALE'] });
+  table('TASK_DEADLINE_HISTORY', 'History_ID', 'History_ID Task_ID Request_ID Previous_Due_Date New_Due_Date Previous_Planned_Start New_Planned_Start Reason Changed_At Changed_By Source',
+    {}, ['Task_ID'], { Task_ID: 'TASKS', Request_ID: 'TASK_REQUESTS' });
   ['TASKS', 'MEMBERS'].forEach(function (name) {
     tables[name].fields.forEach(function (f) {
       if (f.name === 'Notification_Enabled') f.defaultValue = false;
@@ -84,7 +94,11 @@ var Schema = (function () {
   set('SCHEDULE_CONFIRMATIONS', 'Estimated_Hours', { defaultValue: '', min: 0 });
   // V1.2: nothing is published until a manager reviews the project. Blank stays restricted.
   set('PROJECTS', 'Dashboard_Visibility', { defaultValue: 'RESTRICTED' });
-  return { version: 4, tables: tables,
+  // V1.3 planning: the duration is a schedule length, never a labour-hour estimate.
+  set('TASKS', 'Planned_Duration_Value', { type: 'number', defaultValue: '', min: 0, integer: true });
+  set('TASKS', 'Planned_Start_Source', { type: 'string', defaultValue: '' });
+  set('TASK_REQUESTS', 'Task_Revision_At_Submission', { type: 'string', defaultValue: '' });
+  return { version: 5, tables: tables,
     generated: ['DASHBOARD', 'PROJECT_OVERVIEW', 'TEAM_VIEW', 'GANTT_OVERVIEW', 'TIMELINE_DATA',
       'WORKLOAD', 'SKILL_MATRIX', 'BACKPLAN', 'AUTOMATION_STATUS'],
     field: field };

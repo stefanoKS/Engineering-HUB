@@ -108,7 +108,7 @@ formula, custom column and ID, and publishes nothing. Take the approval out of
 ## 8. Enable publication
 
 Publication settings are also available in the manager sidebar
-(**Engineering HUB → 自動化設定 → 共有ダッシュボード公開**): status, interval, ON/OFF,
+(**設計・開発課 管理 → 自動化設定 → 共有ダッシュボード公開**): status, interval, ON/OFF,
 "今すぐ公開" and "公開差分を確認". The sidebar calls the same validated domain functions and a
 MEMBER is refused every one of them.
 
@@ -193,3 +193,16 @@ publication and re-run `installAuthorizedTriggers`.
 | Page says the format is unsupported | `CONTRACT_VERSION` mismatch between deployed apps | Deploy both projects from the same commit. |
 | Page shows a stale-data banner | Last publication older than `SHARED_DASHBOARD_STALE_HOURS` | Check `sharedDashboardPublicationStatus()` and the scheduled trigger. |
 | Manager sees "publication destination must never be the private master workbook" | Property points at the management workbook | Correct the property; never point at the master. |
+
+## V1.3: request submission
+
+1. Create the request inbox spreadsheet and configure `REQUEST_INBOX_SPREADSHEET_ID` in both
+   projects (see [../REQUEST_INBOX_DEPLOYMENT.md](../REQUEST_INBOX_DEPLOYMENT.md)).
+2. Run `initializeRequestInbox('INITIALIZE REQUEST INBOX')` once in the manager project.
+3. The dashboard manifest now asks for `https://www.googleapis.com/auth/spreadsheets` plus
+   `userinfo.email`. Re-authorise, keep `access: DOMAIN` and `executeAs: USER_DEPLOYING`, and
+   deploy a new version.
+4. Publish a snapshot with contract `1.3` after upgrading the workbook; the viewer refuses
+   an unknown contract.
+5. Set `REQUEST_SUBMISSION_ENABLED=false` to close submissions without redeploying.
+

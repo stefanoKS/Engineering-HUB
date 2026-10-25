@@ -40,3 +40,24 @@ This is a Google Apps Script application backed by Google Sheets. Treat code, sp
 - Use the Node.js 22 tools: `npm ci`, `npm run lint`, `npm test`, `npm run validate`. Never delete or weaken a test to make a gate pass, and keep earlier gate records intact.
 - Local mocks are not live verification. [docs/PRODUCTION_READINESS.md](../docs/PRODUCTION_READINESS.md) stays **NOT APPROVED FOR PRODUCTION** until recorded Workspace evidence exists; never fabricate it.
 - Update the English/Japanese overviews and the operating docs (including `docs/`) with every behavioural change.
+
+## V1.3 rules (deadline planning, worker requests, bilingual UI)
+
+Follow `/AGENTS.md` rules 35–48 in addition to the rules above.
+
+- The user-visible name is exactly `設計・開発課 管理`; internal identifiers stay unchanged.
+- Deadline + required duration drive the schedule; duration is never converted to labour hours.
+- No workload-overlap validation, capacity limit, automatic reassignment or conflict blocking.
+- Only `src/Notifications.gs` sends mail; request notifications default to OFF.
+- The dashboard may only append validated rows to the separate request inbox; never read the
+  private workbook and never write the published snapshot.
+- Any internal viewer may request a deadline change or report completion for any published
+  task. Never add a login/password UI or an owner-match check for requests.
+- Only a manager approval changes `Due_Date`, once, with history and audit rows; a changed
+  task makes the pending request `STALE`.
+- Translation lives in `shared/i18n.js` (copied by `npm run sync:i18n`). Never translate
+  stored text, identifiers or enum values. Japanese is the default; keep the
+  `日本語 | English` switch on every listed screen and keep the language in `localStorage`.
+- Run `npm ci`, `npm run lint`, `npm test` and `npm run validate` before opening a PR, and
+  record the V1.3 check gates.
+

@@ -8,7 +8,7 @@ Architecture: a **container-bound** Apps Script adapter (`Ui.gs` + three HTML te
 project cannot open `SpreadsheetApp.getUi()`; the adapter throws an explicit Japanese error instead of appearing
 to work.
 
-- `onOpen()` adds the **Engineering HUB** menu: ダッシュボード, 新規プロジェクト, 新規サブプロジェクト,
+- `onOpen()` adds the **設計・開発課 管理** menu: ダッシュボード, 新規プロジェクト, 新規サブプロジェクト,
   新規タスク, タスク割当, 進捗更新, 課題, マイルストーン, メンバー, スキル, 自動化設定,
   ダッシュボード更新, システム状態.
 - Sidebars: `UiMenu.html` (project/subproject/task/progress/member/skill), `UiSettings.html`

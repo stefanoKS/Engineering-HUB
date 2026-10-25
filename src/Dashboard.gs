@@ -201,7 +201,7 @@ var Dashboard = (function () {
   function dashboardRows(analysis) {
     var metrics = analysis.metrics;
     return [
-      ['Engineering HUB ダッシュボード（自動生成・編集禁止）', ''],
+      ['設計・開発課 管理 ダッシュボード（自動生成・編集禁止）', ''],
       ['基準日', analysis.asOf],
       ['最終更新', Domain.now()],
       ['', ''],

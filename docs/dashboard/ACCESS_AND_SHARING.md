@@ -70,3 +70,21 @@ resource) in the smoke-test record.
 - The dashboard is **not** an anonymous site. Publishing with "Anyone" access would expose
   the projection to the internet; the manifest is checked to prevent that.
 - Hidden HTML, disabled buttons or client-side checks are never used as access control.
+
+## V1.3 change: one write capability
+
+The dashboard deployment can now append a request row to the **request inbox** spreadsheet.
+Everything else is unchanged:
+
+| Resource | Dashboard access |
+| --- | --- |
+| Published snapshot | read only |
+| Request inbox | append only (validated request rows) |
+| Private management workbook | none (its ID is never configured) |
+
+Controls: domain-restricted deployment (`access: DOMAIN`), viewer check, payload whitelist,
+length limits, 5 submissions per browser token per hour, a 24-hour duplicate guard, script
+lock, and a strict inbox header contract. Set `REQUEST_SUBMISSION_ENABLED=false` to close
+submissions. Review the deployment after any scope change; anonymous access must never be
+enabled.
+

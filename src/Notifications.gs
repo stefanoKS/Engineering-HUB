@@ -407,6 +407,122 @@ var Notifications = (function () {
     });
   }
 
+  /**
+   * V1.3 request notifications. Same gate, same switches, OFF by default.
+   *
+   * Only the requesting employee's self-reported name, the task identity and the dates are
+   * sent: no credentials, no client token, no private workbook identifier.
+   */
+  function requestRecipients(state, config) {
+    var members = Object.create(null);
+    Database.read('MEMBERS').forEach(function (member) { members[email(member.Email)] = member; });
+    var addresses = state.configured ? state.managementRecipients : (config.managementRecipients || []);
+    var out = [], seen = Object.create(null);
+    addresses.forEach(function (address) {
+      var to = recipient(address, config, members);
+      if (!to || seen[to]) return;
+      seen[to] = true;
+      out.push(to);
+    });
+    return out;
+  }
+
+  function requestToggle(state, request) {
+    return String(request && request.Request_Type) === 'COMPLETION_REPORT'
+      ? state.toggles.COMPLETION_REPORT === true
+      : state.toggles.DEADLINE_REQUEST === true;
+  }
+
+  function requestBody(request, kind, status) {
+    var typeLabel = String(request.Request_Type) === 'COMPLETION_REPORT' ? '完了報告' : '納期変更申請';
+    var lines = [
+      typeLabel + '（' + (kind === 'REQUEST_SUBMITTED' ? '受付' : '判断: ' + status) + '）',
+      '申請ID: ' + String(request.Request_ID || ''),
+      'プロジェクトID: ' + String(request.Project_ID || ''),
+      'タスクID: ' + String(request.Task_ID || ''),
+      '申請者（自己申告・未確認）: ' + String(request.Requester_Name || ''),
+      '申請日時: ' + String(request.Submitted_At || '')
+    ];
+    if (String(request.Request_Type) === 'COMPLETION_REPORT') {
+      lines.push('報告メモ: ' + String(request.Completion_Note || ''));
+    } else {
+      lines.push('現在の期限: ' + String(request.Original_Due_Date || ''));
+      lines.push('希望期限: ' + String(request.Requested_Due_Date || ''));
+      lines.push('理由: ' + String(request.Reason || ''));
+      lines.push('詳細: ' + String(request.Explanation || ''));
+    }
+    lines.push('', '判断は管理アプリの「申請一覧 / 承認待ち」で行ってください。');
+    return lines.join('\n');
+  }
+
+  function deliverRequest(request, kind, now) {
+    var config = boundConfig();
+    var state = AutomationSettings.emailState(config);
+    var result = emptyResult(state);
+    var activated = date(config.notificationActivationAt);
+    if (!activated || !config.notificationAuthorizedBy) { result.reason = 'NOT_ACTIVATED'; return result; }
+    if (!requestToggle(state, request)) { result.reason = 'REQUEST_NOTIFICATIONS_DISABLED'; return result; }
+    if (state.mode === 'OFF') return result;
+    var recipients = requestRecipients(state, config);
+    if (!recipients.length) { result.reason = 'NO_VALID_RECIPIENTS'; return result; }
+    var logs = ledgerSeen(Database.read('NOTIFICATION_LOG'));
+    var deliver = createMailer({config: config, state: state, mode: state.mode, now: now,
+      options: {writeLedger: true}, result: result, seen: logs.seen, previewSeen: logs.previewSeen, taskMap: {}});
+    var subject = kind === 'REQUEST_SUBMITTED'
+      ? '【申請受付】' + (String(request.Request_Type) === 'COMPLETION_REPORT' ? '完了報告' : '納期変更申請')
+      : '【申請判断】' + String(request.Request_ID || '');
+    var body = requestBody(request, kind, request.Status);
+    recipients.forEach(function (to) {
+      deliver(JSON.stringify([kind, String(request.Request_ID || ''), to]), to, subject, body,
+        String(request.Task_ID || ''), kind, String(request.Request_ID || ''));
+    });
+    return result;
+  }
+
+  function notifyRequestSubmitted(request) {
+    if (!request) return null;
+    return deliverRequest(request, 'REQUEST_SUBMITTED', new Date());
+  }
+
+  function notifyRequestDecision(request, status) {
+    if (!request) return null;
+    return deliverRequest(request, 'REQUEST_DECISION', new Date());
+  }
+
+  /** Bounded daily reminder about requests that are still waiting for approval. */
+  function sendPendingRequestReminder(nowValue) {
+    var config = boundConfig();
+    var now = date(nowValue) || new Date();
+    var state = AutomationSettings.emailState(config);
+    var result = emptyResult(state);
+    var activated = date(config.notificationActivationAt);
+    if (!activated || !config.notificationAuthorizedBy) { result.reason = 'NOT_ACTIVATED'; return result; }
+    if (!state.toggles.PENDING_REQUEST_REMINDER) { result.reason = 'PENDING_REQUEST_REMINDER_DISABLED'; return result; }
+    if (state.mode === 'OFF') return result;
+    var pending = Database.read('TASK_REQUESTS').filter(function (request) {
+      var status = String(request.Status).toUpperCase();
+      return status === 'PENDING' || status === 'STALE';
+    });
+    if (!pending.length) { result.reason = 'NOTHING_PENDING'; return result; }
+    var recipients = requestRecipients(state, config);
+    if (!recipients.length) { result.reason = 'NO_VALID_RECIPIENTS'; return result; }
+    var logs = ledgerSeen(Database.read('NOTIFICATION_LOG'));
+    var deliver = createMailer({config: config, state: state, mode: state.mode, now: now,
+      options: {writeLedger: true}, result: result, seen: logs.seen, previewSeen: logs.previewSeen, taskMap: {}});
+    var body = ['承認待ちの申請が ' + pending.length + ' 件あります。', '',
+      pending.slice(0, 20).map(function (request) {
+        return '- ' + String(request.Request_ID) + ' / タスク ' + String(request.Task_ID) +
+          ' / 状態 ' + String(request.Status);
+      }).join('\n'),
+      '', '管理アプリの「申請一覧 / 承認待ち」で判断してください。'].join('\n');
+    recipients.forEach(function (to) {
+      deliver(JSON.stringify(['PENDING_REQUEST_REMINDER', day(now), to]), to,
+        '【申請リマインド】承認待ち ' + pending.length + ' 件', body, '', 'PENDING_REQUEST_REMINDER', day(now));
+    });
+    AutomationSettings.setStatus('LAST_PENDING_REQUEST_REMINDER_AT', Domain.now());
+    return result;
+  }
+
   function history(limit) {
     var rows = Database.read('NOTIFICATION_LOG').slice();
     rows.sort(function (a, b) { return String(b.Created_At).localeCompare(String(a.Created_At)); });
@@ -459,6 +575,9 @@ var Notifications = (function () {
     scan: scan,
     preview: preview,
     sendWeeklyReport: sendWeeklyReport,
+    notifyRequestSubmitted: notifyRequestSubmitted,
+    notifyRequestDecision: notifyRequestDecision,
+    sendPendingRequestReminder: sendPendingRequestReminder,
     history: history,
     reconcileUncertain: reconcileUncertain,
     effectiveStatus: effectiveStatus,

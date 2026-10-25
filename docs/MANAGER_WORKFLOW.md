@@ -1,7 +1,7 @@
 # Manager workflow
 
 This guide describes the intended V1.1 manager workflow in the bound Google Sheets project. All screens are
-Japanese-first; the menu is **Engineering HUB**.
+Japanese-first; the menu is **設計・開発課 管理**.
 
 > Prerequisite: roles are assigned in `MEMBERS.Role` (`ADMIN`, `MANAGER`, `MEMBER`, `VIEWER`). A member without a
 > role is treated as `VIEWER`; migrated rows are blank and must be assigned deliberately after the upgrade.
@@ -89,7 +89,7 @@ confirmation). The last active administrator can never be demoted or deactivated
 
 ## Create a project
 
-1. **Engineering HUB → 新規プロジェクト**.
+1. **設計・開発課 管理 → 新規プロジェクト**.
 2. Enter プロジェクト名, 責任者, 確定期限, 状態.
 3. **作成**. The stable `Project_ID` is generated, the audit log records `UI_PROJECT_CREATED`, and the dashboard
    refreshes automatically.
@@ -147,7 +147,7 @@ weekday-only sending, execution window (JST) and report recipients are all manag
 
 ## Disable email immediately
 
-**Engineering HUB → 自動化設定 → 緊急停止** (or set 配信モード to `OFF`) → **設定を保存**. The next scan sends
+**設計・開発課 管理 → 自動化設定 → 緊急停止** (or set 配信モード to `OFF`) → **設定を保存**. The next scan sends
 nothing, even if a trigger is still installed. Notification history is preserved.
 
 ## Enable email after safety checks
@@ -182,3 +182,41 @@ configuration rebinding. The application never restores automatically and never 
 5. Re-check `システム状態`, assign roles if the migration appended blank roles, and re-run automation in PREVIEW.
 
 `clasp push` never changes spreadsheet data, Script Properties, triggers or automation settings.
+
+## V1.3 — deadline planning and the request queue
+
+### Assign a task with a deadline and a duration
+
+1. Open **設計・開発課 管理 → 新規タスク** (or タスク割当) in the bound spreadsheet.
+2. Choose the project, optional subproject, task name and assignee.
+3. Enter the **完了期限**, the **必要期間**, the **単位** (日/週) and the **計算方法**
+   (営業日/暦日). The form shows the calculated **開始予定日 → 完了期限** before saving.
+4. Read the warnings. A past deadline, a past start or a milestone conflict is a warning
+   only. A deadline that is not a working day requires the acknowledgement checkbox; the
+   deadline itself is not changed.
+5. Optionally enter 見積工数（時間）. Duration and effort are different numbers and are never
+   converted into each other.
+6. Save. The planned start is stored with the source `DERIVED`, any existing schedule
+   confirmation is invalidated and the assignment version is bumped.
+
+Overlapping assignments are allowed: the manager decides whether the schedule is feasible.
+
+### Process worker requests
+
+1. **設計・開発課 管理 → 申請一覧**.
+2. Press **申請を取り込む** to import new rows from the request inbox.
+3. Review each card: request ID, project, task, current assignee, self-reported requester,
+   current and requested deadline, difference, reason and explanation.
+4. Enter a decision note and press **承認**, **却下** or **差戻し** and confirm.
+   * 承認 changes the deadline once, recalculates the planned start, invalidates the old
+     schedule confirmation and assignment approval, and records the deadline history.
+   * 却下 / 差戻し never change the task.
+5. If a card is marked as re-review required (`STALE`), the task changed after submission.
+   Re-read the task and decide again.
+6. A 完了報告 card completes the task (`Done`, 100%) only when approved.
+
+### Language
+
+Use `日本語 | English` at the top of every sidebar. The choice is remembered per browser and
+never changes stored data.
+

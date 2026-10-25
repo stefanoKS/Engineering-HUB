@@ -288,9 +288,9 @@ test('the viewer exposes no write path and caches only the bounded portfolio', (
 
   const template = viewer.context.doGet();
   const html = template.getContent();
-  assert.match(html, /Engineering HUB — 案件進捗/);
+  assert.match(html, /設計・開発課 管理/);
   assert.match(html, /閲覧のみ/);
-  assert.equal(template.getTitle(), 'Engineering HUB — 案件進捗');
+  assert.equal(template.getTitle(), '設計・開発課 管理');
 });
 
 test('the real client script renders cards, detail groups and the task drawer without markup injection', async () => {

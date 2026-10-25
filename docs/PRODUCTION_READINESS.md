@@ -140,3 +140,26 @@ the blockers above are resolved and this document is updated with recorded evide
 
 Changing this document's status requires: a completed smoke test with results, a verified backup reference, a
 completed restore drill, and a named approver.
+
+## V1.3 status
+
+Status: **NOT APPROVED FOR PRODUCTION** — V1.3 local gates pass, live verification is
+**UNVERIFIED**.
+
+| Area | Local | Live |
+| --- | --- | --- |
+| Branding `設計・開発課 管理` | PASS | UNVERIFIED |
+| Deadline + duration planning | PASS | UNVERIFIED |
+| Request submission (dashboard → inbox) | PASS (mocks) | UNVERIFIED |
+| Manager import/approval/staleness | PASS (mocks) | UNVERIFIED |
+| Completion reporting | PASS (mocks) | UNVERIFIED |
+| Request notification switches (OFF/PREVIEW/LIVE) | PASS (mocks) | UNVERIFIED |
+| Japanese/English UI | PASS (dictionary + client harness) | UNVERIFIED |
+| Schema 5 migration and preservation | PASS (mocks) | UNVERIFIED |
+
+Before any production use, an operator must record live evidence for: the migration on a
+copy of the production workbook, the dashboard scope re-authorisation and domain
+restriction, one real request end to end, the manager decision, the published snapshot with
+contract `1.3`, and the language switch in a real browser. Local mock results are not
+Workspace evidence.
+

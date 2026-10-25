@@ -39,6 +39,7 @@ var Tasks = (function () {
     Domain.number(row.Estimated_Hours, 'Estimated_Hours', 0);
     Domain.number(row.Actual_Hours, 'Actual_Hours', 0);
     Domain.number(row.Progress_Percent, 'Progress_Percent', 0, 100);
+    Domain.number(row.Planned_Duration_Value, 'Planned_Duration_Value', 0);
     if (row.Owner_Member_ID) {
       var owner = Domain.required('MEMBERS', row.Owner_Member_ID);
       if (owner.Active !== true) Domain.fail('Task owner must be active');
@@ -49,6 +50,9 @@ var Tasks = (function () {
     if (row.Progress_Percent === 100 && row.Status !== 'Done') Domain.fail('100% progress requires Done status');
     row.Completed_At = row.Status === 'Done' ? ((before && before.Completed_At) || Domain.now()) : '';
     row.Dependency_IDs = dependencies(row.Dependency_IDs).join(',');
+    // V1.3: a manager-entered duration and deadline derive the planned start. Legacy rows
+    // (no duration) keep their stored start; no estimate is ever invented.
+    Planning.applyTaskPlan(row, {holidays: Database.read('HOLIDAYS')});
     var graph = Database.read('TASKS').filter(function (task) { return !before || task.Task_ID !== before.Task_ID; });
     graph.push(Object.assign({}, row, { Task_ID: row.Task_ID || '__new_task__' }));
     validateGraph(graph);

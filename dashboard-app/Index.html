@@ -3,22 +3,29 @@
 <head>
   <base target="_top">
   <meta charset="utf-8">
-  <title>Engineering HUB — 案件進捗</title>
+  <title>設計・開発課 管理</title>
   <?!= include('Styles') ?>
 </head>
 <body>
-  <a class="skip-link" href="#main">本文へ移動</a>
+  <?!= include('I18n') ?>
+  <a class="skip-link" href="#main" data-i18n="dashboard.skip">本文へ移動</a>
 
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">HUB</span>
         <div>
-          <h1 class="brand-title">Engineering HUB — 案件進捗</h1>
-          <p class="brand-sub">社内共有ダッシュボード（閲覧のみ）</p>
+          <h1 class="brand-title" data-i18n="app.name">設計・開発課 管理</h1>
+          <p class="brand-sub" data-i18n="app.subtitle">案件進捗ダッシュボード</p>
         </div>
       </div>
-      <p class="sync" id="sync-info">最終同期: 読み込み中…</p>
+      <div class="topbar-tools">
+        <div class="lang-switch" role="group" data-i18n-aria="lang.group" aria-label="表示言語">
+          <button type="button" class="lang-option" data-lang="ja">日本語</button>
+          <span class="lang-sep" aria-hidden="true">|</span>
+          <button type="button" class="lang-option" data-lang="en">English</button>
+        </div>
+        <p class="sync" id="sync-info" data-i18n="common.loading">読み込み中…</p>
+      </div>
     </div>
   </header>
 
@@ -27,45 +34,45 @@
 
     <main id="main" tabindex="-1">
       <section id="overview" aria-labelledby="portfolio-heading">
-        <h2 class="visually-hidden" id="portfolio-heading">プロジェクト一覧</h2>
+        <h2 class="visually-hidden" id="portfolio-heading" data-i18n="dashboard.projects.heading">プロジェクト一覧</h2>
         <div class="kpis" id="kpis"></div>
 
         <div class="toolbar">
           <div class="search-row">
             <div class="search-field">
               <span class="search-icon" aria-hidden="true">⌕</span>
-              <label class="visually-hidden" for="search">プロジェクト名・ID・タスク名で検索</label>
-              <input id="search" type="search" placeholder="プロジェクト名・ID・タスク名で検索"
-                     autocomplete="off" spellcheck="false">
+              <label class="visually-hidden" for="search" data-i18n="dashboard.search.label">プロジェクト名・ID・タスク名で検索</label>
+              <input id="search" type="search" data-i18n-placeholder="dashboard.search.placeholder"
+                     placeholder="プロジェクト名・ID・タスク名で検索" autocomplete="off" spellcheck="false">
             </div>
             <div class="filters">
-              <label class="filter"><span>状態</span>
+              <label class="filter"><span data-i18n="dashboard.filter.status">状態</span>
                 <select id="filter-status">
-                  <option value="open">進行中・計画中・保留</option>
-                  <option value="active">進行中</option>
-                  <option value="planned">計画中</option>
-                  <option value="hold">保留</option>
-                  <option value="terminal">完了・中止・アーカイブ</option>
-                  <option value="all">すべて</option>
+                  <option value="open" data-i18n="dashboard.filter.status.open">進行中・計画中・保留</option>
+                  <option value="active" data-i18n="dashboard.filter.status.active">進行中</option>
+                  <option value="planned" data-i18n="dashboard.filter.status.planned">計画中</option>
+                  <option value="hold" data-i18n="dashboard.filter.status.hold">保留</option>
+                  <option value="terminal" data-i18n="dashboard.filter.status.terminal">完了・中止・アーカイブ</option>
+                  <option value="all" data-i18n="dashboard.filter.status.all">すべて</option>
                 </select>
               </label>
-              <label class="filter"><span>カテゴリ</span><select id="filter-category"></select></label>
-              <label class="filter"><span>責任者</span><select id="filter-owner"></select></label>
-              <label class="filter"><span>リスク</span>
+              <label class="filter"><span data-i18n="dashboard.filter.category">カテゴリ</span><select id="filter-category"></select></label>
+              <label class="filter"><span data-i18n="dashboard.filter.owner">責任者</span><select id="filter-owner"></select></label>
+              <label class="filter"><span data-i18n="dashboard.filter.risk">リスク</span>
                 <select id="filter-risk">
-                  <option value="">すべて</option>
-                  <option value="risk">要注意のみ</option>
-                  <option value="RED">危険</option>
-                  <option value="YELLOW">注意</option>
-                  <option value="UNKNOWN">日程不明</option>
+                  <option value="" data-i18n="dashboard.filter.risk.all">すべて</option>
+                  <option value="risk" data-i18n="dashboard.filter.risk.risk">要注意のみ</option>
+                  <option value="RED" data-i18n="dashboard.filter.risk.RED">危険</option>
+                  <option value="YELLOW" data-i18n="dashboard.filter.risk.YELLOW">注意</option>
+                  <option value="UNKNOWN" data-i18n="dashboard.filter.risk.UNKNOWN">日程不明</option>
                 </select>
               </label>
-              <button class="chip" id="filter-due" type="button" aria-pressed="false">期限7日以内</button>
+              <button class="chip" id="filter-due" type="button" aria-pressed="false" data-i18n="dashboard.filter.dueSoon">期限7日以内</button>
             </div>
           </div>
           <div class="toolbar-meta">
             <p class="result-count" id="result-count" role="status" aria-live="polite"></p>
-            <button class="link-button" id="reset-filters" type="button">条件をクリア</button>
+            <button class="link-button" id="reset-filters" type="button" data-i18n="dashboard.filter.clear">条件をクリア</button>
           </div>
         </div>
 
@@ -76,21 +83,21 @@
         </div>
 
         <div class="state" id="overview-empty" hidden>
-          <h3>表示できるプロジェクトがありません</h3>
+          <h3 data-i18n="dashboard.empty.heading">表示できるプロジェクトがありません</h3>
           <p id="overview-empty-detail"></p>
         </div>
 
         <div class="state state-error" id="overview-error" hidden>
-          <h3>データを読み込めませんでした</h3>
+          <h3 data-i18n="dashboard.notice.loadFailed">データを読み込めませんでした</h3>
           <p id="overview-error-detail"></p>
-          <button class="link-button" id="retry" type="button">再試行</button>
+          <button class="link-button" id="retry" type="button" data-i18n="common.retry">再試行</button>
         </div>
 
         <ul class="project-list" id="project-list"></ul>
       </section>
 
       <section id="detail" aria-labelledby="detail-title" hidden>
-        <button class="back-button" id="detail-back" type="button">← 案件一覧へ戻る</button>
+        <button class="back-button" id="detail-back" type="button" data-i18n="dashboard.detail.back">← 案件一覧へ戻る</button>
         <div class="detail-head">
           <h2 class="detail-title" id="detail-title"></h2>
           <p class="detail-summary" id="detail-summary"></p>
@@ -99,11 +106,11 @@
         <div class="task-counts" id="detail-counts"></div>
         <div id="detail-notice"></div>
         <div id="detail-groups"></div>
-        <h3 class="section-title" id="detail-milestones-title">マイルストーン</h3>
+        <h3 class="section-title" id="detail-milestones-title" data-i18n="dashboard.detail.milestones">マイルストーン</h3>
         <div class="milestone-list" id="detail-milestones"></div>
         <div class="state" id="detail-empty" hidden>
-          <h3>タスクがありません</h3>
-          <p>このプロジェクトには公開されているタスクがまだありません。</p>
+          <h3 data-i18n="dashboard.detail.noTasks">タスクがありません</h3>
+          <p data-i18n="dashboard.detail.noTasksBody">このプロジェクトには公開されているタスクがまだありません。</p>
         </div>
       </section>
     </main>
@@ -113,10 +120,10 @@
   <aside class="drawer" id="task-drawer" role="dialog" aria-modal="true" aria-labelledby="task-drawer-title" hidden>
     <div class="drawer-head">
       <div>
-        <h2 class="drawer-title" id="task-drawer-title">タスク</h2>
-        <span class="readonly-badge">閲覧のみ</span>
+        <h2 class="drawer-title" id="task-drawer-title" data-i18n="dashboard.drawer.title">タスク</h2>
+        <span class="readonly-badge" id="drawer-badge" data-i18n="dashboard.drawer.readonly">閲覧のみ</span>
       </div>
-      <button class="drawer-close" id="drawer-close" type="button" aria-label="閉じる">×</button>
+      <button class="drawer-close" id="drawer-close" type="button" data-i18n-aria="common.close" aria-label="閉じる">×</button>
     </div>
     <div class="drawer-body" id="drawer-body"></div>
   </aside>

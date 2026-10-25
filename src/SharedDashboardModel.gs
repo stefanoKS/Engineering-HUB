@@ -16,7 +16,7 @@
  * until a manager reviews each project.
  */
 var SharedDashboardModel = (function () {
-  var CONTRACT_VERSION = '1.2';
+  var CONTRACT_VERSION = '1.3';
   var VISIBILITY = ['INTERNAL', 'RESTRICTED'];
   var DONE = 'Done';
   var CANCELLED = 'Cancelled';
@@ -156,6 +156,23 @@ var SharedDashboardModel = (function () {
     };
   }
 
+  /**
+   * Opaque task revision used by the V1.3 request workflow.
+   *
+   * The value never exposes member IDs or internal version numbers, but it changes when
+   * the assignment (owner, dates, effort) changes, so a request submitted against an older
+   * revision cannot silently overwrite a newer assignment or deadline.
+   */
+  function revision(task) {
+    var payload = [text(task.Task_ID), text(task.Owner_Member_ID), day(task.Due_Date),
+      String(Number(task.Assignment_Version || 0))].join('|');
+    var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, payload, Utilities.Charset.UTF_8);
+    return bytes.slice(0, 8).map(function (byte) {
+      var value = ((byte % 256) + 256) % 256;
+      return (value < 16 ? '0' : '') + value.toString(16);
+    }).join('');
+  }
+
   function taskDto(task, context) {
     return {
       taskId: text(task.Task_ID),
@@ -170,7 +187,9 @@ var SharedDashboardModel = (function () {
       progress: Progress.percent(task),
       // Public_Note is the only approved free-text field. Description, Next_Action and
       // Acceptance_Criteria are private and are never substituted.
-      publicNote: text(task.Public_Note)
+      publicNote: text(task.Public_Note),
+      revision: revision(task),
+      pendingRequest: !!(context.pendingRequests && context.pendingRequests[String(task.Task_ID)])
     };
   }
 
@@ -280,7 +299,9 @@ var SharedDashboardModel = (function () {
       tasksByProject: index(publishedTasks, 'Project_ID'),
       tasksBySubproject: index(publishedTasks, 'Subproject_ID'),
       milestonesByProject: index(publishedMilestones, 'Project_ID'),
-      issuesByProject: index(input.issues || [], 'Project_ID')
+      issuesByProject: index(input.issues || [], 'Project_ID'),
+      // Only a boolean indicator is published; request text stays in the private workbook.
+      pendingRequests: input.pendingRequests || Object.create(null)
     };
 
     var projectDtos = publishedProjects.map(function (project) { return projectDto(project, context); });
@@ -341,7 +362,7 @@ var SharedDashboardModel = (function () {
     'openTasks', 'doneTasks', 'overdueTasks', 'blockedTasks', 'dueSoonTasks', 'totalTasks'];
   var SUBPROJECT_PUBLIC_FIELDS = ['subprojectId', 'projectId', 'name', 'ownerName', 'status', 'progress', 'deadline', 'terminal'];
   var TASK_PUBLIC_FIELDS = ['taskId', 'projectId', 'subprojectId', 'name', 'ownerName', 'status', 'priority',
-    'plannedStart', 'dueDate', 'progress', 'publicNote'];
+    'plannedStart', 'dueDate', 'progress', 'publicNote', 'revision', 'pendingRequest'];
   var MILESTONE_PUBLIC_FIELDS = ['milestoneId', 'projectId', 'subprojectId', 'name', 'targetDate', 'actualDate', 'status'];
 
   return {
@@ -360,6 +381,7 @@ var SharedDashboardModel = (function () {
     daysRemaining: daysRemaining,
     build: build,
     hash: hash,
+    revision: revision,
     isPublicFieldSet: isPublicFieldSet,
     stable: stable
   };
