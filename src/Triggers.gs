@@ -11,8 +11,12 @@
  */
 var Triggers = (function () {
   var WEEKLY_HANDLER = 'scheduledWeeklyManagementReport';
-  var MANAGED = ['scheduledNotificationScan', 'scheduledManagementRefresh', 'scheduledDailyBackup', WEEKLY_HANDLER];
+  var PUBLICATION_HANDLER = 'scheduledSharedDashboardPublish';
+  var MANAGED = ['scheduledNotificationScan', 'scheduledManagementRefresh', 'scheduledDailyBackup', WEEKLY_HANDLER, PUBLICATION_HANDLER];
   var SIGNATURE_PROPERTY = 'MANAGED_TRIGGER_SIGNATURE';
+  // Apps Script only accepts these cadences for time-based triggers.
+  var MINUTE_CADENCES = [1, 5, 10, 15, 30];
+  var HOUR_CADENCES = [1, 2, 4];
 
   function weeklyEnabled() {
     try {
@@ -20,6 +24,31 @@ var Triggers = (function () {
     } catch (error) {
       return false;
     }
+  }
+
+  /** Shared dashboard publication is disabled by default, so it adds no trigger by default. */
+  function publicationEnabled() {
+    try {
+      return AutomationSettings.get().SHARED_DASHBOARD_PUBLISH_ENABLED === true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Maps the configured publication interval onto a supported Apps Script cadence.
+   * The configured value is a target, not a guarantee; nearest-lower cadence is used.
+   */
+  function publicationCadence() {
+    var interval = Number(AutomationSettings.get().SHARED_DASHBOARD_PUBLISH_INTERVAL_MINUTES);
+    if (!isFinite(interval) || interval < 1) interval = 30;
+    if (interval >= 60) {
+      var hours = Math.max(1, Math.floor(interval / 60));
+      var hourCadence = HOUR_CADENCES.filter(function (value) { return value <= hours; }).pop() || 1;
+      return {kind: 'hours', everyHours: hourCadence};
+    }
+    var minuteCadence = MINUTE_CADENCES.filter(function (value) { return value <= interval; }).pop() || 1;
+    return {kind: 'minutes', everyMinutes: minuteCadence};
   }
 
   function weeklySchedule() {
@@ -47,6 +76,10 @@ var Triggers = (function () {
         weekDay: weekly.weekDay, atHour: weekly.hour, nearMinute: weekly.minute
       });
     }
+    if (publicationEnabled()) {
+      var cadence = publicationCadence();
+      schedule.push(Object.assign({handler: PUBLICATION_HANDLER, kind: cadence.kind}, cadence));
+    }
     return schedule;
   }
 
@@ -61,7 +94,9 @@ var Triggers = (function () {
       builder.everyWeeks(1).onWeekDay(ScriptApp.WeekDay[item.weekDay]).atHour(item.atHour);
       if (typeof builder.nearMinute === 'function') builder.nearMinute(item.nearMinute);
       builder.create();
-    } else builder.everyHours(item.everyHours).create();
+    } else if (item.kind === 'minutes') builder.everyMinutes(item.everyMinutes).create();
+    else if (item.kind === 'hours') builder.everyHours(item.everyHours).create();
+    else builder.everyHours(item.everyHours || 1).create();
   }
 
   function inspect() {
@@ -151,6 +186,7 @@ var Triggers = (function () {
     expectedHandlers: expectedHandlers,
     expectedSchedule: expectedSchedule,
     weeklySchedule: weeklySchedule,
+    publicationCadence: publicationCadence,
     signature: signature
   };
 })();
