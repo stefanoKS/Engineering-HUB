@@ -10,7 +10,7 @@ Engineering project management using Google Sheets as the database, Google Apps 
 | --- | --- |
 | Release | V1.2 (shared read-only employee dashboard) on top of V1.1 (management usability, reliability & automation controls) + production hardening |
 | Version | `1.2.0` |
-| Local test count | **148 passing** (`npm test`), 0 failing; `npm run lint` and `npm run validate` pass |
+| Local test count | **149 passing** (`npm test`), 0 failing; `npm run lint` and `npm run validate` pass |
 | Schema version | **4** — `004_shared_dashboard` (additive only; approval + verified backup required) |
 | Verified locally | Unknown-vs-zero estimates, deadline-only assignment, separated approval/schedule confirmation, eligibility policy, weighted progress, deterministic health, dashboard/Gantt/workload views, role enforcement (ADMIN/MANAGER/MEMBER/VIEWER), safe DOM rendering, first-admin bootstrap, OFF/PREVIEW/LIVE matrix, reminder offsets and catch-up, weekly report, trigger drift recreation, ledger states, data preservation on upgrade, sanitized dashboard DTO allowlist, `INTERNAL`-only publication, A/B snapshot commit and rollback-on-failure, read-only viewer API, deadline wording in Asia/Tokyo |
 | Known production blockers | No live Google Workspace execution of any kind; development/production projects not created; roles blank after migration until bootstrap; real Sheets quota/performance unmeasured; repository visibility undecided; dashboard deployment ACL, Drive ACLs and scheduled publication unverified |

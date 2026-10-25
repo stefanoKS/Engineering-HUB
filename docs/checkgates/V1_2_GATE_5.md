@@ -28,17 +28,17 @@
 ```text
 npm ci            -> lockfile install
 npm run lint      -> pass (src + dashboard-app)
-npm test          -> 148 tests, 148 pass, 0 fail
+npm test          -> 149 tests, 149 pass, 0 fail
 npm run validate  -> 31 manager files, 2 dashboard files, both manifests
 ```
 
-Breakdown: 105 pre-existing tests (V1.0/V1.1) plus 43 new V1.2 tests:
+Breakdown: 105 pre-existing tests (V1.0/V1.1) plus 44 new V1.2 tests:
 
 | File | Tests | Covers |
 | --- | --- | --- |
 | `tests/v1_2-model.test.js` | 9 | schema 4, visibility, DTO allowlisting, private-field exclusion, cross-project references, aggregates, sibling isolation, health, content hash |
 | `tests/v1_2-publisher.test.js` | 13 | initialization guards, destination guards, allowlisted snapshot, A/B alternation, idempotency, interruption, OFF suppression, approval flow, status/preview, mail independence, manager sidebar controls, role requirement |
-| `tests/v1_2-dashboard.test.js` | 13 | contract parity, portfolio, search, grouping, deadline wording, bounded responses, staleness, viewer restrictions, fail-closed snapshots, read-only surface, client rendering/safety, empty state, 100 projects / 5 000 tasks scale |
+| `tests/v1_2-dashboard.test.js` | 14 | contract parity, portfolio, search, grouping, deadline wording, bounded responses, staleness, viewer restrictions, fail-closed snapshots, read-only surface, client rendering/safety, stale and error states, empty state, 100 projects / 5 000 tasks scale |
 | `tests/v1_2-release.test.js` | 8 | documentation and gate presence, doc coverage, release status, ignored deployment files, no write/mail surface, validation run, no credentials, honest preview tooling |
 
 ## Scale measurement (mock only)

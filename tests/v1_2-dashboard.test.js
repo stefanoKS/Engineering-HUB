@@ -357,6 +357,35 @@ test('the real client script renders cards, detail groups and the task drawer wi
   assert.doesNotMatch(document.getElementById('drawer-body').textContent, /編集|保存する/, 'no fake write buttons');
 });
 
+test('the client shows a stale-data warning and a friendly error state', async () => {
+  const {snapshot, viewer} = portfolio();
+  const meta = snapshot.getSheetByName('PUBLISHED_META');
+  const rows = meta.getDataRange().getValues();
+  rows[rows.findIndex(row => row[0] === 'PUBLISHED_AT')][1] = new Date(Date.now() - 30 * 3600000).toISOString();
+  meta.getRange(1, 1, rows.length, 2).setValues(rows);
+
+  const stale = dashboard.runClient({
+    dashboardPortfolio: request => viewer.context.dashboardPortfolio(request),
+    dashboardProject: (id, options) => viewer.context.dashboardProject(id, options),
+    dashboardTask: (projectId, taskId) => viewer.context.dashboardTask(projectId, taskId)
+  });
+  await dashboard.flush();
+  assert.match(stale.document.getElementById('notices').textContent, /データが更新されていません/);
+  assert.match(stale.document.getElementById('notices').textContent, /30 時間前/);
+  assert.match(stale.document.getElementById('sync-info').textContent, /更新が遅れています/);
+
+  const failing = dashboard.runClient({
+    dashboardPortfolio: () => ({ok: false, error: {code: 'SNAPSHOT_NOT_PUBLISHED', message: '公開データがまだ作成されていません。管理者に連絡してください。'}}),
+    dashboardProject: () => ({ok: false, error: {code: 'NOT_FOUND', message: 'x'}}),
+    dashboardTask: () => ({ok: false, error: {code: 'NOT_FOUND', message: 'x'}})
+  });
+  await dashboard.flush();
+  assert.equal(failing.document.getElementById('overview-error').hidden, false);
+  assert.match(failing.document.getElementById('overview-error-detail').textContent, /公開データがまだ作成されていません/);
+  assert.equal(failing.document.getElementById('project-list').hidden, true);
+  assert.doesNotMatch(failing.document.getElementById('overview-error-detail').textContent, /at Object\.|\.js:\d+/);
+});
+
 test('an empty portfolio shows an intentional empty state', async () => {
   const manager = fixtures.app();
   manager.context.Database.insert('MEMBERS', {

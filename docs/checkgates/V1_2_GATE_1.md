@@ -23,7 +23,7 @@ Two isolated applications, schema version 4, and an explicit sanitized data cont
 
 | Item | Result | Evidence |
 | --- | --- | --- |
-| Existing tests pass | PASS | `npm test`: 148 tests, 148 pass, 0 fail, including all 105 pre-existing V1.0/V1.1 tests. See [V1_2_GATE_5.md](V1_2_GATE_5.md). |
+| Existing tests pass | PASS | `npm test`: 149 tests, 149 pass, 0 fail, including all 105 pre-existing V1.0/V1.1 tests. See [V1_2_GATE_5.md](V1_2_GATE_5.md). |
 | V4 migration is non-destructive | PASS | `tests/core.test.js` "approved upgrade preserves project, task ownership, skill records and existing cell positions", `tests/gate-c-correctness.test.js`, `tests/gate6-release.test.js` assert every pre-existing cell, formula, custom column and ID after the 3 → 4 step. |
 | Manager and dashboard deployments are isolated | PASS (local) | `npm run validate` compiles both projects separately and asserts that `dashboard-app/` contains no manager module, no `SPREADSHEET_ID` property, no write/mail/Calendar/Drive/trigger API. `DEPLOYMENT.md` documents the separate `rootDir` clasp targets. |
 | Public snapshot uses allowlisted fields only | PASS | `tests/v1_2-model.test.js` "public DTOs use the explicit allowlist…" compares each DTO key set with `PROJECT_PUBLIC_FIELDS` / `SUBPROJECT_PUBLIC_FIELDS` / `TASK_PUBLIC_FIELDS` / `MILESTONE_PUBLIC_FIELDS`; `tests/v1_2-publisher.test.js` scans the written workbook. |
