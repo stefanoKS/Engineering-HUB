@@ -1,6 +1,6 @@
 {
   "name": "engineering-hub",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Safe Google Apps Script engineering operations workspace",
   "engines": {
@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "test": "node --test tests/*.test.js",
     "validate": "node scripts/validate-source.js",
+    "preview:dashboard": "node scripts/dashboard-preview.js",
     "clasp": "clasp"
   },
   "devDependencies": {
