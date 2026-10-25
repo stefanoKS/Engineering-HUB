@@ -5,9 +5,12 @@ const assert = require('node:assert/strict');
 const { loadApp } = require('./helpers');
 
 function fixture(properties = {}, options = {}) {
+  // These cases exercise the pre-V1.1 workbook shape (no persisted automation settings), so
+  // they explicitly opt into the documented legacy compatibility path. Without that flag the
+  // same workbook now fails closed and sends nothing; see gate-a/gate-b hardening tests.
   const app = loadApp({
     properties: {
-      EMAIL_ENABLED: 'true', DRY_RUN: 'false',
+      EMAIL_ENABLED: 'true', DRY_RUN: 'false', ALLOW_LEGACY_EMAIL_CONFIG: 'true',
       ALLOWED_RECIPIENT_DOMAINS: 'example.test', ...properties
     }, ...options
   });
