@@ -55,9 +55,9 @@ var Health = (function () {
     var milestones = context.milestones || [];
     var issues = context.issues || [];
 
-    if (status === 'Archived') return result('ARCHIVED', ['ARCHIVED'], today, limits);
-    if (status === 'Cancelled') return result('CANCELLED', ['CANCELLED'], today, limits);
-    if (status === 'Completed') return result('COMPLETED', ['COMPLETED'], today, limits);
+    if (status === 'Archived') return result('ARCHIVED', ['ARCHIVED'], today, limits, project);
+    if (status === 'Cancelled') return result('CANCELLED', ['CANCELLED'], today, limits, project);
+    if (status === 'Completed') return result('COMPLETED', ['COMPLETED'], today, limits, project);
 
     var committed = day(project.Committed_Deadline);
     var forecast = day(project.Forecast_End);
@@ -112,21 +112,33 @@ var Health = (function () {
     });
     if (overdue.length) reasons.push({level: YELLOW, code: 'OVERDUE_TASK'});
 
-    if (status === 'On Hold') return result('ON_HOLD', codes(reasons).concat(['ON_HOLD']), today, limits);
-    if (status === 'Planned' && !hasRed(reasons)) return result('PLANNED', codes(reasons).concat(['PLANNED']), today, limits);
+    if (status === 'On Hold') return result('ON_HOLD', codes(reasons).concat(['ON_HOLD']), today, limits, project);
+    if (status === 'Planned' && !hasRed(reasons)) return result('PLANNED', codes(reasons).concat(['PLANNED']), today, limits, project);
 
     if (!committed && !forecast && !hasRed(reasons)) {
-      return result(UNKNOWN, codes(reasons).concat(['UNKNOWN_SCHEDULE']), today, limits);
+      return result(UNKNOWN, codes(reasons).concat(['UNKNOWN_SCHEDULE']), today, limits, project);
     }
 
     var levels = reasons.map(function (reason) { return reason.level; });
-    if (levels.indexOf(RED) >= 0) return result(RED, codes(reasons), today, limits);
-    if (levels.indexOf(YELLOW) >= 0) return result(YELLOW, codes(reasons), today, limits);
-    return result(GREEN, ['ON_TRACK'], today, limits);
+    if (levels.indexOf(RED) >= 0) return result(RED, codes(reasons), today, limits, project);
+    if (levels.indexOf(YELLOW) >= 0) return result(YELLOW, codes(reasons), today, limits, project);
+    return result(GREEN, ['ON_TRACK'], today, limits, project);
   }
 
-  function result(health, reasons, today, limits) {
-    return {health: health, reasons: reasons, staleDays: limits, evaluatedOn: today};
+  function result(health, reasons, today, limits, project) {
+    return {
+      health: health,
+      reasons: reasons,
+      // Numeric days since the last meaningful project update (null when unknown).
+      staleDays: project ? staleDays(project, today) : null,
+      thresholds: {
+        staleDays: limits.staleDays,
+        milestoneApproachDays: limits.milestoneApproachDays,
+        delayToleranceDays: limits.delayToleranceDays,
+        staleAlert: limits.staleAlert
+      },
+      evaluatedOn: today
+    };
   }
 
   function codes(reasons) {
