@@ -1,0 +1,895 @@
+<script>
+(function () {
+  'use strict';
+
+  /* ------------------------------------------------------------------ *
+   * Browser-side dashboard controller.
+   *
+   * Rules enforced here (and checked by `npm run validate`):
+   * - Every stored string is inserted with textContent or DOM creation. There is no
+   *   markup-string assignment path (the forbidden DOM APIs are rejected by validation),
+   *   so spreadsheet text can never become markup.
+   * - Nothing is ever written back: the only server calls are the read-only
+   *   dashboardPortfolio / dashboardProject / dashboardTask functions.
+   * - Responses carry a request token, so a slow answer for an older search or project
+   *   cannot overwrite a newer selection.
+   * ------------------------------------------------------------------ */
+
+  var RISK_ORDER = {RED: 0, YELLOW: 1, UNKNOWN: 2};
+  var SEARCH_DEBOUNCE_MS = 280;
+  var PRIORITY_RANK = {Critical: 4, High: 3, Medium: 2, Low: 1};
+
+  var state = {
+    projects: [],
+    meta: null,
+    indicators: null,
+    filterOptions: null,
+    requestToken: 0,
+    detailToken: 0,
+    drawerToken: 0,
+    query: '',
+    filters: {status: 'open', category: '', owner: '', risk: '', dueSoon: false},
+    detail: null,
+    currentProjectId: '',
+    taskSort: {key: 'due', direction: 1},
+    drawerOpen: false,
+    lastFocused: null
+  };
+
+  /* ---------------- DOM helpers ---------------- */
+
+  function el(tag, options, children) {
+    var node = document.createElement(tag);
+    options = options || {};
+    if (options.className) node.className = options.className;
+    if (options.text !== undefined && options.text !== null) node.textContent = String(options.text);
+    if (options.attrs) {
+      Object.keys(options.attrs).forEach(function (name) {
+        var value = options.attrs[name];
+        if (value === null || value === undefined || value === false) return;
+        node.setAttribute(name, value === true ? 'true' : String(value));
+      });
+    }
+    (children || []).forEach(function (child) { if (child) node.appendChild(child); });
+    return node;
+  }
+
+  function clear(node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+  }
+
+  function byId(id) { return document.getElementById(id); }
+
+  var dom = {
+    sync: byId('sync-info'),
+    notices: byId('notices'),
+    kpis: byId('kpis'),
+    search: byId('search'),
+    filterStatus: byId('filter-status'),
+    filterCategory: byId('filter-category'),
+    filterOwner: byId('filter-owner'),
+    filterRisk: byId('filter-risk'),
+    filterDue: byId('filter-due'),
+    reset: byId('reset-filters'),
+    resultCount: byId('result-count'),
+    overview: byId('overview'),
+    loading: byId('overview-loading'),
+    empty: byId('overview-empty'),
+    emptyDetail: byId('overview-empty-detail'),
+    error: byId('overview-error'),
+    errorDetail: byId('overview-error-detail'),
+    retry: byId('retry'),
+    list: byId('project-list'),
+    detail: byId('detail'),
+    detailBack: byId('detail-back'),
+    detailTitle: byId('detail-title'),
+    detailSummary: byId('detail-summary'),
+    detailFacts: byId('detail-facts'),
+    detailCounts: byId('detail-counts'),
+    detailNotice: byId('detail-notice'),
+    detailGroups: byId('detail-groups'),
+    detailEmpty: byId('detail-empty'),
+    detailMilestones: byId('detail-milestones'),
+    milestonesTitle: byId('detail-milestones-title'),
+    drawer: byId('task-drawer'),
+    drawerBody: byId('drawer-body'),
+    drawerTitle: byId('task-drawer-title'),
+    drawerClose: byId('drawer-close'),
+    backdrop: byId('drawer-backdrop'),
+    toast: byId('toast')
+  };
+
+  /* ---------------- server access (read only) ---------------- */
+
+  function hasAppsScript() {
+    return typeof google !== 'undefined' && google && google.script && google.script.run;
+  }
+
+  function callServer(name, args) {
+    return new Promise(function (resolve, reject) {
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(function (error) { reject(error || new Error('server error')); })
+        [name].apply(null, args || []);
+    });
+  }
+
+  // Static offline preview (screenshots and local review only). In a deployed Apps Script
+  // page `google.script.run` always exists, so this branch is unreachable there.
+  var PREVIEW = (!hasAppsScript() && typeof window !== 'undefined' && window.__DASHBOARD_PREVIEW__) || null;
+
+  var api = PREVIEW
+    ? {
+        portfolio: function (request) { return Promise.resolve(previewPortfolio(request)); },
+        project: function (id) { return Promise.resolve(previewProject(id)); },
+        task: function (projectId, taskId) { return Promise.resolve(previewTask(projectId, taskId)); }
+      }
+    : {
+        portfolio: function (request) { return callServer('dashboardPortfolio', [request]); },
+        project: function (id) { return callServer('dashboardProject', [id]); },
+        task: function (projectId, taskId) { return callServer('dashboardTask', [projectId, taskId]); }
+      };
+
+  function previewPortfolio(request) {
+    var query = String((request && request.query) || '').toLowerCase();
+    var projects = PREVIEW.portfolio.projects.filter(function (project) {
+      if (!query) return true;
+      return (project.projectName + ' ' + project.projectId).toLowerCase().indexOf(query) >= 0;
+    });
+    return {ok: true, data: Object.assign({}, PREVIEW.portfolio, {projects: projects, query: query})};
+  }
+
+  function previewProject(id) {
+    var data = PREVIEW.projects[id];
+    if (!data) return {ok: false, error: {code: 'NOT_FOUND', message: '対象のデータが見つかりませんでした。'}};
+    return {ok: true, data: data};
+  }
+
+  function previewTask(projectId, taskId) {
+    var data = (PREVIEW.tasks || []).filter(function (item) {
+      return item.task.taskId === taskId && item.project.projectId === projectId;
+    })[0];
+    if (!data) return {ok: false, error: {code: 'NOT_FOUND', message: '対象のデータが見つかりませんでした。'}};
+    return {ok: true, data: data};
+  }
+
+  /* ---------------- formatting ---------------- */
+
+  function percentText(value) {
+    return value === null || value === undefined ? '—' : Math.round(value) + '%';
+  }
+
+  function healthClass(health) {
+    if (health === 'GREEN') return 'pill pill-green';
+    if (health === 'YELLOW') return 'pill pill-amber';
+    if (health === 'RED') return 'pill pill-red';
+    return 'pill pill-gray';
+  }
+
+  function deadlineClass(item) {
+    if (item.deadlineKind === 'overdue') return 'is-overdue';
+    if (item.deadlineKind === 'today') return 'is-soon';
+    if (item.deadlineKind === 'future' && item.daysRemaining !== null && item.daysRemaining <= 7) return 'is-soon';
+    return '';
+  }
+
+  function progressBar(percent, label) {
+    var value = percent === null || percent === undefined ? 0 : Math.max(0, Math.min(100, percent));
+    var track = el('div', {className: 'progress', attrs: {
+      role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100',
+      'aria-valuenow': String(Math.round(value)), 'aria-label': label || '進捗'
+    }}, [el('div', {className: 'progress-fill', attrs: {style: 'width: ' + value + '%'}})]);
+    return track;
+  }
+
+  function metaItem(label, value, valueClass) {
+    return el('div', {className: 'meta-item'}, [
+      el('span', {className: 'meta-label', text: label}),
+      el('span', {className: 'meta-value ' + (valueClass || ''), text: value === '' || value === null || value === undefined ? '—' : String(value)})
+    ]);
+  }
+
+  /* ---------------- overview ---------------- */
+
+  function loadPortfolio(query) {
+    var token = ++state.requestToken;
+    setLoading(true);
+    state.query = query || '';
+    return api.portfolio({query: state.query}).then(function (result) {
+      if (token !== state.requestToken) return;   // a stale response never overwrites a newer one
+      setLoading(false);
+      if (!result || !result.ok) {
+        showOverviewError(result);
+        return;
+      }
+      applyPayload(result.data);
+    }).catch(function () {
+      if (token !== state.requestToken) return;
+      setLoading(false);
+      showOverviewError(null);
+    });
+  }
+
+  function applyPayload(data) {
+    state.projects = data.projects || [];
+    state.meta = data.meta || null;
+    state.indicators = data.indicators || null;
+    state.filterOptions = data.filters || {categories: [], owners: [], statuses: []};
+    dom.error.hidden = true;
+    dom.list.hidden = false;
+    renderSync();
+    renderNotices();
+    renderKpis();
+    renderFilterOptions();
+    renderProjects();
+  }
+
+  function setLoading(loading) {
+    dom.loading.hidden = !loading;
+    if (loading) {
+      dom.list.hidden = true;
+      dom.empty.hidden = true;
+    }
+  }
+
+  function showOverviewError(result) {
+    dom.list.hidden = true;
+    dom.empty.hidden = true;
+    dom.error.hidden = false;
+    dom.errorDetail.textContent = result && result.error && result.error.message
+      ? result.error.message
+      : 'データを読み込めませんでした。時間をおいて再試行してください。';
+    dom.resultCount.textContent = '表示できません';
+    dom.sync.textContent = '最終同期: 取得できません';
+  }
+
+  function renderSync() {
+    if (!state.meta) return;
+    var label = state.meta.publishedAtLabel || '未同期';
+    dom.sync.textContent = '最終同期: ' + label + (state.meta.stale ? '（更新が遅れています）' : '');
+  }
+
+  function renderNotices() {
+    clear(dom.notices);
+    if (!state.meta) return;
+    if (state.meta.stale) {
+      dom.notices.appendChild(el('div', {className: 'notice notice-warn'}, [
+        el('span', {className: 'notice-strong', text: 'データが更新されていません。'}),
+        el('span', {
+          text: '最終同期は ' + (state.meta.publishedAtLabel || '不明') + '（' +
+            state.meta.ageHours + ' 時間前）です。最新の状況は管理者にご確認ください。'
+        })
+      ]));
+    }
+    if (state.meta.ageHours === null) {
+      dom.notices.appendChild(el('div', {className: 'notice notice-info'}, [
+        el('span', {text: '同期時刻を取得できませんでした。表示内容が最新とは限りません。'})
+      ]));
+    }
+  }
+
+  function renderKpis() {
+    clear(dom.kpis);
+    if (!state.indicators) return;
+    var items = [
+      {label: '進行中の案件', value: state.indicators.activeProjects, unit: '件', risk: false},
+      {label: '要注意の案件', value: state.indicators.atRiskProjects, unit: '件', risk: state.indicators.atRiskProjects > 0},
+      {label: '7日以内に期限', value: state.indicators.dueWithin7Days, unit: '件', risk: false},
+      {label: '期限超過タスク', value: state.indicators.overdueTasks, unit: '件', risk: state.indicators.overdueTasks > 0}
+    ];
+    items.forEach(function (item) {
+      dom.kpis.appendChild(el('div', {className: 'kpi' + (item.risk ? ' is-risk' : '')}, [
+        el('p', {className: 'kpi-label', text: item.label}),
+        el('p', {className: 'kpi-value'}, [
+          el('span', {text: String(item.value)}),
+          el('span', {className: 'kpi-unit', text: item.unit})
+        ])
+      ]));
+    });
+  }
+
+  function renderFilterOptions() {
+    var options = state.filterOptions || {categories: [], owners: []};
+    fillSelect(dom.filterCategory, 'すべて', options.categories || [], state.filters.category, 'category');
+    fillSelect(dom.filterOwner, 'すべて', options.owners || [], state.filters.owner, 'owner');
+  }
+
+  function fillSelect(select, allLabel, values, current, key) {
+    clear(select);
+    select.appendChild(el('option', {text: allLabel, attrs: {value: ''}}));
+    values.forEach(function (value) {
+      select.appendChild(el('option', {text: value, attrs: {value: value}}));
+    });
+    select.value = values.indexOf(current) >= 0 ? current : '';
+    state.filters[key] = select.value;
+  }
+
+  function isTerminal(project) {
+    return !!project.terminal;
+  }
+
+  function matchesStatus(project, status) {
+    if (!status || status === 'all') return true;
+    if (status === 'open') return !isTerminal(project) && project.status !== 'Completed' && project.status !== 'Cancelled';
+    if (status === 'active') return project.status === 'Active';
+    if (status === 'planned') return project.status === 'Planned';
+    if (status === 'hold') return project.status === 'On Hold';
+    if (status === 'terminal') return isTerminal(project) || project.status === 'Completed' || project.status === 'Cancelled';
+    return true;
+  }
+
+  function matchesRisk(project, risk) {
+    if (!risk) return true;
+    if (risk === 'risk') return project.atRisk;
+    return project.health === risk;
+  }
+
+  function visibleProjects() {
+    var filters = state.filters;
+    var list = state.projects.filter(function (project) {
+      if (!matchesStatus(project, filters.status)) return false;
+      if (filters.category && project.category !== filters.category) return false;
+      if (filters.owner && project.ownerName !== filters.owner) return false;
+      if (!matchesRisk(project, filters.risk)) return false;
+      if (filters.dueSoon) {
+        var soon = project.deadlineKind === 'today' ||
+          (project.deadlineKind === 'future' && project.daysRemaining !== null && project.daysRemaining <= 7) ||
+          project.dueSoonTasks > 0;
+        if (!soon) return false;
+      }
+      return true;
+    });
+    return sortProjects(list);
+  }
+
+  function sortProjects(list) {
+    return list.slice().sort(function (a, b) {
+      var left = RISK_ORDER[a.health];
+      var right = RISK_ORDER[b.health];
+      left = left === undefined ? 9 : left;
+      right = right === undefined ? 9 : right;
+      if (left !== right) return left - right;
+      var leftDue = a.committedDeadline || '9999-12-31';
+      var rightDue = b.committedDeadline || '9999-12-31';
+      if (leftDue !== rightDue) return leftDue < rightDue ? -1 : 1;
+      return String(a.projectName).localeCompare(String(b.projectName), 'ja');
+    });
+  }
+
+  function renderProjects() {
+    clear(dom.list);
+    var list = visibleProjects();
+    var total = state.projects.length;
+    dom.list.hidden = list.length === 0;
+    dom.empty.hidden = list.length > 0;
+
+    if (!list.length) {
+      dom.emptyDetail.textContent = !total
+        ? (state.query
+          ? '検索条件に一致するプロジェクトがありません。検索語を変更してください。'
+          : '公開対象として承認されたプロジェクトがまだありません。管理者が公開設定を行うと表示されます。')
+        : '絞り込み条件に一致するプロジェクトがありません。「条件をクリア」で元に戻せます。';
+    }
+
+    dom.resultCount.textContent = list.length
+      ? list.length + ' 件を表示' + (total !== list.length ? '（全 ' + total + ' 件）' : '')
+      : '0 件';
+
+    list.forEach(function (project) {
+      dom.list.appendChild(projectCard(project));
+    });
+  }
+
+  function projectCard(project) {
+    var cardClass = 'project-card' + (project.health === 'RED' ? ' is-risk'
+      : (project.health === 'YELLOW' || project.health === 'UNKNOWN' ? ' is-caution' : ''));
+    var card = el('li');
+    var button = el('button', {
+      className: cardClass,
+      attrs: {
+        type: 'button',
+        'data-project-id': project.projectId,
+        'aria-label': project.projectName + ' の詳細を表示'
+      }
+    });
+
+    button.appendChild(el('div', {className: 'card-head'}, [
+      el('div', {}, [
+        el('p', {className: 'card-title', text: project.projectName}),
+        el('p', {className: 'card-sub', text: [project.category || 'カテゴリ未設定', project.statusLabel || project.status].join(' · ')})
+      ]),
+      el('span', {className: healthClass(project.health), text: project.healthLabel || project.health || '—'})
+    ]));
+
+    var dl = el('div', {className: 'card-meta'});
+    button.appendChild(el('div', {className: 'card-body'}, [
+      el('div', {className: 'progress-row'}, [
+        progressBar(project.progress, project.projectName + ' の進捗'),
+        el('span', {className: 'progress-value', text: percentText(project.progress)})
+      ]),
+      dl,
+      el('div', {className: 'task-counts'}, [
+        el('span', {text: '未完了 '}),
+        el('strong', {text: String(project.openTasks)}),
+        el('span', {text: ' · 期限超過 '}),
+        el('strong', {className: project.overdueTasks > 0 ? 'is-overdue' : '', text: String(project.overdueTasks)}),
+        el('span', {text: ' · 残り '}),
+        el('span', {className: deadlineClass(project), text: project.deadlineLabel || '—'})
+      ])
+    ]));
+
+    dl.appendChild(metaItem('責任者', project.ownerName || '未設定'));
+    dl.appendChild(metaItem('確定期限', project.committedDeadline || '未設定'));
+    dl.appendChild(metaItem('予測完了', project.forecastDeadline || '未設定'));
+    dl.appendChild(metaItem('最終更新', project.lastUpdated || '未設定'));
+
+    card.appendChild(button);
+    return card;
+  }
+
+  /* ---------------- detail ---------------- */
+
+  function openProject(projectId) {
+    var token = ++state.detailToken;
+    state.currentProjectId = projectId;
+    dom.overview.hidden = true;
+    dom.detail.hidden = false;
+    dom.detailTitle.textContent = '読み込み中…';
+    dom.detailSummary.textContent = '';
+    clear(dom.detailFacts);
+    clear(dom.detailCounts);
+    clear(dom.detailNotice);
+    clear(dom.detailMilestones);
+    clear(dom.detailGroups);
+    dom.detailGroups.appendChild(el('div', {className: 'skeleton-list'}, [
+      el('div', {className: 'skeleton-card'}),
+      el('div', {className: 'skeleton-card'})
+    ]));
+    dom.detailBack.focus();
+    window.scrollTo(0, 0);
+
+    api.project(projectId).then(function (result) {
+      if (token !== state.detailToken) return;    // another project was selected meanwhile
+      if (!result || !result.ok) {
+        clear(dom.detailGroups);
+        dom.detailGroups.appendChild(el('div', {className: 'state state-error'}, [
+          el('h3', {text: '案件を表示できませんでした'}),
+          el('p', {text: result && result.error ? result.error.message : '一覧に戻って選び直してください。'})
+        ]));
+        return;
+      }
+      state.detail = result.data;
+      state.taskSort = {key: 'due', direction: 1};
+      renderDetail();
+    }).catch(function () {
+      if (token !== state.detailToken) return;
+      clear(dom.detailGroups);
+      dom.detailGroups.appendChild(el('div', {className: 'state state-error'}, [
+        el('h3', {text: '案件を表示できませんでした'}),
+        el('p', {text: '通信に失敗しました。時間をおいて再試行してください。'})
+      ]));
+    });
+  }
+
+  function closeDetail() {
+    state.detailToken++;
+    state.currentProjectId = '';
+    state.detail = null;
+    dom.detail.hidden = true;
+    dom.overview.hidden = false;
+    dom.search.focus();
+  }
+
+  function renderDetail() {
+    var detail = state.detail;
+    if (!detail) return;
+    var project = detail.project;
+
+    dom.detailTitle.textContent = project.projectName;
+    dom.detailSummary.textContent = project.summary || '公開用の概要は設定されていません。';
+    clear(dom.detailFacts);
+    var facts = [
+      ['責任者', project.ownerName || '未設定'],
+      ['状態', project.statusLabel || project.status],
+      ['進捗', percentText(project.progress)],
+      ['健全性', project.healthLabel || project.health],
+      ['確定期限', project.committedDeadline || '未設定'],
+      ['予測完了', project.forecastDeadline || '未設定'],
+      ['残り', project.deadlineLabel],
+      ['最終更新', project.lastUpdated || '未設定']
+    ];
+    facts.forEach(function (item) {
+      dom.detailFacts.appendChild(el('div', {}, [
+        el('p', {className: 'fact-label', text: item[0]}),
+        el('p', {className: 'fact-value' + (item[0] === '残り' ? ' ' + deadlineClass(project) : ''), text: item[1]})
+      ]));
+    });
+
+    clear(dom.detailCounts);
+    var counts = detail.counts || {total: 0, open: 0, done: 0, overdue: 0, blocked: 0};
+    [
+      ['タスク', counts.total],
+      ['未完了', counts.open],
+      ['期限超過', counts.overdue],
+      ['ブロック', counts.blocked],
+      ['完了', counts.done]
+    ].forEach(function (item) {
+      dom.detailCounts.appendChild(el('span', {}, [
+        el('span', {text: item[0] + ' '}),
+        el('strong', {className: item[0] === '期限超過' && item[1] > 0 ? 'is-overdue' : '', text: String(item[1])})
+      ]));
+    });
+
+    clear(dom.detailNotice);
+    if (detail.truncated) {
+      dom.detailNotice.appendChild(el('div', {className: 'notice notice-info'}, [
+        el('span', {text: 'タスクが多いため先頭 ' + detail.tasks.length + ' 件を表示しています（全 ' + detail.taskTotal + ' 件）。'})
+      ]));
+    }
+
+    renderGroups();
+    renderMilestones();
+    dom.detailEmpty.hidden = counts.total > 0;
+  }
+
+  function tasksFor(subprojectId) {
+    return (state.detail.tasks || []).filter(function (task) {
+      return (task.subprojectId || '') === subprojectId;
+    });
+  }
+
+  function sortedTasks(tasks) {
+    var key = state.taskSort.key;
+    var direction = state.taskSort.direction;
+    return tasks.slice().sort(function (a, b) {
+      var left, right;
+      if (key === 'due') {
+        left = a.dueDate || '9999-12-31';
+        right = b.dueDate || '9999-12-31';
+      } else if (key === 'progress') {
+        left = a.progress === null ? -1 : a.progress;
+        right = b.progress === null ? -1 : b.progress;
+      } else if (key === 'priority') {
+        left = PRIORITY_RANK[a.priority] || 0;
+        right = PRIORITY_RANK[b.priority] || 0;
+        return (left - right) * direction;
+      } else {
+        left = a[key] || '';
+        right = b[key] || '';
+      }
+      if (left < right) return -1 * direction;
+      if (left > right) return 1 * direction;
+      return String(a.name).localeCompare(String(b.name), 'ja');
+    });
+  }
+
+  function renderGroups() {
+    var detail = state.detail;
+    clear(dom.detailGroups);
+    var groups = (detail.subprojects || []).filter(function (subproject) { return subproject.total > 0; });
+    var known = {};
+    groups.forEach(function (subproject) { known[subproject.subprojectId] = true; });
+
+    groups.forEach(function (subproject) {
+      var tasks = tasksFor(subproject.subprojectId);
+      dom.detailGroups.appendChild(groupBlock(subproject.name, [
+        subproject.ownerName ? '担当 ' + subproject.ownerName : '',
+        subproject.statusLabel || subproject.status,
+        '進捗 ' + percentText(subproject.progress),
+        subproject.deadline ? '期限 ' + subproject.deadline : '',
+        tasks.length + ' 件'
+      ].filter(Boolean).join(' · '), tasks, subproject.name));
+    });
+
+    var ungrouped = (detail.tasks || []).filter(function (task) {
+      return !task.subprojectId || !known[task.subprojectId];
+    });
+    if (ungrouped.length) {
+      dom.detailGroups.appendChild(groupBlock('全体タスク',
+        'サブプロジェクト未割当 · ' + ungrouped.length + ' 件', ungrouped, '全体タスク'));
+    }
+  }
+
+  function groupBlock(title, metaText, tasks, caption) {
+    var details = el('details', {className: 'group', attrs: {open: true}});
+    details.appendChild(el('summary', {}, [
+      el('span', {className: 'group-summary-main'}, [
+        el('span', {className: 'group-name', text: title}),
+        el('span', {className: 'group-meta', text: metaText})
+      ])
+    ]));
+    var body = el('div', {className: 'group-body'});
+    if (tasks.length) body.appendChild(taskTable(sortedTasks(tasks), caption));
+    else body.appendChild(el('p', {className: 'group-meta', text: 'このグループに公開タスクはありません。'}));
+    details.appendChild(body);
+    return details;
+  }
+
+  function taskTable(tasks, caption) {
+    var table = el('table', {className: 'task-table'});
+    table.appendChild(el('caption', {className: 'visually-hidden', text: caption + ' のタスク一覧'}));
+
+    var columns = [
+      {key: 'name', label: 'タスク', sortKey: 'name'},
+      {key: 'ownerName', label: '担当', sortKey: 'ownerName'},
+      {key: 'statusLabel', label: '状態', sortKey: 'status'},
+      {key: 'priorityLabel', label: '優先度', sortKey: 'priority'},
+      {key: 'dueDate', label: '期限', sortKey: 'due'},
+      {key: 'deadlineLabel', label: '残り', sortKey: null},
+      {key: 'progress', label: '進捗', sortKey: 'progress'}
+    ];
+
+    var head = el('thead');
+    var headRow = el('tr');
+    columns.forEach(function (column) {
+      var th = el('th', {attrs: {scope: 'col'}});
+      if (column.sortKey) {
+        var active = state.taskSort.key === column.sortKey;
+        var button = el('button', {
+          className: 'sort-button',
+          attrs: {type: 'button', 'aria-label': column.label + 'で並べ替え'},
+          text: column.label + (active ? (state.taskSort.direction === 1 ? ' ▲' : ' ▼') : '')
+        });
+        button.addEventListener('click', function () {
+          state.taskSort = {
+            key: column.sortKey,
+            direction: active && state.taskSort.direction === 1 ? -1 : 1
+          };
+          renderGroups();
+        });
+        th.appendChild(button);
+      } else {
+        th.textContent = column.label;
+      }
+      headRow.appendChild(th);
+    });
+    head.appendChild(headRow);
+    table.appendChild(head);
+
+    var body = el('tbody');
+    tasks.forEach(function (task) {
+      var row = el('tr', {attrs: {'data-task-id': task.taskId}});
+
+      var nameCell = el('td', {className: 'cell-primary'}, [
+        el('span', {className: 'cell-label', text: 'タスク'})
+      ]);
+      var nameButton = el('button', {
+        className: 'task-name-button',
+        attrs: {type: 'button', 'data-open-task': task.taskId, 'aria-label': task.name + ' の詳細を表示'},
+        text: task.name
+      });
+      nameCell.appendChild(nameButton);
+      row.appendChild(nameCell);
+
+      row.appendChild(cell('担当', task.ownerName || '未設定'));
+      row.appendChild(cell('状態', task.statusLabel || task.status));
+      row.appendChild(cell('優先度', task.priorityLabel || '—'));
+      row.appendChild(cell('期限', task.dueDate || '未設定'));
+      row.appendChild(cell('残り', task.deadlineLabel, 'cell-remaining ' + deadlineClass(task)));
+
+      var progressCell = el('td', {}, [el('span', {className: 'cell-label', text: '進捗'})]);
+      progressCell.appendChild(el('div', {className: 'cell-progress'}, [
+        progressBar(task.progress, task.name + ' の進捗'),
+        el('span', {className: 'progress-value', text: percentText(task.progress)})
+      ]));
+      row.appendChild(progressCell);
+
+      body.appendChild(row);
+    });
+    table.appendChild(body);
+    var wrapper = el('div', {className: 'table-scroll'});
+    wrapper.appendChild(table);
+    return wrapper;
+  }
+
+  function cell(label, value, extraClass) {
+    var node = el('td', {className: extraClass || ''}, [
+      el('span', {className: 'cell-label', text: label})
+    ]);
+    node.appendChild(el('span', {text: value === '' || value === null || value === undefined ? '—' : String(value)}));
+    return node;
+  }
+
+  function renderMilestones() {
+    clear(dom.detailMilestones);
+    var milestones = state.detail.milestones || [];
+    dom.milestonesTitle.hidden = milestones.length === 0;
+    milestones.forEach(function (milestone) {
+      dom.detailMilestones.appendChild(el('div', {className: 'milestone'}, [
+        el('span', {text: milestone.name}),
+        el('span', {
+          className: milestone.reached ? 'pill pill-green' : 'pill pill-gray',
+          text: milestone.reached ? '達成 ' + milestone.actualDate : (milestone.targetDate || '日程未設定')
+        })
+      ]));
+    });
+  }
+
+  /* ---------------- task drawer ---------------- */
+
+  function openTask(projectId, taskId) {
+    var token = ++state.drawerToken;
+    state.lastFocused = document.activeElement;
+    api.task(projectId, taskId).then(function (result) {
+      if (token !== state.drawerToken) return;
+      if (!result || !result.ok) {
+        toast(result && result.error ? result.error.message : 'タスクを表示できませんでした。');
+        return;
+      }
+      renderTaskDrawer(result.data);
+      showDrawer();
+    }).catch(function () {
+      if (token !== state.drawerToken) return;
+      toast('タスクを表示できませんでした。');
+    });
+  }
+
+  function renderTaskDrawer(data) {
+    var task = data.task;
+    dom.drawerTitle.textContent = task.name;
+    clear(dom.drawerBody);
+
+    var facts = el('div', {className: 'drawer-facts'});
+    [
+      ['タスクID', task.taskId],
+      ['プロジェクト', task.projectName],
+      ['サブプロジェクト', task.subprojectName || '未割当'],
+      ['担当', task.ownerName || '未設定'],
+      ['状態', task.statusLabel || task.status],
+      ['優先度', task.priorityLabel || '—'],
+      ['開始日', task.plannedStart || '未設定'],
+      ['期限', task.dueDate || '未設定'],
+      ['残り', task.deadlineLabel],
+      ['進捗', percentText(task.progress)]
+    ].forEach(function (item) {
+      facts.appendChild(el('div', {}, [
+        el('p', {className: 'fact-label', text: item[0]}),
+        el('p', {className: 'fact-value' + (item[0] === '残り' ? ' ' + deadlineClass(task) : ''), text: item[1]})
+      ]));
+    });
+    dom.drawerBody.appendChild(facts);
+
+    dom.drawerBody.appendChild(el('div', {}, [
+      el('p', {className: 'fact-label', text: '公開メモ'}),
+      el('p', {className: 'note', text: task.publicNote || '公開メモはありません。'})
+    ]));
+
+    dom.drawerBody.appendChild(el('div', {className: 'progress-row'}, [
+      progressBar(task.progress, '進捗'),
+      el('span', {className: 'progress-value', text: percentText(task.progress)})
+    ]));
+
+    dom.drawerBody.appendChild(el('p', {
+      className: 'group-meta',
+      text: 'このダッシュボードは閲覧専用です。変更は管理者が管理アプリで行います。'
+    }));
+  }
+
+  function showDrawer() {
+    state.drawerOpen = true;
+    dom.drawer.hidden = false;
+    dom.backdrop.hidden = false;
+    dom.drawerClose.focus();
+    document.addEventListener('keydown', handleDrawerKeydown, true);
+  }
+
+  function closeDrawer() {
+    if (!state.drawerOpen) return;
+    state.drawerOpen = false;
+    dom.drawer.hidden = true;
+    dom.backdrop.hidden = true;
+    document.removeEventListener('keydown', handleDrawerKeydown, true);
+    if (state.lastFocused && document.contains(state.lastFocused)) state.lastFocused.focus();
+    state.lastFocused = null;
+  }
+
+  function focusables() {
+    return Array.prototype.slice.call(
+      dom.drawer.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+    ).filter(function (node) { return !node.disabled; });
+  }
+
+  function handleDrawerKeydown(event) {
+    if (event.key === 'Escape' || event.key === 'Esc') {
+      event.preventDefault();
+      closeDrawer();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    var nodes = focusables();
+    if (!nodes.length) return;
+    var first = nodes[0];
+    var last = nodes[nodes.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  /* ---------------- misc ---------------- */
+
+  var toastTimer = null;
+  function toast(message) {
+    dom.toast.textContent = message;
+    dom.toast.hidden = false;
+    if (toastTimer) window.clearTimeout(toastTimer);
+    toastTimer = window.setTimeout(function () { dom.toast.hidden = true; }, 4000);
+  }
+
+  var searchTimer = null;
+  function scheduleSearch() {
+    if (searchTimer) window.clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(function () {
+      loadPortfolio(dom.search.value.trim());
+    }, SEARCH_DEBOUNCE_MS);
+  }
+
+  function syncFilterState() {
+    state.filters.status = dom.filterStatus.value;
+    state.filters.category = dom.filterCategory.value;
+    state.filters.owner = dom.filterOwner.value;
+    state.filters.risk = dom.filterRisk.value;
+    renderProjects();
+  }
+
+  function resetFilters() {
+    dom.filterStatus.value = 'open';
+    dom.filterCategory.value = '';
+    dom.filterOwner.value = '';
+    dom.filterRisk.value = '';
+    dom.filterDue.setAttribute('aria-pressed', 'false');
+    state.filters.dueSoon = false;
+    syncFilterState();
+  }
+
+  function wireEvents() {
+    dom.search.addEventListener('input', scheduleSearch);
+    dom.search.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        if (searchTimer) window.clearTimeout(searchTimer);
+        loadPortfolio(dom.search.value.trim());
+      }
+    });
+    [dom.filterStatus, dom.filterCategory, dom.filterOwner, dom.filterRisk].forEach(function (select) {
+      select.addEventListener('change', syncFilterState);
+    });
+    dom.filterDue.addEventListener('click', function () {
+      state.filters.dueSoon = !state.filters.dueSoon;
+      dom.filterDue.setAttribute('aria-pressed', state.filters.dueSoon ? 'true' : 'false');
+      renderProjects();
+    });
+    dom.reset.addEventListener('click', resetFilters);
+    dom.retry.addEventListener('click', function () { loadPortfolio(state.query); });
+
+    dom.list.addEventListener('click', function (event) {
+      var trigger = event.target.closest('[data-project-id]');
+      if (!trigger) return;
+      openProject(trigger.getAttribute('data-project-id'));
+    });
+
+    dom.detailGroups.addEventListener('click', function (event) {
+      var trigger = event.target.closest('[data-open-task]');
+      if (!trigger) return;
+      openTask(state.currentProjectId, trigger.getAttribute('data-open-task'));
+    });
+
+    dom.detailBack.addEventListener('click', closeDetail);
+    dom.drawerClose.addEventListener('click', closeDrawer);
+    dom.backdrop.addEventListener('click', closeDrawer);
+    document.addEventListener('keydown', function (event) {
+      if ((event.key === 'Escape' || event.key === 'Esc') && !state.drawerOpen && !dom.detail.hidden) closeDetail();
+    });
+  }
+
+  function boot() {
+    wireEvents();
+    loadPortfolio('');
+  }
+
+  boot();
+})();
+</script>
