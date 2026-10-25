@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    body { font-family: "Hiragino Sans", "Yu Gothic", sans-serif; font-size: 12px; margin: 8px; color: #202124; }
+    h2 { font-size: 14px; margin: 10px 0 6px; }
+    fieldset { border: 1px solid #dadce0; border-radius: 6px; margin: 0 0 10px; padding: 8px; }
+    legend { font-weight: 600; padding: 0 4px; }
+    label { display: block; margin: 6px 0 2px; }
+    label.inline { display: flex; align-items: center; gap: 6px; }
+    input[type=text], input[type=number], input[type=time], select { width: 100%; box-sizing: border-box; padding: 4px; border: 1px solid #bdc1c6; border-radius: 4px; font-size: 12px; }
+    button { margin-top: 8px; padding: 6px 10px; border: 0; border-radius: 4px; background: #1a73e8; color: #fff; cursor: pointer; }
+    button.secondary { background: #5f6368; }
+    button.danger { background: #b3261e; }
+    #status { margin-top: 10px; padding: 8px; border-radius: 4px; display: none; white-space: pre-wrap; }
+    #status.loading { display: block; background: #e8f0fe; }
+    #status.error { display: block; background: #fce8e6; color: #b3261e; }
+    #status.ok { display: block; background: #e6f4ea; color: #137333; }
+    #effective { font-weight: 600; }
+    #history, #preview { font-size: 11px; max-height: 160px; overflow: auto; background: #f8f9fa; padding: 6px; border-radius: 4px; }
+    .hint { color: #5f6368; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <h2>自動化設定</h2>
+  <div class="hint">有効モード: <span id="effective">読み込み中...</span></div>
+  <div class="hint" id="reason"></div>
+
+  <fieldset>
+    <legend>メール通知</legend>
+    <label>配信モード</label>
+    <select id="emailMode">
+      <option value="OFF">OFF（送信しない）</option>
+      <option value="PREVIEW">PREVIEW（プレビューのみ）</option>
+      <option value="LIVE">LIVE（本番送信）</option>
+    </select>
+    <label class="inline"><input id="emergencyStop" type="checkbox"> 緊急停止（すべての送信を止める）</label>
+    <label class="inline"><input id="assignmentEnabled" type="checkbox"> 担当依頼通知</label>
+    <label class="inline"><input id="reassignmentEnabled" type="checkbox"> 担当変更通知</label>
+    <label class="inline"><input id="deadlineChangeEnabled" type="checkbox"> 期限変更通知</label>
+    <label class="inline"><input id="deadlineReminderEnabled" type="checkbox"> 期限前通知</label>
+    <label class="inline"><input id="overdueEnabled" type="checkbox"> 期限超過通知</label>
+    <label class="inline"><input id="weeklyReportEnabled" type="checkbox"> 週次レポート</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>期限リマインダー</legend>
+    <label>期限前の日数（カンマ区切り）</label><input id="offsets" type="text" placeholder="7,2">
+    <label>キャッチアップ日数（取りこぼし時の猶予）</label><input id="catchup" type="number" min="0" max="31">
+    <label>期限超過の再通知間隔（日）</label><input id="overdueFrequency" type="number" min="1" max="90">
+    <label class="inline"><input id="weekdayOnly" type="checkbox"> 平日のみ送信</label>
+    <label>実行時間帯（開始 / 終了・JST）</label>
+    <div style="display:flex; gap:6px">
+      <input id="windowStart" type="time"><input id="windowEnd" type="time">
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>週次レポート</legend>
+    <label>送信先（カンマ区切り）</label><input id="recipients" type="text">
+    <label>曜日</label>
+    <select id="reportDay">
+      <option>MONDAY</option><option>TUESDAY</option><option>WEDNESDAY</option>
+      <option>THURSDAY</option><option>FRIDAY</option>
+    </select>
+    <label>時刻（JST）</label><input id="reportTime" type="time">
+  </fieldset>
+
+  <fieldset>
+    <legend>カレンダー・バックアップ・ダッシュボード</legend>
+    <label class="inline"><input id="calendarEnabled" type="checkbox"> カレンダー同期</label>
+    <label class="inline"><input id="backupEnabled" type="checkbox"> 自動バックアップ</label>
+    <label class="inline"><input id="autoDashboard" type="checkbox"> ダッシュボード自動更新</label>
+    <label class="inline"><input id="autoWorkload" type="checkbox"> ワークロード自動更新</label>
+    <label class="inline"><input id="staleAlert" type="checkbox"> 更新停滞アラート</label>
+    <label>停滞判定日数</label><input id="staleDays" type="number" min="1" max="365">
+    <div class="hint">カレンダーID、スプレッドシートID、認証情報はScriptプロパティで管理し、この画面には表示しません。</div>
+  </fieldset>
+
+  <div style="display:flex; gap:6px; flex-wrap:wrap">
+    <button onclick="save()">設定を保存</button>
+    <button class="secondary" onclick="preview()">送信プレビュー</button>
+    <button class="secondary" onclick="refreshHistory()">履歴を表示</button>
+    <button class="secondary" onclick="restore()">安全な既定値に戻す</button>
+    <button class="danger" onclick="reconcile()">不確定配信を確認済みにする</button>
+  </div>
+
+  <div id="status"></div>
+  <h2>最近の実行結果</h2>
+  <div id="history">読み込み中...</div>
+  <h2>送信プレビュー</h2>
+  <div id="preview">未実行</div>
+
+  <script>
+    var current = null;
+
+    function setStatus(kind, message) {
+      var node = document.getElementById('status');
+      node.className = kind;
+      node.textContent = message;
+    }
+    function call(fn, payload, onSuccess) {
+      setStatus('loading', '処理中...');
+      var runner = google.script.run
+        .withSuccessHandler(function (result) {
+          if (!result || result.ok !== true) {
+            setStatus('error', 'エラー: ' + ((result && result.error) || '不明なエラー'));
+            return;
+          }
+          setStatus('ok', '完了しました');
+          if (onSuccess) onSuccess(result.data);
+        })
+        .withFailureHandler(function (error) { setStatus('error', 'エラー: ' + error.message); });
+      if (payload === undefined) runner[fn](); else runner[fn](payload);
+    }
+    function value(id) { return document.getElementById(id).value; }
+    function checked(id) { return document.getElementById(id).checked; }
+    function setValue(id, value) { document.getElementById(id).value = value; }
+    function setChecked(id, value) { document.getElementById(id).checked = value === true; }
+
+    function render(data) {
+      current = data;
+      var values = {};
+      data.settings.forEach(function (item) { values[item.key] = item.value; });
+      document.getElementById('effective').textContent = data.status.mode + '（' + data.status.reason + '）';
+      document.getElementById('reason').textContent = data.status.configured ? '' :
+        '旧設定互換モードです。保存すると自動化設定が有効になります。';
+      setValue('emailMode', values.EMAIL_MODE === 'LIVE' && !data.status.activated ? 'OFF' : values.EMAIL_MODE);
+      setChecked('emergencyStop', values.EMERGENCY_STOP);
+      setChecked('assignmentEnabled', values.ASSIGNMENT_EMAIL_ENABLED);
+      setChecked('reassignmentEnabled', values.REASSIGNMENT_EMAIL_ENABLED);
+      setChecked('deadlineChangeEnabled', values.DEADLINE_CHANGE_EMAIL_ENABLED);
+      setChecked('deadlineReminderEnabled', values.DEADLINE_REMINDER_ENABLED);
+      setChecked('overdueEnabled', values.OVERDUE_REMINDER_ENABLED);
+      setChecked('weeklyReportEnabled', values.WEEKLY_MANAGER_REPORT_ENABLED);
+      setValue('offsets', (values.REMINDER_OFFSETS || []).join(','));
+      setValue('catchup', values.REMINDER_CATCHUP_DAYS);
+      setValue('overdueFrequency', values.OVERDUE_FREQUENCY_DAYS);
+      setChecked('weekdayOnly', values.WEEKDAY_ONLY_SENDING);
+      setValue('windowStart', values.EXECUTION_WINDOW_START);
+      setValue('windowEnd', values.EXECUTION_WINDOW_END);
+      setValue('recipients', (values.MANAGEMENT_REPORT_RECIPIENTS || []).join(','));
+      setValue('reportDay', values.WEEKLY_REPORT_DAY);
+      setValue('reportTime', values.WEEKLY_REPORT_TIME);
+      setChecked('calendarEnabled', values.CALENDAR_SYNC_ENABLED);
+      setChecked('backupEnabled', values.DAILY_BACKUP_ENABLED);
+      setChecked('autoDashboard', values.AUTO_DASHBOARD_REFRESH_ENABLED);
+      setChecked('autoWorkload', values.AUTO_WORKLOAD_REFRESH_ENABLED);
+      setChecked('staleAlert', values.PROJECT_STALE_ALERT_ENABLED);
+      setValue('staleDays', values.PROJECT_STALE_DAYS);
+      renderHistory(data.history);
+    }
+
+    function renderHistory(rows) {
+      document.getElementById('history').innerHTML = rows.length ? rows.map(function (row) {
+        return (row.created || '') + ' / ' + (row.type || '') + ' / ' + (row.recipient || '') +
+          ' / ' + (row.result || '') + (row.error ? ' / ' + row.error : '');
+      }).join('<br>') : '履歴はありません';
+    }
+
+    function save() {
+      var changes = {
+        EMAIL_MODE: value('emailMode'),
+        EMERGENCY_STOP: checked('emergencyStop'),
+        ASSIGNMENT_EMAIL_ENABLED: checked('assignmentEnabled'),
+        REASSIGNMENT_EMAIL_ENABLED: checked('reassignmentEnabled'),
+        DEADLINE_CHANGE_EMAIL_ENABLED: checked('deadlineChangeEnabled'),
+        DEADLINE_REMINDER_ENABLED: checked('deadlineReminderEnabled'),
+        OVERDUE_REMINDER_ENABLED: checked('overdueEnabled'),
+        WEEKLY_MANAGER_REPORT_ENABLED: checked('weeklyReportEnabled'),
+        REMINDER_OFFSETS: value('offsets'),
+        REMINDER_CATCHUP_DAYS: value('catchup'),
+        OVERDUE_FREQUENCY_DAYS: value('overdueFrequency'),
+        WEEKDAY_ONLY_SENDING: checked('weekdayOnly'),
+        EXECUTION_WINDOW_START: value('windowStart'),
+        EXECUTION_WINDOW_END: value('windowEnd'),
+        MANAGEMENT_REPORT_RECIPIENTS: value('recipients'),
+        WEEKLY_REPORT_DAY: value('reportDay'),
+        WEEKLY_REPORT_TIME: value('reportTime'),
+        CALENDAR_SYNC_ENABLED: checked('calendarEnabled'),
+        DAILY_BACKUP_ENABLED: checked('backupEnabled'),
+        AUTO_DASHBOARD_REFRESH_ENABLED: checked('autoDashboard'),
+        AUTO_WORKLOAD_REFRESH_ENABLED: checked('autoWorkload'),
+        PROJECT_STALE_ALERT_ENABLED: checked('staleAlert'),
+        PROJECT_STALE_DAYS: value('staleDays')
+      };
+      var confirmation = '';
+      if (changes.EMAIL_MODE === 'LIVE') {
+        if (!window.confirm('本番送信（LIVE）を有効にします。承認済みの通知のみ送信されます。続行しますか？')) return;
+        confirmation = window.prompt('確認のため「ENABLE LIVE EMAIL」と入力してください');
+        if (confirmation !== 'ENABLE LIVE EMAIL') { setStatus('error', 'LIVE有効化は中止されました'); return; }
+      }
+      call('uiSaveAutomationSettings', {changes: changes, confirmation: confirmation},
+        function () { load(); });
+    }
+
+    function preview() {
+      call('uiPreviewNotifications', undefined, function (items) {
+        document.getElementById('preview').innerHTML = items.length ? items.map(function (item) {
+          return (item.type || '') + ' / ' + (item.stage || '') + ' / ' + (item.recipient || '') + ' / ' + (item.subject || '');
+        }).join('<br>') : '送信対象はありません';
+      });
+    }
+
+    function refreshHistory() { call('uiNotificationHistory', undefined, renderHistory); }
+
+    function restore() {
+      if (!window.confirm('すべての自動化設定を安全な既定値（メールOFF）に戻します。よろしいですか？')) return;
+      call('uiRestoreAutomationDefaults', {confirmation: 'RESTORE SAFE DEFAULTS'}, function () { load(); });
+    }
+
+    function reconcile() {
+      if (!window.confirm('一定時間を超えたPENDING通知を「配信不確定」として記録します。再送は行いません。')) return;
+      call('uiReconcileUncertain', {confirmation: 'RECONCILE DELIVERY'});
+    }
+
+    function load() { call('uiAutomationSettings', undefined, render); }
+    load();
+  </script>
+</body>
+</html>
