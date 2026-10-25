@@ -56,11 +56,30 @@ Documentation
   DEPLOYMENT, AGENTS, `.github/copilot-instructions.md`, PRODUCTION_READINESS,
   MANAGER_WORKFLOW, DEADLINE_REQUEST_WORKFLOW, REQUEST_INBOX_DEPLOYMENT,
   dashboard/DEPLOYMENT and dashboard/SMOKE_TEST.
+- Installation review corrections (same release, no behaviour change):
+  - two clasp targets with explicit `rootDir` (`src`, `dashboard-app`) and target selection
+    through `.clasp.json`; `"rootDir": "."` is prohibited, and both applications are never
+    pushed into one project;
+  - every argument-taking function is run through a documented no-argument editor wrapper
+    (`initializeDevelopmentFromEditor`, `createFirstOperatorFromEditor`, `bootstrapFromEditor`,
+    `initializeSnapshotFromEditor`, `initializeInboxFromEditor`, `backupFromEditor`);
+  - the first operator member is created with `Members.create` (generated `Member_ID`) and
+    verified before the bootstrap, instead of hand-writing a partial `MEMBERS` row;
+  - `SHARED_DASHBOARD_REQUIRE_EMAIL` is documented as optional and as a lockout risk when the
+    deployer-run web app cannot resolve the viewer address; the deployment ACL remains the
+    primary control and "Anyone" is never recommended;
+  - the backup recipe expects `BACKUP_LOG` `Result = VERIFIED` (not `SUCCESS`), which is what
+    `Backup.createVerified()` writes;
+  - `ALLOWED_RECIPIENT_DOMAINS` guidance corrected to a real domain (a placeholder blocks
+    member creation);
+  - one guide is primary (`docs/PRE_TRIAL_CHECKLIST.md`), cross-referenced from DEPLOYMENT.md and
+    both READMEs, with new installation, existing-database upgrade and production kept separate.
+  A regression test guards these installation facts.
 
 Tests
 
-- 256 local tests pass (`npm test`), 0 failing; `npm run lint` and `npm run validate` pass.
-  New suites: `tests/v1_3_1-stabilization.test.js` (24) and `tests/v1_3_1-ui.test.js` (15,
+- 257 local tests pass (`npm test`), 0 failing; `npm run lint` and `npm run validate` pass.
+  New suites: `tests/v1_3_1-stabilization.test.js` (24) and `tests/v1_3_1-ui.test.js` (16,
   including a sidebar client harness). Local mocks are not Workspace verification.
 
 ## V1.3 planning, worker requests and Japanese/English UI

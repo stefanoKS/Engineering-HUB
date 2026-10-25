@@ -6,15 +6,21 @@ UNVERIFIED until the corresponding smoke test is recorded in [SMOKE_TEST.md](SMO
 
 ## 1. Resources
 
-Three independent Google resources per environment:
+Four independent Google resources per environment (three spreadsheets + two Apps Script projects,
+one of which is bound to the first spreadsheet):
 
 | # | Resource | Environment-bound | Notes |
 | --- | --- | --- | --- |
 | 1 | Manager Apps Script project | yes | Container-bound to the management workbook |
-| 2 | Snapshot spreadsheet | yes | New, empty; never the management workbook |
-| 3 | Dashboard Apps Script project (standalone) | yes | Web app; not container-bound |
+| 2 | Management spreadsheet | yes | Private operational database |
+| 3 | Snapshot spreadsheet | yes | New, empty; never the management workbook |
+| 4 | Request inbox spreadsheet (V1.3) | yes | Third file; never the management workbook or the snapshot |
+| 5 | Dashboard Apps Script project (standalone) | yes | Web app; not container-bound |
 
-Development and production must not share any of the three.
+Development and production must not share any of these resources. The management, snapshot and
+inbox spreadsheets are **three different files**; publication refuses the management workbook as a
+destination and the inbox refuses it too. For a first installation follow
+[../PRE_TRIAL_CHECKLIST.md](../PRE_TRIAL_CHECKLIST.md).
 
 ## 2. Separate clasp targets
 
@@ -33,12 +39,20 @@ The two applications are pushed from different `rootDir` values. `.clasp.json` a
 '@ | Set-Content -Encoding ascii .clasp.dashboard-dev.json
 
 Copy-Item .clasp.manager-dev.json .clasp.json -Force
-Get-Content .clasp.json        # confirm rootDir and scriptId before every push
+Get-Content .clasp.json        # rootDir must be "src"
+npx clasp status               # only src/ files may be listed
+npx clasp push
+
+Copy-Item .clasp.dashboard-dev.json .clasp.json -Force
+Get-Content .clasp.json        # rootDir must be "dashboard-app"
+npx clasp status               # only dashboard-app/ files may be listed
 npx clasp push
 ```
 
-Repeat with `-prod` files for production. Verify `rootDir` every time: pushing `src/` into
-the dashboard project (or the reverse) is the failure mode this split exists to prevent.
+Repeat with `-prod` files for production. The manager project always uses `"rootDir": "src"`;
+**never** `"rootDir": "."`, and never upload both applications into the same Apps Script project.
+Verify `rootDir` and the `clasp status` file list every time: pushing `src/` into the dashboard
+project (or the reverse) is the failure mode this split exists to prevent.
 
 ## 3. Manager Script Properties added for V1.2
 
@@ -57,7 +71,7 @@ edited through `SharedDashboardPublisher.saveSettings`.
 | --- | --- | --- |
 | `SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID` | yes | Snapshot workbook the viewer may read. |
 | `SHARED_DASHBOARD_ALLOWED_DOMAIN` | recommended | Company Workspace domain, e.g. `example.com`. |
-| `SHARED_DASHBOARD_REQUIRE_EMAIL` | optional | `true` refuses viewers whose address cannot be resolved. |
+| `SHARED_DASHBOARD_REQUIRE_EMAIL` | optional | `true` refuses viewers whose address cannot be resolved. **Leave unset for a first trial:** the web app runs as its deployer, an employee address may be unavailable, and enabling this before verifying resolution can lock employees out. |
 | `SHARED_DASHBOARD_STALE_HOURS` | optional | Age in hours after which the page warns (default `24`). |
 
 The dashboard project must never contain `SPREADSHEET_ID`; `npm run validate` rejects it.
@@ -155,8 +169,13 @@ removes the handler when publication is disabled.
 2. Execute as **Me** (the authorized deployment account).
 3. Who has access: **Anyone within `<company domain>`**.
 4. Deploy, then open the URL with a normal employee account and with a manager account.
+5. Only after an employee account can open the page may you optionally set
+   `SHARED_DASHBOARD_REQUIRE_EMAIL=true` (fail closed) and re-test; remove it if a legitimate
+   employee is refused.
 
-Do not use "Anyone" access. Do not reuse the manager project as the employee app.
+Do not use "Anyone" access. Do not reuse the manager project as the employee app. The deployment
+ACL is the primary access control; the server-side domain check is defence in depth because the
+deployer-run web app may not expose the viewer's address.
 
 ## 11. Emergency publication disable
 
@@ -196,9 +215,12 @@ publication and re-run `installAuthorizedTriggers`.
 
 ## V1.3: request submission
 
-1. Create the request inbox spreadsheet and configure `REQUEST_INBOX_SPREADSHEET_ID` in both
+1. Create the request inbox spreadsheet — a **third** file, different from the management
+   workbook and from the snapshot — and configure `REQUEST_INBOX_SPREADSHEET_ID` in both
    projects (see [../REQUEST_INBOX_DEPLOYMENT.md](../REQUEST_INBOX_DEPLOYMENT.md)).
-2. Run `initializeRequestInbox('INITIALIZE REQUEST INBOX')` once in the manager project.
+2. Run `initializeRequestInbox('INITIALIZE REQUEST INBOX')` once in the manager project through a
+   temporary no-argument wrapper (the editor Run button cannot pass arguments; example in
+   [docs/REQUEST_INBOX_DEPLOYMENT.md](docs/REQUEST_INBOX_DEPLOYMENT.md)).
 3. The dashboard manifest now asks for `https://www.googleapis.com/auth/spreadsheets` plus
    `userinfo.email`. Re-authorise, keep `access: DOMAIN` and `executeAs: USER_DEPLOYING`, and
    deploy a new version.

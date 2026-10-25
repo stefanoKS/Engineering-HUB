@@ -9,14 +9,14 @@ Result: **PASS** (local) — Google Workspace verification: **UNVERIFIED**
 ```text
 npm ci            -> added 364 packages, audited 365, 0 vulnerabilities
 npm run lint      -> clean (eslint 10.13.0, no output)
-npm test          -> tests 256 / pass 256 / fail 0 / duration 3513.6 ms
+npm test          -> tests 257 / pass 257 / fail 0 / duration 3513.6 ms
 npm run validate  -> Validated 32 manager Apps Script files, 3 dashboard files,
                      both manifests and 452 translation keys
 npm run preview:dashboard -> 7 projects, 7 details, 13 tasks, stale=false,
                      publishedAt 2026/10/26 07:35
 ```
 
-Test totals: **256 tests, 256 pass, 0 fail, 0 skipped**. No test was deleted, skipped or
+Test totals: **257 tests, 257 pass, 0 fail, 0 skipped**. No test was deleted, skipped or
 weakened for this release.
 
 ## Regression coverage added for V1.3.1
@@ -49,7 +49,7 @@ weakened for this release.
 | No login/password | "no login, password or browser write path was introduced" |
 | OAuth scopes | "the manager manifest keeps its existing scopes only" |
 
-`tests/v1_3_1-ui.test.js` (15 tests) executes the real `src/UiMenu.html` and
+`tests/v1_3_1-ui.test.js` (16 tests) executes the real `src/UiMenu.html` and
 `src/UiRequests.html` client scripts against the real manager modules in a DOM mock that
 throws on `innerHTML`:
 
@@ -67,7 +67,7 @@ throws on `innerHTML`:
 | Automatic import UI | "the request queue imports automatically and reports the import" |
 | Import failure UI | "a failing inbox import never hides the requests already imported" |
 | Wiring | "the sidebars reference only script functions that exist on the server", "every onclick handler … is defined", "the manager sidebar keeps a single control per action" |
-| Documentation | "the trial documentation describes the visibility and edit workflow" |
+| Documentation | "the trial documentation describes the visibility and edit workflow", "the installation guide cannot regress to a broken clasp, bootstrap or backup recipe" |
 
 Existing suites affected by the release were updated only where behaviour intentionally
 changed:

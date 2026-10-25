@@ -133,7 +133,8 @@ only a pending indicator (a boolean) is published for a task with an open reques
 ## 7. Operator checklist
 
 1. Configure `REQUEST_INBOX_SPREADSHEET_ID` and run `initializeRequestInbox('INITIALIZE
-   REQUEST INBOX')` once as an administrator.
+   REQUEST INBOX')` once as an administrator from a temporary no-argument editor wrapper (see
+   [REQUEST_INBOX_DEPLOYMENT.md](REQUEST_INBOX_DEPLOYMENT.md) §3).
 2. Set `REQUEST_SUBMISSION_ENABLED=true` in the dashboard project. Since V1.3.1 an absent
    property (or any value other than `true`) means submissions are closed, and
    `requestSubmissionConfig()` reports that state to the page.

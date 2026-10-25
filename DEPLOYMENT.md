@@ -1,5 +1,18 @@
 # Deployment and activation
 
+> **First-time installation?** Follow [docs/PRE_TRIAL_CHECKLIST.md](docs/PRE_TRIAL_CHECKLIST.md)
+> step by step. It is the primary guide for a new DEVELOPMENT trial and it resolves any
+> difference from the reference chapters below. This document is the reference for each area and
+> the only place for the production gate.
+
+Three situations, never mixed:
+
+| Situation | Path |
+| --- | --- |
+| New DEVELOPMENT installation (empty workbook) | [PRE_TRIAL_CHECKLIST.md](docs/PRE_TRIAL_CHECKLIST.md) steps 1–27 |
+| Existing database upgrade | §4 "existing database" and §8.7 of this document (`upgradeExistingDatabase()`) |
+| Production deployment | §5 production release gate, then §8.10 |
+
 ## Prerequisites
 
 - Node.js 22 (at least 22.13.0), npm, PowerShell, and a Google account allowed to create Apps Script projects.
@@ -52,10 +65,22 @@ Create the following local clasp configurations. These files and the active `.cl
 npx clasp login
 Copy-Item .clasp.dev.json .clasp.json -Force
 Get-Content .clasp.json
+npx clasp status
 npx clasp push
 ```
 
-Replace placeholders before pushing. The explicit copy selects the destination; do not assume a `clasp --project` option. Inspect the selected `scriptId` every time. `clasp push` updates source files; it does not install triggers, configure Script Properties, migrate data, or authorize services.
+The manager project always uses `"rootDir": "src"`. **Never use `"rootDir": "."`**: it exposes both
+`src/` and `dashboard-app/` (each with its own `appsscript.json` and `I18n.html`), so the upload
+either fails or mixes the two applications into one Apps Script project. The standalone dashboard
+always uses `"rootDir": "dashboard-app"` (§8); the two applications are never pushed into the same
+Apps Script project. `npx clasp status` prints the file list — check it before pushing.
+
+Replace placeholders before pushing. The explicit copy selects the destination and keeps the active
+target visible in the working tree; the pinned clasp 3.4.1 also accepts
+`--project .clasp.dev.json`, which you may use instead if you prefer. Inspect the selected
+`scriptId` every time (and run `npx clasp status` to see the file list). `clasp push` updates
+source files; it does not install triggers, configure Script Properties, migrate data, or authorize
+services.
 
 ## 3. Configure Script Properties
 
@@ -71,7 +96,7 @@ In **Project Settings → Script Properties**, enter the following string values
 | `APPROVED_MIGRATIONS` | Comma-separated reviewed migration IDs; normally empty. Example: `002_task_assignment_safety`. |
 | `EMAIL_ENABLED` | Default `false`; enable only after production checks. |
 | `DRY_RUN` | Default `true`; external effects remain suppressed. |
-| `ALLOWED_RECIPIENT_DOMAINS` | Comma-separated allowed mail domains; use development-only domains in development. |
+| `ALLOWED_RECIPIENT_DOMAINS` | Comma-separated allowed mail **and member** domains. Use your real Workspace domain in development (or leave empty); `Members.create` refuses an e-mail outside this list. |
 | `MAX_EMAILS_PER_RUN` | Integer per-run cap from 1 to 50; default `10`. |
 | `CALENDAR_ENABLED` | Default `false`; enable only after reviewing the Calendar behavior. |
 | `CALENDAR_ID` | Dedicated secondary calendar ID (`…@group.calendar.google.com`); not `primary`. |
@@ -94,16 +119,49 @@ Matching environment strings alone do not prove the selected IDs are correct. In
 
 Open the correct Apps Script project in the web editor. Use an editor wrapper to call functions requiring arguments; top-level editor Run does not supply arguments. Review the OAuth consent for the account that will run scheduled jobs.
 
-For a newly created, empty workbook only, set `INITIALIZATION_SPREADSHEET_ID` to its ID as well as `SPREADSHEET_ID`, then run a temporary editor wrapper:
+For a newly created, empty workbook only, set `INITIALIZATION_SPREADSHEET_ID` to its ID as well as `SPREADSHEET_ID`, then run a temporary editor wrapper (the editor Run button cannot pass arguments):
 
 ```javascript
 function initializeDevelopmentFromEditor() {
   var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
-  initializeNewDatabase('INITIALIZE ' + id);
+  return initializeNewDatabase('INITIALIZE ' + id);
 }
 ```
 
-Run only after verifying the environment and workbook. Delete the wrapper and remove `INITIALIZATION_SPREADSHEET_ID` afterward. Never use initialization for an existing workbook.
+Run only after verifying the environment and workbook. A successful run writes the schema
+(`SCHEMA_MIGRATIONS` = `INITIALIZE_V5`, version **5**), seeds the automation defaults, records
+`SETTINGS` = `DATABASE_ENVIRONMENT`, deletes `INITIALIZATION_SPREADSHEET_ID` and returns `5`.
+Delete the wrapper afterward. Never rerun initialization against an operational workbook;
+initialization refuses any workbook that already contains a value or formula.
+
+The first `MEMBERS` row also needs a generated `Member_ID`, so create it through the API rather
+than by hand. Temporary wrapper, new empty database only:
+
+```javascript
+function createFirstOperatorFromEditor() {
+  var email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  if (!email) throw new Error('Operator email unavailable');
+  var allowed = String(PropertiesService.getScriptProperties()
+    .getProperty('ADMIN_BOOTSTRAP_ALLOWLIST') || '')
+    .toLowerCase().split(',').map(function (x) { return x.trim(); });
+  if (allowed.indexOf(email) < 0) throw new Error('Operator not on bootstrap allowlist');
+  if (Database.read('MEMBERS').length !== 0) throw new Error('Members already exist; do not seed twice');
+  var member = Members.create({Name: 'DEV Operator', Email: email, Active: true, Role: 'MEMBER'});
+  return {memberId: member.Member_ID, email: member.Email};
+}
+
+function bootstrapFromEditor() {
+  var email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  if (!email) throw new Error('Operator email unavailable');
+  return bootstrapFirstAdministrator(email, 'BOOTSTRAP ADMIN ' + email);
+}
+```
+
+`Members.create` enforces `ALLOWED_RECIPIENT_DOMAINS` when that property is set, so the operator's
+domain must be listed (or the property must be empty). Verify the generated `MEMBERS` row
+(`Member_ID`, e-mail, `Active = TRUE`) before running `bootstrapFromEditor`, then remove the
+allowlist entry and both wrappers. Never run either wrapper against an existing operational
+system; seeding is refused when members already exist.
 
 For an existing database, take a verified backup, inspect the migration code, add only reviewed IDs to `APPROVED_MIGRATIONS`, and run `upgradeExistingDatabase()` from an editor wrapper. Inspect the migration log and schema afterward; remove temporary approvals. `002_task_assignment_safety` upgrades version 1 to 2; `003_management_reliability` upgrades version 2 to 3 (additive tables/columns plus safe mail-OFF automation defaults). Each approved migration takes its own verified backup.
 
@@ -279,7 +337,7 @@ Project Settings → Script Properties. Required keys:
 | `ENVIRONMENT` / `BOUND_ENVIRONMENT` | `DEVELOPMENT` / `DEVELOPMENT` |
 | `SPREADSHEET_ID` | development workbook ID |
 | `BACKUP_FOLDER_ID` | restricted Drive folder ID |
-| `ALLOWED_RECIPIENT_DOMAINS` | `example.test` (development-only domain) |
+| `ALLOWED_RECIPIENT_DOMAINS` | your real development domain, e.g. `eh-dev.example.co.jp` (or empty). A placeholder such as `example.test` blocks member creation. |
 | `MAX_EMAILS_PER_RUN` | `1` while testing |
 | `EMAIL_ENABLED` / `DRY_RUN` | `false` / `true` until the LIVE review |
 | `ADMIN_BOOTSTRAP_ALLOWLIST` | your development address (remove after bootstrap) |
@@ -295,21 +353,26 @@ function initializeDevelopmentFromEditor() {
 }
 ```
 
-Set `INITIALIZATION_SPREADSHEET_ID` to the same ID first, run once, then delete both the wrapper and the property.
-Initialization refuses any workbook that already contains a value or formula.
+Set `INITIALIZATION_SPREADSHEET_ID` to the same ID first, run once, then delete the wrapper.
+Initialization refuses any workbook that already contains a value or formula, deletes
+`INITIALIZATION_SPREADSHEET_ID` itself, writes `SCHEMA_MIGRATIONS` = `INITIALIZE_V5` and returns `5`.
 
 ### 8.6 First administrator bootstrap
 
+Create the operator member first (wrapper in §4, `createFirstOperatorFromEditor`), verify the
+generated `Member_ID` in the `MEMBERS` sheet, then run:
+
 ```javascript
 function bootstrapFromEditor() {
-  var actor = Session.getActiveUser().getEmail();
-  return bootstrapFirstAdministrator(actor, 'BOOTSTRAP ADMIN ' + actor);
+  var email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+  if (!email) throw new Error('Operator email unavailable');
+  return bootstrapFirstAdministrator(email, 'BOOTSTRAP ADMIN ' + email);
 }
 ```
 
 Requirements: `ADMIN_BOOTSTRAP_ALLOWLIST` contains the account, an active member row exists for it, the workbook is
 initialized at the current schema, and no administrator/bootstrap/notification history exists. It is one-time and
-audited (`ADMIN_BOOTSTRAPPED`). Remove the allowlist entry afterwards.
+audited (`ADMIN_BOOTSTRAPPED`). Remove the allowlist entry afterwards and delete both wrappers.
 
 ### 8.7 Existing workbook migration
 
@@ -332,7 +395,10 @@ function backupFromEditor() {
 }
 ```
 
-Record the returned ID, timestamp, environment and schema version. Open the copy as the recovery operator and
+`Backup.createVerified()` compares every sheet, value and formula of the copy with the source and
+requires a **private** backup folder. On success it appends `BACKUP_LOG` `Result = VERIFIED` (a
+failure appends `Result = FAILED` with `Error_Details` and the call throws). Record the returned
+ID, timestamp, environment and schema version. Open the copy as the recovery operator and
 confirm it is restricted. A failed backup blocks the migration — do not continue.
 
 ### 8.9 Trigger installation
@@ -393,7 +459,8 @@ Apps Script projects, spreadsheets and clasp configurations, and every activatio
 2. **Create the request inbox** (separate spreadsheet, never the master or the snapshot):
    see [Request inbox deployment](docs/REQUEST_INBOX_DEPLOYMENT.md). Set
    `REQUEST_INBOX_SPREADSHEET_ID` in **both** projects and run
-   `initializeRequestInbox('INITIALIZE REQUEST INBOX')` once as an administrator.
+   `initializeRequestInbox('INITIALIZE REQUEST INBOX')` once as an administrator, from a temporary
+   no-argument editor wrapper (the Run button cannot pass arguments).
 
 3. **Dashboard project**: the manifest now requests
    `https://www.googleapis.com/auth/spreadsheets` (snapshot read + inbox append) and

@@ -31,7 +31,7 @@ Result: **PASS** (local) — live Google Workspace verification: **UNVERIFIED**
 
 ## Evidence
 
-* `npm test` — 256 tests, 256 pass, 0 fail (includes the 24 stabilization and 15 sidebar
+* `npm test` — 257 tests, 257 pass, 0 fail (includes the 24 stabilization and 16 sidebar
   wiring tests added for V1.3.1).
 * `npm run lint` — clean.
 * `npm run validate` — 32 manager files, 3 dashboard files, both manifests, 452 translation keys.

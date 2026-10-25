@@ -1,11 +1,22 @@
 # 試験運用前チェックリスト / Pre-trial checklist (V1.3.1)
 
-This checklist installs Engineering-HUB **設計・開発課 管理** in a Google Workspace
-**DEVELOPMENT** environment for the first trial. It is written for a manager who has never
-installed it.
+This is the **primary first-time installation guide** for Engineering-HUB **設計・開発課 管理**.
+It installs a Google Workspace **DEVELOPMENT** trial. `DEPLOYMENT.md`,
+`docs/dashboard/DEPLOYMENT.md` and `docs/REQUEST_INBOX_DEPLOYMENT.md` are the reference
+chapters for each area; where they differ, follow this checklist.
 
-Read the rules first: [AGENTS.md](../AGENTS.md). Do not install the trial in the production
-project, do not reuse production data and never enable LIVE mail for the trial.
+Three situations must not be mixed:
+
+| Situation | Use | Never |
+| --- | --- | --- |
+| **New DEV installation** (empty workbook) | This checklist, steps 1–27 | migrations, production IDs |
+| **Existing database upgrade** | [DEPLOYMENT.md §8.7](../DEPLOYMENT.md) + `upgradeExistingDatabase()` | `initializeNewDatabase`, re-seeding members |
+| **Production deployment** | [DEPLOYMENT.md §5–8](../DEPLOYMENT.md) after the DEV trial is signed off | reusing DEV IDs, "Anyone" web-app access |
+
+First-trial safety defaults: **e-mail OFF**, **Calendar OFF**, **scheduled publication OFF**,
+**worker request submission OFF** until step 18, and no production resource touched.
+
+Read the rules first: [AGENTS.md](../AGENTS.md).
 
 ## What you need
 
@@ -54,8 +65,9 @@ Create all three in `EH-DEV`. They must be empty for a new installation.
 | B | `設計・開発課 管理 - DEV 共有ダッシュボード` | never used as the database |
 | C | `設計・開発課 管理 - DEV 申請受信箱` | never shared with employees |
 
-A and B must be different files: publication refuses the management workbook as a
-destination.
+A, B and C must be **three different files**: publication refuses the management workbook as a
+destination, and the inbox refuses the management workbook as well. Creating one spreadsheet and
+"reusing" it for another role is the most common installation mistake.
 
 ## 4. Create the two Apps Script projects
 
@@ -64,7 +76,8 @@ destination.
 | 1 | Container-bound manager project | Open spreadsheet A → **Extensions → Apps Script**. Rename it `EH-管理-DEV`. |
 | 2 | Standalone dashboard project | <https://script.google.com/home> → **New project**, rename `EH-ダッシュボード-DEV`. |
 
-Do not create the dashboard as a bound script and do not push `src/` into it.
+Do not create the dashboard as a bound script, do not push `src/` into it, and never upload both
+applications into the same Apps Script project (step 7 selects the target through `rootDir`).
 
 ## 5. Obtain spreadsheet IDs
 
@@ -79,34 +92,62 @@ Record A, B and C in a scratch note (never in the repository).
 
 ## 7. Local clasp configuration
 
-`.clasp.json` is git-ignored and must stay local. One configuration per project, in separate
-folders — never commit it, never share one file between the two projects.
+Two Apps Script projects means two clasp targets. `.clasp.json` is git-ignored (`.gitignore`
+covers `.clasp.json` and `.clasp.*.json`) and stays local; the repository deliberately ships no
+example clasp file.
+
+The **active** `.clasp.json` in the repository root decides which project the next
+`npx clasp push` updates. Keep one named file per target and copy the one you want over
+`.clasp.json` before every push.
+
+| Target | `rootDir` | Contents |
+| --- | --- | --- |
+| Manager (container-bound) | `src` | `src/*.gs`, `src/*.html`, `src/appsscript.json` |
+| Shared dashboard (standalone) | `dashboard-app` | `dashboard-app/*.gs`, `dashboard-app/*.html`, `dashboard-app/appsscript.json` |
 
 ```powershell
+Set-Location C:\Users\<you>\Documents\Engineering-HUB
 npm ci
+
+# 1. Manager target (rootDir = src). Never use "." here.
+@'
+{ "scriptId": "MANAGER_DEV_SCRIPT_ID", "rootDir": "src" }
+'@ | Set-Content -Encoding ascii .clasp.manager-dev.json
+
+# 2. Dashboard target (rootDir = dashboard-app)
+@'
+{ "scriptId": "DASHBOARD_DEV_SCRIPT_ID", "rootDir": "dashboard-app" }
+'@ | Set-Content -Encoding ascii .clasp.dashboard-dev.json
+
+# 3. Push the manager project
+Copy-Item .clasp.manager-dev.json .clasp.json -Force
+Get-Content .clasp.json                # rootDir must read "src"
+npx clasp login                        # once per machine
+npx clasp status                       # lists the files about to be uploaded
+npx clasp push
+
+# 4. Push the dashboard project
+Copy-Item .clasp.dashboard-dev.json .clasp.json -Force
+Get-Content .clasp.json                # rootDir must read "dashboard-app"
+npx clasp status                       # only dashboard-app files may appear
+npx clasp push
 ```
 
-`.clasp.json` is git-ignored (`.gitignore` covers `.clasp.json` and `.clasp.*.json`). Create it
-by hand — the repository deliberately ships no example clasp file.
+Rules that prevent the usual installation failure:
 
-Create `.clasp.json` next to the repository root for the **manager** project:
-
-```json
-{ "scriptId": "<manager script id>", "rootDir": "." }
-```
-
-For the dashboard project create a second folder (outside the repository, for example
-`C:\eh-dashboard-clasp\`) with `.clasp.json` pointing to the dashboard script ID, then copy
-the three `.gs` files, the HTML partials, `appsscript.json` and `.claspignore` from
-`dashboard-app/` there before pushing:
-
-```powershell
-npm run clasp -- login
-npm run clasp -- push
-```
-
-The manager push uses `.claspignore` from the repository root. Always push `dashboard-app/`
-into the standalone project and `src/` into the bound project.
+* `rootDir: "src"` for the manager project; **never** `"."`. With `"."` clasp would expose
+  both `src/` and `dashboard-app/` (each contains `appsscript.json` and `I18n.html`), so the
+  upload either fails or mixes the two applications into one project.
+* Never upload both applications into the same Apps Script project. The manager project is
+  container-bound to spreadsheet A; the dashboard project is standalone.
+* Replace `MANAGER_DEV_SCRIPT_ID` / `DASHBOARD_DEV_SCRIPT_ID` with the real script IDs from
+  step 6 and never commit them.
+* Read the `rootDir` line printed by `Get-Content .clasp.json` before each `clasp push`.
+  `clasp status` is the last check: it must list only the expected source files.
+* `npm run clasp -- push` is equivalent to `npx clasp push` if you prefer the npm script.
+* If PowerShell blocks `npx` (execution policy), use `npx.cmd clasp ...` or `npm run clasp -- ...`.
+* `clasp push` uploads code only. It does not set Script Properties, initialize data,
+  authorize scopes, or deploy the web app.
 
 ## 8. Required Script Properties for each project
 
@@ -119,7 +160,7 @@ into the standalone project and `src/` into the bound project.
 | `SPREADSHEET_ID` | spreadsheet **A** ID |
 | `INITIALIZATION_SPREADSHEET_ID` | spreadsheet **A** ID — only while initializing, remove afterwards |
 | `BACKUP_FOLDER_ID` | `EH-DEV-BACKUP` folder ID |
-| `ALLOWED_RECIPIENT_DOMAINS` | your development domain only |
+| `ALLOWED_RECIPIENT_DOMAINS` | **your real Workspace domain** (e.g. `example.co.jp`) or empty. A member e-mail whose domain is not listed is refused, so `example.test` would block step 10. |
 | `MAX_EMAILS_PER_RUN` | `1` while testing |
 | `EMAIL_ENABLED` / `DRY_RUN` | `false` / `true` — leave at the defaults |
 | `ADMIN_BOOTSTRAP_ALLOWLIST` | the operator e-mail address (remove after the bootstrap) |
@@ -134,54 +175,146 @@ into the standalone project and `src/` into the bound project.
 | Property | Value for the trial |
 | --- | --- |
 | `SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID` | spreadsheet **B** ID |
-| `SHARED_DASHBOARD_ALLOWED_DOMAIN` | your workspace domain, e.g. `example.co.jp` |
-| `SHARED_DASHBOARD_REQUIRE_EMAIL` | `true` (fail closed when the viewer identity is unavailable) |
+| `SHARED_DASHBOARD_ALLOWED_DOMAIN` | your Workspace domain, e.g. `example.co.jp` |
+| `SHARED_DASHBOARD_REQUIRE_EMAIL` | **leave unset for the trial** — see the warning below |
+| `SHARED_DASHBOARD_STALE_HOURS` | optional, default `24` |
 | `REQUEST_INBOX_SPREADSHEET_ID` | spreadsheet **C** ID |
 | `REQUEST_SUBMISSION_ENABLED` | leave **unset** until step 18 |
 
 Never place a spreadsheet ID into source code or documentation. The sidebars never display
 these values.
 
-## 9. First database initialization (new installation)
+> **Viewer e-mail caution.** The web app runs as its **deploying account**, so
+> `Session.getActiveUser().getEmail()` may legitimately return an empty address for an employee
+> viewer. The primary access control is the deployment ACL (**Who has access: anyone within your
+> domain**), not the e-mail check. `SHARED_DASHBOARD_REQUIRE_EMAIL=true` fails closed, so enabling
+> it before you have verified that the address actually resolves can lock legitimate employees
+> out of the dashboard. Enable it only after step 16.4 has proved the address resolves for an
+> employee account, and remove the property again if it blocks access. Never widen the
+> deployment to "Anyone" as a workaround.
 
-Only for an explicitly identified, **empty** workbook (spreadsheet A):
+## 9. First database initialization (new DEV installation only)
 
-1. Manager project → editor → choose the function `initializeNewDatabase`.
-2. Run it with the exact confirmation string `INITIALIZE <spreadsheet A id>`:
+The Apps Script **Run** button cannot pass arguments, so a one-off editor wrapper is required.
+Paste this at the end of `src/Main.gs` (or any `src/*.gs` file) in the manager project, save,
+and run it with the **Run** button:
 
-```js
-initializeNewDatabase('INITIALIZE <spreadsheet A id>');
+```javascript
+function initializeDevelopmentFromEditor() {
+  var id = PropertiesService.getScriptProperties()
+    .getProperty('SPREADSHEET_ID');
+  return initializeNewDatabase('INITIALIZE ' + id);
+}
 ```
 
-3. Approve the OAuth consent for the operator account.
-4. It refuses to run when `INITIALIZATION_SPREADSHEET_ID` differs from `SPREADSHEET_ID`, when
-   the workbook is not empty, or when the confirmation does not match. It removes
-   `INITIALIZATION_SPREADSHEET_ID` after success and writes a `SETTINGS` row
-   `DATABASE_ENVIRONMENT`.
-5. Reload the spreadsheet: the menu **設計・開発課 管理** appears (via `onOpen`).
+Before running:
 
-**Upgrade instead of installation?** Do not run `initializeNewDatabase`. Set
-`APPROVED_MIGRATIONS` to the reviewed IDs (for V1.2 → V1.3 the list is
+1. `SPREADSHEET_ID` and `INITIALIZATION_SPREADSHEET_ID` must both hold spreadsheet **A**'s ID.
+   `initializeNewDatabase` refuses the run when they differ, because that mismatch is how a
+   wrong workbook gets initialized.
+2. Spreadsheet **A** must contain no value and no formula in any sheet.
+3. `ENVIRONMENT` and `BOUND_ENVIRONMENT` must both be `DEVELOPMENT`.
+
+Run it once and approve the OAuth consent for the operator account. On success it:
+
+* sets the spreadsheet time zone to `Asia/Tokyo`,
+* creates the schema tables and automation defaults,
+* writes `SETTINGS` = `DATABASE_ENVIRONMENT / DEVELOPMENT`,
+* writes `SCHEMA_MIGRATIONS` = `INITIALIZE_V5` (schema version **5**),
+* deletes `INITIALIZATION_SPREADSHEET_ID` automatically,
+* returns `5`.
+
+Then:
+
+4. Delete `initializeDevelopmentFromEditor` from the source before the next `clasp push`.
+5. Reload spreadsheet **A**; the menu **設計・開発課 管理** appears (via `onOpen`).
+6. Never rerun initialization. It is refused against any workbook that already holds data or
+   formulas, and it is never the tool for an existing database — use the migration path below.
+
+**Existing database instead?** Do not create or run this wrapper. Take a verified backup, list
+only reviewed IDs in `APPROVED_MIGRATIONS` (V1.2 → V1.3:
 `002_task_assignment_safety,003_management_reliability,004_shared_dashboard,005_task_planning_and_requests`)
-and run `upgradeExistingDatabase()`. It takes a verified backup first and refuses without the
-approval entry. See [DEPLOYMENT.md §8.7](../DEPLOYMENT.md).
+and run `upgradeExistingDatabase()` from an editor wrapper. See
+[DEPLOYMENT.md §8.7](../DEPLOYMENT.md).
 
-## 10. First ADMIN bootstrap
+## 10. Create the first operator member and bootstrap ADMIN
 
-1. Create the operator's member row **before** the bootstrap. In the spreadsheet A sheet
-   `MEMBERS`, add one row: `Email` = the operator address, `Active` = `TRUE`, `Name` = any
-   name. Leave `Role` blank for now.
-2. Run, in the manager project:
+A `MEMBERS` row needs a real `Member_ID`; do not hand-type a row with only Name/Email/Active.
+The first member is created through `Members.create`, which generates `MEMBER_<uuid>`.
 
-```js
-bootstrapFirstAdministrator('<operator email>', 'BOOTSTRAP ADMIN <operator email>');
+**10a. Create the operator member** (temporary editor wrapper, new empty DEV database only):
+
+```javascript
+function createFirstOperatorFromEditor() {
+  var email = String(
+    Session.getActiveUser().getEmail() || ''
+  ).trim().toLowerCase();
+
+  if (!email) throw new Error('Operator email unavailable');
+
+  var allowed = String(
+    PropertiesService.getScriptProperties()
+      .getProperty('ADMIN_BOOTSTRAP_ALLOWLIST') || ''
+  ).toLowerCase().split(',').map(function (x) {
+    return x.trim();
+  });
+
+  if (allowed.indexOf(email) < 0) {
+    throw new Error('Operator not on bootstrap allowlist');
+  }
+
+  if (Database.read('MEMBERS').length !== 0) {
+    throw new Error('Members already exist; do not seed twice');
+  }
+
+  var member = Members.create({
+    Name: 'DEV Operator',
+    Email: email,
+    Active: true,
+    Role: 'MEMBER'
+  });
+
+  return {memberId: member.Member_ID, email: member.Email};
+}
 ```
 
-3. It requires the member row, the `ADMIN_BOOTSTRAP_ALLOWLIST` entry, a current schema and an
-   unused marker. It refuses a workbook that already has an active administrator or
-   notification history.
-4. Remove the address from `ADMIN_BOOTSTRAP_ALLOWLIST`.
-5. Open **設計・開発課 管理 → ダッシュボード**. The sidebar shows your e-mail and `ADMIN`.
+It needs `ENVIRONMENT`, `BOUND_ENVIRONMENT` and `SPREADSHEET_ID` (already set in step 8), the
+operator address in `ADMIN_BOOTSTRAP_ALLOWLIST`, and a domain that `ALLOWED_RECIPIENT_DOMAINS`
+accepts. It refuses to run when any member row already exists, so it cannot seed a second time.
+
+**10b. Verify the generated row** before bootstrapping. Open spreadsheet **A** → `MEMBERS` and
+confirm exactly one row with a generated `Member_ID` (for example `MEMBER_1a2b…`), your e-mail,
+`Active = TRUE`, `Role = MEMBER`.
+
+**10c. Bootstrap the administrator** (temporary editor wrapper):
+
+```javascript
+function bootstrapFromEditor() {
+  var email = String(
+    Session.getActiveUser().getEmail() || ''
+  ).trim().toLowerCase();
+
+  if (!email) throw new Error('Operator email unavailable');
+
+  return bootstrapFirstAdministrator(
+    email,
+    'BOOTSTRAP ADMIN ' + email
+  );
+}
+```
+
+It requires the active member row above, the allowlist entry, an initialized workbook at the
+current schema, no active administrator and no notification history. It is one-time and audited
+(`ADMIN_BOOTSTRAPPED`); the member row becomes `Role = ADMIN`.
+
+**10d. Clean up.** Remove the address from `ADMIN_BOOTSTRAP_ALLOWLIST` and delete both temporary
+wrappers (`createFirstOperatorFromEditor`, `bootstrapFromEditor`) before the next
+`clasp push`. Never run either wrapper against an existing operational system — the member
+wrapper refuses a non-empty `MEMBERS` table and the bootstrap refuses an already-bootstrapped
+workbook, but do not rely on that as an upgrade path.
+
+**10e. Check the UI.** Open **設計・開発課 管理 → ダッシュボード**; the sidebar shows your e-mail
+and `ADMIN`.
 
 ## 11. Register an employee
 
@@ -235,40 +368,74 @@ approval by design; the deadline history and IDs are preserved.
 
 ## 15. Publish the first dashboard snapshot
 
-1. Initialize the snapshot **once**, as an administrator, in the manager project editor:
-   `initializeSharedDashboardSnapshot('INITIALIZE SHARED DASHBOARD <spreadsheet B id>')`.
-   It refuses a non-empty or operational workbook and never touches spreadsheet A.
-2. Publish: manager sidebar → **共有ダッシュボードを今すぐ公開** (`uiPublishPublicationNow` →
-   `SharedDashboardPublisher.publish`) or, in the editor, `publishSharedDashboard()`.
-3. Check `共有ダッシュボードを今すぐ公開` reported counts, and confirm in spreadsheet B that
-   the `PUBLISHED_META` sheet has `RESULT = SUCCESS` and the active slot contains only
-   `INTERNAL` projects.
-4. Preview without writing: `previewSharedDashboardPublication()`; status:
+1. Initialize the snapshot **once**. Spreadsheet **B** must be a different file from A and C.
+   Add a temporary editor wrapper to the **manager** project and run it (ADMIN account):
+
+```javascript
+function initializeSnapshotFromEditor() {
+  var id = PropertiesService.getScriptProperties()
+    .getProperty('SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID');
+  return initializeSharedDashboardSnapshot(
+    'INITIALIZE SHARED DASHBOARD ' + id
+  );
+}
+```
+
+   It refuses a destination equal to the management workbook, a destination that already holds
+   any value or formula, and one that contains operational tables. It writes `PUBLISHED_META`
+   with `RESULT = INITIALIZED` and never touches spreadsheet A. Delete the wrapper afterwards.
+2. Publish: manager sidebar → **共有ダッシュボードを今すぐ公開**
+   (`uiPublishPublicationNow` → `SharedDashboardPublisher.publish`), or this editor wrapper:
+
+```javascript
+function publishFromEditor() {
+  return publishSharedDashboard();
+}
+```
+
+3. Confirm the publication in spreadsheet **B**: `PUBLISHED_META` now shows `RESULT = SUCCESS`,
+   a `SNAPSHOT_VERSION` of 1 and a `PUBLISHED_AT` time, and the active slot
+   (`PUBLISHED_PROJECTS_A` or `_B`) contains only the `INTERNAL` projects you approved.
+4. Read-only checks: `previewSharedDashboardPublication()` (writes nothing) and
    `sharedDashboardPublicationStatus()`.
 
-Scheduled publication stays OFF. Turning it ON additionally requires ADMIN, the exact
-confirmation `ENABLE SHARED DASHBOARD PUBLICATION`, and an interval.
+Scheduled publication stays **OFF** for the trial. Turning it ON additionally requires ADMIN,
+the exact confirmation `ENABLE SHARED DASHBOARD PUBLICATION`, an initialized snapshot and an
+interval.
 
-## 16. Deploy the dashboard web app
+## 16. Deploy the dashboard web app and verify viewer access
 
 1. Dashboard project → **Deploy → New deployment → Web app**.
 2. Description `EH-DEV trial`; **Execute as: Me (the deploying account)**;
-   **Who has access: Anyone within <your domain>** (never "Anyone").
-3. Authorise the two scopes (`spreadsheets`, `userinfo.email`).
-4. Open the web app URL as the employee test account. Share the URL with the trial members.
-5. `doGet` refuses a viewer outside `SHARED_DASHBOARD_ALLOWED_DOMAIN`.
+   **Who has access: Anyone within <your domain>** — never "Anyone" / "Anyone with the link".
+3. Authorise the two scopes (`https://www.googleapis.com/auth/spreadsheets`,
+   `https://www.googleapis.com/auth/userinfo.email`).
+4. Open the web app URL **as the employee test account** and confirm the portfolio, a project
+   and a task detail render. Share the URL with the trial members.
+5. `SHARED_DASHBOARD_ALLOWED_DOMAIN` refuses a resolved address outside your domain. The
+   deployment ACL is the primary control: the app runs as the deployer, so an employee's
+   address may be unavailable and an empty address is accepted while
+   `SHARED_DASHBOARD_REQUIRE_EMAIL` is unset (the trial default).
+6. Only after step 4 works for a real employee account may you optionally set
+   `SHARED_DASHBOARD_REQUIRE_EMAIL=true` (fail closed). Re-test the employee account; if it is
+   refused, remove the property — do not loosen the deployment access instead.
 
 ## 17. Initialize the request inbox (spreadsheet C)
 
-1. Set `REQUEST_INBOX_SPREADSHEET_ID` in **both** projects (manager and dashboard).
-2. In the **manager** project editor run, as an administrator:
+Spreadsheet **C** must be a third, separate file. Set `REQUEST_INBOX_SPREADSHEET_ID` in **both**
+projects first (step 8), then add a temporary editor wrapper to the **manager** project and run
+it as an ADMIN:
 
-```js
-initializeRequestInbox('INITIALIZE REQUEST INBOX');
+```javascript
+function initializeInboxFromEditor() {
+  return initializeRequestInbox('INITIALIZE REQUEST INBOX');
+}
 ```
 
-3. It creates the `REQUESTS` sheet with the fixed 15-column header and refuses content that
-   already exists. Both projects fail closed on a header mismatch.
+It creates the `REQUESTS` sheet with the fixed 15-column header, refuses content that already
+exists, refuses the management workbook, and writes an audit row
+(`REQUEST_INBOX_INITIALIZED`). Both projects fail closed on a header mismatch. Delete the
+wrapper afterwards; re-running it on an already initialized inbox is not needed.
 
 ## 18. Safely enable request submissions
 
@@ -353,10 +520,26 @@ The web app is the only surface for employees.
 
 ## 26. Create and verify a backup
 
-1. Manager project editor → `createDatabaseBackup()` (requires `BACKUP_FOLDER_ID`).
-2. Confirm a new file `HK-DEVELOPMENT-v5-<timestamp>` exists in `EH-DEV-BACKUP`.
-3. Confirm spreadsheet A's `BACKUP_LOG` has a new row with `Result = SUCCESS`.
-4. Backups are never deleted automatically. Restore is a manual procedure: see
+1. Manager project → **Run** `createDatabaseBackup()` (add a no-argument wrapper if you prefer
+   the Run button):
+
+```javascript
+function backupFromEditor() {
+  return createDatabaseBackup();
+}
+```
+
+2. It requires `BACKUP_FOLDER_ID`; the folder must be private (no public/domain link sharing).
+3. Confirm a new file `HK-DEVELOPMENT-v5-<timestamp>` exists in `EH-DEV-BACKUP`.
+4. Confirm spreadsheet **A** → `BACKUP_LOG` has a new row with `Result = VERIFIED` and the copy's
+   file ID in `Backup_Reference`. A failed attempt logs `Result = FAILED` with
+   `Error_Details`, and the function throws — do not continue past a failure.
+   (`VERIFIED` is the success value for `Backup.createVerified()`; `SUCCESS` belongs to
+   `SCHEMA_MIGRATIONS` and to the publication `PUBLISHED_META`, not to `BACKUP_LOG`.)
+5. Open the copy yourself and check that the expected sheets, rows and formulas are present and
+   that sharing is restricted (the code already compares every cell and formula of the copy
+   against the source before logging `VERIFIED`).
+6. Backups are never deleted automatically. Restore is a manual procedure: see
    [BACKUP_RESTORE.md](../BACKUP_RESTORE.md). Never test a restore against the trial workbook
    in place.
 
@@ -379,7 +562,8 @@ The web app is the only surface for employees.
 
 | Check | Result | Evidence (screenshot / note) |
 | --- | --- | --- |
-| Database initialized (or upgraded) | PASS / FAIL / BLOCKED | |
+| Database initialized (or upgraded) — `SCHEMA_MIGRATIONS` shows `INITIALIZE_V5` | PASS / FAIL / BLOCKED | |
+| Operator member created with a generated `Member_ID` | | |
 | ADMIN bootstrap | | |
 | Employee registered | | |
 | Project created, then marked INTERNAL | | |
@@ -406,12 +590,21 @@ evidence. Record live results in [docs/dashboard/SMOKE_TEST.md](dashboard/SMOKE_
 | --- | --- | --- |
 | `Explicit spreadsheet and matching environment binding required` | `ENVIRONMENT`, `BOUND_ENVIRONMENT` or `SPREADSHEET_ID` missing/unequal | fix the Script Properties |
 | `Workbook is not initialized; …` | wrong spreadsheet bound to the project | check `SPREADSHEET_ID` |
-| `Explicit empty spreadsheet confirmation required` | wrong confirmation text | copy the ID exactly |
+| `Explicit empty spreadsheet confirmation required` | `INITIALIZATION_SPREADSHEET_ID` ≠ `SPREADSHEET_ID`, or the confirmation text is wrong | set both to spreadsheet A and rerun the wrapper |
+| `Initialization refuses any existing content` | spreadsheet A already has a value or formula | use a new empty workbook; never clear an existing one to force it |
+| `Member email domain is not allowed` | `ALLOWED_RECIPIENT_DOMAINS` does not contain the operator's domain | set your real domain, or leave the property empty |
+| `Members already exist; do not seed twice` | the operator wrapper ran on a workbook that already has members | stop; use the existing row instead of re-seeding |
+| `This account is not in the deployment administrator allowlist` | `ADMIN_BOOTSTRAP_ALLOWLIST` missing the address | add it, rerun, then remove it |
+| `Create an active member record for this account before bootstrap` | the member row was not created through `Members.create` | run step 10a and verify the generated `Member_ID` |
+| `Admin bootstrap has already been used …` | the bootstrap marker exists | the installation is already bootstrapped; do not re-seed |
 | Sidebar does not open | script is not container-bound, or the account is not a manager | open spreadsheet A → Extensions → Apps Script |
+| `clasp status` lists `dashboard-app/` files for the manager project (or the reverse) | `.clasp.json` points at the wrong `rootDir` | copy the correct `.clasp.*.json` over `.clasp.json` (step 7) |
 | `Member self-service is disabled` | account is `MEMBER`/`VIEWER` without `ALLOW_MEMBER_SELF_SERVICE` | use a manager account (the trial assumes trusted managers) |
+| Employee is refused although they are in the domain | `SHARED_DASHBOARD_REQUIRE_EMAIL=true` while the viewer address cannot be resolved | remove the property; the deployment ACL is the primary control |
 | Dashboard shows no projects | nothing published, or every project is `RESTRICTED` | set `INTERNAL`, save, publish |
-| `Snapshot workbook is not initialized` | step 15.1 not done | run the snapshot initialization |
+| `Snapshot workbook is not initialized` | step 15.1 not done | run the snapshot initialization wrapper |
 | `この案件は…再読み込み` on save | somebody saved the record after you loaded it | reload the project/task and re-apply your change |
 | Request form is unavailable | `REQUEST_SUBMISSION_ENABLED` is not `true` | step 18 |
 | `申請を取り込めませんでした` | inbox property wrong, spreadsheet unshared, header drifted | check C, the 15-column header and both projects |
 | `DASHBOARD_NOT_CONFIGURED` | snapshot property missing in the dashboard project | step 8 |
+| `Backup folder must not allow public/domain link sharing` | the Drive folder is shared too widely | restrict `EH-DEV-BACKUP` to the operator and deployment account |

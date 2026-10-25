@@ -1,7 +1,13 @@
 # Request inbox deployment (V1.3)
 
 The request inbox is a **third, separate spreadsheet**. Employees never touch the private
-management workbook and the dashboard deployment never receives its ID.
+management workbook and the dashboard deployment never receives its ID. For a first
+installation follow [PRE_TRIAL_CHECKLIST.md](PRE_TRIAL_CHECKLIST.md) steps 17–22; this page is
+the reference chapter.
+
+The management workbook, the published snapshot and the inbox must be **three different files**.
+The manager application refuses the master workbook as an inbox, and the dashboard cannot open
+the master at all.
 
 ```
 dashboard-app (web app, domain-restricted)
@@ -46,14 +52,18 @@ submission functions fail with `REQUEST_DISABLED` rather than silently accepting
 
 ## 3. Initialise the sheet layout
 
-As an administrator with a verified account, run once in the Apps Script editor:
+As an administrator with a verified account, add this temporary wrapper to the **manager**
+project and run it once (the editor Run button cannot pass arguments):
 
-```js
-initializeRequestInbox('INITIALIZE REQUEST INBOX');
+```javascript
+function initializeInboxFromEditor() {
+  return initializeRequestInbox('INITIALIZE REQUEST INBOX');
+}
 ```
 
-This creates the `REQUESTS` sheet with the exact header contract and refuses to touch a
-sheet that already contains content. The header is:
+This creates the `REQUESTS` sheet with the exact header contract, refuses content that already
+exists, refuses the management workbook, and writes an audit row. Delete the wrapper afterwards.
+The header is:
 
 ```
 Request_ID, Request_Type, Task_ID, Project_ID, Requester_Name, Submitted_At,

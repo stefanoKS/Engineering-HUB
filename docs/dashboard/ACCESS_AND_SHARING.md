@@ -8,19 +8,24 @@ until it is executed and recorded in [SMOKE_TEST.md](SMOKE_TEST.md).**
 | Layer | Control | Where it is enforced |
 | --- | --- | --- |
 | Deployment ACL | Web app published with **Execute as: the deployer** and **Who has access: anyone within `<company domain>`** | Google (deployment settings) |
-| OAuth scopes | `spreadsheets.readonly` + `userinfo.email` only | `dashboard-app/appsscript.json`, checked by `npm run validate` |
+| OAuth scopes | `spreadsheets` + `userinfo.email` only | `dashboard-app/appsscript.json`, checked by `npm run validate` |
 | Viewer identity (defence in depth) | `SHARED_DASHBOARD_ALLOWED_DOMAIN`, optional `SHARED_DASHBOARD_REQUIRE_EMAIL=true` | `DashboardApp.requireViewer()` |
 | Data | Only allowlisted snapshot columns | `SharedDashboardModel`, `DataService.readTable` |
 | Data location | Snapshot workbook reachable read-only by the deployment account | Drive sharing |
 
-The primary access control is the **deployment ACL**. `Session.getActiveUser().getEmail()`
-is not guaranteed to return the viewer's address for a web app that runs as its deployer,
-so the server-side domain check is deliberately best-effort:
+The primary access control is the **deployment ACL** (**Who has access: anyone within the company
+domain**). The dashboard runs as its deploying account, so `Session.getActiveUser().getEmail()`
+may legitimately return an empty address for an employee viewer; the server-side domain check is
+deliberately best-effort:
 
 - When an address is available, it must match `SHARED_DASHBOARD_ALLOWED_DOMAIN` (if set).
 - When no address is available, the page is still served; the deployment ACL is the control.
-- Set `SHARED_DASHBOARD_REQUIRE_EMAIL=true` to fail closed instead. Verify in your domain
-  whether the address resolves before relying on this.
+- `SHARED_DASHBOARD_REQUIRE_EMAIL=true` fails closed instead. **Do not enable it before you have
+  verified that the address resolves for a real employee account** — an unresolved address would
+  lock legitimate employees out. Test with `SHARED_DASHBOARD_REQUIRE_EMAIL` unset first, enable it
+  only if the test proves resolution, and remove the property if employees are refused.
+- Never widen the deployment to "Anyone" or "Anyone with the link" as a workaround for a refused
+  viewer.
 
 The viewer address is never returned to the browser. The API returns only `{ok: true|false}`.
 
@@ -84,7 +89,8 @@ Everything else is unchanged:
 
 Controls: domain-restricted deployment (`access: DOMAIN`), viewer check, payload whitelist,
 length limits, 5 submissions per browser token per hour, a 24-hour duplicate guard, script
-lock, and a strict inbox header contract. Set `REQUEST_SUBMISSION_ENABLED=false` to close
-submissions. Review the deployment after any scope change; anonymous access must never be
-enabled.
+lock, and a strict inbox header contract. Submission is **closed** until the dashboard project
+property `REQUEST_SUBMISSION_ENABLED` is exactly `true`; `requestSubmissionConfig()` reports the
+same state the page renders. Review the deployment after any scope change; anonymous access must
+never be enabled.
 

@@ -301,3 +301,30 @@ test('the trial documentation describes the visibility and edit workflow', () =>
   assert.match(checklist, /INTERNAL/);
   assert.match(checklist, /REQUEST_SUBMISSION_ENABLED/);
 });
+
+test('the installation guide cannot regress to a broken clasp, bootstrap or backup recipe', () => {
+  const checklist = fs.readFileSync(path.resolve(__dirname, '../docs/PRE_TRIAL_CHECKLIST.md'), 'utf8');
+  // Two clasp targets with real rootDir values; a "." rootDir would upload the whole repository.
+  assert.match(checklist, /"scriptId": "MANAGER_DEV_SCRIPT_ID", "rootDir": "src"/);
+  assert.match(checklist, /"scriptId": "DASHBOARD_DEV_SCRIPT_ID", "rootDir": "dashboard-app"/);
+  assert.doesNotMatch(checklist, /"rootDir": "\."/);
+  // Argument-taking functions must be run through a no-argument editor wrapper.
+  assert.match(checklist, /function initializeDevelopmentFromEditor\(\)/);
+  assert.match(checklist, /function createFirstOperatorFromEditor\(\)/);
+  assert.match(checklist, /Members\.create\(/);
+  assert.match(checklist, /function bootstrapFromEditor\(\)/);
+  assert.match(checklist, /function initializeSnapshotFromEditor\(\)/);
+  assert.match(checklist, /function initializeInboxFromEditor\(\)/);
+  // Backup success is VERIFIED, not SUCCESS.
+  assert.match(checklist, /`Backup_Reference`|Backup_Reference/);
+  assert.match(checklist, /Result = VERIFIED/);
+  assert.match(checklist, /Result = FAILED/);
+  // Viewer e-mail is optional and must not be recommended before verification.
+  assert.match(checklist, /`SHARED_DASHBOARD_REQUIRE_EMAIL` \| \*\*leave unset for the trial\*\*/);
+  assert.match(checklist, /never "Anyone"/i);
+
+  const sharing = fs.readFileSync(path.resolve(__dirname, '../docs/dashboard/ACCESS_AND_SHARING.md'), 'utf8');
+  assert.match(sharing, /may legitimately return an empty address/);
+  assert.match(sharing, /Do not enable it before you have\n?  verified|Do not enable it before/);
+  assert.doesNotMatch(sharing, /spreadsheets\.readonly \+ `userinfo\.email`/);
+});

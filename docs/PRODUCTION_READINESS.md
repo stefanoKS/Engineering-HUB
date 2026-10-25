@@ -29,7 +29,7 @@ No real Google Workspace resource was created, changed or inspected while prepar
 ```text
 npm ci            -> lockfile install, 0 vulnerabilities
 npm run lint      -> pass
-npm test          -> 256 tests, 256 pass, 0 fail (V1.3.1 adds 39: 24 stabilization + 15 sidebar wiring)
+npm test          -> 257 tests, 257 pass, 0 fail (V1.3.1 adds 40: 24 stabilization + 16 sidebar wiring)
 npm run validate  -> 32 Apps Script files, 3 dashboard files, both manifests and 452 translation keys validated
 ```
 

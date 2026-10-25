@@ -10,7 +10,7 @@ Engineering project management using Google Sheets as the database, Google Apps 
 | --- | --- |
 | Release | V1.3.1 (final pre-trial stabilization) on top of V1.3 (planning, requests, Japanese/English UI), V1.2 (shared read-only dashboard) and V1.1 + production hardening |
 | Version | `1.3.1` |
-| Local test count | **256 passing** (`npm test`), 0 failing; `npm run lint` and `npm run validate` pass |
+| Local test count | **257 passing** (`npm test`), 0 failing; `npm run lint` and `npm run validate` pass |
 | Schema version | **5** — `005_task_planning_and_requests` (additive only; approval + verified backup required). V1.3.1 adds **no** schema change |
 | Verified locally | Project visibility controls and manager ownership default, project/task edit modes with partial patches, stale-edit refusal, automatic request import with idempotency and lock, unknown-vs-zero estimates, deadline-only assignment, separated approval/schedule confirmation, eligibility policy, weighted progress, deterministic health, role enforcement (ADMIN/MANAGER/MEMBER/VIEWER), safe DOM rendering, first-admin bootstrap, OFF/PREVIEW/LIVE matrix, reminder offsets and catch-up, weekly report, trigger drift recreation, ledger states, data preservation on upgrade, sanitized dashboard DTO allowlist, `INTERNAL`-only publication, A/B snapshot commit and rollback-on-failure, read-only viewer API, deadline wording in Asia/Tokyo |
 | Known production blockers | No live Google Workspace execution of any kind; development/production projects not created; roles blank after migration until bootstrap; real Sheets quota/performance unmeasured; repository visibility undecided; dashboard deployment ACL, Drive ACLs and scheduled publication unverified; request submission flag intentionally OFF until the operator enables it |
@@ -55,7 +55,12 @@ npm test
 npm run validate
 ```
 
-Then follow [Deployment](DEPLOYMENT.md) to create an isolated development project, configure Script Properties, authorize the script through the Apps Script editor, and initialize an empty spreadsheet. `config.example.json` is a reference for **Script Properties**, not credentials or an automatically loaded configuration file.
+Then follow [docs/PRE_TRIAL_CHECKLIST.md](docs/PRE_TRIAL_CHECKLIST.md) to create an isolated
+development project, push the two clasp targets, configure Script Properties, initialize an empty
+spreadsheet, bootstrap the first administrator, publish a snapshot and deploy the dashboard.
+[DEPLOYMENT.md](DEPLOYMENT.md) is the reference chapter for each area (and the only place for the
+production gate); where the two differ, the checklist wins. `config.example.json` is a reference for
+**Script Properties**, not credentials or an automatically loaded configuration file.
 
 ## V1.1 — Management usability, reliability and automation controls
 

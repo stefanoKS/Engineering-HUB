@@ -80,3 +80,42 @@ executed against a real Workspace.
 Documentation accuracy is verified by reading the source and by the automated checks above.
 No installation step was executed; see
 [V1_3_1_GATE_7.md](V1_3_1_GATE_7.md) for the live-verification status.
+
+## Installation review corrections (same release)
+
+A focused review of the installation documentation found and corrected seven issues. No
+application code, schema or Script Property name changed.
+
+| # | Correction | Where |
+| --- | --- | --- |
+| 1 | Two clasp targets with explicit `rootDir` (`src`, `dashboard-app`), target selection through `.clasp.json`, `npx clasp status`, `"rootDir": "."` prohibited, never both apps in one project | `PRE_TRIAL_CHECKLIST.md` §7, `DEPLOYMENT.md` §2/§8.2, `docs/dashboard/DEPLOYMENT.md` §2 |
+| 2 | The editor Run button cannot pass arguments: `initializeDevelopmentFromEditor()` documented, with the `INITIALIZATION_SPREADSHEET_ID` match rule, the version-5 outcome, wrapper deletion and the never-rerun rule | checklist §9, `DEPLOYMENT.md` §4/§8.5 |
+| 3 | The first operator member is created through `Members.create` (`createFirstOperatorFromEditor()`), the generated `Member_ID` is verified, then `bootstrapFromEditor()`; allowlist removed and wrappers deleted afterwards | checklist §10, `DEPLOYMENT.md` §4/§8.6 |
+| 4 | `SHARED_DASHBOARD_REQUIRE_EMAIL` documented as optional with the employee-lockout risk; deployment ACL is primary; "Anyone" never recommended | checklist §8/§16, `docs/dashboard/ACCESS_AND_SHARING.md`, `docs/dashboard/DEPLOYMENT.md` §4/§10 |
+| 5 | No-argument wrappers for the snapshot and inbox initialization; three different spreadsheets restated; properties, first publication, web-app deployment, `REQUEST_SUBMISSION_ENABLED=true` and the submission/approval test documented | checklist §15–§22, `docs/REQUEST_INBOX_DEPLOYMENT.md` §3, `docs/dashboard/DEPLOYMENT.md` §1 |
+| 6 | `BACKUP_LOG` success is `Result = VERIFIED` (`Backup.createVerified`), `FAILED` on error, with the copy-verification steps | checklist §26, `DEPLOYMENT.md` §8.8 |
+| 7 | One primary guide with the new-installation / existing-database / production distinction, cross-referenced from `DEPLOYMENT.md` and both READMEs | checklist header, `DEPLOYMENT.md` header, `README.md`, `README_JP.md` |
+
+Verification for this correction round:
+
+* Every function referenced by the installation documents exists as a global in `src/*.gs` or
+  `dashboard-app/*.gs`, or is defined as a wrapper inside the same document (checked
+  mechanically).
+* Every documented Script Property name is read by the code (`Config.get`/`Config.require`/
+  `getProperty`) and every documented `AUTOMATION_SETTINGS` key exists in
+  `AutomationSettings.gs`.
+* `npx clasp`, `clasp push` and `clasp status` were checked against the pinned clasp 3.4.1;
+  the `--project` option exists in that version and is documented as an alternative.
+* The six documented editor wrappers were **extracted verbatim from the checklist** and executed
+  against the mocked Google services in installation order:
+  `initializeDevelopmentFromEditor` → `5` (and `INITIALIZATION_SPREADSHEET_ID` deleted),
+  `createFirstOperatorFromEditor` → `MEMBER_<uuid>` with `Role = MEMBER`,
+  `bootstrapFromEditor` → role becomes `ADMIN`,
+  `initializeSnapshotFromEditor` → `{initialized: true, contractVersion: '1.3'}`,
+  `initializeInboxFromEditor` → `{initialized: true, fields: 15}`,
+  `backupFromEditor` → `BACKUP_LOG` `Result = VERIFIED`.
+  This is a mock-level execution, not Workspace evidence.
+* `tests/v1_3_1-ui.test.js` now asserts the two `rootDir` values, the absence of
+  `"rootDir": "."`, the wrapper names, `Result = VERIFIED`/`FAILED` and the
+  `SHARED_DASHBOARD_REQUIRE_EMAIL` wording, so the recipe cannot regress silently.
+* Live Workspace execution remains **UNVERIFIED**.
