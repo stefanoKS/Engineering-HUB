@@ -74,6 +74,7 @@
     <label>進捗率 (0-100) *</label><input id="progressValue" type="number" min="0" max="100">
     <label>次のアクション</label><input id="progressNext">
     <button onclick="updateProgress()">更新</button>
+    <div class="hint">自分の担当タスクのみ更新できます（管理者は管理範囲内）。</div>
   </fieldset>
 
   <fieldset>
@@ -82,11 +83,8 @@
     <label>メンバーID（更新時）</label><input id="memberId">
     <label>氏名 *</label><input id="memberName">
     <label>メール *</label><input id="memberEmail">
-    <label>役割</label>
-    <select id="memberRole">
-      <option value="MEMBER">MEMBER</option><option value="MANAGER">MANAGER</option>
-      <option value="ADMIN">ADMIN</option><option value="VIEWER">VIEWER</option>
-    </select>
+    <label>役割（ADMIN/MANAGERの変更はADMINのみ）</label>
+    <select id="memberRole"></select>
     <label>週容量（時間）</label><input id="memberCapacity" type="number" min="0" step="0.5">
     <div class="row">
       <button onclick="saveMember()">保存</button>
@@ -108,14 +106,13 @@
 
   <div id="status"></div>
 
+  <?!= include('UiSafe') ?>
   <script>
     var context = null;
 
-    function setStatus(kind, message) {
-      var node = document.getElementById('status');
-      node.className = kind;
-      node.textContent = message;
-    }
+    function statusNode() { return document.getElementById('status'); }
+
+    function setStatus(kind, message) { EH.setStatus(statusNode(), kind, message); }
 
     function call(fn, payload, onSuccess) {
       setStatus('loading', '処理中...');
@@ -132,45 +129,33 @@
       if (payload === undefined) runner[fn](); else runner[fn](payload);
     }
 
-    function fill(select, items, valueKey, labelKey, blankLabel) {
-      select.innerHTML = '';
-      if (blankLabel) {
-        var option = document.createElement('option');
-        option.value = '';
-        option.textContent = blankLabel;
-        select.appendChild(option);
-      }
-      items.forEach(function (item) {
-        var node = document.createElement('option');
-        node.value = item[valueKey];
-        node.textContent = item[labelKey];
-        select.appendChild(node);
-      });
-    }
-
     function value(id) { return document.getElementById(id).value; }
     function checked(id) { return document.getElementById(id).checked; }
+
+    function roleOptions(roles) {
+      return (roles || ['MEMBER', 'VIEWER']).map(function (role) { return {id: role, name: role}; });
+    }
 
     function render(data) {
       context = data;
       document.getElementById('actor').textContent =
         'ログイン: ' + data.actor.email + '（' + data.actor.role + '）';
       var activeMembers = data.members.filter(function (member) { return member.active; });
-      fill(document.getElementById('projectOwner'), activeMembers, 'id', 'name', '未設定');
-      fill(document.getElementById('subProject'), data.projects, 'id', 'name', '');
-      fill(document.getElementById('subOwner'), activeMembers, 'id', 'name', '未設定');
-      fill(document.getElementById('taskProject'), data.projects, 'id', 'name', '');
-      fill(document.getElementById('taskOwner'), activeMembers, 'id', 'name', '');
-      fill(document.getElementById('progressTask'), data.tasks, 'id', 'name', '');
-      fill(document.getElementById('skillMember'), activeMembers, 'id', 'name', '');
-      fill(document.getElementById('skillName'), data.skills, 'id', 'name', '');
-      fill(document.getElementById('skillAssessor'), activeMembers, 'id', 'name', '未設定');
-      var memberList = data.members.map(function (member) {
-        return member.id + ': ' + member.name + '（' + member.role + (member.active ? '' : '・無効') + '）';
-      }).join('<br>');
-      document.getElementById('memberList').innerHTML = memberList || 'メンバー未登録';
-      document.getElementById('skillList').textContent =
-        data.skills.map(function (skill) { return skill.name; }).join(' / ') || 'スキル未登録';
+      EH.fillSelect(document.getElementById('projectOwner'), activeMembers, 'id', 'name', '未設定');
+      EH.fillSelect(document.getElementById('subProject'), data.projects, 'id', 'name', '');
+      EH.fillSelect(document.getElementById('subOwner'), activeMembers, 'id', 'name', '未設定');
+      EH.fillSelect(document.getElementById('taskProject'), data.projects, 'id', 'name', '');
+      EH.fillSelect(document.getElementById('taskOwner'), activeMembers, 'id', 'name', '');
+      EH.fillSelect(document.getElementById('progressTask'), data.tasks, 'id', 'name', '');
+      EH.fillSelect(document.getElementById('skillMember'), activeMembers, 'id', 'name', '');
+      EH.fillSelect(document.getElementById('skillName'), data.skills, 'id', 'name', '');
+      EH.fillSelect(document.getElementById('skillAssessor'), activeMembers, 'id', 'name', '未設定');
+      EH.fillSelect(document.getElementById('memberRole'), roleOptions(data.roles), 'id', 'name', null);
+      EH.renderRecords(document.getElementById('memberList'), data.members, function (member) {
+        return member.id + ': ' + member.name + '（' + (member.role || 'VIEWER') + (member.active ? '' : '・無効') + '）';
+      }, 'メンバー未登録');
+      var skillNames = data.skills.map(function (skill) { return skill.name; });
+      EH.renderLines(document.getElementById('skillList'), skillNames.length ? skillNames : ['スキル未登録'], 'hint');
       refreshSubprojects();
     }
 
@@ -178,7 +163,7 @@
       if (!context) return;
       var project = value('taskProject');
       var items = context.subprojects.filter(function (sub) { return sub.projectId === project; });
-      fill(document.getElementById('taskSubproject'), items, 'id', 'name', 'なし（プロジェクト直下）');
+      EH.fillSelect(document.getElementById('taskSubproject'), items, 'id', 'name', 'なし（プロジェクト直下）');
     }
 
     function createProject() {
@@ -203,7 +188,7 @@
         priority: value('taskPriority'), notify: checked('taskNotify'),
         approve: checked('taskApprove'), confirmSchedule: checked('taskConfirm')
       };
-      if (payload.confirmSchedule && !window.confirm('日程を確定します。期限と見積が必須です。よろしいですか？')) return;
+      if (payload.confirmSchedule && !EH.confirmAction('日程を確定します。期限と見積が必須です。よろしいですか？')) return;
       call('uiAssignTask', payload, function () { call('uiContext', undefined, render); });
     }
 
@@ -221,7 +206,7 @@
     }
 
     function deactivateMember() {
-      if (!window.confirm('メンバーを無効化します。未完了タスクがある場合は失敗します。よろしいですか？')) return;
+      if (!EH.confirmAction('メンバーを無効化します。未完了タスクがある場合は失敗します。よろしいですか？')) return;
       call('uiDeactivateMember', {memberId: value('memberId')}, function () { call('uiContext', undefined, render); });
     }
 

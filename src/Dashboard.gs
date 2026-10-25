@@ -52,8 +52,10 @@ var Dashboard = (function () {
     var timeline = [['タスクID', 'タスク', 'プロジェクトID', '担当者', '開始日', '終了日', '進捗率', '状態']];
     var gantt = [['種別', 'ID', '名称', 'プロジェクト', '開始日', '終了日', '予測終了', '進捗率', '状態', '備考']];
     var attention = {
-      pendingApprovals: [], tasksWithoutOwner: [], tasksNeedingReassignment: [], projectsUnknownSchedule: [],
-      dueWithin7: [], dueWithin30: [], overcapacity: [], staleProjects: []
+      pendingApprovals: [], tasksWithoutOwner: [], tasksNeedingReassignment: [],
+      unknownScheduleProjects: [], atRiskProjects: [], staleProjects: [],
+      overdueTasks: [], blockedTasks: [], criticalIssues: [],
+      dueWithin7: [], dueWithin30: [], overcapacity: []
     };
 
     subprojects.forEach(function (subproject) {
@@ -82,8 +84,11 @@ var Dashboard = (function () {
       var owner = memberById[project.Project_Owner_ID];
       var deadline = project.Committed_Deadline || project.Forecast_End || '';
       var terminal = TERMINAL.indexOf(project.Status) >= 0;
-      if (!terminal && Health.isAttention(classified.health)) {
-        attention.projectsUnknownSchedule.push(project.Project_ID);
+      // Independent categories: a missing schedule is not the same condition as a health colour.
+      var missingSchedule = !project.Committed_Deadline && !project.Forecast_End;
+      if (!terminal && missingSchedule) attention.unknownScheduleProjects.push(project.Project_ID);
+      if (!terminal && (classified.health === 'YELLOW' || classified.health === 'RED')) {
+        attention.atRiskProjects.push(project.Project_ID);
       }
       var stale = Health.staleDays(project, asOf);
       if (!terminal && stale !== null && stale > limits.staleDays && limits.staleAlert) attention.staleProjects.push(project.Project_ID);
@@ -144,7 +149,10 @@ var Dashboard = (function () {
       return days <= limit;
     }
     open.forEach(function (task) {
-      if (task.Owner_Member_ID && Health.day(task.Due_Date) >= today) {
+      var due = Health.day(task.Due_Date);
+      if (due && due < today) attention.overdueTasks.push(task.Task_ID);
+      if (task.Status === 'Blocked') attention.blockedTasks.push(task.Task_ID);
+      if (task.Owner_Member_ID && due && due >= today) {
         if (dueIn(task, 7)) attention.dueWithin7.push(task.Task_ID);
         if (dueIn(task, 30)) attention.dueWithin30.push(task.Task_ID);
       }
@@ -153,6 +161,9 @@ var Dashboard = (function () {
       if (task.Owner_Member_ID && (!taskOwner || taskOwner.Active !== true)) attention.tasksNeedingReassignment.push(task.Task_ID);
       if (!task.Assignment_Approved_At && task.Owner_Member_ID) attention.pendingApprovals.push(task.Task_ID);
     });
+    openIssues.forEach(function (issue) {
+      if (issue.Severity === 'Critical') attention.criticalIssues.push(issue.Issue_ID);
+    });
 
     var metrics = {
       activeProjects: projects.filter(function (project) { return project.Status === 'Active'; }).length,
@@ -160,14 +171,12 @@ var Dashboard = (function () {
       onHoldProjects: projects.filter(function (project) { return project.Status === 'On Hold'; }).length,
       completedProjects: projects.filter(function (project) { return project.Status === 'Completed'; }).length,
       archivedProjects: projects.filter(function (project) { return project.Status === 'Archived'; }).length,
-      atRiskProjects: projectItems.filter(function (item) {
-        return TERMINAL.indexOf(item.project.Status) < 0 && Health.isAttention(item.health.health);
-      }).length,
+      atRiskProjects: attention.atRiskProjects.length,
       openTasks: open.length,
-      overdueTasks: open.filter(function (task) { return task.Due_Date && Health.day(task.Due_Date) < today; }).length,
-      blockedTasks: open.filter(function (task) { return task.Status === 'Blocked'; }).length,
+      overdueTasks: attention.overdueTasks.length,
+      blockedTasks: attention.blockedTasks.length,
       openIssues: openIssues.length,
-      criticalIssues: openIssues.filter(function (issue) { return issue.Severity === 'Critical'; }).length,
+      criticalIssues: attention.criticalIssues.length,
       upcomingMilestones: milestones.filter(function (milestone) {
         return !milestone.Actual_Date && milestone.Target_Date && Health.day(milestone.Target_Date) >= today;
       }).length,
@@ -178,9 +187,7 @@ var Dashboard = (function () {
       pendingApprovals: attention.pendingApprovals.length,
       dueWithin7: attention.dueWithin7.length,
       dueWithin30: attention.dueWithin30.length,
-      unknownScheduleProjects: projectItems.filter(function (item) {
-        return TERMINAL.indexOf(item.project.Status) < 0 && !item.project.Committed_Deadline && !item.project.Forecast_End;
-      }).length,
+      unknownScheduleProjects: attention.unknownScheduleProjects.length,
       overallocatedMembers: attention.overcapacity.length
     };
 
@@ -218,6 +225,11 @@ var Dashboard = (function () {
       ['担当者未設定タスク', metrics.unownedTasks],
       ['再割当が必要なタスク', analysis.attention.tasksNeedingReassignment.length],
       ['日程不明プロジェクト', metrics.unknownScheduleProjects],
+      ['期限超過タスク', metrics.overdueTasks],
+      ['ブロック中タスク', metrics.blockedTasks],
+      ['重大未解決課題', metrics.criticalIssues],
+      ['更新停滞プロジェクト', metrics.staleProjects],
+      ['要注意プロジェクト（黄/赤）', metrics.atRiskProjects],
       ['7日以内に期限', metrics.dueWithin7],
       ['30日以内に期限', metrics.dueWithin30],
       ['見積未設定タスク', metrics.unknownEstimateTasks],

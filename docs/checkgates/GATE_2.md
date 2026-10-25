@@ -100,3 +100,16 @@ Project → Subproject → Task and Project → Task are both supported. New hel
   manager must still review unestimated work.
 - `PROJECT_PHASES` did not exist before version 3; reverse planning on an unmigrated workbook fails with a
   missing-table error instead of writing anywhere unexpected.
+
+## Post-merge audit (production hardening)
+
+Previously undiscovered issue: `Health.classify` returned `staleDays: limits`, i.e. the thresholds object under a
+numeric field name, so any consumer treating `staleDays` as a number received an object.
+
+Corrected behaviour: `staleDays` is the numeric age (or `null`), and the limits are returned under `thresholds`.
+
+New regression tests: `tests/gate-c-correctness.test.js` (numeric `staleDays`, threshold separation, weighted
+progress 58.82 %, per-member remaining hours, unknown counts, archived exclusion, data-preservation upgrade).
+
+Remaining live verification: none specific to this gate beyond the general smoke test; progress and health remain
+documented heuristics that require human review in a real workbook.

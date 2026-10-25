@@ -50,15 +50,21 @@ test('settings reject malformed values, unknown keys and status writes', () => {
   assert.throws(() => fixtures.settings(app, { PROJECT_STALE_DAYS: 0 }), /integer between 1 and 365/);
 });
 
-test('unmigrated workbooks keep the legacy master flags and never silently enable live mail', () => {
+test('unmigrated workbooks fail closed and need the documented legacy opt-in', () => {
   const legacy = fixtures.base(FLAGS);
   legacy.book.sheets = legacy.book.sheets.filter(sheet => sheet.getName() !== 'AUTOMATION_SETTINGS');
   assert.equal(legacy.context.AutomationSettings.configured(), false);
   const status = legacy.context.Notifications.effectiveStatus();
-  assert.equal(status.mode, 'LIVE');
-  assert.equal(status.reason, 'LEGACY_CONFIGURATION');
+  assert.equal(status.mode, 'OFF');
+  assert.equal(status.reason, 'LEGACY_CONFIGURATION_BLOCKED');
 
-  const dryLegacy = fixtures.base({ properties: { EMAIL_ENABLED: 'true', DRY_RUN: 'true' } });
+  const optInFlags = { EMAIL_ENABLED: 'true', DRY_RUN: 'false', ALLOW_LEGACY_EMAIL_CONFIG: 'true' };
+  const optIn = fixtures.base({ properties: optInFlags });
+  optIn.book.sheets = optIn.book.sheets.filter(sheet => sheet.getName() !== 'AUTOMATION_SETTINGS');
+  assert.equal(optIn.context.Notifications.effectiveStatus().mode, 'LIVE');
+  assert.equal(optIn.context.Notifications.effectiveStatus().reason, 'LEGACY_CONFIGURATION_OPT_IN');
+
+  const dryLegacy = fixtures.base({ properties: Object.assign({}, optInFlags, { DRY_RUN: 'true' }) });
   dryLegacy.book.sheets = dryLegacy.book.sheets.filter(sheet => sheet.getName() !== 'AUTOMATION_SETTINGS');
   assert.equal(dryLegacy.context.Notifications.effectiveStatus().mode, 'PREVIEW');
 });

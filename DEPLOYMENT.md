@@ -76,6 +76,9 @@ In **Project Settings → Script Properties**, enter the following string values
 | `CALENDAR_ENABLED` | Default `false`; enable only after reviewing the Calendar behavior. |
 | `CALENDAR_ID` | Dedicated secondary calendar ID (`…@group.calendar.google.com`); not `primary`. |
 | `MANAGEMENT_RECIPIENTS` | Optional comma-separated weekly overdue-summary recipients; each must also be an active member with an allowed domain. |
+| `ADMIN_BOOTSTRAP_ALLOWLIST` | Comma-separated deployment administrator allowlist for the one-time bootstrap; remove after use. |
+| `ALLOW_LEGACY_EMAIL_CONFIG` | Optional, default unset. `true` is the only way an unconfigured (pre-V1.1) workbook may use the legacy `EMAIL_ENABLED`/`DRY_RUN` mapping. `false`/unset means mail stays `OFF`. |
+| `ALLOW_MEMBER_SELF_SERVICE` | Optional, default unset (`false`). `true` lets a `MEMBER` open the sidebar with own-task scope. It does not make the workbook confidential (a member with spreadsheet access can read every sheet). |
 | `NOTIFICATION_ACTIVATION_AT` | Application-written activation timestamp; do not manually prepopulate it. |
 | `NOTIFICATION_AUTHORIZED_BY` | Application-written activating account; do not manually forge it. |
 
@@ -183,3 +186,153 @@ Use `healthCheck()` for binding/integration flags and `validateSystem()` for ope
 ## Rollback
 
 Deploying older code does **not** reverse a schema migration or recover overwritten data. Inspect compatibility first. For data recovery follow [Backup and restore](BACKUP_RESTORE.md); keep automation disabled until restored state and delivery history have been reconciled.
+
+## 8. Exact Windows 11 PowerShell procedure
+
+Run every command from the repository root in **Windows PowerShell 5.1 or PowerShell 7**. Paths assume
+`C:\Users\<you>\Documents\Engineering-HUB`; adjust to your checkout.
+
+> **Warning:** `clasp push` uploads source only. It does **not** migrate spreadsheet data, change Script
+> Properties, install triggers, or reset `AUTOMATION_SETTINGS`. Older code may not be schema-compatible with a
+> migrated workbook.
+
+### 8.1 Local validation
+
+```powershell
+Set-Location C:\Users\<you>\Documents\Engineering-HUB
+git fetch origin
+git switch main
+git pull --ff-only
+npm ci
+npm run lint
+npm test
+npm run validate
+```
+
+If `npm` is blocked by the execution policy, call `npm.cmd` instead (for example `& npm.cmd test`).
+
+### 8.2 Development clasp selection
+
+```powershell
+@'
+{ "scriptId": "REPLACE_WITH_DEVELOPMENT_SCRIPT_ID", "rootDir": "src" }
+'@ | Set-Content -Encoding ascii .clasp.dev.json
+
+Copy-Item .clasp.dev.json .clasp.json -Force
+Get-Content .clasp.json     # verify the scriptId before pushing
+```
+
+`.clasp.json` and `.clasp.dev.json` are git-ignored. Never commit them.
+
+### 8.3 Development deployment
+
+```powershell
+npx clasp login                       # once per machine
+npx clasp status                      # shows the files that will be pushed
+npx clasp push --force                # updates source in the development project
+```
+
+The bound project must be created from the spreadsheet (**Extensions → Apps Script**) so the sidebar works.
+
+### 8.4 Script Properties (development)
+
+Project Settings → Script Properties. Required keys:
+
+| Property | Example |
+| --- | --- |
+| `ENVIRONMENT` / `BOUND_ENVIRONMENT` | `DEVELOPMENT` / `DEVELOPMENT` |
+| `SPREADSHEET_ID` | development workbook ID |
+| `BACKUP_FOLDER_ID` | restricted Drive folder ID |
+| `ALLOWED_RECIPIENT_DOMAINS` | `example.test` (development-only domain) |
+| `MAX_EMAILS_PER_RUN` | `1` while testing |
+| `EMAIL_ENABLED` / `DRY_RUN` | `false` / `true` until the LIVE review |
+| `ADMIN_BOOTSTRAP_ALLOWLIST` | your development address (remove after bootstrap) |
+| `APPROVED_MIGRATIONS` | empty until a migration is reviewed |
+| `CALENDAR_ENABLED` / `CALENDAR_ID` | `false` / empty until reviewed |
+
+### 8.5 Safe initialization (empty workbook only)
+
+```javascript
+function initializeDevelopmentFromEditor() {
+  var id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  initializeNewDatabase('INITIALIZE ' + id);
+}
+```
+
+Set `INITIALIZATION_SPREADSHEET_ID` to the same ID first, run once, then delete both the wrapper and the property.
+Initialization refuses any workbook that already contains a value or formula.
+
+### 8.6 First administrator bootstrap
+
+```javascript
+function bootstrapFromEditor() {
+  var actor = Session.getActiveUser().getEmail();
+  return bootstrapFirstAdministrator(actor, 'BOOTSTRAP ADMIN ' + actor);
+}
+```
+
+Requirements: `ADMIN_BOOTSTRAP_ALLOWLIST` contains the account, an active member row exists for it, the workbook is
+initialized at the current schema, and no administrator/bootstrap/notification history exists. It is one-time and
+audited (`ADMIN_BOOTSTRAPPED`). Remove the allowlist entry afterwards.
+
+### 8.7 Existing workbook migration
+
+Take and verify a backup first (see 8.8), then run the migration from the editor:
+
+```javascript
+function migrateFromEditor() {
+  return upgradeExistingDatabase();   // requires APPROVED_MIGRATIONS to list the reviewed IDs
+}
+```
+
+Run only with the reviewed migration IDs in `APPROVED_MIGRATIONS` (for example `003_management_reliability`), then
+inspect `SCHEMA_MIGRATIONS`, `validateSystem()` and the roles. Remove the temporary approvals.
+
+### 8.8 Backup verification
+
+```javascript
+function backupFromEditor() {
+  return createDatabaseBackup();      // returns the Drive copy ID
+}
+```
+
+Record the returned ID, timestamp, environment and schema version. Open the copy as the recovery operator and
+confirm it is restricted. A failed backup blocks the migration — do not continue.
+
+### 8.9 Trigger installation
+
+```javascript
+function installTriggersFromEditor() {
+  var actor = Session.getActiveUser().getEmail();
+  return installAuthorizedTriggers(actor, 'INSTALL AUTHORIZED TRIGGERS');
+}
+```
+
+Then check `Triggers.diagnostics()` (or システム状態): no duplicates, no missing handlers, no obsolete handlers and
+`scheduleMatches === true`. Weekly report day/time come from the settings — change them first, then reinstall.
+
+### 8.10 Controlled production promotion
+
+```powershell
+Copy-Item .clasp.prod.json .clasp.json -Force
+Get-Content .clasp.json            # verify the PRODUCTION scriptId
+npx clasp push
+```
+
+Then, in the production project: confirm `ENVIRONMENT=PRODUCTION` and `BOUND_ENVIRONMENT=PRODUCTION`, take a verified
+backup, migrate with reviewed IDs only, bootstrap/assign roles, keep `EMAIL_MODE=OFF`, run the smoke test, and only
+then consider PREVIEW → LIVE (ADMIN + confirmation + preflight).
+
+### 8.11 Rollback
+
+```powershell
+git switch main
+git log --oneline -5               # pick the last known-good commit
+git checkout <known-good-sha>
+Copy-Item .clasp.prod.json .clasp.json -Force
+npx clasp push                     # deploys the older source only
+git switch main
+```
+
+Code rollback does not revert data. If data must be reverted, follow [Backup and restore](BACKUP_RESTORE.md): new
+copy, explicit rebinding, ledger reconciliation, operator sign-off.

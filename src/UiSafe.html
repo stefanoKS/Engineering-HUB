@@ -1,0 +1,83 @@
+<script>
+  /**
+   * Safe DOM helpers shared by the bound sidebars.
+   *
+   * Operational text (names, subjects, error messages, history rows) is spreadsheet content
+   * and therefore untrusted: it is always assigned through textContent on created nodes.
+   * This module never builds markup from data and never touches innerHTML.
+   */
+  var EH = (function () {
+    function text(value) { return value === undefined || value === null ? '' : String(value); }
+
+    function clear(node) {
+      while (node.firstChild) node.removeChild(node.firstChild);
+      return node;
+    }
+
+    function element(tag, className, value) {
+      var node = document.createElement(tag);
+      if (className) node.className = className;
+      if (value !== undefined) node.textContent = text(value);
+      return node;
+    }
+
+    function append(parent, tag, value, className) {
+      var node = element(tag, className, value);
+      parent.appendChild(node);
+      return node;
+    }
+
+    function renderLines(container, lines, className) {
+      clear(container);
+      (lines || []).forEach(function (line) { append(container, 'div', line, className); });
+      return container;
+    }
+
+    function renderRecords(container, records, formatter, emptyLabel) {
+      clear(container);
+      if (!records || !records.length) {
+        append(container, 'div', emptyLabel || '該当なし', 'hint');
+        return container;
+      }
+      records.forEach(function (record) {
+        append(container, 'div', formatter(record));
+      });
+      return container;
+    }
+
+    function fillSelect(select, items, valueKey, labelKey, blankLabel) {
+      clear(select);
+      if (blankLabel !== undefined && blankLabel !== null) {
+        var blank = element('option', null, blankLabel);
+        blank.value = '';
+        select.appendChild(blank);
+      }
+      (items || []).forEach(function (item) {
+        var option = element('option', null, item[labelKey]);
+        option.value = item[valueKey];
+        select.appendChild(option);
+      });
+      return select;
+    }
+
+    function setStatus(node, kind, message) {
+      node.className = kind;
+      node.textContent = text(message);
+      return node;
+    }
+
+    function confirmAction(message) { return window.confirm(message); }
+
+    return {
+      text: text,
+      clear: clear,
+      element: element,
+      append: append,
+      renderLines: renderLines,
+      renderRecords: renderRecords,
+      fillSelect: fillSelect,
+      setStatus: setStatus,
+      confirmAction: confirmAction
+    };
+  }());
+</script>

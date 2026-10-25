@@ -135,3 +135,25 @@ npm run lint
 npm test
 npm run validate
 ```
+
+## Post-merge audit (production hardening)
+
+The PASS records above are **historical local test results**, not live Google Workspace acceptance.
+
+Previously undiscovered issues in this gate's scope:
+
+1. **Authorization was not implemented at all.** There was no policy layer between the UI bridges and the domain
+   services, so any caller could pass a task ID or role from the browser. Fixed by `src/Access.gs`, the role guards
+   in `src/Members.gs`, and server-side checks in `src/Ui.gs`.
+2. **No first-administrator path existed.** A migrated workbook with blank roles could never be operated safely.
+   Fixed by the one-time, allowlisted, audited `bootstrapFirstAdministrator`.
+3. **Sidebar HTML insertion.** Spreadsheet text reached `innerHTML`. Fixed by `src/UiSafe.html` plus template
+   inclusion, and enforced by `npm run validate`.
+
+New regression tests: `tests/gate-a-security.test.js` (role escalation, self-change, last administrator, task
+ownership, cross-project scope, forged payload fields, DOM-shim HTML safety, data visibility, bootstrap).
+
+Corrected behaviour: authorization is enforced server-side for every UI write; operational text renders as text.
+
+Remaining live verification: two-account enforcement, sidebar rendering and identity disclosure in a real
+Workspace (see `docs/GOOGLE_WORKSPACE_SMOKE_TEST.md`, all items UNVERIFIED).

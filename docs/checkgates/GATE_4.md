@@ -92,3 +92,22 @@ session (`Session.getActiveUser()`), never from client input.
 - Sidebar HTML cannot be unit-tested for layout; only server-side behaviour is covered locally.
 - A bound spreadsheet shared with untrusted editors is not a secure admin boundary.
 - `google.script.run` payloads are trusted only after server-side role checks; the UI is not the control.
+
+## Post-merge audit (production hardening)
+
+Previously undiscovered issues:
+
+1. **Role escalation through the UI.** `uiSaveMember` forwarded `payload.role`; a MANAGER could grant `ADMIN`, and
+   any caller could change a role. Fixed: only ADMIN may grant/revoke `ADMIN`/`MANAGER`, self-change is refused and
+   the last active administrator is protected.
+2. **Task ownership was not checked.** `uiUpdateProgress` trusted the task ID. Fixed: MEMBER → own tasks only,
+   MANAGER → own projects/subprojects and own tasks, ADMIN → all, VIEWER → none.
+3. **Unsafe HTML rendering** of names, history and error messages via `innerHTML`. Fixed with `src/UiSafe.html`
+   (DOM creation + `textContent`); enforced by source validation.
+4. **Member data visibility** exposed every project, member record and assessment. Fixed: MEMBER sees only their own
+   tasks/projects, a minimal directory and their own assessment row; documented in `docs/SECURITY_MODEL.md`.
+
+New regression tests: `tests/gate-a-security.test.js`.
+
+Remaining live verification: real browser rendering, real two-account behaviour, and the fact that Sheets editors
+can still bypass the application entirely (documented limitation).

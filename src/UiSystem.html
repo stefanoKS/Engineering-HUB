@@ -16,39 +16,45 @@
   <button onclick="load()">再読み込み</button>
   <div id="status"></div>
   <pre id="output">読み込み中...</pre>
+  <?!= include('UiSafe') ?>
   <script>
+    function setStatus(message) { document.getElementById('status').textContent = message; }
+
+    function render(data) {
+      var lines = [];
+      lines.push('環境: ' + data.health.environment);
+      lines.push('有効メールモード: ' + data.health.emailMode + ' (' + data.health.emailModeReason + ')');
+      lines.push('自動化設定の保存: ' + (data.health.automationConfigured ? 'あり' : '未保存'));
+      lines.push('通知の有効化: ' + (data.health.notificationsActivated ? 'あり' : 'なし'));
+      lines.push('カレンダー: ' + (data.health.calendarEnabled ? '有効' : '無効'));
+      lines.push('データ検証: ' + (data.valid ? 'OK' : 'エラー ' + data.errorCount + '件'));
+      lines.push('トリガー: ' + data.triggers.installed.join(', '));
+      lines.push('トリガー設定の一致: ' + (data.triggers.scheduleMatches ? '一致' : '再インストールが必要'));
+      if (data.triggers.missing.length) lines.push('未導入トリガー: ' + data.triggers.missing.join(', '));
+      if (data.triggers.obsolete.length) lines.push('不要トリガー: ' + data.triggers.obsolete.join(', '));
+      if (data.triggers.duplicates.length) lines.push('重複トリガー: ' + data.triggers.duplicates.length + '件');
+      lines.push('行数: ' + Object.keys(data.rowCounts).map(function (key) {
+        return key + '=' + data.rowCounts[key];
+      }).join(', '));
+      if (data.errors.length) {
+        lines.push('');
+        lines.push('検証エラー:');
+        data.errors.forEach(function (error) { lines.push('- ' + error); });
+      }
+      document.getElementById('output').textContent = lines.join('\n');
+    }
+
     function load() {
-      document.getElementById('status').textContent = '';
+      setStatus('');
       google.script.run
         .withSuccessHandler(function (result) {
           if (!result || result.ok !== true) {
-            document.getElementById('status').textContent = 'エラー: ' + ((result && result.error) || '不明なエラー');
+            setStatus('エラー: ' + ((result && result.error) || '不明なエラー'));
             return;
           }
-          var data = result.data;
-          var lines = [];
-          lines.push('環境: ' + data.health.environment);
-          lines.push('有効メールモード: ' + data.health.emailMode + ' (' + data.health.emailModeReason + ')');
-          lines.push('自動化設定の保存: ' + (data.health.automationConfigured ? 'あり' : '旧設定互換'));
-          lines.push('通知の有効化: ' + (data.health.notificationsActivated ? 'あり' : 'なし'));
-          lines.push('カレンダー: ' + (data.health.calendarEnabled ? '有効' : '無効'));
-          lines.push('データ検証: ' + (data.valid ? 'OK' : 'エラー ' + data.errorCount + '件'));
-          lines.push('トリガー: ' + data.triggers.installed.join(', '));
-          if (data.triggers.missing.length) lines.push('未導入トリガー: ' + data.triggers.missing.join(', '));
-          if (data.triggers.duplicates.length) lines.push('重複トリガー: ' + data.triggers.duplicates.length + '件');
-          lines.push('行数: ' + Object.keys(data.rowCounts).map(function (key) {
-            return key + '=' + data.rowCounts[key];
-          }).join(', '));
-          if (data.errors.length) {
-            lines.push('');
-            lines.push('検証エラー:');
-            data.errors.forEach(function (error) { lines.push('- ' + error); });
-          }
-          document.getElementById('output').textContent = lines.join('\n');
+          render(result.data);
         })
-        .withFailureHandler(function (error) {
-          document.getElementById('status').textContent = 'エラー: ' + error.message;
-        })
+        .withFailureHandler(function (error) { setStatus('エラー: ' + error.message); })
         .uiSystemStatus();
     }
     load();

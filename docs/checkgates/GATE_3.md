@@ -78,3 +78,18 @@ is created automatically; availability depends on Workspace edition and remains 
 - Writing computed progress/health on every manual refresh costs one bounded batch per table; on very large
   workbooks this may approach the 6-minute execution limit and should be measured.
 - Native Google Timeline must be created manually; the fallback sheet is authoritative for V1.1.
+
+## Post-merge audit (production hardening)
+
+Previously undiscovered issue: `attention.projectsUnknownSchedule` was populated for every project whose health was
+YELLOW/RED/UNKNOWN, so blocked, overdue, stale or critical-issue projects were reported as having an unknown
+schedule.
+
+Corrected behaviour: independent categories `unknownScheduleProjects`, `atRiskProjects`, `overdueTasks`,
+`blockedTasks`, `criticalIssues`, `staleProjects`, each derived from its own source of truth and reported on
+separate dashboard lines.
+
+New regression tests: `tests/gate-c-correctness.test.js` ("dashboard attention categories stay independent",
+"a realistic programme keeps progress, workload and attention honest").
+
+Remaining live verification: real Sheets rendering and performance at scale (UNVERIFIED).

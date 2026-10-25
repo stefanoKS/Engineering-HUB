@@ -206,6 +206,8 @@ var AutomationSettings = (function () {
     if (!config.allowedDomains.length) problems.push('ALLOWED_RECIPIENT_DOMAINS is empty');
     if (!config.notificationActivationAt || !config.notificationAuthorizedBy) problems.push('notifications are not activated');
     if (!config.spreadsheetId) problems.push('spreadsheet binding is missing');
+    if (candidate.EMERGENCY_STOP === true) problems.push('emergency stop is engaged');
+    if (candidate.EMAIL_MODE !== 'LIVE') problems.push('EMAIL_MODE is not LIVE');
     var windowStart = candidate.EXECUTION_WINDOW_START, windowEnd = candidate.EXECUTION_WINDOW_END;
     if (windowStart >= windowEnd) problems.push('execution window end must be after its start');
     return problems;
@@ -237,6 +239,7 @@ var AutomationSettings = (function () {
     var keys = Object.keys(changes);
     if (!keys.length) throw new Error('No automation settings supplied');
     var actor = Roles.requireAtLeast('MANAGER', actorEmail);
+    var config = Config.get();
     var before = get();
     var next = {};
     keys.forEach(function (key) {
@@ -248,17 +251,31 @@ var AutomationSettings = (function () {
     if (candidate.EXECUTION_WINDOW_START >= candidate.EXECUTION_WINDOW_END) {
       throw new Error('Execution window end must be after its start');
     }
-    // Explicit confirmation is required when enabling LIVE, not for later toggle changes.
-    var enablingLive = candidate.EMAIL_MODE === 'LIVE' && before.EMAIL_MODE !== 'LIVE';
-    if (enablingLive) {
+    // The transition that matters is the EFFECTIVE state: clearing the emergency stop while
+    // EMAIL_MODE is already LIVE re-activates delivery and needs the same fresh authorization.
+    // Persisting LIVE while the emergency stop is engaged is refused as well, so a MANAGER can
+    // never pre-position live delivery for a later restart.
+    var beforeState = emailState(config);
+    var afterState = resolve(config, candidate, true);
+    var storedLive = before.EMAIL_MODE === 'LIVE';
+    var enteringLive = afterState.mode === 'LIVE' && beforeState.mode !== 'LIVE';
+    var selectingLive = next.EMAIL_MODE === 'LIVE' && !storedLive;
+    if (enteringLive || selectingLive) {
       if (confirmation !== 'ENABLE LIVE EMAIL') throw new Error('Explicit LIVE email confirmation required');
       Roles.requireAtLeast('ADMIN', actorEmail);
-      if (candidate.EMERGENCY_STOP === true) throw new Error('Disable the emergency stop before enabling LIVE email');
       var problems = preflight(candidate);
       if (problems.length) throw new Error('LIVE email preflight failed: ' + problems.join('; '));
     }
     return Database.withLock(function () {
       writeRows(next, actor, before);
+      if (enteringLive || selectingLive) {
+        AuditLog.write('EMAIL_LIVE_ACTIVATED', TABLE, 'EMAIL_MODE',
+          {actor: actor.email, previousMode: beforeState.mode, effectiveMode: afterState.mode,
+            emergencyStop: candidate.EMERGENCY_STOP});
+      } else if (afterState.mode !== 'LIVE' && beforeState.mode === 'LIVE') {
+        AuditLog.write('EMAIL_LIVE_DEACTIVATED', TABLE, 'EMAIL_MODE',
+          {actor: actor.email, mode: afterState.mode, reason: afterState.reason});
+      }
       return {updated: keys, effective: emailState(Config.get())};
     });
   }
@@ -300,16 +317,23 @@ var AutomationSettings = (function () {
     return count;
   }
 
-  function emailState(config) {
-    config = config || Config.get();
-    var values = get(), isConfigured = configured();
+  /**
+   * Single effective-state resolver.
+   *
+   * A workbook without persisted automation settings stays OFF unless the deployment has
+   * explicitly opted into the documented legacy compatibility path
+   * (`ALLOW_LEGACY_EMAIL_CONFIG=true`). This keeps unmigrated or partially configured
+   * workbooks from activating mail unexpectedly.
+   */
+  function resolve(config, values, isConfigured) {
+    var legacyToggles = config.allowLegacyEmail === true;
     var toggles = {
-      NEW_ASSIGNMENT: isConfigured ? values.ASSIGNMENT_EMAIL_ENABLED === true : true,
-      REASSIGNMENT: isConfigured ? values.REASSIGNMENT_EMAIL_ENABLED === true : true,
-      DEADLINE_CHANGE: isConfigured ? values.DEADLINE_CHANGE_EMAIL_ENABLED === true : true,
-      DEADLINE: isConfigured ? values.DEADLINE_REMINDER_ENABLED === true : true,
-      OVERDUE: isConfigured ? values.OVERDUE_REMINDER_ENABLED === true : true,
-      OVERDUE_SUMMARY: isConfigured ? values.OVERDUE_REMINDER_ENABLED === true : true,
+      NEW_ASSIGNMENT: isConfigured ? values.ASSIGNMENT_EMAIL_ENABLED === true : legacyToggles,
+      REASSIGNMENT: isConfigured ? values.REASSIGNMENT_EMAIL_ENABLED === true : legacyToggles,
+      DEADLINE_CHANGE: isConfigured ? values.DEADLINE_CHANGE_EMAIL_ENABLED === true : legacyToggles,
+      DEADLINE: isConfigured ? values.DEADLINE_REMINDER_ENABLED === true : legacyToggles,
+      OVERDUE: isConfigured ? values.OVERDUE_REMINDER_ENABLED === true : legacyToggles,
+      OVERDUE_SUMMARY: isConfigured ? values.OVERDUE_REMINDER_ENABLED === true : legacyToggles,
       WEEKLY_REPORT: isConfigured ? values.WEEKLY_MANAGER_REPORT_ENABLED === true : false
     };
     var mode, reason = '';
@@ -323,14 +347,18 @@ var AutomationSettings = (function () {
         mode = 'OFF';
         reason = 'LEGACY_SAFETY_FLAGS_BLOCK_LIVE';
       } else if (mode === 'OFF') reason = 'EMAIL_MODE_OFF';
+    } else if (!legacyToggles) {
+      mode = 'OFF';
+      reason = 'LEGACY_CONFIGURATION_BLOCKED';
     } else {
       mode = !config.emailEnabled ? 'OFF' : (config.dryRun ? 'PREVIEW' : 'LIVE');
-      reason = 'LEGACY_CONFIGURATION';
+      reason = 'LEGACY_CONFIGURATION_OPT_IN';
     }
     return {
       mode: mode,
       reason: reason,
       configured: isConfigured,
+      legacyCompatibility: !isConfigured && legacyToggles,
       emergencyStop: isConfigured && values.EMERGENCY_STOP === true,
       toggles: toggles,
       offsets: isConfigured ? values.REMINDER_OFFSETS : [7, 2],
@@ -342,6 +370,16 @@ var AutomationSettings = (function () {
       managementRecipients: isConfigured ? values.MANAGEMENT_REPORT_RECIPIENTS : [],
       values: values
     };
+  }
+
+  function emailState(config) {
+    config = config || Config.get();
+    return resolve(config, get(), configured());
+  }
+
+  /** Effective state for a candidate settings set, used before anything is written. */
+  function stateFor(values, config) {
+    return resolve(config || Config.get(), Object.assign({}, defaults(), values || {}), true);
   }
 
   function describe() {
@@ -356,8 +394,8 @@ var AutomationSettings = (function () {
     try {
       var state = emailState(Config.get());
       rows.push(['有効なメールモード', state.mode, state.reason || '']);
-      rows.push(['旧設定互換モード', state.configured ? 'いいえ' : 'はい',
-        state.configured ? '' : '自動化設定が未保存のため旧来のマスターフラグのみで動作します']);
+      rows.push(['自動化設定の保存', state.configured ? 'あり' : 'なし',
+        state.configured ? '' : '自動化設定が未保存です。保存するまでメール送信は無効です（旧設定の互換利用は明示的な設定が必要）']);
       rows.push(['緊急停止', state.emergencyStop ? '有効' : '無効', '']);
       Object.keys(state.toggles).forEach(function (type) {
         rows.push(['通知: ' + type, state.toggles[type] ? 'ON' : 'OFF', '']);
@@ -387,6 +425,7 @@ var AutomationSettings = (function () {
     setStatus: setStatus,
     seedDefaults: seedDefaults,
     emailState: emailState,
+    stateFor: stateFor,
     describe: describe,
     preflight: preflight,
     viewRows: viewRows

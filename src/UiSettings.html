@@ -93,14 +93,12 @@
   <h2>送信プレビュー</h2>
   <div id="preview">未実行</div>
 
+  <?!= include('UiSafe') ?>
   <script>
     var current = null;
 
-    function setStatus(kind, message) {
-      var node = document.getElementById('status');
-      node.className = kind;
-      node.textContent = message;
-    }
+    function setStatus(kind, message) { EH.setStatus(document.getElementById('status'), kind, message); }
+
     function call(fn, payload, onSuccess) {
       setStatus('loading', '処理中...');
       var runner = google.script.run
@@ -115,10 +113,20 @@
         .withFailureHandler(function (error) { setStatus('error', 'エラー: ' + error.message); });
       if (payload === undefined) runner[fn](); else runner[fn](payload);
     }
+
     function value(id) { return document.getElementById(id).value; }
     function checked(id) { return document.getElementById(id).checked; }
-    function setValue(id, value) { document.getElementById(id).value = value; }
-    function setChecked(id, value) { document.getElementById(id).checked = value === true; }
+    function setValue(id, v) { document.getElementById(id).value = v; }
+    function setChecked(id, v) { document.getElementById(id).checked = v === true; }
+
+    function historyLine(row) {
+      return (row.created || '') + ' / ' + (row.type || '') + ' / ' + (row.recipient || '') +
+        ' / ' + (row.result || '') + (row.error ? ' / ' + row.error : '');
+    }
+
+    function previewLine(item) {
+      return (item.type || '') + ' / ' + (item.stage || '') + ' / ' + (item.recipient || '') + ' / ' + (item.subject || '');
+    }
 
     function render(data) {
       current = data;
@@ -126,7 +134,7 @@
       data.settings.forEach(function (item) { values[item.key] = item.value; });
       document.getElementById('effective').textContent = data.status.mode + '（' + data.status.reason + '）';
       document.getElementById('reason').textContent = data.status.configured ? '' :
-        '旧設定互換モードです。保存すると自動化設定が有効になります。';
+        '自動化設定が未保存です。保存するまではメール送信は無効です（旧設定の互換利用は明示的な設定が必要）。';
       setValue('emailMode', values.EMAIL_MODE === 'LIVE' && !data.status.activated ? 'OFF' : values.EMAIL_MODE);
       setChecked('emergencyStop', values.EMERGENCY_STOP);
       setChecked('assignmentEnabled', values.ASSIGNMENT_EMAIL_ENABLED);
@@ -154,10 +162,7 @@
     }
 
     function renderHistory(rows) {
-      document.getElementById('history').innerHTML = rows.length ? rows.map(function (row) {
-        return (row.created || '') + ' / ' + (row.type || '') + ' / ' + (row.recipient || '') +
-          ' / ' + (row.result || '') + (row.error ? ' / ' + row.error : '');
-      }).join('<br>') : '履歴はありません';
+      EH.renderRecords(document.getElementById('history'), rows, historyLine, '履歴はありません');
     }
 
     function save() {
@@ -186,11 +191,14 @@
         PROJECT_STALE_ALERT_ENABLED: checked('staleAlert'),
         PROJECT_STALE_DAYS: value('staleDays')
       };
+      // Live activation needs a fresh administrator confirmation: it happens both when the
+      // mode changes and when the emergency stop is cleared while LIVE is selected.
       var confirmation = '';
-      if (changes.EMAIL_MODE === 'LIVE') {
-        if (!window.confirm('本番送信（LIVE）を有効にします。承認済みの通知のみ送信されます。続行しますか？')) return;
-        confirmation = window.prompt('確認のため「ENABLE LIVE EMAIL」と入力してください');
-        if (confirmation !== 'ENABLE LIVE EMAIL') { setStatus('error', 'LIVE有効化は中止されました'); return; }
+      if (changes.EMAIL_MODE === 'LIVE' && !changes.EMERGENCY_STOP) {
+        if (!EH.confirmAction('本番送信（LIVE）を有効にします。承認済みの通知のみ送信されます。続行しますか？')) return;
+        var typed = window.prompt('確認のため「ENABLE LIVE EMAIL」と入力してください');
+        if (typed !== 'ENABLE LIVE EMAIL') { setStatus('error', 'LIVE有効化は中止されました'); return; }
+        confirmation = typed;
       }
       call('uiSaveAutomationSettings', {changes: changes, confirmation: confirmation},
         function () { load(); });
@@ -198,21 +206,19 @@
 
     function preview() {
       call('uiPreviewNotifications', undefined, function (items) {
-        document.getElementById('preview').innerHTML = items.length ? items.map(function (item) {
-          return (item.type || '') + ' / ' + (item.stage || '') + ' / ' + (item.recipient || '') + ' / ' + (item.subject || '');
-        }).join('<br>') : '送信対象はありません';
+        EH.renderRecords(document.getElementById('preview'), items, previewLine, '送信対象はありません');
       });
     }
 
     function refreshHistory() { call('uiNotificationHistory', undefined, renderHistory); }
 
     function restore() {
-      if (!window.confirm('すべての自動化設定を安全な既定値（メールOFF）に戻します。よろしいですか？')) return;
+      if (!EH.confirmAction('すべての自動化設定を安全な既定値（メールOFF）に戻します。よろしいですか？')) return;
       call('uiRestoreAutomationDefaults', {confirmation: 'RESTORE SAFE DEFAULTS'}, function () { load(); });
     }
 
     function reconcile() {
-      if (!window.confirm('一定時間を超えたPENDING通知を「配信不確定」として記録します。再送は行いません。')) return;
+      if (!EH.confirmAction('一定時間を超えたPENDING通知を「配信不確定」として記録します。再送は行いません。')) return;
       call('uiReconcileUncertain', {confirmation: 'RECONCILE DELIVERY'});
     }
 

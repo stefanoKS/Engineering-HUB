@@ -1,113 +1,139 @@
 # Google Workspace smoke test (development only)
 
-All steps are **manual**. They must be executed in an isolated development Apps Script project and development
-spreadsheet. Never run them against production. Never enable email or Calendar during setup.
+**Status: EVERY ITEM IS UNVERIFIED.** No live Google Workspace test has been executed for this repository. Each
+item below must be recorded as PASS / FAIL / BLOCKED with the date, account and observed evidence. Local unit tests
+(`npm test`) are not evidence of live behaviour.
 
-Record the result of each step (PASS / FAIL / BLOCKED) with the date, account and observed evidence. Local unit
-tests are not evidence of live Workspace behaviour.
+All steps are manual and must run in an isolated **development** Apps Script project and development spreadsheet.
+Never run them against production. Never enable email or Calendar during setup.
 
 ## 0. Preparation
 
-- [ ] Development Apps Script project exists and is **container-bound** to the development spreadsheet.
-- [ ] `.clasp.dev.json` selected (`Copy-Item .clasp.dev.json .clasp.json -Force`) and its `scriptId` inspected.
-- [ ] `npm ci`, `npm run lint`, `npm test`, `npm run validate` pass for the deployed commit.
-- [ ] Development spreadsheet ID, backup folder ID and the developing account are recorded locally (not in Git).
-- [ ] OAuth consent reviewed for the account that will own the triggers.
+- [ ] UNVERIFIED — Development Apps Script project exists and is **container-bound** to the development spreadsheet.
+- [ ] UNVERIFIED — `.clasp.dev.json` selected (`Copy-Item .clasp.dev.json .clasp.json -Force`) and its `scriptId`
+      inspected.
+- [ ] UNVERIFIED — `npm ci`, `npm run lint`, `npm test`, `npm run validate` pass for the deployed commit.
+- [ ] UNVERIFIED — Development spreadsheet ID, backup folder ID and the developing account are recorded locally
+      (not in Git).
+- [ ] UNVERIFIED — OAuth consent reviewed for the account that will own the triggers.
 
 ## 1. Environment binding and initialization
 
-- [ ] `ENVIRONMENT=DEVELOPMENT`, `BOUND_ENVIRONMENT=DEVELOPMENT`, `SPREADSHEET_ID=<dev id>`,
+- [ ] UNVERIFIED — `ENVIRONMENT=DEVELOPMENT`, `BOUND_ENVIRONMENT=DEVELOPMENT`, `SPREADSHEET_ID=<dev id>`,
       `BACKUP_FOLDER_ID=<restricted dev folder>`, `ALLOWED_RECIPIENT_DOMAINS=<dev-only domain>`.
-- [ ] `INITIALIZATION_SPREADSHEET_ID` set to the same development ID.
-- [ ] Run `initializeNewDatabase('INITIALIZE <dev id>')` once on an **empty** workbook.
-- [ ] Confirm initialization refuses a workbook that already contains any value or formula.
-- [ ] Confirm `SCHEMA_MIGRATIONS` shows `INITIALIZE_V3` and `Migrations.currentVersion()` is `3`.
-- [ ] Remove `INITIALIZATION_SPREADSHEET_ID` and any temporary editor wrapper.
-- [ ] Confirm no trigger, mail or Calendar event was created.
+- [ ] UNVERIFIED — initialization refuses a workbook that already contains any value or formula.
+- [ ] UNVERIFIED — `SCHEMA_MIGRATIONS` shows `INITIALIZE_V3` and `Migrations.currentVersion()` is `3`.
+- [ ] UNVERIFIED — no trigger, mail or Calendar event was created by initialization.
 
-## 2. Manager UI
+## 2. First administrator bootstrap
 
-- [ ] Reload the spreadsheet; the **Engineering HUB** menu is present (container-bound only).
-- [ ] ダッシュボード sidebar opens; Japanese labels render; no error toast.
-- [ ] 自動化設定 sidebar shows 有効モード = `OFF` and 旧設定互換モード = いいえ.
-- [ ] システム状態 shows environment, modes, activation state, trigger list and row counts.
+- [ ] UNVERIFIED — without `ADMIN_BOOTSTRAP_ALLOWLIST`, `bootstrapFirstAdministrator` refuses.
+- [ ] UNVERIFIED — with the allowlist missing this account, it refuses.
+- [ ] UNVERIFIED — with a wrong confirmation string, it refuses.
+- [ ] UNVERIFIED — with the allowlist, an active member row and the exact `BOOTSTRAP ADMIN <email>` confirmation,
+      the member becomes `ADMIN`, `ADMIN_BOOTSTRAPPED` appears in `AUDIT_LOG`, and
+      `ADMIN_BOOTSTRAP_COMPLETED_AT` is set.
+- [ ] UNVERIFIED — running it a second time is refused.
+- [ ] UNVERIFIED — after creating a notification log row (or activating notifications), it is refused as an
+      operational workbook.
 
-## 3. Data preservation
+## 3. Two-account permission enforcement
 
-- [ ] Create two projects, two subprojects, a direct project task and a subproject task with fictional data.
-- [ ] Add a manual column with a formula to `TASKS` and confirm it survives refresh.
-- [ ] Run **ダッシュボード更新**; confirm `PROJECT_OVERVIEW`, `TEAM_VIEW`, `GANTT_OVERVIEW`, `TIMELINE_DATA`,
-      `WORKLOAD`, `SKILL_MATRIX`, `BACKPLAN`, `AUTOMATION_STATUS` are populated.
-- [ ] Confirm operational rows, IDs and the manual formula are unchanged (compare a snapshot).
-- [ ] Confirm `DASHBOARD` displays last refresh and that no operational sheet was cleared.
+Prepare a second Google account with an active `MEMBER` row (and optionally one with `VIEWER`).
 
-## 4. Protected operational columns
+- [ ] UNVERIFIED — ADMIN sees every project, member e-mail and the full skill matrix.
+- [ ] UNVERIFIED — the second account (MEMBER) is refused by default
+      (`Member self-service is disabled: manager access is required`).
+- [ ] UNVERIFIED — with `ALLOW_MEMBER_SELF_SERVICE=true`, that account opens the sidebar and sees only its own tasks
+      and the projects of those tasks; other members show only id/name/active.
+- [ ] UNVERIFIED — with `ALLOW_MEMBER_SELF_SERVICE=true`, the MEMBER still cannot see other people's skill
+      assessments or the gap list.
+- [ ] UNVERIFIED — a VIEWER account is refused even with self-service enabled (`Insufficient role: MEMBER required`).
+- [ ] UNVERIFIED — a MANAGER account cannot grant `ADMIN` (error mentions `Insufficient role: ADMIN`).
+- [ ] UNVERIFIED — an account cannot change its own role, even as ADMIN.
+- [ ] UNVERIFIED — the last active ADMIN cannot be demoted or deactivated.
 
-- [ ] Confirm `Progress_Percent` and `Health` on `PROJECTS` change only through refresh.
-- [ ] Confirm direct edits to `Assignment_Approved_At` / `Notification_Baseline` cannot trigger mail.
-- [ ] Confirm archiving a project keeps its tasks, issues and milestones.
+## 4. Cross-member task update rejection
 
-## 5. Roles and UI permissions
+- [ ] UNVERIFIED — as the MEMBER, updating a task owned by someone else is rejected with a scope error and the cell
+      does not change.
+- [ ] UNVERIFIED — as the MEMBER, sending extra `role: 'ADMIN'` / `actor` fields in the payload changes nothing.
+- [ ] UNVERIFIED — as a MANAGER, a task in a project they do not own is rejected.
+- [ ] UNVERIFIED — as ADMIN, the same update succeeds and is audited.
 
-- [ ] Set `MEMBERS.Role` for the operator (`ADMIN`) and for a second test account (`MEMBER`).
-- [ ] With the MEMBER account, confirm the settings form and member administration are rejected.
-- [ ] With an account that is not an active member, confirm every management surface is rejected.
-- [ ] Confirm a migrated row with a blank role is treated as `VIEWER`.
+## 5. Sidebar HTML safety
 
-## 6. Email preview
+Create fictional records containing `<img src=x onerror=alert(1)>` and `<script>alert(2)</script>` in a member
+name, a project name, a task name, a notification-history row and an error message.
 
-- [ ] Set `EMAIL_MODE=PREVIEW`, disable 緊急停止, enable 担当依頼通知, save.
-- [ ] Approve one task assignment (割当を承認) and confirm `Assignment_Approved_At` and
-      `Notification_Baseline` are set.
-- [ ] Run the scan (`scanNotifications()`); confirm `NOTIFICATION_LOG` gets a `PREVIEW` row.
-- [ ] Confirm **zero** emails were sent and no `SENT` row exists.
-- [ ] Confirm a second scan the same day does not duplicate the preview row.
+- [ ] UNVERIFIED — the text is displayed literally in メンバー, タスク割当, 自動化設定 → 履歴 and システム状態.
+- [ ] UNVERIFIED — no alert/dialog appears and no element is injected (inspect the DOM).
+- [ ] UNVERIFIED — setting a status error with a script-like string shows it as plain text.
 
-## 7. Authorized single test email
+## 6. Email OFF / PREVIEW / LIVE
 
-- [ ] Confirm `EMAIL_ENABLED=true`, `DRY_RUN=false`, `ALLOWED_RECIPIENT_DOMAINS` contains only the test domain,
-      `MAX_EMAILS_PER_RUN` is small (for example 1), and notifications were activated
-      (`activateNotifications('<admin>', 'ACTIVATE NOTIFICATIONS')`).
-- [ ] Set `EMAIL_MODE=LIVE`, type `ENABLE LIVE EMAIL`, save.
-- [ ] Run one scan; confirm exactly one test email arrived at the approved address and one `SENT` ledger row.
-- [ ] Run the scan again; confirm no duplicate delivery.
-- [ ] Confirm the current trigger owner is the authorized sending account.
+- [ ] UNVERIFIED — default `EMAIL_MODE=OFF`: approve a task, run the scan, confirm zero e-mails and zero `SENT` rows.
+- [ ] UNVERIFIED — `PREVIEW`: the scan records `PREVIEW` rows, sends nothing, and a second scan the same day does
+      not duplicate them.
+- [ ] UNVERIFIED — switching PREVIEW → LIVE sends exactly one already-eligible notification and does not replay
+      history.
+- [ ] UNVERIFIED — `EMAIL_ENABLED=false` or `DRY_RUN=true` blocks LIVE with the reason
+      `LEGACY_SAFETY_FLAGS_BLOCK_LIVE`.
+- [ ] UNVERIFIED — with automation settings absent and `ALLOW_LEGACY_EMAIL_CONFIG` unset, the effective mode is
+      `OFF` (`LEGACY_CONFIGURATION_BLOCKED`) and nothing is sent.
 
-## 8. Notification triggers
+## 7. Admin-only email reactivation
 
-- [ ] `installAuthorizedTriggers('<authorized account>', 'INSTALL AUTHORIZED TRIGGERS')`.
-- [ ] `Triggers.diagnostics()` reports installed handlers, no missing handlers and no duplicates.
-- [ ] Enable 週次レポート and re-run the installation; confirm the weekly handler is added once.
-- [ ] Confirm a different account cannot see or repair the other account's triggers.
-- [ ] Turn a feature off and confirm the next run sends nothing even though the trigger still exists.
-- [ ] Force a failure (temporary invalid recipient) and confirm the ledger records the failure/`PENDING` state.
-- [ ] Reconcile: `reconcileUncertainDeliveries('<admin>', 'RECONCILE DELIVERY')` marks stale `PENDING` rows
-      `DELIVERY_UNCERTAIN` and nothing is resent.
+- [ ] UNVERIFIED — as ADMIN: LIVE → emergency stop shows `OFF` immediately, without confirmation.
+- [ ] UNVERIFIED — as MANAGER: clearing the emergency stop is refused (confirmation, then `Insufficient role:
+      ADMIN`).
+- [ ] UNVERIFIED — as ADMIN: clearing the emergency stop with `ENABLE LIVE EMAIL` succeeds, writes
+      `EMAIL_LIVE_ACTIVATED`, and a rescan sends no duplicate.
+- [ ] UNVERIFIED — as MANAGER: setting the mode to `OFF` works immediately.
 
-## 9. Calendar synchronization
+## 8. Report scheduling and trigger ownership
 
-- [ ] Create a dedicated secondary calendar; set `CALENDAR_ENABLED=true` and `CALENDAR_ID=<secondary id>`.
-- [ ] With `CALENDAR_SYNC_ENABLED=false`, confirm the sync reports disabled and creates no event.
-- [ ] Enable the setting, add one milestone, run `syncMilestoneCalendar()`; confirm one owned event and the
-      persisted last-sync status.
-- [ ] Modify an unrelated event manually; confirm it is never modified.
-- [ ] Turn the setting off; confirm sync stops and existing events are not deleted.
+- [ ] UNVERIFIED — enable 週次レポート with MONDAY 08:30; reinstall triggers; the weekly trigger exists once and
+      システム状態 shows 一致.
+- [ ] UNVERIFIED — change the time to 14:45; システム状態 shows 再インストールが必要; after reinstalling, only one
+      weekly trigger remains and it fires near 14:45 JST.
+- [ ] UNVERIFIED — change the weekday; after reinstalling, the trigger fires on that weekday only.
+- [ ] UNVERIFIED — disable the report; after reinstalling, the weekly trigger is gone and unrelated triggers remain.
+- [ ] UNVERIFIED — a trigger created by a different account is invisible/unrepairable from this account (documented
+      behaviour), and installing with a non-matching account is refused.
 
-## 10. Backup creation
+## 9. Data preservation
 
-- [ ] Enable 自動バックアップ and run `scheduledDailyBackup()`; confirm a private Drive copy exists with the
-      expected name and `BACKUP_LOG` shows `VERIFIED`.
-- [ ] Disable the switch and confirm the scheduled job skips; confirm a migration would still create a backup.
-- [ ] Confirm the backup folder is not shared by link.
+- [ ] UNVERIFIED — create two projects, two subprojects, a direct task and a subproject task with fictional data.
+- [ ] UNVERIFIED — add a manual column with a formula to `TASKS`; run ダッシュボード更新; the formula and every
+      operational value survive and the IDs are unchanged.
+- [ ] UNVERIFIED — confirm no operational sheet was cleared and `DASHBOARD` shows the refresh time.
+- [ ] UNVERIFIED — archive a project; its tasks/issues/milestones remain and it is excluded from active views.
 
-## 11. Backup restore drill (manual)
+## 10. Backups and restore drill
 
-- [ ] Follow [BACKUP_RESTORE.md](../BACKUP_RESTORE.md) to restore into a **new** Drive copy.
-- [ ] Rebind configuration explicitly to the restored copy (`SPREADSHEET_ID`, environment marker check).
-- [ ] Confirm records and IDs match the backup reference and no automatic restore occurred.
+- [ ] UNVERIFIED — `createDatabaseBackup()` returns a Drive copy ID; the copy is private and matches the source.
+- [ ] UNVERIFIED — `BACKUP_LOG` records `VERIFIED` and `LAST_BACKUP_RESULT` is updated.
+- [ ] UNVERIFIED — disabling `DAILY_BACKUP_ENABLED` skips the scheduled job, but a migration still creates a backup.
+- [ ] UNVERIFIED — restore into a new copy per [BACKUP_RESTORE.md](../BACKUP_RESTORE.md): new ID, rebinding,
+      ledger reconciliation and sign-off.
 
-## 12. Close-out
+## 11. Calendar synchronization
 
-- [ ] Remove temporary editor wrappers and test records that are not needed.
-- [ ] Record which claims are verified and which remain unverified.
-- [ ] Do not copy development results into production settings.
+- [ ] UNVERIFIED — with `CALENDAR_ENABLED=false`, sync reports disabled and creates nothing.
+- [ ] UNVERIFIED — with a dedicated secondary calendar enabled, one milestone creates exactly one owned event and
+      the last-sync status is persisted.
+- [ ] UNVERIFIED — a manually created unrelated event is never modified.
+- [ ] UNVERIFIED — disabling the setting stops syncing and deletes nothing.
+
+## 12. Notification delivery uncertainty
+
+- [ ] UNVERIFIED — force a send failure; the ledger keeps the row `PENDING` and a rescan does not retry it.
+- [ ] UNVERIFIED — `reconcileUncertainDeliveries` marks it `DELIVERY_UNCERTAIN` with actor/timestamp and nothing is
+      resent.
+
+## 13. Close-out
+
+- [ ] UNVERIFIED — temporary editor wrappers, allowlist entries and test records removed.
+- [ ] UNVERIFIED — results recorded here and summarised in [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md).
+- [ ] UNVERIFIED — no development values copied into production settings.

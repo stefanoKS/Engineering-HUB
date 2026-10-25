@@ -1,5 +1,53 @@
 # Changelog
 
+## V1.1 production hardening (security fixes, release gates, documentation)
+
+Schema version stays **3** (no migration required for this release).
+
+Security
+
+- Server-side authorization layer (`src/Access.gs`): identity from the verified session only; role, actor, owner
+  and confirmation values supplied by the browser are data, never authority.
+- Role management guarded: only ADMIN may grant/revoke `ADMIN`/`MANAGER`, self-role-change is refused, unknown role
+  text is rejected, and the last active administrator cannot be demoted or deactivated.
+- Task ownership enforced: MEMBER → own tasks, MANAGER → own projects/subprojects and own tasks, ADMIN → all,
+  VIEWER → none.
+- One-time, allowlisted, audited first-administrator bootstrap (`bootstrapFirstAdministrator`); refused on an
+  operational workbook and not reusable.
+- Member-scoped data visibility: MEMBER sees only own tasks/projects, a minimal member directory and own
+  assessment; no other people's assessment details.
+- Sidebar rendering rewritten with DOM creation and `textContent` (`src/UiSafe.html`); `innerHTML`, `outerHTML`,
+  `insertAdjacentHTML` and `document.write` are rejected by `npm run validate`.
+
+Automation
+
+- LIVE authorization is evaluated on the **effective-state** transition, so clearing the emergency stop while
+  `EMAIL_MODE=LIVE` requires ADMIN, the exact confirmation and a passing preflight. Activation/deactivation is
+  audited (`EMAIL_LIVE_ACTIVATED`, `EMAIL_LIVE_DEACTIVATED`).
+- Unmigrated workbooks fail closed (`OFF`, `LEGACY_CONFIGURATION_BLOCKED`); the legacy flag mapping requires the
+  explicit `ALLOW_LEGACY_EMAIL_CONFIG=true` opt-in.
+- Weekly report scheduling derives weekday and time from settings, detects drift through
+  `MANAGED_TRIGGER_SIGNATURE`, recreates only managed triggers, and removes obsolete ones without touching
+  unrelated triggers.
+
+Management correctness
+
+- `Health.staleDays` returns a numeric age; thresholds moved to `thresholds`.
+- Dashboard attention categories are independent (`unknownScheduleProjects`, `atRiskProjects`, `overdueTasks`,
+  `blockedTasks`, `criticalIssues`, `staleProjects`).
+
+Documentation
+
+- Updated `README.md`, `README_JP.md`, `ARCHITECTURE.md`, `DATA_SCHEMA.md`, `DEPLOYMENT.md`, `BACKUP_RESTORE.md`,
+  `AGENTS.md`, `.github/copilot-instructions.md`, `docs/AUTOMATION_SETTINGS.md`, `docs/MANAGER_WORKFLOW.md`,
+  `docs/GOOGLE_WORKSPACE_SMOKE_TEST.md`, and added post-merge audit sections to `docs/checkgates/GATE_1..6.md`.
+- New: `docs/PRODUCTION_READINESS.md` (canonical gate, **NOT APPROVED FOR PRODUCTION**),
+  `docs/SECURITY_MODEL.md`, `docs/OPERATIONS_RUNBOOK.md`,
+  `docs/checkgates/SECURITY_HARDENING.md`, `docs/checkgates/AUTOMATION_HARDENING.md`,
+  `docs/checkgates/CORRECTNESS_HARDENING.md`.
+
+Tests: 105 local tests pass (84 before hardening + 21 new). No live Google Workspace verification is claimed.
+
 ## V1.1 — Management usability, reliability & automation controls
 
 Schema version 3, migration `003_management_reliability` (additive; each approved migration takes its own verified

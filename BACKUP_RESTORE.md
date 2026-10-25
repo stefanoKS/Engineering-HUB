@@ -31,3 +31,76 @@ There is no automatic restore implementation or unattended overwrite operation.
 11. Obtain operator approval before resuming triggers and external effects. Retain the original workbook and recovery notes until the recovery is accepted.
 
 Practice this procedure in development. There is no claimed live restore drill, recovery-time objective, or recovery-point guarantee in this repository.
+
+## Recovery ownership and permissions
+
+- **Recovery owner**: a named administrator per environment (recorded in the operations log, not in Git). The
+  owner must be an active `ADMIN` in the workbook and the creator account of the installable triggers.
+- **Backup folder**: `BACKUP_FOLDER_ID` must be a restricted folder whose editors are only the recovery owner and
+  the executing script account. The application rejects publicly/link-shared folders; it cannot detect inherited
+  access, shared-drive policies or group membership — verify those manually.
+- **Second operator**: an independent reviewer confirms the restored copy before service resumes.
+- **No automatic deletion**: the application never deletes backups. Retention is a documented manual decision.
+
+## Required verification evidence
+
+Record for every backup: creation time, environment, schema version, source spreadsheet ID, Drive copy ID, file
+name (`HK-<ENV>-v<schema>-<timestamp>`), `BACKUP_LOG` result and who verified it. A backup without a verified
+restore drill is not evidence of recoverability.
+
+## Backup test procedure (development)
+
+1. Open the development workbook; confirm `AUTOMATION_SETTINGS.DAILY_BACKUP_ENABLED` state.
+2. Run `createDatabaseBackup()` (or wait for the scheduled run).
+3. Confirm the returned Drive copy exists, is private, and its sheet names, values and formulas match the source.
+4. Confirm `BACKUP_LOG` shows `VERIFIED` (or `FAILED` with an error) and `LAST_BACKUP_RESULT` is updated.
+5. Open the copy as the recovery owner to prove access.
+
+## Restore drill into a new copy
+
+1. Pick a verified snapshot and note its timestamp/schema version.
+2. Drive → **Make a copy** into the restricted recovery location (the copy gets a **new** spreadsheet ID).
+3. Verify sharing, sheet names, headers, row counts, formulas and the environment marker.
+4. Do **not** run initialization on the restored workbook. If an upgrade is needed, back up the copy first and apply
+   only reviewed migrations.
+5. Rebind configuration explicitly: set `SPREADSHEET_ID` to the new ID, keep `ENVIRONMENT`/`BOUND_ENVIRONMENT`
+   matching, and leave `INITIALIZATION_SPREADSHEET_ID` unset.
+6. Recheck the backup folder and Calendar bindings separately; a copied workbook does not move those settings.
+
+## Environment rebinding checklist
+
+- [ ] `SPREADSHEET_ID` points at the restored copy.
+- [ ] `ENVIRONMENT` equals `BOUND_ENVIRONMENT`.
+- [ ] The restored `SETTINGS` marker `DATABASE_ENVIRONMENT` matches the environment.
+- [ ] `EMAIL_MODE` is `OFF` or `PREVIEW`; emergency stop engaged.
+- [ ] `ADMIN_BOOTSTRAP_ALLOWLIST` is empty (bootstrap is not reusable).
+- [ ] Roles reviewed; at least one active `ADMIN` exists.
+- [ ] `MANAGED_TRIGGER_SIGNATURE` cleared or triggers reinstalled with the current account.
+
+## Notification-ledger reconciliation
+
+A restored ledger may predate mail that was actually sent, and mail sent after the snapshot is missing.
+
+1. Treat every restored `PENDING` row as unknown; run `reconcileUncertainDeliveries(actor, 'RECONCILE DELIVERY')`
+   to mark them `DELIVERY_UNCERTAIN`. Never delete rows to force a resend.
+2. Compare `SENT` rows after the snapshot time with the mail actually received; do not replay them.
+3. Re-enable features one at a time, starting with PREVIEW, and confirm no historical mass sending occurs.
+4. Calendar: reconcile owned events using the stored event IDs and the `Engineering-HUB:<spreadsheetId>:<milestone>`
+   marker; missing events are repaired deliberately, never recreated in bulk.
+
+## Recovery sign-off
+
+| Field | Value |
+| --- | --- |
+| Incident / reason | |
+| Snapshot used (Drive ID, time, schema) | |
+| Restored workbook ID | |
+| Data loss accepted (rows, timespan) | |
+| Notification reconciliation result | |
+| Calendar reconciliation result | |
+| Automation state after recovery | `OFF` / `PREVIEW` |
+| Recovery owner | |
+| Independent reviewer | |
+| Approved to resume triggers | yes / no + date |
+
+Until this record is complete, continue with automation disabled.

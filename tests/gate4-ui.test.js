@@ -10,17 +10,26 @@ test('management surfaces reject unverified or under-privileged callers', () => 
   assert.equal(denied.ok, false);
   assert.match(denied.error, /verified active member/);
 
+  // Default V1.1 posture: trusted managers only.
   const viewer = fixtures.base({ actor: 'viewer@example.test' });
   const viewerRead = viewer.context.Ui.context();
   assert.equal(viewerRead.ok, false);
-  assert.match(viewerRead.error, /Insufficient role: MEMBER/);
+  assert.match(viewerRead.error, /Member self-service is disabled/);
 
   const member = fixtures.base({ actor: 'engineer@example.test' });
+  assert.equal(member.context.Ui.context().ok, false, 'member self-service is off by default');
   const memberWrite = member.context.Ui.createProject({ name: '不可' });
   assert.equal(memberWrite.ok, false);
   assert.match(memberWrite.error, /Insufficient role: MANAGER/);
   assert.equal(member.context.Ui.saveAutomationSettings({ changes: { ASSIGNMENT_EMAIL_ENABLED: true } }).ok, false);
   assert.equal(member.context.Ui.members().ok, false, 'member administration requires MANAGER');
+
+  // Opt-in self-service: a MEMBER gets an own-scope view, a VIEWER still does not.
+  const selfService = fixtures.base({ actor: 'engineer@example.test', properties: { ALLOW_MEMBER_SELF_SERVICE: 'true' } });
+  assert.equal(selfService.context.Ui.context().ok, true);
+  const selfViewer = fixtures.base({ actor: 'viewer@example.test', properties: { ALLOW_MEMBER_SELF_SERVICE: 'true' } });
+  assert.equal(selfViewer.context.Ui.context().ok, false);
+  assert.match(selfViewer.context.Ui.context().error, /Insufficient role: MEMBER/);
 });
 
 test('manager can create a project, subproject and deadline-only assignment through the UI adapter', () => {
@@ -57,7 +66,7 @@ test('manager can create a project, subproject and deadline-only assignment thro
 });
 
 test('UI progress updates and validation keep task invariants', () => {
-  const app = fixtures.base({ actor: 'engineer@example.test' });
+  const app = fixtures.base({ actor: 'engineer@example.test', properties: { ALLOW_MEMBER_SELF_SERVICE: 'true' } });
   const context = app.context;
   const updated = context.Ui.updateProgress({ taskId: 'T1', progress: 100 });
   assert.equal(updated.ok, true, updated.error);

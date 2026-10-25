@@ -110,6 +110,14 @@ Required: `Name`, `Email`, `Active`. `Active` defaults to true; `Manager_ID` ref
 (existing/migrated rows) is treated as `VIEWER`: no privilege is invented by a migration. Deactivation preserves
 history and is refused while open tasks remain.
 
+Role changes are application-controlled: only `ADMIN` may grant or revoke `ADMIN`/`MANAGER`, a member cannot change
+their own role record, and the last active `ADMIN` cannot be demoted or deactivated. The first administrator is
+created by `bootstrapFirstAdministrator` (deployment allowlist + exact confirmation + audited). See
+[SECURITY_MODEL.md](docs/SECURITY_MODEL.md).
+
+Manual edits to `Role` bypass these checks — spreadsheet editors are trusted by definition. Use the UI or the
+domain API.
+
 ### SKILLS
 
 ```text
@@ -168,7 +176,8 @@ Audit_ID Timestamp Entity_Type Entity_ID Action Previous_Value New_Value Actor R
 
 Application history is not a tamper-proof security log: spreadsheet editors can modify it. Restrict access
 accordingly. V1.1 actions include `SETTING_CHANGED`, `SCHEDULE_CONFIRMED`, `SCHEDULE_CONFIRMATION_INVALIDATED`,
-`TRIGGERS_INSTALLED`, `DELIVERY_RECONCILED`, `UI_PROJECT_CREATED`, `UI_SUBPROJECT_CREATED`, `UI_TASK_ASSIGNED`.
+`TRIGGERS_INSTALLED`, `DELIVERY_RECONCILED`, `UI_PROJECT_CREATED`, `UI_SUBPROJECT_CREATED`, `UI_TASK_ASSIGNED`,
+`ADMIN_BOOTSTRAPPED`, `EMAIL_LIVE_ACTIVATED`, `EMAIL_LIVE_DEACTIVATED`.
 
 ### SCHEMA_MIGRATIONS
 
@@ -260,6 +269,22 @@ The registry assigns `datetime` to names ending `_At` and to `Last_Updated`/`Tim
 ending `_Date`, `_Start`, `_End`, or `Deadline`, and to `HOLIDAYS.Date`. `Assignment_Version`, `Plan_Version`,
 `Phase_Order`, migration version fields, `Schema_Version`, `Duration_Days`, and `Buffer_Days` are numbers. `Active`
 and `Notification_Enabled` are booleans.
+
+Computed versus manually editable:
+
+| Field | Owner |
+| --- | --- |
+| `PROJECTS.Progress_Percent`, `SUBPROJECTS.Progress_Percent`, `PROJECTS.Health` | Computed by refresh; manual edits are overwritten |
+| `PROJECTS.Last_Updated` | Application-managed (domain changes only, never a dashboard refresh) |
+| `TASKS.Assignment_Version`, `Assignment_Approved_At`, `Notification_Baseline`, `Completed_At` | Application-managed |
+| `SCHEDULE_CONFIRMATIONS.*` | Application-managed |
+| `NOTIFICATION_LOG.*`, `AUDIT_LOG.*`, `BACKUP_LOG.*`, `SCHEMA_MIGRATIONS.*` | Application-managed logs |
+| `AUTOMATION_SETTINGS` status keys (`LAST_*`, `CALENDAR_LAST_SYNC_*`) | Application-managed |
+| Everything else | Operator-maintained |
+
+The hardening release changed **no schema**: version 3 is unchanged from the previous V1.1 release. The trigger
+schedule signature (`MANAGED_TRIGGER_SIGNATURE`) and the bootstrap marker (`ADMIN_BOOTSTRAP_COMPLETED_AT`) are
+Script Properties, not columns.
 
 Primary IDs, creation/update timestamps, and project/subproject progress are marked non-editable in registry
 metadata; application-managed state must not be treated as arbitrary user input. Metadata alone is not an

@@ -1,10 +1,10 @@
 /**
  * Manager-facing UI adapter (container-bound Apps Script only).
  *
- * A standalone script project cannot show SpreadsheetApp.getUi(), so this adapter is
- * documented as requiring a Sheets-bound deployment. Every write goes through the same
- * validated domain services as the rest of the application; the browser never gets a
- * direct write path, and mail is never sent from a UI callback.
+ * A standalone script project cannot show SpreadsheetApp.getUi(), so this adapter requires
+ * a Sheets-bound deployment. Every write goes through the same validated domain services as
+ * the rest of the application, plus a server-side authorization check from Access.gs. Role,
+ * actor and owner values supplied by the browser are never trusted for authorization.
  */
 var Ui = (function () {
   var MENU = 'Engineering HUB';
@@ -39,7 +39,7 @@ var Ui = (function () {
     } catch (error) {
       throw new Error('この画面はスプレッドシートにバインドされたApps Scriptプロジェクトでのみ表示できます');
     }
-    var output = HtmlService.createHtmlOutputFromFile(fileName)
+    var output = HtmlService.createTemplateFromFile(fileName).evaluate()
       .setTitle(MENU)
       .setWidth(460)
       .setHeight(680);
@@ -49,25 +49,29 @@ var Ui = (function () {
 
   function context() {
     return guard(function () {
-      var actor = Roles.requireAtLeast('MEMBER');
-      var members = Members.list({}).map(function (member) {
-        return {id: member.Member_ID, name: member.Name, active: member.Active === true, role: Roles.normalize(member.Role)};
-      });
+      var current = Access.requireUiAccess();
+      var tasks = Access.visibleTasks(current);
+      var projects = Access.visibleProjects(current, tasks);
+      var projectIds = Object.create(null);
+      projects.forEach(function (project) { projectIds[project.Project_ID] = true; });
+      var subprojects = Database.read('SUBPROJECTS').filter(function (subproject) { return !!projectIds[subproject.Project_ID]; });
+      var skills = Access.visibleSkills(current);
       return {
-        actor: actor,
-        canManage: Roles.can('MANAGER'),
-        canAdminister: Roles.can('ADMIN'),
-        projects: Projects.list({}).map(function (project) {
+        actor: current,
+        canManage: current.role === 'ADMIN' || current.role === 'MANAGER',
+        canAdminister: current.role === 'ADMIN',
+        projects: projects.map(function (project) {
           return {id: project.Project_ID, name: project.Project_Name, status: project.Status};
         }),
-        subprojects: Database.read('SUBPROJECTS').map(function (subproject) {
+        subprojects: subprojects.map(function (subproject) {
           return {id: subproject.Subproject_ID, projectId: subproject.Project_ID, name: subproject.Subproject_Name, status: subproject.Status};
         }),
-        members: members,
-        skills: Database.read('SKILLS').map(function (skill) {
+        members: Access.memberDirectory(current),
+        roles: Members.roles,
+        skills: skills.skills.map(function (skill) {
           return {id: skill.Skill_ID, name: skill.Skill_Name, category: skill.Category};
         }),
-        tasks: Tasks.list({}).slice(0, 300).map(function (task) {
+        tasks: tasks.slice(0, 300).map(function (task) {
           return {
             id: task.Task_ID, name: task.Task_Name, projectId: task.Project_ID,
             ownerId: task.Owner_Member_ID, status: task.Status,
@@ -81,7 +85,7 @@ var Ui = (function () {
 
   function createProject(payload) {
     return guard(function () {
-      Roles.requireAtLeast('MANAGER');
+      Access.requireManager();
       payload = payload || {};
       var project = Projects.create({
         Project_Name: text(payload.name, 'プロジェクト名'),
@@ -100,7 +104,7 @@ var Ui = (function () {
 
   function createSubproject(payload) {
     return guard(function () {
-      Roles.requireAtLeast('MANAGER');
+      Access.requireManager();
       payload = payload || {};
       var subproject = Subprojects.create({
         Project_ID: text(payload.projectId, 'プロジェクト'),
@@ -118,10 +122,17 @@ var Ui = (function () {
   /** Deadline-only assignment is valid; start date and estimate stay optional. */
   function assignTask(payload) {
     return guard(function () {
-      var actor = Roles.requireAtLeast('MANAGER');
       payload = payload || {};
+      var current = Access.requireManager();
+      var projectId = text(payload.projectId, 'プロジェクト');
+      if (payload.taskId) {
+        // Updating an existing task: the caller must own the task or manage its project.
+        Access.requireTaskWrite(payload.taskId, current.email);
+      } else {
+        Access.requireProjectWrite(projectId, current.email);
+      }
       var data = {
-        Project_ID: text(payload.projectId, 'プロジェクト'),
+        Project_ID: projectId,
         Subproject_ID: payload.subprojectId || '',
         Task_Name: text(payload.taskName, 'タスク名'),
         Description: payload.description || '',
@@ -140,8 +151,8 @@ var Ui = (function () {
       var task = payload.taskId ? Tasks.update(payload.taskId, data) : Tasks.create(data);
       AuditLog.write('UI_TASK_ASSIGNED', 'TASK', task.Task_ID,
         {owner: data.Owner_Member_ID, deadline: data.Due_Date, estimate: data.Estimated_Hours, notify: data.Notification_Enabled});
-      if (payload.approve === true) Notifications.approveAssignment(task.Task_ID, actor.email, 'APPROVE ASSIGNMENT');
-      if (payload.confirmSchedule === true) Tasks.confirmSchedule(task.Task_ID, actor.email, 'CONFIRM SCHEDULE');
+      if (payload.approve === true) Notifications.approveAssignment(task.Task_ID, current.email, 'APPROVE ASSIGNMENT');
+      if (payload.confirmSchedule === true) Tasks.confirmSchedule(task.Task_ID, current.email, 'CONFIRM SCHEDULE');
       var refreshed = Dashboard.refresh();
       return {task: plain(Database.find('TASKS', task.Task_ID)), dashboard: refreshed};
     });
@@ -149,8 +160,10 @@ var Ui = (function () {
 
   function updateProgress(payload) {
     return guard(function () {
-      Roles.requireAtLeast('MEMBER');
       payload = payload || {};
+      var current = Access.requireUiAccess();
+      var taskId = text(payload.taskId, 'タスク');
+      Access.requireTaskWrite(taskId, current.email);
       var progress = Number(payload.progress);
       if (!isFinite(progress) || progress < 0 || progress > 100) throw new Error('進捗率は0〜100で入力してください');
       var patch = {Progress_Percent: progress};
@@ -158,28 +171,32 @@ var Ui = (function () {
       if (payload.nextAction !== undefined) patch.Next_Action = payload.nextAction;
       if (progress === 100) patch.Status = 'Done';
       else if (patch.Status === 'Done') throw new Error('100%未満では完了にできません');
-      var task = Tasks.update(text(payload.taskId, 'タスク'), patch);
+      var task = Tasks.update(taskId, patch);
       return plain(task);
     });
   }
 
   function approveAssignment(payload) {
     return guard(function () {
-      var actor = Roles.requireAtLeast('MANAGER');
-      return Notifications.approveAssignment(text((payload || {}).taskId, 'タスク'), actor.email, 'APPROVE ASSIGNMENT');
+      var current = Access.requireManager();
+      var taskId = text((payload || {}).taskId, 'タスク');
+      Access.requireTaskWrite(taskId, current.email);
+      return Notifications.approveAssignment(taskId, current.email, 'APPROVE ASSIGNMENT');
     });
   }
 
   function confirmSchedule(payload) {
     return guard(function () {
-      var actor = Roles.requireAtLeast('MANAGER');
-      return plain(Tasks.confirmSchedule(text((payload || {}).taskId, 'タスク'), actor.email, 'CONFIRM SCHEDULE'));
+      var current = Access.requireManager();
+      var taskId = text((payload || {}).taskId, 'タスク');
+      Access.requireTaskWrite(taskId, current.email);
+      return plain(Tasks.confirmSchedule(taskId, current.email, 'CONFIRM SCHEDULE'));
     });
   }
 
   function members() {
     return guard(function () {
-      Roles.requireAtLeast('MANAGER');
+      Access.requireManager();
       return Database.read('MEMBERS').map(function (member) {
         var open = Members.openTasks(member.Member_ID);
         return {
@@ -195,7 +212,7 @@ var Ui = (function () {
 
   function saveMember(payload) {
     return guard(function () {
-      Roles.requireAtLeast('MANAGER');
+      Access.requireManager();
       payload = payload || {};
       var capacity = optionalNumber(payload.capacity, '週容量');
       var data = {
@@ -203,36 +220,38 @@ var Ui = (function () {
         Email: text(payload.email, 'メールアドレス'),
         Department: payload.department || '',
         Position: payload.position || '',
-        Role: payload.role || 'MEMBER',
         Weekly_Capacity_Hours: capacity === '' ? 0 : capacity,
         Active: payload.active !== false
       };
-      var member = payload.memberId ? Members.update(payload.memberId, data) : Members.create(data);
+      // The role is data, not an authorization claim: Members.guardRoleChange validates it
+      // against the verified actor and refuses any privilege escalation.
+      if (payload.role !== undefined && payload.role !== '') data.Role = payload.role;
+      var member = payload.memberId ? Members.update(payload.memberId, data) : Members.create(Object.assign({Role: 'MEMBER'}, data));
       return plain(member);
     });
   }
 
   function deactivateMember(payload) {
     return guard(function () {
-      Roles.requireAtLeast('MANAGER');
+      Access.requireManager();
       return plain(Members.deactivate(text((payload || {}).memberId, 'メンバー')));
     });
   }
 
   function skills() {
     return guard(function () {
-      Roles.requireAtLeast('MEMBER');
+      var current = Access.requireUiAccess();
+      var visible = Access.visibleSkills(current);
       var matrix = Skills.matrix();
-      var gaps = Roles.can('MANAGER') ? Skills.gaps() : Skills.gaps().map(function (gap) {
-        return {Task_ID: gap.Task_ID, Task_Name: gap.Task_Name, Skill_Name: gap.Skill_Name, Gap: gap.Gap, NeedsSupervision: gap.NeedsSupervision};
-      });
-      return {matrix: matrix, gaps: gaps};
+      if (current.role === 'ADMIN' || current.role === 'MANAGER') return {matrix: matrix, gaps: Skills.gaps()};
+      var own = matrix.filter(function (row, index) { return index === 0 || row[0] === current.memberId; });
+      return {matrix: own, gaps: []};
     });
   }
 
   function setSkill(payload) {
     return guard(function () {
-      Roles.requireAtLeast('MANAGER');
+      Access.requireManager();
       payload = payload || {};
       var level = Number(payload.level);
       if (!Number.isInteger(level) || level < 0 || level > 4) throw new Error('スキルレベルは0〜4の整数で入力してください');
@@ -248,7 +267,7 @@ var Ui = (function () {
 
   function createSkill(payload) {
     return guard(function () {
-      Roles.requireAtLeast('MANAGER');
+      Access.requireManager();
       payload = payload || {};
       return plain(Skills.create({
         Skill_Name: text(payload.name, 'スキル名'), Category: payload.category || '',
@@ -259,7 +278,7 @@ var Ui = (function () {
 
   function createIssue(payload) {
     return guard(function () {
-      Roles.requireAtLeast('MANAGER');
+      Access.requireManager();
       payload = payload || {};
       return plain(Issues.create({
         Project_ID: text(payload.projectId, 'プロジェクト'),
@@ -278,7 +297,7 @@ var Ui = (function () {
 
   function createMilestone(payload) {
     return guard(function () {
-      Roles.requireAtLeast('MANAGER');
+      Access.requireManager();
       payload = payload || {};
       return plain(Milestones.create({
         Project_ID: text(payload.projectId, 'プロジェクト'),
@@ -295,7 +314,7 @@ var Ui = (function () {
 
   function automationSettings() {
     return guard(function () {
-      Roles.requireAtLeast('MANAGER');
+      Access.requireManager();
       return {
         settings: AutomationSettings.describe(),
         status: Notifications.effectiveStatus(),
@@ -312,7 +331,7 @@ var Ui = (function () {
   function saveAutomationSettings(payload) {
     return guard(function () {
       payload = payload || {};
-      Roles.requireAtLeast('MANAGER');
+      Access.requireManager();
       var result = AutomationSettings.save(payload.changes || {}, AuditLog.actor(), payload.confirmation || '');
       return {updated: result.updated, mode: result.effective.mode, reason: result.effective.reason};
     });
@@ -320,7 +339,7 @@ var Ui = (function () {
 
   function restoreAutomationDefaults(payload) {
     return guard(function () {
-      Roles.requireAtLeast('MANAGER');
+      Access.requireManager();
       var result = AutomationSettings.restoreDefaults(AuditLog.actor(),
         payload && payload.confirmation ? payload.confirmation : '');
       return {restored: true, mode: result.effective.mode};
@@ -329,7 +348,7 @@ var Ui = (function () {
 
   function previewNotifications() {
     return guard(function () {
-      Roles.requireAtLeast('MANAGER');
+      Access.requireManager();
       return Notifications.preview().map(function (item) {
         return {taskId: item.taskId, type: item.type, stage: item.stage, recipient: item.recipient, subject: item.subject};
       });
@@ -338,7 +357,7 @@ var Ui = (function () {
 
   function notificationHistory() {
     return guard(function () {
-      Roles.requireAtLeast('MANAGER');
+      Access.requireManager();
       return Notifications.history(50).map(function (row) {
         return {id: row.Notification_ID, type: row.Notification_Type, recipient: row.Recipient,
           result: row.Result, created: plain(row.Created_At), error: row.Error_Details};
@@ -348,21 +367,21 @@ var Ui = (function () {
 
   function reconcileUncertain(payload) {
     return guard(function () {
-      Roles.requireAtLeast('MANAGER');
+      Access.requireManager();
       return Notifications.reconcileUncertain(AuditLog.actor(), (payload || {}).confirmation || '');
     });
   }
 
   function refresh() {
     return guard(function () {
-      Roles.requireAtLeast('MEMBER');
+      Access.requireUiAccess();
       return refreshManagement();
     });
   }
 
   function status() {
     return guard(function () {
-      Roles.requireAtLeast('MEMBER');
+      Access.requireUiAccess();
       return systemStatus();
     });
   }
@@ -395,6 +414,11 @@ var Ui = (function () {
     status: status
   };
 }());
+
+/** Template inclusion for the bound UI; HtmlService resolves this global by name. */
+function include(name) {
+  return HtmlService.createHtmlOutputFromFile(name).getContent();
+}
 
 /** Google Sheets menu; requires a container-bound deployment. */
 function onOpen() {
