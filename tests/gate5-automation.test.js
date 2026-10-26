@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -301,11 +301,11 @@ test('calendar and daily backup switches are independent and never bypass migrat
   fixtures.settings(migrationApp, { DAILY_BACKUP_ENABLED: false });
   const backupsBefore = migrationApp.backups.length;
   // A migration always takes its verified backup, regardless of the daily schedule switch.
-  migrationApp.properties.setProperty('APPROVED_MIGRATIONS', '004_shared_dashboard,005_task_planning_and_requests');
+  migrationApp.properties.setProperty('APPROVED_MIGRATIONS', '004_shared_dashboard,005_task_planning_and_requests,006_responsibilities_and_nested_subprojects');
   const history = migrationApp.book.getSheetByName('SCHEMA_MIGRATIONS');
   history.rows = [history.rows[0], ['INITIALIZE_V3', new Date().toISOString(), 0, 3, 'SUCCESS', 'NEW_EMPTY_DATABASE']];
-  assert.equal(migrationApp.context.Migrations.upgrade(), 5);
-  assert.equal(migrationApp.backups.length, backupsBefore + 2);
+  assert.equal(migrationApp.context.Migrations.upgrade(), 6);
+  assert.equal(migrationApp.backups.length, backupsBefore + 3);
   assert.equal(migrationApp.context.AutomationSettings.get().DAILY_BACKUP_ENABLED, false);
 });
 

@@ -53,6 +53,19 @@ var Ui = (function () {
   /** Statuses a manager may select; archival uses Projects.archive instead. */
   var PROJECT_STATUSES = ['Planned', 'Active', 'On Hold', 'Completed', 'Cancelled'];
 
+  /**
+   * A new project may only be filed under an active responsibility (or stay unassigned).
+   * Retirement stops new selection but never hides or changes existing projects.
+   */
+  function responsibilityForNewProject(value) {
+    var id = String(value === undefined || value === null ? '' : value).trim();
+    if (!id) return '';
+    var row = Database.find('RESPONSIBILITIES', id);
+    if (!row) throw new Error('担当領域が見つかりません');
+    if (row.Status === 'Retired') throw new Error('退職した担当領域は新規案件に指定できません');
+    return id;
+  }
+
   function projectStatus(value) {
     var status = text(value, '状態');
     if (PROJECT_STATUSES.indexOf(status) < 0) {
@@ -79,14 +92,29 @@ var Ui = (function () {
     return number;
   }
 
-  function show(fileName) {
+  /**
+   * Opens a sidebar at a specific section.
+   *
+   * The initial section and action are template values, never a mutable global, so two
+   * users opening different menu entries cannot interfere with each other.
+   */
+  var VIEWS = ['project', 'task', 'admin'];
+  var ACTIONS = ['create', 'assign', 'progress', 'edit'];
+
+  function show(fileName, options) {
     var ui;
     try {
       ui = SpreadsheetApp.getUi();
     } catch (error) {
       throw new Error('この画面はスプレッドシートにバインドされたApps Scriptプロジェクトでのみ表示できます');
     }
-    var output = HtmlService.createTemplateFromFile(fileName).evaluate()
+    var settings = options || {};
+    var view = VIEWS.indexOf(settings.view) >= 0 ? settings.view : 'project';
+    var action = ACTIONS.indexOf(settings.action) >= 0 ? settings.action : '';
+    var template = HtmlService.createTemplateFromFile(fileName);
+    template.initialView = view;
+    template.initialAction = action;
+    var output = template.evaluate()
       .setTitle(MENU)
       .setWidth(460)
       .setHeight(680);
@@ -102,12 +130,41 @@ var Ui = (function () {
       var managedProjects = Access.managedProjectIds(current);
       var projectIds = Object.create(null);
       projects.forEach(function (project) { projectIds[project.Project_ID] = true; });
-      var subprojects = Database.read('SUBPROJECTS').filter(function (subproject) { return !!projectIds[subproject.Project_ID]; });
+      var allSubprojects = Database.read('SUBPROJECTS');
+      var subprojects = allSubprojects.filter(function (subproject) { return !!projectIds[subproject.Project_ID]; });
       var skills = Access.visibleSkills(current);
+      var memberList = Access.memberDirectory(current);
+      var memberNames = Object.create(null);
+      memberList.forEach(function (member) { memberNames[member.id] = member.name; });
+      var responsibilityRows = Responsibilities.list({includeRetired: true});
+      var responsibilityCounts = Responsibilities.counts();
+      var retiredMap = Responsibilities.retiredMap();
+      var responsibilityNames = Object.create(null);
+      responsibilityRows.forEach(function (row) { responsibilityNames[row.Responsibility_ID] = row.Name; });
+      var children = Subprojects.childrenMap(allSubprojects);
+      var parentMap = Subprojects.parentMap(allSubprojects);
+      var responsibilityItems = responsibilityRows.map(function (row) {
+        var item = responsibilityCounts[row.Responsibility_ID] || {};
+        return {
+          id: row.Responsibility_ID,
+          name: row.Name,
+          description: row.Description || '',
+          ownerId: row.Owner_Member_ID || '',
+          ownerName: memberNames[row.Owner_Member_ID] || '',
+          status: row.Status === 'Retired' ? 'Retired' : 'Active',
+          retired: row.Status === 'Retired',
+          sortOrder: Number(row.Sort_Order) || 0,
+          activeProjects: item.activeProjects || 0,
+          atRiskProjects: item.atRiskProjects || 0,
+          totalProjects: item.totalProjects || 0,
+          canEdit: Access.canManageResponsibility(current, row)
+        };
+      });
       return {
         actor: current,
         canManage: current.role === 'ADMIN' || current.role === 'MANAGER',
         canAdminister: current.role === 'ADMIN',
+        responsibilities: responsibilityItems,
         projects: projects.map(function (project) {
           return {
             id: project.Project_ID,
@@ -115,6 +172,9 @@ var Ui = (function () {
             status: project.Status || 'Planned',
             ownerId: project.Project_Owner_ID || '',
             category: project.Category || '',
+            responsibilityId: project.Responsibility_ID || '',
+            responsibilityName: responsibilityNames[project.Responsibility_ID] || '',
+            needsReassignment: Responsibilities.needsReassignment(project, retiredMap),
             priority: project.Priority || 'Medium',
             deadline: dateText(project.Committed_Deadline),
             description: project.Description || '',
@@ -125,7 +185,22 @@ var Ui = (function () {
           };
         }),
         subprojects: subprojects.map(function (subproject) {
-          return {id: subproject.Subproject_ID, projectId: subproject.Project_ID, name: subproject.Subproject_Name, status: subproject.Status};
+          var level = 1;
+          try {
+            level = Subprojects.levelOf(subproject.Subproject_ID, parentMap);
+          } catch (error) {
+            level = 1;
+          }
+          return {
+            id: subproject.Subproject_ID,
+            projectId: subproject.Project_ID,
+            parentId: subproject.Parent_Subproject_ID || '',
+            level: level,
+            hasChildren: !!(children[subproject.Subproject_ID] || []).length,
+            name: subproject.Subproject_Name,
+            ownerId: subproject.Owner_ID || '',
+            status: subproject.Status
+          };
         }),
         members: Access.memberDirectory(current),
         roles: Members.roles,
@@ -168,6 +243,7 @@ var Ui = (function () {
         Project_Name: text(payload.name, 'プロジェクト名'),
         Description: payload.description || '',
         Category: payload.category || '',
+        Responsibility_ID: responsibilityForNewProject(payload.responsibilityId),
         Project_Owner_ID: owner,
         Status: status,
         Priority: payload.priority || 'Medium',
@@ -177,7 +253,8 @@ var Ui = (function () {
         Dashboard_Summary: payload.summary || ''
       });
       AuditLog.write('UI_PROJECT_CREATED', 'PROJECT', project.Project_ID,
-        {status: project.Status, owner: project.Project_Owner_ID, visibility: project.Dashboard_Visibility});
+        {status: project.Status, owner: project.Project_Owner_ID, visibility: project.Dashboard_Visibility,
+          responsibility: project.Responsibility_ID || ''});
       return plain(Database.find('PROJECTS', project.Project_ID));
     });
   }
@@ -209,6 +286,21 @@ var Ui = (function () {
       if (payload.description !== undefined) patch.Description = String(payload.description);
       if (payload.summary !== undefined) patch.Dashboard_Summary = String(payload.summary);
       if (payload.visibility !== undefined) patch.Dashboard_Visibility = visibilityValue(payload.visibility);
+      // A responsibility change is a separate, audited transfer; it never touches the owner.
+      var transfer = null;
+      if (payload.responsibilityId !== undefined) {
+        var targetResponsibility = String(payload.responsibilityId === null ? '' : payload.responsibilityId).trim();
+        if (targetResponsibility !== String(before.Responsibility_ID || '')) {
+          if (payload.confirmResponsibilityChange !== true) {
+            throw new Error('担当領域の変更には確認が必要です');
+          }
+          transfer = {
+            id: targetResponsibility,
+            confirmRetired: payload.confirmRetiredResponsibility === true,
+            reason: String(payload.responsibilityReason || '').slice(0, 200)
+          };
+        }
+      }
       if (payload.deadline !== undefined) {
         var deadline = String(payload.deadline || '').trim();
         if (deadline !== dateText(before.Committed_Deadline) && payload.confirmDeadlineChange !== true) {
@@ -216,7 +308,7 @@ var Ui = (function () {
         }
         patch.Committed_Deadline = deadline;
       }
-      if (!Object.keys(patch).length) throw new Error('変更する項目がありません');
+      if (!Object.keys(patch).length && !transfer) throw new Error('変更する項目がありません');
       if (patch.Status === 'Completed') {
         var rolled = Progress.rollup(Database.read('TASKS').filter(function (task) { return task.Project_ID === projectId; }));
         if (!rolled.calculated || rolled.percent !== 100) {
@@ -224,10 +316,16 @@ var Ui = (function () {
         }
         patch.Progress_Percent = 100;
       }
-      var project = Projects.update(projectId, patch);
+      var project = Object.keys(patch).length ? Projects.update(projectId, patch) : before;
+      if (transfer) {
+        Responsibilities.transferProject(projectId, transfer.id,
+          {confirmed: true, confirmRetired: transfer.confirmRetired, reason: transfer.reason});
+        project = Database.find('PROJECTS', projectId);
+      }
       AuditLog.write('UI_PROJECT_UPDATED', 'PROJECT', projectId, {
         fields: Object.keys(patch).join(','), owner: project.Project_Owner_ID,
         status: project.Status, visibility: project.Dashboard_Visibility,
+        responsibility: project.Responsibility_ID || '',
         deadline: dateText(project.Committed_Deadline)
       });
       return plain(Database.find('PROJECTS', projectId));
@@ -238,16 +336,142 @@ var Ui = (function () {
     return guard(function () {
       Access.requireManager();
       payload = payload || {};
+      var parentId = String(payload.parentId || '').trim();
       var subproject = Subprojects.create({
         Project_ID: text(payload.projectId, 'プロジェクト'),
+        Parent_Subproject_ID: parentId,
         Subproject_Name: text(payload.name, 'サブプロジェクト名'),
         Owner_ID: payload.ownerId || '',
         Status: payload.status || 'Planned',
         Planned_Start: payload.plannedStart || '',
         Deadline: payload.deadline || ''
       });
-      AuditLog.write('UI_SUBPROJECT_CREATED', 'SUBPROJECT', subproject.Subproject_ID, {project: subproject.Project_ID});
+      AuditLog.write('UI_SUBPROJECT_CREATED', 'SUBPROJECT', subproject.Subproject_ID,
+        {project: subproject.Project_ID, parent: parentId});
       return plain(subproject);
+    });
+  }
+
+  /**
+   * Edits a subproject. A hierarchy change goes through its own audited operation, so the
+   * parent is never written as a side effect of renaming a record.
+   */
+  function saveSubproject(payload) {
+    return guard(function () {
+      Access.requireManager();
+      payload = payload || {};
+      var subprojectId = text(payload.subprojectId, 'サブプロジェクト');
+      var before = Database.find('SUBPROJECTS', subprojectId);
+      if (!before) throw new Error('サブプロジェクトが見つかりません');
+      var patch = {};
+      if (payload.name !== undefined) patch.Subproject_Name = text(payload.name, 'サブプロジェクト名');
+      if (payload.ownerId !== undefined) patch.Owner_ID = String(payload.ownerId || '');
+      var reparent = null;
+      if (payload.parentId !== undefined) {
+        var target = String(payload.parentId || '').trim();
+        if (target !== String(before.Parent_Subproject_ID || '')) {
+          if (payload.confirmReparent !== true) throw new Error('階層の変更には確認が必要です');
+          reparent = target;
+        }
+      }
+      if (!Object.keys(patch).length && reparent === null) throw new Error('変更する項目がありません');
+      var row = Object.keys(patch).length ? Subprojects.update(subprojectId, patch) : before;
+      if (reparent !== null) row = Subprojects.reparent(subprojectId, reparent, {confirmed: true});
+      return plain(row);
+    });
+  }
+
+  function archiveSubproject(payload) {
+    return guard(function () {
+      Access.requireManager();
+      return plain(Subprojects.archive(text((payload || {}).subprojectId, 'サブプロジェクト')));
+    });
+  }
+
+  function reactivateSubproject(payload) {
+    return guard(function () {
+      Access.requireManager();
+      return plain(Subprojects.reactivate(text((payload || {}).subprojectId, 'サブプロジェクト')));
+    });
+  }
+
+  /** Explicit, confirmed task move inside the same project. */
+  function moveTask(payload) {
+    return guard(function () {
+      Access.requireManager();
+      payload = payload || {};
+      var taskId = text(payload.taskId, 'タスク');
+      var updated = Subprojects.moveTask(taskId, payload.subprojectId || '', {confirmed: true});
+      return plain(updated);
+    });
+  }
+
+  function saveResponsibility(payload) {
+    return guard(function () {
+      Access.requireManager();
+      payload = payload || {};
+      var patch = {};
+      if (payload.name !== undefined) patch.Name = text(payload.name, '担当領域名');
+      if (payload.description !== undefined) patch.Description = String(payload.description);
+      if (payload.ownerId !== undefined) patch.Owner_Member_ID = String(payload.ownerId || '');
+      if (payload.responsibilityId) {
+        if (!Object.keys(patch).length) throw new Error('変更する項目がありません');
+        return plain(Responsibilities.update(payload.responsibilityId, patch));
+      }
+      if (!patch.Name) throw new Error('担当領域名を入力してください');
+      return plain(Responsibilities.create(patch));
+    });
+  }
+
+  /** Moves one responsibility one position up or down in the manager's display order. */
+  function moveResponsibility(payload) {
+    return guard(function () {
+      payload = payload || {};
+      Access.requireManager();
+      var rows = Responsibilities.all();
+      var ids = rows.map(function (row) { return row.Responsibility_ID; });
+      var index = ids.indexOf(String(payload.responsibilityId || ''));
+      if (index < 0) throw new Error('担当領域が見つかりません');
+      var target = payload.direction === 'up' ? index - 1 : index + 1;
+      if (target < 0 || target >= ids.length) return {moved: false};
+      var swapped = ids.slice();
+      var current = swapped[index];
+      swapped[index] = swapped[target];
+      swapped[target] = current;
+      Responsibilities.reorder(swapped);
+      return {moved: true};
+    });
+  }
+
+  function retireResponsibility(payload) {
+    return guard(function () {
+      Access.requireManager();
+      payload = payload || {};
+      var result = Responsibilities.retire(text(payload.responsibilityId, '担当領域'), {confirmed: true});
+      return {retired: true, openProjects: result.openProjects};
+    });
+  }
+
+  function reactivateResponsibility(payload) {
+    return guard(function () {
+      Access.requireManager();
+      return plain(Responsibilities.reactivate(text((payload || {}).responsibilityId, '担当領域')));
+    });
+  }
+
+  /** Explicit, confirmed responsibility transfer; ownership and deadlines are untouched. */
+  function transferProject(payload) {
+    return guard(function () {
+      Access.requireManager();
+      payload = payload || {};
+      var projectId = text(payload.projectId, 'プロジェクト');
+      var result = Responsibilities.transferProject(projectId, payload.responsibilityId || '', {
+        confirmed: true,
+        confirmRetired: payload.confirmRetiredResponsibility === true,
+        reason: payload.reason || ''
+      });
+      return {changed: result.changed, previous: result.previous, next: result.next,
+        nextName: result.nextName, project: plain(Database.find('PROJECTS', projectId))};
     });
   }
 
@@ -719,6 +943,15 @@ var Ui = (function () {
     createProject: createProject,
     updateProject: updateProject,
     createSubproject: createSubproject,
+    saveSubproject: saveSubproject,
+    archiveSubproject: archiveSubproject,
+    reactivateSubproject: reactivateSubproject,
+    moveTask: moveTask,
+    saveResponsibility: saveResponsibility,
+    moveResponsibility: moveResponsibility,
+    retireResponsibility: retireResponsibility,
+    reactivateResponsibility: reactivateResponsibility,
+    transferProject: transferProject,
     assignTask: assignTask,
     planPreview: planPreview,
     updateProgress: updateProgress,
@@ -760,15 +993,16 @@ function onOpen() {
   try {
     SpreadsheetApp.getUi().createMenu(Ui.MENU)
       .addItem('ダッシュボード', 'showManagerSidebar')
-      .addItem('新規プロジェクト', 'showManagerSidebar')
-      .addItem('新規サブプロジェクト', 'showManagerSidebar')
-      .addItem('新規タスク', 'showManagerSidebar')
-      .addItem('タスク割当', 'showManagerSidebar')
-      .addItem('進捗更新', 'showManagerSidebar')
-      .addItem('課題', 'showManagerSidebar')
-      .addItem('マイルストーン', 'showManagerSidebar')
-      .addItem('メンバー', 'showManagerSidebar')
-      .addItem('スキル', 'showManagerSidebar')
+      .addItem('新規プロジェクト', 'showNewProjectSidebar')
+      .addItem('担当領域の管理', 'showResponsibilitiesSidebar')
+      .addItem('新規サブプロジェクト', 'showNewSubprojectSidebar')
+      .addItem('新規タスク', 'showNewTaskSidebar')
+      .addItem('タスク割当', 'showTaskAssignmentSidebar')
+      .addItem('進捗更新', 'showProgressSidebar')
+      .addItem('課題', 'showTaskSidebar')
+      .addItem('マイルストーン', 'showProjectSidebar')
+      .addItem('メンバー', 'showMembersSidebar')
+      .addItem('スキル', 'showSkillsSidebar')
       .addItem('自動化設定', 'showAutomationSidebar')
       .addItem('申請一覧', 'showRequestsSidebar')
       .addItem('ダッシュボード更新', 'refreshDashboardFromMenu')
@@ -778,10 +1012,20 @@ function onOpen() {
     console.warn('設計・開発課 管理 menu requires a container-bound Apps Script project: ' + error.message);
   }
 }
-function showManagerSidebar() { return Ui.show('UiMenu'); }
-function showAutomationSidebar() { return Ui.show('UiSettings'); }
-function showRequestsSidebar() { return Ui.show('UiRequests'); }
-function showSystemSidebar() { return Ui.show('UiSystem'); }
+function showManagerSidebar() { return Ui.show('UiMenu', {view: 'project'}); }
+function showProjectSidebar() { return Ui.show('UiMenu', {view: 'project'}); }
+function showNewProjectSidebar() { return Ui.show('UiMenu', {view: 'project', action: 'create'}); }
+function showNewSubprojectSidebar() { return Ui.show('UiMenu', {view: 'project', action: 'create'}); }
+function showTaskSidebar() { return Ui.show('UiMenu', {view: 'task', action: 'edit'}); }
+function showNewTaskSidebar() { return Ui.show('UiMenu', {view: 'task', action: 'assign'}); }
+function showTaskAssignmentSidebar() { return Ui.show('UiMenu', {view: 'task', action: 'assign'}); }
+function showProgressSidebar() { return Ui.show('UiMenu', {view: 'task', action: 'progress'}); }
+function showResponsibilitiesSidebar() { return Ui.show('UiMenu', {view: 'admin', action: 'edit'}); }
+function showMembersSidebar() { return Ui.show('UiMenu', {view: 'admin', action: 'edit'}); }
+function showSkillsSidebar() { return Ui.show('UiMenu', {view: 'admin', action: 'edit'}); }
+function showAutomationSidebar() { return Ui.show('UiSettings', {view: 'admin'}); }
+function showRequestsSidebar() { return Ui.show('UiRequests', {view: 'task'}); }
+function showSystemSidebar() { return Ui.show('UiSystem', {view: 'admin'}); }
 function refreshDashboardFromMenu() {
   var result = Ui.refresh();
   try {
@@ -795,6 +1039,15 @@ function uiContext() { return Ui.context(); }
 function uiCreateProject(payload) { return Ui.createProject(payload); }
 function uiUpdateProject(payload) { return Ui.updateProject(payload); }
 function uiCreateSubproject(payload) { return Ui.createSubproject(payload); }
+function uiSaveSubproject(payload) { return Ui.saveSubproject(payload); }
+function uiArchiveSubproject(payload) { return Ui.archiveSubproject(payload); }
+function uiReactivateSubproject(payload) { return Ui.reactivateSubproject(payload); }
+function uiMoveTask(payload) { return Ui.moveTask(payload); }
+function uiSaveResponsibility(payload) { return Ui.saveResponsibility(payload); }
+function uiMoveResponsibility(payload) { return Ui.moveResponsibility(payload); }
+function uiRetireResponsibility(payload) { return Ui.retireResponsibility(payload); }
+function uiReactivateResponsibility(payload) { return Ui.reactivateResponsibility(payload); }
+function uiTransferProject(payload) { return Ui.transferProject(payload); }
 function uiAssignTask(payload) { return Ui.assignTask(payload); }
 function uiPlanPreview(payload) { return Ui.planPreview(payload); }
 function uiRequests(payload) { return Ui.requests(payload); }

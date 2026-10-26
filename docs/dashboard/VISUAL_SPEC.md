@@ -136,3 +136,25 @@ remains [UNVERIFIED](SMOKE_TEST.md).
 * Screenshots produced by `npm run preview:dashboard` are local review artefacts, not Google
   Workspace behaviour, and stay **UNVERIFIED** until recorded.
 
+
+## V1.4 refinement
+
+Palette and typography moved to the shared tokens documented in
+[docs/UI_UX_GUIDELINES.md](../UI_UX_GUIDELINES.md): `--accent #365F7D`, `--text #27333E`,
+`--text-soft #526170`, `--border #D7DEE5`, and the green/amber/red families. The measured contrast
+ratios are 12.89:1 (`--text`), 6.36:1 (`--text-soft`) and 6.07:1 (`--text-soft` on
+`--surface-soft`), all above the WCAG AA target for normal text. Secondary text is 12.5px or larger.
+
+Layout changes:
+
+- The responsibility filter is always visible next to status and 期限7日以内.
+- カテゴリ, 責任者 and リスク moved under `詳細フィルター`; active filters are listed as tags.
+- Project cards show `担当領域 · カテゴリ · 状態` in the secondary line.
+- A nested subproject group is indented 16px with an accent-soft left border.
+- The request form shows a plain explanation instead of a disabled button when submission is
+  closed, still loading or failed.
+
+Screens: the static preview (`npm run preview:dashboard`) was rendered in a real browser at 375px
+and 1366px with no overlapping controls and no horizontal scrolling. A deployed Apps Script page was
+**not** captured for V1.4, so the items in
+[SMOKE_TEST.md](SMOKE_TEST.md#v14-additions-contract-14) remain UNVERIFIED.

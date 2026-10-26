@@ -2,7 +2,7 @@
 
 ## Contract and versions
 
-`src/Schema.gs` is authoritative. The current schema version is **4**.
+`src/Schema.gs` is authoritative. The current schema version is **6**.
 
 | Version | Migration | Adds |
 | --- | --- | --- |
@@ -10,9 +10,11 @@
 | 2 | `002_task_assignment_safety` | `TASKS.Assignment_Version`, `Assignment_Approved_At`, `Notification_Baseline` |
 | 3 | `003_management_reliability` | `AUTOMATION_SETTINGS`, `PROJECT_PHASES`, `SCHEDULE_CONFIRMATIONS`, `PROJECTS.Notification_Enabled`, `MEMBERS.Role`, `NOTIFICATION_LOG.Reconciled_At`/`Reconciled_By`, seeded safe automation defaults (mail OFF) |
 | 4 | `004_shared_dashboard` | `PROJECTS.Dashboard_Visibility`, `PROJECTS.Dashboard_Summary`, `TASKS.Public_Note` (additive; publishes nothing by itself) |
+| 5 | `005_task_planning_and_requests` | `TASKS.Planned_Duration_Value`/`_Unit`/`_Basis`/`Planned_Start_Source`, `TASK_REQUESTS`, `TASK_DEADLINE_HISTORY` |
+| 6 | `006_responsibilities_and_nested_subprojects` | `RESPONSIBILITIES` (new table), `PROJECTS.Responsibility_ID`, `SUBPROJECTS.Parent_Subproject_ID` (additive; seeds no responsibility and leaves every existing project unassigned) |
 
 Approved migrations upgrade one version at a time, each with its own verified backup. Fresh empty workbooks
-initialize directly to version 4. `SCHEMA_MIGRATIONS` records successful versions; changing code or a header
+initialize directly to version 6. `SCHEMA_MIGRATIONS` records successful versions; changing code or a header
 manually does not apply a migration.
 
 The upgrade appends missing schema elements; it does not invent assignment approvals, roles or notification
@@ -30,13 +32,18 @@ The first field in each list is the stable primary key. Relationships are descri
 ### PROJECTS
 
 ```text
-Project_ID Project_Name Description Category Project_Owner_ID Status Priority
+Project_ID Project_Name Description Category Responsibility_ID Project_Owner_ID Status Priority
 Planned_Start Forecast_End Committed_Deadline Original_Deadline Actual_Completion
 Progress_Percent Health Next_Milestone Next_Action Last_Updated Created_At Archived_At Notification_Enabled
 Dashboard_Visibility Dashboard_Summary
 ```
 
-Required: `Project_Name`, `Status`. `Project_Owner_ID` references `MEMBERS`.
+Required: `Project_Name`, `Status`. `Project_Owner_ID` references `MEMBERS`; `Responsibility_ID` references
+`RESPONSIBILITIES` and may be blank.
+
+- `Responsibility_ID` is the organizational area (担当領域). Blank means 未分類. It is a grouping concept, not a
+  permission boundary: it never grants access to the project and never changes `Project_Owner_ID`.
+  `Category` is a separate, free-form classification and is unchanged by V1.4.
 
 - `Original_Deadline` is captured at creation and is immutable; `Committed_Deadline` may change.
 - `Progress_Percent` and `Health` are computed by refresh and may be overwritten.
@@ -53,15 +60,40 @@ Required: `Project_Name`, `Status`. `Project_Owner_ID` references `MEMBERS`.
   `Ui.updateProject` → `Projects.update`. Every change is audited (`UI_PROJECT_UPDATED`) and only appears in the
   shared dashboard at the next publication; the API does not touch the snapshot.
 
+### RESPONSIBILITIES
+
+```text
+Responsibility_ID Name Description Owner_Member_ID Status Sort_Order
+Created_At Updated_At Retired_At
+```
+
+Required: `Name`, `Status` (`Active` / `Retired`). `Responsibility_ID` is generated (`RESP_<uuid>`), immutable and
+never reused. `Owner_Member_ID` references `MEMBERS`.
+
+- `Name` is unique among **active** rows only; a retired name may be reused because the retired row keeps its own ID.
+- `Sort_Order` controls the manager's display order and never affects identity.
+- `Retired_At` is set by retirement and cleared by reactivation; both are status changes, never deletions.
+- Retirement keeps every project, task, milestone and history row. A retired responsibility stays visible in lists
+  and filters and is no longer selectable for new work.
+- The owner administers the responsibility only. Project ownership remains the only project permission boundary.
+  See [docs/RESPONSIBILITIES.md](docs/RESPONSIBILITIES.md).
+
 ### SUBPROJECTS
 
 ```text
-Subproject_ID Project_ID Subproject_Name Owner_ID Status Planned_Start Planned_End
+Subproject_ID Project_ID Parent_Subproject_ID Subproject_Name Owner_ID Status Planned_Start Planned_End
 Deadline Progress_Percent Estimated_Hours Next_Action Last_Updated
 ```
 
-Required: `Project_ID`, `Subproject_Name`, `Status`. Project and owner reference `PROJECTS` and `MEMBERS`.
-`Estimated_Hours` defaults to blank (unknown). Progress is computed from child tasks.
+Required: `Project_ID`, `Subproject_Name`, `Status`. Project, parent and owner reference `PROJECTS`, `SUBPROJECTS`
+and `MEMBERS`. `Estimated_Hours` defaults to blank (unknown).
+
+- `Parent_Subproject_ID` blank is a root subproject, so every pre-V1.4 row keeps its meaning.
+- At most two subproject levels exist beneath a project. A parent and its child must belong to the same project,
+  a subproject cannot parent itself and circular references are refused. Reparenting validates the whole affected
+  subtree, so a move that would push a descendant to level three is rejected instead of flattened.
+- A parent subproject's progress covers its own tasks plus every descendant task exactly once. It is never an
+  average of child percentages.
 
 ### TASKS
 

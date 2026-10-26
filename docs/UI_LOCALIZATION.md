@@ -106,3 +106,15 @@ guarantee that stored text is not translated. Browser rendering with a real Goog
 Workspace account remains **UNVERIFIED** until it is recorded in
 [`docs/checkgates/V1_3_GATE_7.md`](checkgates/V1_3_GATE_7.md); local output is not
 Workspace evidence.
+
+## V1.4 keys
+
+Responsibilities added `manager.nav.*`, `manager.detail.*`, `manager.responsibility.*`,
+`manager.project.responsibility*`, `manager.subproject.*` and `manager.requests.staleNote`,
+plus `dashboard.filter.responsibility*`, `dashboard.filter.more`, `dashboard.filter.active`,
+`dashboard.card.responsibilityUnset`, `dashboard.detail.responsibility`,
+`dashboard.detail.subtreeCount`, `request.config.*` and `request.draft.discard`.
+
+The rules do not change: stored text (a responsibility name included) is never translated, 未分類
+is a label that may be translated, and the language preference stays browser-local. Switching
+language preserves the current screen, project, task, filters and any unsent request draft.

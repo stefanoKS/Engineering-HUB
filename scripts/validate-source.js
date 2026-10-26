@@ -248,3 +248,9 @@ assert(fs.existsSync(path.join(root, 'docs', 'REQUEST_INBOX_DEPLOYMENT.md')),
   'docs/REQUEST_INBOX_DEPLOYMENT.md must document the request inbox deployment');
 assert(fs.existsSync(path.join(root, 'docs', 'TASK_DURATION_POLICY.md')),
   'docs/TASK_DURATION_POLICY.md must document the duration policy');
+assert(fs.existsSync(path.join(root, 'docs', 'RESPONSIBILITIES.md')),
+  'docs/RESPONSIBILITIES.md must document responsibilities and the hierarchy');
+assert(fs.existsSync(path.join(root, 'docs', 'UI_UX_GUIDELINES.md')),
+  'docs/UI_UX_GUIDELINES.md must document the shared visual language');
+assert(fs.existsSync(path.join(root, 'docs', 'checkgates', 'V1_4_GATE_6.md')),
+  'docs/checkgates/V1_4_GATE_6.md must record the V1.4 release review');

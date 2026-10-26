@@ -19,12 +19,15 @@
  *   duplicates tasks.
  */
 var SharedDashboardPublisher = (function () {
-  var PUBLISHER_VERSION = '1.3.0';
+  var PUBLISHER_VERSION = '1.4.0';
   var CONTRACT_VERSION = SharedDashboardModel.CONTRACT_VERSION;
   var DESTINATION_PROPERTY = 'SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID';
   var META_SHEET = 'PUBLISHED_META';
   var SLOTS = ['A', 'B'];
   var TABLES = [
+    {key: 'responsibilities', sheet: 'PUBLISHED_RESPONSIBILITIES',
+      fields: SharedDashboardModel.RESPONSIBILITY_PUBLIC_FIELDS, modelKey: 'responsibilities',
+      label: 'RESPONSIBILITY_COUNT'},
     {key: 'projects', sheet: 'PUBLISHED_PROJECTS', fields: SharedDashboardModel.PROJECT_PUBLIC_FIELDS,
       modelKey: 'projects', label: 'PROJECT_COUNT'},
     {key: 'subprojects', sheet: 'PUBLISHED_SUBPROJECTS', fields: SharedDashboardModel.SUBPROJECT_PUBLIC_FIELDS,
@@ -35,8 +38,8 @@ var SharedDashboardPublisher = (function () {
       modelKey: 'milestones', label: 'MILESTONE_COUNT'}
   ];
   var META_KEYS = ['CONTRACT_VERSION', 'ACTIVE_SLOT', 'SNAPSHOT_VERSION', 'PUBLISHED_AT', 'PUBLISHER_VERSION',
-    'CONTENT_HASH', 'AS_OF', 'PREVIOUS_SLOT', 'PROJECT_COUNT', 'SUBPROJECT_COUNT', 'TASK_COUNT',
-    'MILESTONE_COUNT', 'RESULT'];
+    'CONTENT_HASH', 'AS_OF', 'PREVIOUS_SLOT', 'RESPONSIBILITY_COUNT', 'PROJECT_COUNT', 'SUBPROJECT_COUNT',
+    'TASK_COUNT', 'MILESTONE_COUNT', 'RESULT'];
   var OPERATIONAL_SHEETS = ['PROJECTS', 'MEMBERS', 'AUTOMATION_SETTINGS', 'NOTIFICATION_LOG', 'AUDIT_LOG'];
 
   function slotSheet(name, slot) {
@@ -218,6 +221,7 @@ var SharedDashboardPublisher = (function () {
   function collect() {
     return {
       today: Domain.today(),
+      responsibilities: Database.read('RESPONSIBILITIES'),
       projects: Database.read('PROJECTS'),
       subprojects: Database.read('SUBPROJECTS'),
       tasks: Database.read('TASKS'),
@@ -309,6 +313,7 @@ var SharedDashboardPublisher = (function () {
           CONTENT_HASH: verified.hash,
           AS_OF: snapshot.asOf,
           PREVIOUS_SLOT: active,
+          RESPONSIBILITY_COUNT: verified.counts.RESPONSIBILITY_COUNT,
           PROJECT_COUNT: verified.counts.PROJECT_COUNT,
           SUBPROJECT_COUNT: verified.counts.SUBPROJECT_COUNT,
           TASK_COUNT: verified.counts.TASK_COUNT,
@@ -325,6 +330,7 @@ var SharedDashboardPublisher = (function () {
           hash: nextMeta.CONTENT_HASH,
           asOf: snapshot.asOf,
           counts: {
+            responsibilities: verified.counts.RESPONSIBILITY_COUNT,
             projects: verified.counts.PROJECT_COUNT,
             subprojects: verified.counts.SUBPROJECT_COUNT,
             tasks: verified.counts.TASK_COUNT,
@@ -415,6 +421,7 @@ var SharedDashboardPublisher = (function () {
         contractVersion: String(meta.CONTRACT_VERSION || ''),
         ageHours: ageHours,
         counts: {
+          responsibilities: Number(meta.RESPONSIBILITY_COUNT || 0),
           projects: Number(meta.PROJECT_COUNT || 0),
           subprojects: Number(meta.SUBPROJECT_COUNT || 0),
           tasks: Number(meta.TASK_COUNT || 0),
@@ -495,7 +502,7 @@ var SharedDashboardPublisher = (function () {
       writeMeta(book, {
         CONTRACT_VERSION: CONTRACT_VERSION, ACTIVE_SLOT: '', SNAPSHOT_VERSION: 0,
         PUBLISHED_AT: '', PUBLISHER_VERSION: PUBLISHER_VERSION, CONTENT_HASH: '', AS_OF: '',
-        PREVIOUS_SLOT: '', PROJECT_COUNT: 0, SUBPROJECT_COUNT: 0, TASK_COUNT: 0,
+        PREVIOUS_SLOT: '', RESPONSIBILITY_COUNT: 0, PROJECT_COUNT: 0, SUBPROJECT_COUNT: 0, TASK_COUNT: 0,
         MILESTONE_COUNT: 0, RESULT: 'INITIALIZED'
       });
       AuditLog.write('SHARED_DASHBOARD_INITIALIZED', 'SHARED_DASHBOARD_WORKBOOK', '', {

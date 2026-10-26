@@ -72,14 +72,15 @@ test('publication writes only allowlisted fields, excludes restricted projects a
   const result = app.context.publishSharedDashboard();
   assert.equal(result.published, true);
   assert.equal(result.version, 1);
-  assert.deepEqual(JSON.parse(JSON.stringify(result.counts)), {projects: 1, subprojects: 1, tasks: 2, milestones: 0});
+  assert.deepEqual(JSON.parse(JSON.stringify(result.counts)),
+    {responsibilities: 0, projects: 1, subprojects: 1, tasks: 2, milestones: 0});
   assert.equal(result.excluded.projects, 1, 'the archived, restricted project is never published');
 
   const projectRows = sheetRows(snapshot, 'PUBLISHED_PROJECTS_A');
   assert.equal(projectRows.length, 2, 'one header row plus one published project');
   assert.deepEqual(JSON.parse(JSON.stringify(projectRows[1])), [
-    'P1', '検査装置', '', '管理 花子', 'Active', 24.39, 'GREEN', '2026-12-31', '', '公開してよい概要',
-    projectRows[1][10], false, 2, 0, 0, 0, 0, 2
+    'P1', '検査装置', '', '', '', '管理 花子', 'Active', 24.39, 'GREEN', '2026-12-31', '', '公開してよい概要',
+    projectRows[1][12], false, 2, 0, 0, 0, 0, 2
   ]);
   const taskRows = sheetRows(snapshot, 'PUBLISHED_TASKS_A');
   assert.deepEqual(JSON.parse(JSON.stringify(taskRows.slice(1).map(row => row[0]))), ['T1', 'T2']);
@@ -209,7 +210,8 @@ test('publication status and preview never expose the destination spreadsheet id
 
   const preview = app.context.previewSharedDashboardPublication();
   assert.equal(preview.initialized, true);
-  assert.deepEqual(JSON.parse(JSON.stringify(preview.counts)), {PROJECT_COUNT: 1, SUBPROJECT_COUNT: 1, TASK_COUNT: 2, MILESTONE_COUNT: 0});
+  assert.deepEqual(JSON.parse(JSON.stringify(preview.counts)),
+    {RESPONSIBILITY_COUNT: 0, PROJECT_COUNT: 1, SUBPROJECT_COUNT: 1, TASK_COUNT: 2, MILESTONE_COUNT: 0});
   assert.equal(metaValue(app.spreadsheets.get(SNAPSHOT_ID), 'ACTIVE_SLOT'), '', 'preview writes nothing');
 
   app.context.publishSharedDashboard();
@@ -239,7 +241,7 @@ test('publication settings stay independent of the mail mode and from the snapsh
   assert.equal(app.triggers.length, 0, 'publication installs no trigger by itself');
 
   const snapshot = app.spreadsheets.get(SNAPSHOT_ID);
-  assert.equal(metaValue(snapshot, 'CONTRACT_VERSION'), '1.3');
+  assert.equal(metaValue(snapshot, 'CONTRACT_VERSION'), '1.4');
   assert.equal(metaValue(snapshot, 'RESULT'), 'SUCCESS');
   assert.equal(metaValue(snapshot, 'AS_OF').length, 10);
 });

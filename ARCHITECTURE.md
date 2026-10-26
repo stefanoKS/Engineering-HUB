@@ -1,4 +1,4 @@
-# Architecture
+﻿# Architecture
 
 ## Boundaries and source of truth
 
@@ -261,4 +261,50 @@ manager sidebar (UiMenu.html)
   The import runs inside `Database.withLock`, treats the inbox `Request_ID` as the permanent
   key, and converts a duplicate-ID collision into "skipped". A read failure is returned as
   `importError`; the queue is still rendered from the workbook.
+
+## V1.4 — responsibilities, nested subprojects and UI refinement
+
+Schema version **6** (`006_responsibilities_and_nested_subprojects`), additive only.
+
+```text
+RESPONSIBILITIES (new)            -> src/Responsibilities.gs
+PROJECTS.Responsibility_ID        -> optional area; blank = 未分類
+SUBPROJECTS.Parent_Subproject_ID  -> blank = root; at most two levels
+```
+
+* **Responsibilities are data, not code.** `Responsibilities` owns validation, the unique-name
+  rule for active rows, re-ordering, retirement and transfer. `Access.canManageResponsibility`
+  is the single policy: ADMIN administers every area, a MANAGER only the areas they own, and
+  nobody gains project access from an area. A transfer ends in `Projects.update` with one column
+  changed plus an `AUDIT_LOG` entry (`RESPONSIBILITY_TRANSFERRED`).
+* **A bounded hierarchy.** `Subprojects.validateHierarchy` builds the parent map once, rejects a
+  self-parent, a cross-project parent, a cycle and any level beyond two, and validates the whole
+  subtree on reparent. `Subprojects.moveTask` is the only way a task changes node, and it needs
+  confirmation and the same project.
+* **One rollup helper.** `Progress.subtreeTasks` feeds `Progress.refresh`, the management
+  dashboard, the workload/eligibility check and the snapshot, so a parent subproject, the Gantt
+  fallback and the shared dashboard cannot disagree. Weights stay as documented (known estimate,
+  the fallback of 1 for unknown effort, `Cancelled` excluded). Tables are read once per refresh
+  and the hierarchy is built in memory.
+* **Archived work leaves the active figures, not the workbook.** `Eligibility.taskInActiveWork`
+  walks the ancestor chain, so descendants of an archived subproject stop contributing and come
+  back on reactivation. No row is deleted and nothing is marked done automatically.
+* **The sidebar is sectioned for a real 300px.** 案件 / タスク / 管理, one visible section,
+  collapsed 詳細設定 for rarely used fields, and a compact subproject tree. `Ui.show(fileName,
+  {view, action})` passes the initial section as a template value, and the Sheets menu maps each
+  entry to its own handler instead of reusing one.
+* **Snapshot contract 1.4.** `PUBLISHED_RESPONSIBILITIES` (id, name, order, retired),
+  `projects[].responsibilityId` / `responsibilityName`, and `subprojects[].parentSubprojectId` /
+  `level` / `directTasks` / `totalTasks` / hierarchical `progress`. Descriptions and owners are
+  never published, and an older contract is rejected (`SNAPSHOT_CONTRACT_UNSUPPORTED`) rather than
+  misread.
+* **The request form honours the switch.** Loading, `REQUEST_SUBMISSION_ENABLED=false` and a
+  configuration failure all offer no active submission button and explain why. Unsent values live
+  in memory, survive a language switch and a validation error, and are cleared only after a
+  successful submission that shows the request ID.
+
+Details: [docs/RESPONSIBILITIES.md](docs/RESPONSIBILITIES.md),
+[docs/UI_UX_GUIDELINES.md](docs/UI_UX_GUIDELINES.md). Gates:
+[docs/checkgates/V1_4_GATE_1.md](docs/checkgates/V1_4_GATE_1.md) …
+[V1_4_GATE_6.md](docs/checkgates/V1_4_GATE_6.md).
 

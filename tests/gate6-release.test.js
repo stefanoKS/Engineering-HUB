@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -26,8 +26,8 @@ test('version 3 upgrade preserves every pre-existing operational cell and cannot
   history.rows = [history.rows[0], ['INITIALIZE_V2', new Date().toISOString(), 0, 2, 'SUCCESS', 'NEW_EMPTY_DATABASE']];
 
   const before = JSON.parse(JSON.stringify(context.Backup.snapshot(app.book)));
-  app.properties.setProperty('APPROVED_MIGRATIONS', '003_management_reliability,004_shared_dashboard,005_task_planning_and_requests');
-  assert.equal(context.upgradeExistingDatabase(), 5);
+  app.properties.setProperty('APPROVED_MIGRATIONS', '003_management_reliability,004_shared_dashboard,005_task_planning_and_requests,006_responsibilities_and_nested_subprojects');
+  assert.equal(context.upgradeExistingDatabase(), 6);
 
   for (const old of before) {
     if (['SCHEMA_MIGRATIONS', 'BACKUP_LOG', 'AUTOMATION_SETTINGS'].includes(old.name)) continue;
@@ -36,7 +36,7 @@ test('version 3 upgrade preserves every pre-existing operational cell and cannot
       `${old.name} row ${r + 1} column ${c + 1} changed`)));
   }
 
-  assert.equal(app.backups.length, 3, 'each migration takes a verified backup');
+  assert.equal(app.backups.length, 4, 'each migration takes a verified backup');
   assert.ok(app.book.getSheetByName('PROJECT_PHASES'));
   assert.ok(app.book.getSheetByName('SCHEDULE_CONFIRMATIONS'));
   assert.equal(db.find('TASKS', 'T1').Task_Name, '機構設計');
@@ -138,7 +138,14 @@ test('source and repository stay free of credentials, live identifiers and stray
     const content = fs.readFileSync(path.join(sourceDir, name), 'utf8');
     assert.doesNotMatch(content, /BEGIN [A-Z ]*PRIVATE KEY/, `${name} contains a private key`);
     assert.doesNotMatch(content, /client_secret|refresh_token|ya29\.|AIza[0-9A-Za-z_-]{30}/, `${name} contains credentials`);
-    assert.doesNotMatch(content, /["'][0-9][A-Za-z0-9_-]{32,}["']/, `${name} contains a hard-coded Google identifier`);
+    // A hard-coded Google identifier is a long opaque token. Versioned migration IDs are
+    // long too, but they are snake_case words, so they are allowed explicitly.
+    const opaque = /["']([0-9][A-Za-z0-9_-]{32,})["']/g;
+    let token;
+    while ((token = opaque.exec(content)) !== null) {
+      assert.match(token[1], /^[0-9]+(_[a-z][a-z0-9]*)+$/,
+        `${name} contains a hard-coded Google identifier`);
+    }
     assert.doesNotMatch(content, /@gmail\.com/, `${name} contains a real mailbox`);
   }
   for (const name of files.filter(item => item.endsWith('.gs'))) {

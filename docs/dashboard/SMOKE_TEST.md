@@ -108,3 +108,21 @@ never changes the release status.
 
 Record the results in `docs/checkgates/V1_3_1_GATE_7.md`.
 
+
+## V1.4 additions (contract 1.4)
+
+Run these in addition to sections A–E after deploying V1.4. Every item stays UNVERIFIED until a
+development deployment records the result.
+
+| # | Check | Expected | Result | Notes |
+| --- | --- | --- | --- | --- |
+| F1 | `PUBLISHED_RESPONSIBILITIES_A` exists after the first V1.4 publication and lists only areas used by a published project | Header plus one row per area | UNVERIFIED | |
+| F2 | A published project shows its responsibility name on the card and as the first detail fact | Stored name, untranslated | UNVERIFIED | |
+| F3 | The responsibility filter offers すべて, the active areas and a retired area marked （退職） | Retired area still selectable | UNVERIFIED | |
+| F4 | A nested subproject is indented under its parent and the parent shows 「配下を含む n 件」 | Indentation and count | UNVERIFIED | |
+| F5 | The parent subproject progress equals the manager's rollup for the same project | Equal numbers | UNVERIFIED | |
+| F6 | No responsibility description, owner, e-mail or private project text appears in any published sheet | None found | UNVERIFIED | |
+| F7 | With `REQUEST_SUBMISSION_ENABLED` unset, the drawer offers no request button and explains why | No active button | UNVERIFIED | |
+| F8 | With `REQUEST_SUBMISSION_ENABLED=true`, both request types are offered and a submission returns a request ID | Receipt with ID | UNVERIFIED | |
+| F9 | Typing a request, switching 日本語 → English → 日本語, then submitting | Values preserved, one submission | UNVERIFIED | |
+| F10 | A snapshot written by V1.3.1 opened by the V1.4 viewer | `SNAPSHOT_CONTRACT_UNSUPPORTED`, friendly message | UNVERIFIED | |

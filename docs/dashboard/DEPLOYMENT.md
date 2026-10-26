@@ -231,3 +231,23 @@ publication and re-run `installAuthorizedTriggers`.
    `requestSubmissionConfig()` in the dashboard project and set it to `false` to close
    submissions without redeploying.
 
+
+## V1.4: contract 1.4 and the nested hierarchy
+
+Deploy both Apps Script projects from the **same commit**. The viewer refuses a snapshot whose
+`PUBLISHED_META.CONTRACT_VERSION` is not `1.4`, so the order is:
+
+1. Push and deploy the manager project and the dashboard project.
+2. Run migration `006_responsibilities_and_nested_subprojects` in development (see
+   [../../DEPLOYMENT.md](../../DEPLOYMENT.md#v14-upgrade-5--6)).
+3. Open 担当領域の管理 and create the areas you need; existing projects stay 未分類 until you
+   assign them.
+4. Publish a snapshot with contract `1.4`. The new `PUBLISHED_RESPONSIBILITIES_A/B` sheets appear
+   and the project/subproject sheets gain the responsibility and hierarchy columns. Until this
+   publication succeeds the deployed viewer shows the "unsupported format" message, which is the
+   intended fail-closed behaviour.
+5. Re-check the deployment ACL (access = company domain, execute as the deployment account) and
+   open the URL with an employee account.
+
+Do not edit the snapshot sheets by hand and do not copy the management workbook's sheets into the
+snapshot workbook. Publication is the only supported path.

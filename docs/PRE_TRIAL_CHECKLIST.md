@@ -608,3 +608,22 @@ evidence. Record live results in [docs/dashboard/SMOKE_TEST.md](dashboard/SMOKE_
 | `申請を取り込めませんでした` | inbox property wrong, spreadsheet unshared, header drifted | check C, the 15-column header and both projects |
 | `DASHBOARD_NOT_CONFIGURED` | snapshot property missing in the dashboard project | step 8 |
 | `Backup folder must not allow public/domain link sharing` | the Drive folder is shared too widely | restrict `EH-DEV-BACKUP` to the operator and deployment account |
+
+## V1.4 trial additions
+
+Before a V1.4 trial, additionally verify in the **development** deployment:
+
+1. `APPROVED_MIGRATIONS = 006_responsibilities_and_nested_subprojects` was the only value present
+   while upgrading, and it was removed afterwards.
+2. `SCHEMA_MIGRATIONS` holds one `SUCCESS` row for version 6 and `BACKUP_LOG` shows the verified
+   pre-migration backup.
+3. The `RESPONSIBILITIES` sheet is empty except for the header row: no example area was seeded.
+4. Existing projects show 未分類 and existing subprojects are root-level.
+5. The sidebar fits a 300px pane, the three sections switch, and each Sheets menu entry lands on
+   the right section.
+6. The shared dashboard shows the responsibility label, the 担当領域 filter (including a retired
+   area) and the indented nested subproject, and refuses a V1.3.1 snapshot with a friendly message.
+7. `REQUEST_SUBMISSION_ENABLED` still decides whether the employee request form is offered.
+
+`npm run lint`, `npm test` (310 tests) and `npm run validate` must all pass before pushing to
+development. Local results are not Workspace verification.

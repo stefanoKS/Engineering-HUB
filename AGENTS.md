@@ -80,3 +80,18 @@
 55. A committed deadline change requires an explicit confirmation, and a project can only be marked `Completed` when its tasks are all done.
 56. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_3_1_GATE_<n>.md` for this release, and keep live Workspace verification separate from local results.
 
+## V1.4 mandatory rules
+
+57. Responsibilities are configurable data in the `RESPONSIBILITIES` table, never source constants, and the number of responsibilities is never assumed. Keep `PROJECTS.Category`; a responsibility is a different concept.
+58. A blank `PROJECTS.Responsibility_ID` means 未分類. Never seed example responsibilities or assign historical projects automatically, and never invent an owner `Member_ID`.
+59. Retirement is a status change, never a deletion: keep every project, task, milestone, approval and history row, keep the area visible in lists and filters, and keep its projects actionable and marked for reassignment.
+60. Responsibility ownership never becomes a project permission. `PROJECTS.Project_Owner_ID` stays the only project boundary, and a responsibility change never rewrites the owner, the deadline or the status.
+61. A responsibility transfer requires explicit confirmation and an `AUDIT_LOG` record containing the previous ID, the new ID, the actor and the reason if supplied. Do not add a parallel history table.
+62. Nested subprojects stop at two levels beneath a project. Reject a self-parent, a cross-project parent and a circular link, and validate the whole subtree on reparent instead of flattening it.
+63. Archiving a subproject cascades nothing. Descendant eligibility follows the whole ancestor chain, and only explicit actions move tasks or reassign work.
+64. Rollups count each task exactly once: keep the existing weight rules (known estimate, the documented fallback for unknown effort, `Cancelled` excluded) and never invent hours.
+65. Publish only the responsibility label, the hierarchy and the hierarchy progress. Never publish a responsibility description, its owner, or a private project field, and never read an older snapshot contract as the new one.
+66. The request form must honour `REQUEST_SUBMISSION_ENABLED` and fail closed while loading or on error. Unsent request data stays in memory across a language switch, a validation error and a temporary failure, and is never written to a spreadsheet.
+67. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_4_GATE_<n>.md`, keep live Workspace verification separate from local results, and keep `docs/PRODUCTION_READINESS.md` NOT APPROVED until that evidence exists.
+
+

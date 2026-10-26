@@ -4,35 +4,98 @@
   <base target="_top">
   <meta charset="utf-8">
   <style>
-    body { font-family: "Hiragino Sans", "Yu Gothic", sans-serif; font-size: 12px; margin: 8px; color: #202124; }
-    h2 { font-size: 14px; margin: 10px 0 6px; }
-    fieldset { border: 1px solid #dadce0; border-radius: 6px; margin: 0 0 10px; padding: 8px; }
-    legend { font-weight: 600; padding: 0 4px; }
-    label { display: block; margin: 6px 0 2px; }
-    input, select, textarea { width: 100%; box-sizing: border-box; padding: 4px; border: 1px solid #bdc1c6; border-radius: 4px; font-size: 12px; }
-    button { margin: 6px 4px 0 0; padding: 5px 9px; border: 0; border-radius: 4px; background: #1a73e8; color: #fff; cursor: pointer; }
-    button.secondary { background: #5f6368; }
-    button.reject { background: #b3261e; }
-    .hint { color: #5f6368; font-size: 11px; margin-top: 2px; }
-    .request { border: 1px solid #dadce0; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
-    .request.is-stale { border-color: #e37400; background: #fef7e0; }
-    .request-head { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
-    .request-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; margin: 6px 0; }
-    .field-label { color: #5f6368; font-size: 11px; }
-    .field-value { word-break: break-word; }
-    .status-PENDING { color: #1a73e8; }
-    .status-STALE { color: #b06000; }
-    .status-APPROVED { color: #137333; }
-    .status-REJECTED, .status-RETURNED { color: #b3261e; }
-    #status { margin-top: 10px; padding: 8px; border-radius: 4px; display: none; white-space: pre-wrap; }
-    #status.loading { display: block; background: #e8f0fe; }
-    #status.error { display: block; background: #fce8e6; color: #b3261e; }
-    #status.ok { display: block; background: #e6f4ea; color: #137333; }
-    .lang-switch { display: flex; align-items: center; gap: 4px; justify-content: flex-end; margin-bottom: 6px; font-size: 11px; }
-    .lang-label { color: #5f6368; }
-    .lang-option { margin: 0; padding: 2px 6px; background: #f1f3f4; color: #202124; border-radius: 4px; }
-    .lang-option.is-active { background: #1a73e8; color: #fff; }
-    .lang-sep { color: #bdc1c6; }
+    :root {
+      --bg: #F4F6F8;
+      --surface: #FFFFFF;
+      --surface-soft: #F8FAFB;
+      --text: #27333E;
+      --text-soft: #526170;
+      --muted: #526170;
+      --accent: #365F7D;
+      --accent-hover: #294D68;
+      --accent-soft: #EAF1F6;
+      --border: #D7DEE5;
+      --green: #287348;
+      --green-soft: #EAF4ED;
+      --amber: #8C5A15;
+      --amber-soft: #FBF3E6;
+      --red: #A83E3A;
+      --red-soft: #F9ECEB;
+      --radius: 8px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", "Meiryo", system-ui, sans-serif;
+      font-size: 13px; line-height: 1.55; margin: 0; padding: 10px 10px 24px;
+      background: var(--bg); color: var(--text);
+    }
+    h1 { font-size: 15px; margin: 0 0 8px; font-weight: 600; }
+    fieldset {
+      border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
+      margin: 0 0 12px; padding: 10px 12px 12px;
+    }
+    legend { font-size: 14px; font-weight: 600; padding: 0 6px; }
+    label { display: block; margin: 10px 0 3px; font-size: 13px; color: var(--text-soft); }
+    input, select, textarea {
+      width: 100%; padding: 8px 9px; font-size: 14px; font-family: inherit; color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px; background: var(--surface); min-height: 38px;
+    }
+    button {
+      margin-top: 10px; padding: 10px 12px; min-height: 40px; font-size: 14px; font-family: inherit;
+      border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent);
+      color: #fff; cursor: pointer;
+    }
+    button:hover { background: var(--accent-hover); }
+    button.secondary { background: var(--surface-soft); color: var(--text-soft); border-color: var(--border); }
+    button.reject { background: var(--surface-soft); color: var(--red); border-color: var(--border); }
+    button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .row { display: flex; gap: 8px; }
+    .row > * { flex: 1; }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    #status { margin-top: 4px; padding: 9px 10px; border-radius: 6px; display: none; white-space: pre-wrap; }
+    #status.loading { display: block; background: var(--accent-soft); color: var(--text); }
+    #status.error { display: block; background: var(--red-soft); color: var(--red); }
+    #status.ok { display: block; background: var(--green-soft); color: var(--green); }
+    .lang-switch { display: flex; align-items: center; gap: 6px; justify-content: flex-end; margin-bottom: 8px; font-size: 12px; }
+    .lang-label { color: var(--muted); }
+    .lang-option {
+      margin: 0; padding: 4px 8px; background: var(--surface-soft); color: var(--text-soft);
+      border: 1px solid var(--border); border-radius: 6px; font-size: 12px; min-height: 28px;
+    }
+    .lang-option.is-active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .lang-sep { color: var(--border); }
+
+    .request {
+      border: 1px solid var(--border); border-left: 4px solid var(--border);
+      border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; background: var(--surface-soft);
+    }
+    .request.is-stale { border-left-color: var(--amber); background: var(--amber-soft); }
+    .req-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .req-type { font-size: 14px; font-weight: 600; }
+    .status-badge {
+      display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text-soft); white-space: nowrap;
+    }
+    .status-PENDING { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+    .status-STALE { border-color: var(--amber); background: var(--amber-soft); color: var(--amber); }
+    .status-APPROVED { border-color: var(--green); background: var(--green-soft); color: var(--green); }
+    .status-REJECTED, .status-RETURNED { border-color: var(--red); background: var(--red-soft); color: var(--red); }
+    .req-project { margin-top: 6px; font-weight: 600; }
+    .req-task { color: var(--text-soft); }
+    .req-dates { margin: 8px 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+    .req-dates dt { font-size: 12px; color: var(--muted); }
+    .req-dates dd { margin: 0; font-weight: 600; }
+    .req-diff.is-later { color: var(--amber); }
+    .req-diff.is-earlier { color: var(--green); }
+    .req-line { margin-top: 8px; }
+    .req-line .label { display: block; font-size: 12px; color: var(--muted); }
+    .req-explanation { margin-top: 8px; white-space: pre-wrap; word-break: break-word; }
+    .req-meta { margin-top: 8px; font-size: 12px; color: var(--muted); }
+    .req-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .req-actions button { flex: 1 1 auto; }
+    .history-row { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+    .history-row:last-child { border-bottom: 0; }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
   </style>
 </head>
 <body>
@@ -40,14 +103,20 @@
   <?!= include('UiSafe') ?>
   <?!= include('UiLang') ?>
 
+  <h1 data-i18n="manager.requests.legend">申請一覧 / 承認待ち</h1>
+
   <fieldset>
-    <legend data-i18n="manager.requests.legend">申請一覧 / 承認待ち</legend>
     <div class="hint" data-i18n="manager.requests.hint">承認すると期限が更新され、予定開始日を再計算し、旧日程確認と割当承認を無効化します。却下・差戻しは期限を変更しません。</div>
     <div class="hint" data-i18n="manager.requests.autoImportHint">画面を開くと新しい申請を自動で取り込みます。取り込めない場合は下のボタンで再試行してください。</div>
     <div class="row">
-      <button id="import" data-i18n="manager.requests.sync">申請を取り込む</button>
-      <button id="refresh" class="secondary" data-i18n="common.retry">再試行</button>
+      <button id="import" type="button" data-i18n="manager.requests.sync">申請を取り込む</button>
+      <button id="refresh" type="button" class="secondary" data-i18n="common.retry">再試行</button>
     </div>
+    <label for="requestFilter" data-i18n="manager.requests.filter">表示する申請</label>
+    <select id="requestFilter">
+      <option value="pending" data-i18n="manager.requests.pendingOnly">承認待ちのみ</option>
+      <option value="all" data-i18n="manager.requests.all">すべて</option>
+    </select>
     <div class="hint" id="summary"></div>
     <div class="hint" id="importNote"></div>
     <div id="requests"></div>
@@ -61,7 +130,7 @@
   <div id="status"></div>
 
   <script>
-    var state = {data: null};
+    var state = {data: null, includeDecided: false};
 
     function T(key, vars) { return EHLang.t(key, vars); }
     function byId(id) { return document.getElementById(id); }
@@ -83,23 +152,28 @@
     }
 
     function load() {
-      call('uiRequests', {includeDecided: false}, function (data) {
+      call('uiRequests', {includeDecided: state.includeDecided === true}, function (data) {
         state.data = data;
         render();
       });
     }
 
-    function field(label, value) {
-      var wrap = EH.element('div');
-      EH.append(wrap, 'div', label, 'field-label');
-      EH.append(wrap, 'div', value === '' || value === null || value === undefined ? T('common.none') : value, 'field-value');
-      return wrap;
-    }
+    function text(value) { return value === '' || value === null || value === undefined ? T('common.none') : String(value); }
 
     function difference(request) {
-      if (request.differenceDays === null || request.differenceDays === undefined) return T('common.none');
+      if (request.differenceDays === null || request.differenceDays === undefined) return {text: T('common.none'), className: ''};
       var value = Number(request.differenceDays);
-      return (value > 0 ? '+' : '') + value + T('manager.requests.daysSuffix');
+      return {
+        text: (value > 0 ? '+' : '') + value + T('manager.requests.daysSuffix'),
+        className: value > 0 ? 'is-later' : (value < 0 ? 'is-earlier' : '')
+      };
+    }
+
+    /** A dated cell is shown as a date; the technical timestamp stays in the small meta line. */
+    function day(value) {
+      if (!value) return T('common.none');
+      var match = /^\d{4}-\d{2}-\d{2}/.exec(String(value));
+      return match ? match[0] : String(value);
     }
 
     function decide(request, action) {
@@ -113,35 +187,53 @@
       }, function () { load(); });
     }
 
+    function datePair(label, value, className) {
+      var wrap = EH.element('div');
+      EH.append(wrap, 'dt', label);
+      EH.append(wrap, 'dd', text(value), className || '');
+      return wrap;
+    }
+
+    function line(label, value, className) {
+      var wrap = EH.element('div', 'req-line' + (className ? ' ' + className : ''));
+      EH.append(wrap, 'span', label, 'label');
+      EH.append(wrap, 'span', text(value));
+      return wrap;
+    }
+
     function renderRequest(request) {
       var card = EH.element('div', 'request' + (request.stale ? ' is-stale' : ''));
-      var head = EH.element('div', 'request-head');
-      EH.append(head, 'span', T('manager.requests.' + (request.type === 'COMPLETION_REPORT' ? 'type.COMPLETION_REPORT' : 'type.DEADLINE_CHANGE')) +
-        ' — ' + request.requestId);
-      EH.append(head, 'span', T('request.status.' + request.status), 'status-' + request.status);
+      var head = EH.element('div', 'req-head');
+      EH.append(head, 'span', T('manager.requests.type.' +
+        (request.type === 'COMPLETION_REPORT' ? 'COMPLETION_REPORT' : 'DEADLINE_CHANGE')), 'req-type');
+      EH.append(head, 'span', T('request.status.' + request.status), 'status-badge status-' + request.status);
       card.appendChild(head);
 
-      var grid = EH.element('div', 'request-grid');
-      grid.appendChild(field(T('manager.requests.project'), request.projectName + (request.projectId ? ' (' + request.projectId + ')' : '')));
-      grid.appendChild(field(T('manager.requests.task'), request.taskName + (request.taskId ? ' (' + request.taskId + ')' : '')));
-      grid.appendChild(field(T('manager.requests.owner'), request.ownerName));
-      grid.appendChild(field(T('manager.requests.requester'), request.requesterName));
+      // Priority order from the specification: type, project, task, deadlines, reason, requester.
+      EH.append(card, 'div', request.projectName || T('common.none'), 'req-project');
+      EH.append(card, 'div', request.taskName || T('common.none'), 'req-task');
+
+      var dates = EH.element('dl', 'req-dates');
+      var diff = difference(request);
+      dates.appendChild(datePair(T('manager.requests.currentDeadline'), day(request.currentDeadline)));
       if (request.type === 'DEADLINE_CHANGE') {
-        grid.appendChild(field(T('manager.requests.currentDeadline'), request.currentDeadline));
-        grid.appendChild(field(T('manager.requests.requestedDeadline'), request.requestedDeadline));
-        grid.appendChild(field(T('manager.requests.difference'), difference(request)));
-        grid.appendChild(field(T('manager.requests.reason'), request.reason));
-        grid.appendChild(field(T('manager.requests.explanation'), request.explanation));
+        dates.appendChild(datePair(T('manager.requests.requestedDeadline'), day(request.requestedDeadline)));
       } else {
-        grid.appendChild(field(T('manager.requests.currentDeadline'), request.currentDeadline));
-        grid.appendChild(field(T('request.completion.note'), request.completionNote));
-        grid.appendChild(field(T('manager.requests.submittedAt'), request.submittedAt));
+        dates.appendChild(datePair(T('request.completion.reported'), day(request.reportedCompletionAt)));
       }
-      grid.appendChild(field(T('manager.requests.submittedAt'), request.submittedAt));
-      card.appendChild(grid);
+      dates.appendChild(datePair(T('manager.requests.difference'), diff.text, 'req-diff ' + diff.className));
+      card.appendChild(dates);
+
+      if (request.type === 'DEADLINE_CHANGE') {
+        card.appendChild(line(T('manager.requests.reason'), request.reason));
+        card.appendChild(line(T('manager.requests.explanation'), request.explanation, 'req-explanation'));
+      } else {
+        card.appendChild(line(T('request.completion.note'), request.completionNote, 'req-explanation'));
+      }
+      card.appendChild(line(T('manager.requests.requester'), request.requesterName));
 
       if (request.stale) {
-        EH.append(card, 'div', T('manager.requests.stale'), 'hint');
+        EH.append(card, 'div', T('manager.requests.staleNote'), 'hint');
       }
 
       if (request.status === 'PENDING' || request.status === 'STALE') {
@@ -149,20 +241,32 @@
         noteLabel.setAttribute('for', 'note-' + request.requestId);
         var note = EH.element('input');
         note.id = 'note-' + request.requestId;
+        note.setAttribute('id', 'note-' + request.requestId);
         card.appendChild(note);
-        var approve = EH.append(card, 'button', T('manager.requests.approve'));
+        var actions = EH.element('div', 'req-actions');
+        var approve = EH.append(actions, 'button', T('manager.requests.approve'));
         approve.setAttribute('type', 'button');
         approve.addEventListener('click', function () { decide(request, 'APPROVE'); });
-        var reject = EH.append(card, 'button', T('manager.requests.reject'), 'reject');
+        var reject = EH.append(actions, 'button', T('manager.requests.reject'), 'reject');
         reject.setAttribute('type', 'button');
         reject.addEventListener('click', function () { decide(request, 'REJECT'); });
-        var returned = EH.append(card, 'button', T('manager.requests.return'), 'secondary');
+        var returned = EH.append(actions, 'button', T('manager.requests.return'), 'secondary');
         returned.setAttribute('type', 'button');
         returned.addEventListener('click', function () { decide(request, 'RETURN'); });
+        card.appendChild(actions);
       } else {
-        EH.append(card, 'div', T('manager.requests.decisionNote') + ': ' + (request.decisionNote || T('common.none')), 'hint');
-        EH.append(card, 'div', T('manager.requests.submittedAt') + ': ' + (request.decidedAt || T('common.none')), 'hint');
+        card.appendChild(line(T('manager.requests.decisionNote'), request.decisionNote));
       }
+
+      // Technical identifiers and timestamps stay secondary.
+      var meta = [
+        request.requestId,
+        request.projectId || '',
+        request.taskId || '',
+        T('manager.requests.submittedAt') + ' ' + text(request.submittedAt),
+        request.decidedAt ? T('manager.requests.decidedAt') + ' ' + request.decidedAt : ''
+      ].filter(Boolean).join(' · ');
+      EH.append(card, 'div', meta, 'req-meta');
       return card;
     }
 
@@ -177,16 +281,14 @@
       }) + (data.configured ? '' : ' ' + T('manager.requests.inboxMissing'));
       var imported = data.imported || null;
       var note = byId('importNote');
+      note.className = 'hint';
       if (data.importError) {
-        note.className = 'hint';
         note.textContent = T('manager.requests.importFailed', {message: EHLang.serverMessage(data.importError)});
       } else if (imported && imported.imported) {
-        note.className = 'hint';
         note.textContent = T('manager.requests.imported', {
           imported: imported.imported, skipped: imported.skipped || 0, rejected: imported.rejected || 0
         });
       } else {
-        note.className = 'hint';
         note.textContent = '';
       }
       if (!data.requests.length) {
@@ -202,7 +304,8 @@
       } else {
         data.history.forEach(function (row) {
           EH.append(history, 'div', row.previousDeadline + ' → ' + row.newDeadline + '  ' +
-            (row.previousStart || '-') + ' → ' + (row.newStart || '-') + '  ' + row.changedAt + '  ' + (row.changedBy || ''));
+            (row.previousStart || '-') + ' → ' + (row.newStart || '-') + '  ' + row.changedAt + '  ' + (row.changedBy || ''),
+            'history-row');
         });
       }
     }
@@ -214,6 +317,10 @@
       });
     });
     byId('refresh').addEventListener('click', load);
+    byId('requestFilter').addEventListener('change', function () {
+      state.includeDecided = byId('requestFilter').value === 'all';
+      load();
+    });
 
     EHLang.wire(function () { render(); });
     load();

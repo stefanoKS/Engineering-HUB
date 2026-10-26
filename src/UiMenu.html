@@ -4,31 +4,130 @@
   <base target="_top">
   <meta charset="utf-8">
   <style>
-    body { font-family: "Hiragino Sans", "Yu Gothic", sans-serif; font-size: 12px; margin: 8px; color: #202124; }
-    h2 { font-size: 14px; margin: 12px 0 6px; }
-    fieldset { border: 1px solid #dadce0; border-radius: 6px; margin: 0 0 10px; padding: 8px; }
-    legend { font-weight: 600; padding: 0 4px; }
-    label { display: block; margin: 6px 0 2px; }
-    input, select, textarea { width: 100%; box-sizing: border-box; padding: 4px; border: 1px solid #bdc1c6; border-radius: 4px; font-size: 12px; }
-    textarea { min-height: 44px; }
-    button { margin-top: 8px; padding: 6px 10px; border: 0; border-radius: 4px; background: #1a73e8; color: #fff; cursor: pointer; }
-    button.secondary { background: #5f6368; }
-    #status { margin-top: 10px; padding: 8px; border-radius: 4px; display: none; white-space: pre-wrap; }
-    #status.loading { display: block; background: #e8f0fe; }
-    #status.error { display: block; background: #fce8e6; color: #b3261e; }
-    #status.ok { display: block; background: #e6f4ea; color: #137333; }
-    .hint { color: #5f6368; font-size: 11px; margin-top: 2px; }
-    .row { display: flex; gap: 6px; }
+    :root {
+      --bg: #F4F6F8;
+      --surface: #FFFFFF;
+      --surface-soft: #F8FAFB;
+      --text: #27333E;
+      --text-soft: #526170;
+      --muted: #526170;
+      --accent: #365F7D;
+      --accent-hover: #294D68;
+      --accent-soft: #EAF1F6;
+      --border: #D7DEE5;
+      --green: #287348;
+      --green-soft: #EAF4ED;
+      --amber: #8C5A15;
+      --amber-soft: #FBF3E6;
+      --red: #A83E3A;
+      --red-soft: #F9ECEB;
+      --radius: 8px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", "Meiryo", system-ui, sans-serif;
+      font-size: 13px; line-height: 1.55; margin: 0; padding: 10px 10px 24px;
+      background: var(--bg); color: var(--text);
+    }
+    h1 { font-size: 15px; margin: 0; font-weight: 600; }
+    h2 { font-size: 14px; margin: 0 0 8px; font-weight: 600; }
+    p { margin: 0; }
+    .app-head { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    #actor { font-size: 12px; color: var(--muted); }
+    .lang-switch { display: flex; align-items: center; gap: 6px; justify-content: flex-end; font-size: 12px; }
+    .lang-label { color: var(--muted); }
+    .lang-option {
+      margin: 0; padding: 4px 8px; background: var(--surface-soft); color: var(--text-soft);
+      border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 12px;
+      min-height: 28px;
+    }
+    .lang-option.is-active { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .lang-sep { color: var(--border); }
+
+    .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+    .tab {
+      flex: 1; padding: 9px 4px; min-height: 40px; font-size: 14px; cursor: pointer;
+      background: var(--surface); color: var(--text-soft);
+      border: 1px solid var(--border); border-radius: var(--radius);
+    }
+    .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+    .tab:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible,
+    textarea:focus-visible, summary:focus-visible, a:focus-visible {
+      outline: 2px solid var(--accent); outline-offset: 2px;
+    }
+
+    .view[hidden] { display: none; }
+    fieldset {
+      border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
+      margin: 0 0 12px; padding: 10px 12px 12px;
+    }
+    legend { font-size: 14px; font-weight: 600; padding: 0 6px; color: var(--text); }
+    label { display: block; margin: 10px 0 3px; font-size: 13px; color: var(--text-soft); }
+    label.inline { display: flex; align-items: center; gap: 6px; color: var(--text); }
+    label.inline input { width: auto; }
+    input, select, textarea {
+      width: 100%; padding: 8px 9px; font-size: 14px; color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px; background: var(--surface);
+      font-family: inherit; min-height: 38px;
+    }
+    textarea { min-height: 68px; resize: vertical; }
+    button {
+      margin-top: 10px; padding: 11px 12px; min-height: 42px; font-size: 14px; font-family: inherit;
+      border: 1px solid var(--accent); border-radius: var(--radius); background: var(--accent);
+      color: #fff; cursor: pointer;
+    }
+    button:hover { background: var(--accent-hover); }
+    button.secondary { background: var(--surface-soft); color: var(--text-soft); border-color: var(--border); }
+    button.secondary:hover { background: var(--accent-soft); color: var(--text); }
+    button.danger { background: var(--surface-soft); color: var(--red); border-color: var(--border); }
+    button.danger:hover { background: var(--red-soft); }
+    button:disabled { opacity: 0.6; cursor: default; }
+    .row { display: flex; gap: 8px; }
     .row > * { flex: 1; }
-    #actor { font-size: 11px; color: #5f6368; }
-    .plan-preview { margin-top: 6px; padding: 6px; border-radius: 4px; background: #f1f3f4; font-weight: 600; }
-    .warnings { margin: 6px 0 0; padding-left: 18px; color: #b06000; }
+    .row.tight button { margin-top: 0; }
+    .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .plan-preview {
+      margin-top: 8px; padding: 8px 10px; border-radius: 6px;
+      background: var(--accent-soft); color: var(--text); font-weight: 600; font-size: 13px;
+    }
+    .warnings { margin: 8px 0 0; padding-left: 18px; color: var(--amber); font-size: 12px; }
     .warnings:empty { display: none; }
-    .lang-switch { display: flex; align-items: center; gap: 4px; justify-content: flex-end; margin-bottom: 6px; font-size: 11px; }
-    .lang-label { color: #5f6368; }
-    .lang-option { margin: 0; padding: 2px 6px; background: #f1f3f4; color: #202124; border-radius: 4px; }
-    .lang-option.is-active { background: #1a73e8; color: #fff; }
-    .lang-sep { color: #bdc1c6; }
+    details.section { border: 1px solid var(--border); border-radius: 6px; background: var(--surface-soft); margin-top: 12px; padding: 0 10px; }
+    details.section > summary { cursor: pointer; padding: 9px 0; font-size: 13px; font-weight: 600; color: var(--text-soft); }
+    details.section[open] > summary { color: var(--text); }
+    #status { margin-top: 4px; padding: 9px 10px; border-radius: 6px; display: none; white-space: pre-wrap; font-size: 13px; }
+    #status.loading { display: block; background: var(--accent-soft); color: var(--text); }
+    #status.error { display: block; background: var(--red-soft); color: var(--red); }
+    #status.ok { display: block; background: var(--green-soft); color: var(--green); }
+
+    .list { border: 1px solid var(--border); border-radius: 6px; background: var(--surface-soft); }
+    .list-item { padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .list-item:last-child { border-bottom: 0; }
+    .list-item .meta { display: block; color: var(--muted); font-size: 12px; }
+    .badge {
+      display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 11px;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text-soft);
+    }
+    .badge.is-active { border-color: var(--green); background: var(--green-soft); color: var(--green); }
+    .badge.is-retired { border-color: var(--muted); background: var(--surface-soft); color: var(--muted); }
+    .badge.is-warn { border-color: var(--amber); background: var(--amber-soft); color: var(--amber); }
+
+    .tree { border: 1px solid var(--border); border-radius: 6px; background: var(--surface-soft); }
+    .tree-row {
+      display: flex; align-items: center; gap: 6px; width: 100%; margin: 0; padding: 9px 10px;
+      min-height: 38px; text-align: left; background: transparent; color: var(--text);
+      border: 0; border-bottom: 1px solid var(--border); border-radius: 0; font-size: 13px; cursor: pointer;
+    }
+    .tree-row:hover { background: var(--accent-soft); }
+    .tree-row.is-selected { background: var(--accent-soft); font-weight: 600; }
+    .tree-row.is-child { padding-left: 26px; }
+    .tree-row.is-archived { color: var(--muted); }
+    .tree-mark { color: var(--muted); font-size: 12px; }
+
+    .actions { display: flex; flex-wrap: wrap; gap: 6px; }
+    .actions button { flex: 1 1 auto; margin-top: 0; }
+    .section-title { font-size: 13px; font-weight: 600; margin: 12px 0 6px; color: var(--text-soft); }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
   </style>
 </head>
 <body>
@@ -36,139 +135,224 @@
   <?!= include('UiSafe') ?>
   <?!= include('UiLang') ?>
 
-  <div id="actor" data-i18n="manager.loading">読み込み中...</div>
+  <div class="app-head">
+    <h1 data-i18n="app.name">設計・開発課 管理</h1>
+    <div id="actor" data-i18n="manager.loading">読み込み中...</div>
+  </div>
 
-  <fieldset>
-    <legend data-i18n="manager.project.legend">プロジェクト作成 / 編集</legend>
-    <label data-i18n="manager.project.pick">編集するプロジェクト</label>
-    <select id="projectPick"></select>
-    <div class="hint" data-i18n="manager.project.editHint">既存の案件を選ぶと編集できます。案件IDは変更されません。</div>
-    <label data-i18n="manager.project.name">プロジェクト名 *</label><input id="projectName">
-    <label data-i18n="manager.project.owner">責任者</label><select id="projectOwner"></select>
-    <div class="hint" data-i18n="manager.project.ownerDefault">未選択の場合は自分のメンバーIDが責任者になります。</div>
-    <label data-i18n="manager.project.category">カテゴリ</label><input id="projectCategory">
-    <label data-i18n="manager.project.deadline">確定期限</label><input id="projectDeadline" type="date">
-    <label data-i18n="manager.project.status">状態</label>
-    <select id="projectStatus">
-      <option value="Planned" data-i18n="manager.status.Planned">計画中</option>
-      <option value="Active" data-i18n="manager.status.Active">進行中</option>
-      <option value="On Hold" data-i18n="manager.status.On Hold">保留</option>
-      <option value="Completed" data-i18n="manager.status.Completed">完了</option>
-      <option value="Cancelled" data-i18n="manager.status.Cancelled">中止</option>
-    </select>
-    <label data-i18n="manager.project.visibility">社内ダッシュボードに表示する</label>
-    <select id="projectVisibility">
-      <option value="RESTRICTED" selected data-i18n="manager.project.visibility.RESTRICTED">表示しない（社内のみ）</option>
-      <option value="INTERNAL" data-i18n="manager.project.visibility.INTERNAL">表示する（社内ダッシュボード）</option>
-    </select>
-    <div class="hint" data-i18n="manager.project.visibilityHint">「表示する」を選んだ案件だけが共有ダッシュボードに公開されます。</div>
-    <label data-i18n="manager.project.summary">共有用概要</label><textarea id="projectSummary"></textarea>
-    <div class="hint" data-i18n="manager.project.summaryHint">共有用概要だけが公開されます。説明・完了条件・社内メモは公開されません。</div>
-    <label data-i18n="manager.project.description">説明（社内のみ）</label><textarea id="projectDescription"></textarea>
-    <button id="projectSubmit" onclick="saveProject()" data-i18n="manager.project.create">作成</button>
-    <button class="secondary" onclick="publishDashboard()" data-i18n="manager.project.publish">共有ダッシュボードを今すぐ公開</button>
-    <div class="hint" id="visibilityNote" hidden data-i18n="manager.project.updated">変更内容は次回のダッシュボード公開時に反映されます。</div>
-  </fieldset>
+  <nav class="tabs" id="tabs" role="tablist" data-i18n-aria="manager.nav.group" aria-label="画面の切替">
+    <button type="button" class="tab" id="tab-project" role="tab" data-view="project"
+            aria-selected="true" aria-controls="view-project" data-i18n="manager.nav.project">案件</button>
+    <button type="button" class="tab" id="tab-task" role="tab" data-view="task"
+            aria-selected="false" aria-controls="view-task" data-i18n="manager.nav.task">タスク</button>
+    <button type="button" class="tab" id="tab-admin" role="tab" data-view="admin"
+            aria-selected="false" aria-controls="view-admin" data-i18n="manager.nav.admin">管理</button>
+  </nav>
 
-  <fieldset>
-    <legend data-i18n="manager.subproject.legend">サブプロジェクト作成</legend>
-    <label data-i18n="manager.subproject.project">プロジェクト *</label><select id="subProject"></select>
-    <label data-i18n="manager.subproject.name">サブプロジェクト名 *</label><input id="subName">
-    <label data-i18n="manager.subproject.owner">担当者</label><select id="subOwner"></select>
-    <button onclick="createSubproject()" data-i18n="manager.subproject.create">作成</button>
-  </fieldset>
+  <section class="view" id="view-project" role="tabpanel" aria-labelledby="tab-project">
+    <fieldset>
+      <legend data-i18n="manager.project.legend">プロジェクト作成 / 編集</legend>
+      <label for="projectPick" data-i18n="manager.project.pick">編集するプロジェクト</label>
+      <select id="projectPick"></select>
+      <div class="hint" data-i18n="manager.project.editHint">既存の案件を選ぶと編集できます。案件IDは変更されません。</div>
 
-  <fieldset>
-    <legend data-i18n="manager.task.legend">タスク割当 / 編集（完了期限と必要期間から開始日を計算）</legend>
-    <label data-i18n="manager.task.pick">編集するタスク</label>
-    <select id="taskPick"></select>
-    <div class="hint" data-i18n="manager.task.editHint">既存のタスクを選ぶと編集できます。タスクIDは変更されません。</div>
-    <div class="hint" id="taskProgressNote"></div>
-    <label data-i18n="manager.task.project">プロジェクト *</label><select id="taskProject"></select>
-    <label data-i18n="manager.task.subproject">サブプロジェクト（任意）</label><select id="taskSubproject"></select>
-    <label data-i18n="manager.task.name">タスク名 *</label><input id="taskName">
-    <label data-i18n="manager.task.owner">担当者 *</label><select id="taskOwner"></select>
-    <label data-i18n="manager.task.deadline">完了期限 *</label><input id="taskDeadline" type="date">
-    <label data-i18n="manager.task.duration">必要期間</label><input id="taskDuration" type="number" min="1" step="1">
-    <div class="row">
-      <div>
-        <label data-i18n="manager.task.unit">単位</label>
-        <select id="taskUnit">
-          <option value="DAY" data-i18n="manager.task.unit.DAY">日</option>
-          <option value="WEEK" data-i18n="manager.task.unit.WEEK">週</option>
+      <label for="projectName" data-i18n="manager.project.name">プロジェクト名 *</label><input id="projectName">
+      <label for="projectResponsibility" data-i18n="manager.project.responsibility">担当領域</label>
+      <select id="projectResponsibility"></select>
+      <div class="hint" data-i18n="manager.project.responsibilityHint">担当領域は案件の分類です。カテゴリとは別に管理されます。</div>
+      <label for="projectOwner" data-i18n="manager.project.owner">責任者</label><select id="projectOwner"></select>
+      <div class="hint" data-i18n="manager.project.ownerDefault">新規作成で未選択の場合は自分が責任者になります。編集中は変更しなければ現在の責任者が保持されます。</div>
+      <label for="projectDeadline" data-i18n="manager.project.deadline">確定期限</label><input id="projectDeadline" type="date">
+      <label for="projectStatus" data-i18n="manager.project.status">状態</label>
+      <select id="projectStatus">
+        <option value="Planned" data-i18n="manager.status.Planned">計画中</option>
+        <option value="Active" data-i18n="manager.status.Active">進行中</option>
+        <option value="On Hold" data-i18n="manager.status.On Hold">保留</option>
+        <option value="Completed" data-i18n="manager.status.Completed">完了</option>
+        <option value="Cancelled" data-i18n="manager.status.Cancelled">中止</option>
+      </select>
+      <div class="hint" id="responsibilityNote" hidden></div>
+
+      <details class="section" id="projectDetail">
+        <summary data-i18n="manager.detail.toggle">詳細設定</summary>
+        <div class="hint" data-i18n="manager.detail.hint">通常は変更しません。閉じたままの項目は保存済みの値が保持されます。</div>
+        <label for="projectCategory" data-i18n="manager.project.category">カテゴリ</label><input id="projectCategory">
+        <label for="projectPriority" data-i18n="manager.project.priority">優先度</label>
+        <select id="projectPriority">
+          <option value="Low">Low</option>
+          <option value="Medium" selected>Medium</option>
+          <option value="High">High</option>
+          <option value="Critical">Critical</option>
         </select>
-      </div>
-      <div>
-        <label data-i18n="manager.task.basis">計算方法</label>
-        <select id="taskBasis">
-          <option value="WORKING_DAYS" data-i18n="manager.task.basis.WORKING_DAYS">営業日</option>
-          <option value="CALENDAR_DAYS" data-i18n="manager.task.basis.CALENDAR_DAYS">暦日</option>
+        <label for="projectVisibility" data-i18n="manager.project.visibility">社内ダッシュボードに表示する</label>
+        <select id="projectVisibility">
+          <option value="RESTRICTED" selected data-i18n="manager.project.visibility.RESTRICTED">表示しない（社内のみ）</option>
+          <option value="INTERNAL" data-i18n="manager.project.visibility.INTERNAL">表示する（社内ダッシュボード）</option>
         </select>
+        <div class="hint" data-i18n="manager.project.visibilityHint">「表示する」を選んだ案件だけが共有ダッシュボードに公開されます。</div>
+        <label for="projectSummary" data-i18n="manager.project.summary">共有用概要</label><textarea id="projectSummary"></textarea>
+        <div class="hint" data-i18n="manager.project.summaryHint">共有用概要だけが公開されます。説明・完了条件・社内メモは公開されません。</div>
+        <label for="projectDescription" data-i18n="manager.project.description">説明（社内のみ）</label><textarea id="projectDescription"></textarea>
+      </details>
+
+      <button id="projectSubmit" onclick="saveProject()" data-i18n="manager.project.create">作成</button>
+      <button class="secondary" onclick="publishDashboard()" data-i18n="manager.project.publish">共有ダッシュボードを今すぐ公開</button>
+      <div class="hint" id="visibilityNote" hidden data-i18n="manager.project.updated">変更内容は次回のダッシュボード公開時に反映されます。</div>
+    </fieldset>
+
+    <fieldset>
+      <legend data-i18n="manager.subproject.tree">サブプロジェクト構成</legend>
+      <div class="tree" id="subprojectTree"></div>
+      <div class="hint" data-i18n="manager.subproject.nested">階層（2階層まで）</div>
+
+      <label for="subPick" data-i18n="manager.subproject.pick">編集するサブプロジェクト</label>
+      <select id="subPick"></select>
+      <label for="subProject" data-i18n="manager.subproject.project">プロジェクト *</label><select id="subProject"></select>
+      <label for="subParent" data-i18n="manager.subproject.parent">親サブプロジェクト</label><select id="subParent"></select>
+      <label for="subName" data-i18n="manager.subproject.name">サブプロジェクト名 *</label><input id="subName">
+      <label for="subOwner" data-i18n="manager.subproject.owner">担当者</label><select id="subOwner"></select>
+      <div class="row tight">
+        <button id="subSubmit" onclick="saveSubproject()" data-i18n="manager.subproject.create">作成</button>
+        <button class="secondary" onclick="addChildSubproject()" data-i18n="manager.subproject.addChild">子サブプロジェクトを追加</button>
       </div>
-    </div>
-    <div class="plan-preview" id="planPreview" data-i18n="manager.task.planEmpty">完了期限と必要期間を入力すると開始予定日を計算します。</div>
-    <ul class="warnings" id="planWarnings"></ul>
-    <label id="ackWrap" hidden><input id="taskAck" type="checkbox" style="width:auto"> <span data-i18n="manager.task.acknowledge">期限が稼働日でないことを確認しました</span></label>
-    <label data-i18n="manager.task.estimate">見積工数（時間・任意）</label><input id="taskEstimate" type="number" min="0" step="0.5">
-    <div class="hint" data-i18n="manager.task.estimateHint">必要期間は稼働時間ではありません。1営業日＝8時間とは換算しません。</div>
-    <label data-i18n="manager.task.acceptance">完了条件</label><textarea id="taskAcceptance"></textarea>
-    <label data-i18n="manager.task.priority">優先度</label>
-    <select id="taskPriority">
-      <option>Low</option><option selected>Medium</option><option>High</option><option>Critical</option>
-    </select>
-    <label><input id="taskNotify" type="checkbox" style="width:auto"> <span data-i18n="manager.task.notify">メール通知を有効にする（送信は自動化設定に従います）</span></label>
-    <label><input id="taskApprove" type="checkbox" style="width:auto"> <span data-i18n="manager.task.approve">割当を承認する</span></label>
-    <label><input id="taskConfirm" type="checkbox" style="width:auto"> <span data-i18n="manager.task.confirm">日程を確定する（期限と見積が必要）</span></label>
-    <button id="taskSubmit" onclick="assignTask()" data-i18n="manager.task.submit">登録して確認</button>
-    <div class="hint" data-i18n="manager.task.hint">メールはUIから直接送信されません。承認済みの通知のみ、権限を持つアカウントの自動処理が送信します。</div>
-  </fieldset>
+      <div class="row tight">
+        <button class="secondary" onclick="archiveSubproject()" data-i18n="manager.subproject.archive">アーカイブ</button>
+        <button class="secondary" onclick="reactivateSubproject()" data-i18n="manager.subproject.reactivate">アーカイブ解除</button>
+      </div>
+      <div class="hint" data-i18n="manager.subproject.archiveHint">アーカイブしても子サブプロジェクトとタスクは削除されません。</div>
+    </fieldset>
+  </section>
 
-  <fieldset>
-    <legend data-i18n="manager.progress.legend">進捗更新</legend>
-    <label data-i18n="manager.progress.task">タスク *</label><select id="progressTask"></select>
-    <label data-i18n="manager.progress.value">進捗率 (0-100) *</label><input id="progressValue" type="number" min="0" max="100">
-    <label data-i18n="manager.progress.next">次のアクション</label><input id="progressNext">
-    <button onclick="updateProgress()" data-i18n="manager.progress.update">更新</button>
-    <div class="hint" data-i18n="manager.progress.hint">自分の担当タスクのみ更新できます（管理者は管理範囲内）。</div>
-  </fieldset>
+  <section class="view" id="view-task" role="tabpanel" aria-labelledby="tab-task" hidden>
+    <fieldset>
+      <legend data-i18n="manager.task.legend">タスク割当 / 編集（完了期限と必要期間から開始日を計算）</legend>
+      <label for="taskPick" data-i18n="manager.task.pick">編集するタスク</label>
+      <select id="taskPick"></select>
+      <div class="hint" data-i18n="manager.task.editHint">既存のタスクを選ぶと編集できます。タスクIDは変更されません。</div>
+      <div class="hint" id="taskProgressNote"></div>
 
-  <fieldset>
-    <legend data-i18n="manager.member.legend">メンバー</legend>
-    <div id="memberList" class="hint" data-i18n="manager.loading">読み込み中...</div>
-    <label data-i18n="manager.member.id">メンバーID（更新時）</label><input id="memberId">
-    <label data-i18n="manager.member.name">氏名 *</label><input id="memberName">
-    <label data-i18n="manager.member.email">メール *</label><input id="memberEmail">
-    <label data-i18n="manager.member.role">役割（ADMIN/MANAGERの変更はADMINのみ）</label>
-    <select id="memberRole"></select>
-    <label data-i18n="manager.member.capacity">週容量（時間）</label><input id="memberCapacity" type="number" min="0" step="0.5">
-    <div class="row">
-      <button onclick="saveMember()" data-i18n="common.save">保存</button>
-      <button class="secondary" onclick="deactivateMember()" data-i18n="manager.member.deactivate">無効化</button>
-    </div>
-  </fieldset>
+      <label for="taskProject" data-i18n="manager.task.project">プロジェクト *</label><select id="taskProject"></select>
+      <label for="taskSubproject" data-i18n="manager.task.subproject">所属（サブプロジェクト）</label><select id="taskSubproject"></select>
+      <label for="taskName" data-i18n="manager.task.name">タスク名 *</label><input id="taskName">
+      <label for="taskOwner" data-i18n="manager.task.owner">担当者 *</label><select id="taskOwner"></select>
+      <label for="taskDeadline" data-i18n="manager.task.deadline">完了期限 *</label><input id="taskDeadline" type="date">
+      <label for="taskDuration" data-i18n="manager.task.duration">必要期間</label><input id="taskDuration" type="number" min="1" step="1">
+      <div class="row">
+        <div>
+          <label for="taskUnit" data-i18n="manager.task.unit">単位</label>
+          <select id="taskUnit">
+            <option value="DAY" data-i18n="manager.task.unit.DAY">日</option>
+            <option value="WEEK" data-i18n="manager.task.unit.WEEK">週</option>
+          </select>
+        </div>
+        <div>
+          <label for="taskBasis" data-i18n="manager.task.basis">計算方法</label>
+          <select id="taskBasis">
+            <option value="WORKING_DAYS" data-i18n="manager.task.basis.WORKING_DAYS">営業日</option>
+            <option value="CALENDAR_DAYS" data-i18n="manager.task.basis.CALENDAR_DAYS">暦日</option>
+          </select>
+        </div>
+      </div>
+      <div class="plan-preview" id="planPreview" data-i18n="manager.task.planEmpty">完了期限と必要期間を入力すると開始予定日を計算します。</div>
+      <ul class="warnings" id="planWarnings"></ul>
+      <label id="ackWrap" hidden><input id="taskAck" type="checkbox" style="width:auto"> <span data-i18n="manager.task.acknowledge">期限が稼働日でないことを確認しました</span></label>
 
-  <fieldset>
-    <legend data-i18n="manager.skill.legend">スキル</legend>
-    <div id="skillList" class="hint" data-i18n="manager.loading">読み込み中...</div>
-    <label data-i18n="manager.skill.member">メンバー *</label><select id="skillMember"></select>
-    <label data-i18n="manager.skill.name">スキル *</label><select id="skillName"></select>
-    <label data-i18n="manager.skill.level">レベル (0-4) *</label><input id="skillLevel" type="number" min="0" max="4">
-    <label data-i18n="manager.skill.assessor">評価者</label><select id="skillAssessor"></select>
-    <label data-i18n="manager.skill.evidence">根拠・証跡</label><input id="skillEvidence">
-    <label data-i18n="manager.skill.review">次回レビュー日</label><input id="skillReview" type="date">
-    <button onclick="setSkill()" data-i18n="manager.skill.save">評価を保存</button>
-  </fieldset>
+      <details class="section" id="taskDetail">
+        <summary data-i18n="manager.detail.toggle">詳細設定</summary>
+        <div class="hint" data-i18n="manager.detail.hint">通常は変更しません。閉じたままの項目は保存済みの値が保持されます。</div>
+        <label for="taskEstimate" data-i18n="manager.task.estimate">見積工数（時間・任意）</label><input id="taskEstimate" type="number" min="0" step="0.5">
+        <div class="hint" data-i18n="manager.task.estimateHint">必要期間は稼働時間ではありません。1営業日＝8時間とは換算しません。</div>
+        <label for="taskAcceptance" data-i18n="manager.task.acceptance">完了条件</label><textarea id="taskAcceptance"></textarea>
+        <label for="taskPriority" data-i18n="manager.task.priority">優先度</label>
+        <select id="taskPriority">
+          <option>Low</option><option selected>Medium</option><option>High</option><option>Critical</option>
+        </select>
+        <label class="inline"><input id="taskNotify" type="checkbox"> <span data-i18n="manager.task.notify">メール通知を有効にする（送信は自動化設定に従います）</span></label>
+        <label class="inline"><input id="taskApprove" type="checkbox"> <span data-i18n="manager.task.approve">割当を承認する</span></label>
+        <label class="inline"><input id="taskConfirm" type="checkbox"> <span data-i18n="manager.task.confirm">日程を確定する（期限と見積が必要）</span></label>
+      </details>
+
+      <button id="taskSubmit" onclick="assignTask()" data-i18n="manager.task.submit">登録して確認</button>
+      <div class="hint" data-i18n="manager.task.hint">メールはUIから直接送信されません。承認済みの通知のみ、権限を持つアカウントの自動処理が送信します。</div>
+    </fieldset>
+
+    <fieldset>
+      <legend data-i18n="manager.progress.legend">進捗更新</legend>
+      <label for="progressTask" data-i18n="manager.progress.task">タスク *</label><select id="progressTask"></select>
+      <label for="progressValue" data-i18n="manager.progress.value">進捗率 (0-100) *</label><input id="progressValue" type="number" min="0" max="100">
+      <label for="progressNext" data-i18n="manager.progress.next">次のアクション</label><input id="progressNext">
+      <button onclick="updateProgress()" data-i18n="manager.progress.update">更新</button>
+      <div class="hint" data-i18n="manager.progress.hint">自分の担当タスクのみ更新できます（管理者は管理範囲内）。</div>
+    </fieldset>
+  </section>
+
+  <section class="view" id="view-admin" role="tabpanel" aria-labelledby="tab-admin" hidden>
+    <fieldset>
+      <legend data-i18n="manager.responsibility.legend">担当領域</legend>
+      <div class="section-title" data-i18n="manager.responsibility.list">担当領域の一覧</div>
+      <div class="list" id="respList" data-i18n="manager.loading">読み込み中...</div>
+
+      <label for="respPick" data-i18n="manager.responsibility.pick">編集する担当領域</label>
+      <select id="respPick"></select>
+      <label for="respName" data-i18n="manager.responsibility.name">担当領域名 *</label><input id="respName">
+      <label for="respDescription" data-i18n="manager.responsibility.description">説明（社内のみ）</label><textarea id="respDescription"></textarea>
+      <label for="respOwner" data-i18n="manager.responsibility.owner">責任者</label><select id="respOwner"></select>
+      <button id="respSubmit" onclick="saveResponsibility()" data-i18n="manager.responsibility.create">担当領域を追加</button>
+      <div class="row tight">
+        <button class="secondary" onclick="moveResponsibilityUp()" data-i18n="manager.responsibility.up">上へ</button>
+        <button class="secondary" onclick="moveResponsibilityDown()" data-i18n="manager.responsibility.down">下へ</button>
+      </div>
+      <div class="row tight">
+        <button class="danger" onclick="retireResponsibility()" data-i18n="manager.responsibility.retire">退職にする</button>
+        <button class="secondary" onclick="reactivateResponsibility()" data-i18n="manager.responsibility.reactivate">有効に戻す</button>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend data-i18n="manager.member.legend">メンバー</legend>
+      <div id="memberList" class="list" data-i18n="manager.loading">読み込み中...</div>
+      <label for="memberId" data-i18n="manager.member.id">メンバーID（更新時）</label><input id="memberId">
+      <label for="memberName" data-i18n="manager.member.name">氏名 *</label><input id="memberName">
+      <label for="memberEmail" data-i18n="manager.member.email">メール *</label><input id="memberEmail">
+      <label for="memberRole" data-i18n="manager.member.role">役割（ADMIN/MANAGERの変更はADMINのみ）</label>
+      <select id="memberRole"></select>
+      <label for="memberCapacity" data-i18n="manager.member.capacity">週容量（時間）</label><input id="memberCapacity" type="number" min="0" step="0.5">
+      <div class="row tight">
+        <button onclick="saveMember()" data-i18n="common.save">保存</button>
+        <button class="secondary" onclick="deactivateMember()" data-i18n="manager.member.deactivate">無効化</button>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend data-i18n="manager.skill.legend">スキル</legend>
+      <div id="skillList" class="list" data-i18n="manager.loading">読み込み中...</div>
+      <label for="skillMember" data-i18n="manager.skill.member">メンバー *</label><select id="skillMember"></select>
+      <label for="skillName" data-i18n="manager.skill.name">スキル *</label><select id="skillName"></select>
+      <label for="skillLevel" data-i18n="manager.skill.level">レベル (0-4) *</label><input id="skillLevel" type="number" min="0" max="4">
+      <label for="skillAssessor" data-i18n="manager.skill.assessor">評価者</label><select id="skillAssessor"></select>
+      <label for="skillEvidence" data-i18n="manager.skill.evidence">根拠・証跡</label><input id="skillEvidence">
+      <label for="skillReview" data-i18n="manager.skill.review">次回レビュー日</label><input id="skillReview" type="date">
+      <button onclick="setSkill()" data-i18n="manager.skill.save">評価を保存</button>
+    </fieldset>
+  </section>
 
   <div id="status"></div>
 
   <script>
+    // Server-side template values: the menu entry decides the first section.
+    var EH_INITIAL_VIEW = '<?= initialView ?>';
+    var EH_INITIAL_ACTION = '<?= initialAction ?>';
+    var VIEW_NAMES = ['project', 'task', 'admin'];
+
     var context = null;
     var previewTimer = null;
     var lastWarnings = [];
     // Editing state: an empty id means "create". The loaded timestamp guards against
     // overwriting a record that somebody else saved after this form was filled.
-    var projectState = {id: '', updatedAt: '', deadline: ''};
+    var projectState = {id: '', updatedAt: '', deadline: '', responsibilityId: ''};
     var taskState = {id: '', updatedAt: ''};
+    var subState = {id: '', parentId: '', projectId: ''};
+    var respState = {id: ''};
 
     function T(key, vars) { return EHLang.t(key, vars); }
 
@@ -200,6 +384,35 @@
     function value(id) { return document.getElementById(id).value; }
     function checked(id) { return document.getElementById(id).checked; }
 
+    /* ---------------- section navigation ---------------- */
+
+    function showView(name) {
+      var view = VIEW_NAMES.indexOf(name) >= 0 ? name : 'project';
+      VIEW_NAMES.forEach(function (item) {
+        document.getElementById('view-' + item).hidden = item !== view;
+        var tab = document.getElementById('tab-' + item);
+        tab.setAttribute('aria-selected', item === view ? 'true' : 'false');
+      });
+      return view;
+    }
+
+    /** The menu entry decides which control the manager lands on. */
+    function applyAction(action) {
+      if (action === 'create') {
+        document.getElementById('subName').focus();
+        return;
+      }
+      if (action === 'assign') {
+        document.getElementById('taskName').focus();
+        return;
+      }
+      if (action === 'progress') {
+        document.getElementById('progressValue').focus();
+      }
+    }
+
+    /* ---------------- rendering ---------------- */
+
     function roleOptions(roles) {
       return (roles || ['MEMBER', 'VIEWER']).map(function (role) { return {id: role, name: role}; });
     }
@@ -219,14 +432,107 @@
       EH.fillSelect(document.getElementById('skillMember'), activeMembers, 'id', 'name', '');
       EH.fillSelect(document.getElementById('skillName'), data.skills, 'id', 'name', '');
       EH.fillSelect(document.getElementById('skillAssessor'), activeMembers, 'id', 'name', T('common.unset'));
+      EH.fillSelect(document.getElementById('respOwner'), activeMembers, 'id', 'name', T('common.unset'));
       EH.fillSelect(document.getElementById('memberRole'), roleOptions(data.roles), 'id', 'name', null);
       EH.renderRecords(document.getElementById('memberList'), data.members, function (member) {
         return member.id + ': ' + member.name + '（' + (member.role || 'VIEWER') + (member.active ? '' : '・' + T('manager.member.inactive')) + '）';
       }, T('manager.member.empty'));
       var skillNames = data.skills.map(function (skill) { return skill.name; });
       EH.renderLines(document.getElementById('skillList'), skillNames.length ? skillNames : [T('manager.skill.empty')], 'hint');
+      renderResponsibilityOptions();
+      renderResponsibilityList();
+      // Scope the subproject tree to one project instead of mixing every project's nodes.
+      if (!value('subProject') && (context.projects || []).length) {
+        setSelectValue('subProject', context.projects[0].id);
+      }
+      renderSubprojectTree();
       refreshSubprojects();
       syncSelections();
+    }
+
+    /** 未分類 plus active responsibilities, keeping a retired current value visible. */
+    function renderResponsibilityOptions() {
+      if (!context) return;
+      var items = [{id: '', name: T('manager.responsibility.unassigned')}];
+      (context.responsibilities || []).forEach(function (item) {
+        if (item.retired && item.id !== projectState.responsibilityId) return;
+        items.push({id: item.id, name: item.retired ? T('dashboard.filter.responsibility.retired', {name: item.name}) : item.name});
+      });
+      EH.fillSelect(document.getElementById('projectResponsibility'), items, 'id', 'name', null);
+      setSelectValue('projectResponsibility', projectState.responsibilityId || '');
+    }
+
+    function renderResponsibilityList() {
+      var container = document.getElementById('respList');
+      EH.clear(container);
+      var items = (context && context.responsibilities) || [];
+      if (!items.length) {
+        EH.append(container, 'div', T('manager.responsibility.empty'), 'list-item');
+      }
+      items.forEach(function (item) {
+        var row = EH.append(container, 'div', '', 'list-item');
+        var head = EH.append(row, 'span', item.name);
+        head.className = 'name';
+        EH.append(row, 'span', T('manager.responsibility.projects', {
+          count: item.totalProjects, active: item.activeProjects, risk: item.atRiskProjects
+        }), 'meta');
+        var badges = EH.append(row, 'span', '', 'meta');
+        var status = EH.element('span', 'badge ' + (item.retired ? 'is-retired' : 'is-active'),
+          item.retired ? T('manager.responsibility.retired') : T('manager.responsibility.active'));
+        badges.appendChild(status);
+        if (item.ownerName) {
+          badges.appendChild(EH.element('span', 'badge', item.ownerName));
+        }
+        if (item.atRiskProjects > 0) {
+          badges.appendChild(EH.element('span', 'badge is-warn', String(item.atRiskProjects)));
+        }
+      });
+      var pickable = items.filter(function (item) { return item.canEdit; });
+      EH.fillSelect(document.getElementById('respPick'), pickable, 'id', 'name', T('manager.responsibility.new'));
+      setSelectValue('respPick', respState.id || '');
+    }
+
+    function renderSubprojectTree() {
+      var container = document.getElementById('subprojectTree');
+      EH.clear(container);
+      var projectId = value('subProject');
+      var items = (context && context.subprojects ? context.subprojects : []).filter(function (subproject) {
+        return !projectId || subproject.projectId === projectId;
+      });
+      if (!items.length) {
+        EH.append(container, 'div', T('manager.subproject.empty'), 'list-item');
+        return;
+      }
+      // A nested subproject always follows its parent; the hierarchy is bounded to two levels.
+      var byParent = Object.create(null);
+      items.forEach(function (subproject) {
+        var parent = subproject.parentId || '';
+        if (!byParent[parent]) byParent[parent] = [];
+        byParent[parent].push(subproject);
+      });
+      var ordered = [];
+      (function walk(parentId) {
+        (byParent[parentId] || []).forEach(function (subproject) {
+          ordered.push(subproject);
+          walk(subproject.id);
+        });
+      }(''));
+      items.forEach(function (subproject) {
+        if (ordered.indexOf(subproject) < 0) ordered.push(subproject);
+      });
+      ordered.forEach(function (subproject) {
+        var row = EH.element('button', 'tree-row' + (subproject.level > 1 ? ' is-child' : '') +
+          (subproject.id === subState.id ? ' is-selected' : '') +
+          (subproject.status === 'Archived' ? ' is-archived' : ''), subproject.name);
+        row.setAttribute('type', 'button');
+        row.setAttribute('data-subproject-id', subproject.id);
+        row.setAttribute('aria-label', subproject.name);
+        row.addEventListener('click', function () {
+          setSelectValue('subPick', subproject.id);
+          loadSubproject();
+        });
+        container.appendChild(row);
+      });
     }
 
     /**
@@ -241,22 +547,37 @@
       var task = taskState.id ? recordById(context.tasks, taskState.id) : null;
       if (task && task.canEdit) { setSelectValue('taskPick', task.id); loadTask(true); }
       else if (taskState.id) clearTask();
+      if (subState.id && recordById(context.subprojects, subState.id)) {
+        setSelectValue('subPick', subState.id);
+        loadSubproject(true);
+      }
+      if (respState.id && recordById(context.responsibilities || [], respState.id)) {
+        setSelectValue('respPick', respState.id);
+        loadResponsibility(true);
+      }
       setButtonLabel('projectSubmit', projectState.id ? 'manager.project.save' : 'manager.project.create');
       setButtonLabel('taskSubmit', taskState.id ? 'common.save' : 'manager.task.submit');
+      setButtonLabel('subSubmit', subState.id ? 'common.save' : 'manager.subproject.create');
+      setButtonLabel('respSubmit', respState.id ? 'manager.responsibility.save' : 'manager.responsibility.create');
     }
 
-    var FORM_FIELDS = ['projectPick', 'projectName', 'projectOwner', 'projectCategory', 'projectDeadline',
-      'projectStatus', 'projectVisibility', 'projectSummary', 'projectDescription', 'taskPick',
+    var FORM_FIELDS = ['projectPick', 'projectName', 'projectResponsibility', 'projectOwner', 'projectCategory',
+      'projectPriority', 'projectDeadline', 'projectStatus', 'projectVisibility', 'projectSummary',
+      'projectDescription', 'subPick', 'subProject', 'subParent', 'subName', 'subOwner', 'taskPick',
       'taskProject', 'taskSubproject', 'taskName', 'taskOwner', 'taskDeadline', 'taskDuration',
-      'taskUnit', 'taskBasis', 'taskEstimate', 'taskAcceptance', 'taskPriority'];
+      'taskUnit', 'taskBasis', 'taskEstimate', 'taskAcceptance', 'taskPriority', 'progressTask',
+      'progressValue', 'progressNext', 'respPick', 'respName', 'respDescription', 'respOwner'];
     var FORM_CHECKS = ['taskNotify', 'taskApprove', 'taskConfirm', 'taskAck'];
 
     function captureForms() {
-      var kept = {values: {}, checked: {}, hidden: {}};
+      var kept = {values: {}, checked: {}, hidden: {}, details: {}};
       FORM_FIELDS.forEach(function (id) { kept.values[id] = value(id); });
       FORM_CHECKS.forEach(function (id) { kept.checked[id] = checked(id) === true; });
       kept.hidden.visibilityNote = document.getElementById('visibilityNote').hidden === true;
       kept.hidden.ackWrap = document.getElementById('ackWrap').hidden === true;
+      kept.hidden.responsibilityNote = document.getElementById('responsibilityNote').hidden === true;
+      kept.details.project = document.getElementById('projectDetail').open === true;
+      kept.details.task = document.getElementById('taskDetail').open === true;
       return kept;
     }
 
@@ -265,6 +586,9 @@
       FORM_CHECKS.forEach(function (id) { document.getElementById(id).checked = kept.checked[id]; });
       document.getElementById('visibilityNote').hidden = kept.hidden.visibilityNote;
       document.getElementById('ackWrap').hidden = kept.hidden.ackWrap;
+      document.getElementById('responsibilityNote').hidden = kept.hidden.responsibilityNote;
+      document.getElementById('projectDetail').open = kept.details.project;
+      document.getElementById('taskDetail').open = kept.details.task;
     }
 
     function editableProjects() {
@@ -292,25 +616,39 @@
       node.textContent = T(key);
     }
 
+    function noteResponsibility(project) {
+      var node = document.getElementById('responsibilityNote');
+      if (project && project.needsReassignment) {
+        node.textContent = T('manager.responsibility.needsReassign');
+        node.hidden = false;
+        return;
+      }
+      node.hidden = true;
+      node.textContent = '';
+    }
+
     function clearProject() {
-      projectState = {id: '', updatedAt: '', deadline: ''};
+      projectState = {id: '', updatedAt: '', deadline: '', responsibilityId: ''};
       setSelectValue('projectPick', '');
       document.getElementById('projectName').value = '';
-      setSelectValue('projectOwner', '');
       document.getElementById('projectCategory').value = '';
       document.getElementById('projectDeadline').value = '';
       setSelectValue('projectStatus', 'Planned');
       setSelectValue('projectVisibility', 'RESTRICTED');
+      setSelectValue('projectPriority', 'Medium');
       document.getElementById('projectSummary').value = '';
       document.getElementById('projectDescription').value = '';
       document.getElementById('visibilityNote').hidden = true;
+      noteResponsibility(null);
+      renderResponsibilityOptions();
       setButtonLabel('projectSubmit', 'manager.project.create');
     }
 
     function loadProject(quiet) {
       var project = recordById(context ? context.projects : [], value('projectPick'));
       if (!project) { clearProject(); return; }
-      projectState = {id: project.id, updatedAt: project.updatedAt, deadline: project.deadline};
+      projectState = {id: project.id, updatedAt: project.updatedAt, deadline: project.deadline,
+        responsibilityId: project.responsibilityId || ''};
       setSelectValue('projectOwner', project.ownerId);
       document.getElementById('projectName').value = project.name;
       document.getElementById('projectCategory').value = project.category;
@@ -320,9 +658,120 @@
       document.getElementById('projectSummary').value = project.summary;
       document.getElementById('projectDescription').value = project.description;
       document.getElementById('visibilityNote').hidden = true;
+      renderResponsibilityOptions();
+      noteResponsibility(project);
+      setSelectValue('subProject', project.id);
+      renderSubprojectState();
       setButtonLabel('projectSubmit', 'manager.project.save');
       if (!quiet) setStatus('ok', T('manager.project.loaded', {name: project.name}));
     }
+
+    /* ---------------- subprojects ---------------- */
+
+    function projectSubprojects(projectId, excludeId) {
+      if (!context) return [];
+      return (context.subprojects || []).filter(function (subproject) {
+        if (subproject.projectId !== projectId) return false;
+        if (subproject.id === excludeId) return false;
+        // Only a root subproject can take children: the hierarchy is two levels deep.
+        return subproject.level === 1 && !subproject.hasChildren;
+      });
+    }
+
+    function refreshParentOptions() {
+      var projectId = value('subProject') || subState.projectId;
+      var items = projectSubprojects(projectId, subState.id);
+      EH.fillSelect(document.getElementById('subParent'), items, 'id', 'name', T('manager.subproject.root'));
+      setSelectValue('subParent', subState.parentId || '');
+    }
+
+    function refreshSubprojectPick() {
+      var projectId = value('subProject');
+      var items = (context && context.subprojects ? context.subprojects : []).filter(function (subproject) {
+        return !projectId || subproject.projectId === projectId;
+      });
+      EH.fillSelect(document.getElementById('subPick'), items, 'id', 'name', T('manager.subproject.new'));
+      setSelectValue('subPick', subState.id || '');
+    }
+
+    function renderSubprojectState() {
+      refreshSubprojectPick();
+      refreshParentOptions();
+      renderSubprojectTree();
+    }
+
+    function clearSubproject() {
+      subState = {id: '', parentId: '', projectId: value('subProject')};
+      setSelectValue('subPick', '');
+      document.getElementById('subName').value = '';
+      setSelectValue('subOwner', '');
+      renderSubprojectState();
+    }
+
+    function loadSubproject(quiet) {
+      var subproject = recordById(context ? context.subprojects : [], value('subPick'));
+      if (!subproject) { clearSubproject(); return; }
+      subState = {id: subproject.id, parentId: subproject.parentId || '', projectId: subproject.projectId};
+      setSelectValue('subProject', subproject.projectId);
+      document.getElementById('subName').value = subproject.name;
+      setSelectValue('subOwner', subproject.ownerId || '');
+      renderSubprojectState();
+      setButtonLabel('subSubmit', 'common.save');
+      if (!quiet) setStatus('ok', T('manager.subproject.loaded', {name: subproject.name}));
+    }
+
+    function saveSubproject() {
+      var submit = document.getElementById('subSubmit');
+      if (submit.disabled) return;
+      var parentId = value('subParent');
+      var payload;
+      var editing = !!subState.id;
+      if (editing) {
+        payload = {subprojectId: subState.id, name: value('subName'), ownerId: value('subOwner')};
+        if (String(parentId || '') !== String(subState.parentId || '')) {
+          if (!EH.confirmAction(T('manager.subproject.reparentPrompt'))) return;
+          payload.parentId = parentId;
+          payload.confirmReparent = true;
+        }
+      } else {
+        payload = {projectId: value('subProject'), parentId: parentId, name: value('subName'), ownerId: value('subOwner')};
+        if (!payload.projectId) { setStatus('error', T('manager.subproject.project') + ': ' + T('common.required')); return; }
+      }
+      submit.disabled = true;
+      call(editing ? 'uiSaveSubproject' : 'uiCreateSubproject', payload, function () {
+        call('uiContext', undefined, function (data) {
+          render(data);
+          if (!editing) clearSubproject();
+        });
+      }, function () { submit.disabled = false; });
+    }
+
+    function addChildSubproject() {
+      var parentId = value('subPick') || subState.id;
+      if (!parentId) { setStatus('error', T('manager.subproject.pick')); return; }
+      setSelectValue('subParent', parentId);
+      subState = {id: '', parentId: parentId, projectId: value('subProject')};
+      setSelectValue('subPick', '');
+      document.getElementById('subName').value = '';
+      setButtonLabel('subSubmit', 'manager.subproject.create');
+      document.getElementById('subName').focus();
+    }
+
+    function archiveSubproject() {
+      var id = value('subPick') || subState.id;
+      if (!id) { setStatus('error', T('manager.subproject.pick')); return; }
+      var record = recordById(context ? context.subprojects : [], id);
+      if (!EH.confirmAction(T('manager.subproject.archivePrompt', {name: record ? record.name : id}))) return;
+      call('uiArchiveSubproject', {subprojectId: id}, function () { call('uiContext', undefined, render); });
+    }
+
+    function reactivateSubproject() {
+      var id = value('subPick') || subState.id;
+      if (!id) { setStatus('error', T('manager.subproject.pick')); return; }
+      call('uiReactivateSubproject', {subprojectId: id}, function () { call('uiContext', undefined, render); });
+    }
+
+    /* ---------------- tasks ---------------- */
 
     function clearTask() {
       taskState = {id: '', updatedAt: ''};
@@ -375,8 +824,18 @@
     function refreshSubprojects() {
       if (!context) return;
       var project = value('taskProject');
-      var items = context.subprojects.filter(function (sub) { return sub.projectId === project; });
-      EH.fillSelect(document.getElementById('taskSubproject'), items, 'id', 'name', T('manager.subproject.none'));
+      var items = (context.subprojects || []).filter(function (sub) { return sub.projectId === project; });
+      items.sort(function (left, right) { return left.level - right.level; });
+      var labels = items.map(function (sub) {
+        return {id: sub.id, name: sub.level > 1 ? '└ ' + sub.name : sub.name};
+      });
+      EH.fillSelect(document.getElementById('taskSubproject'), labels, 'id', 'name', T('manager.subproject.none'));
+      var selected = document.getElementById('taskSubproject').value;
+      if (taskState.id) {
+        var task = recordById(context.tasks, taskState.id);
+        if (task && task.subprojectId) setSelectValue('taskSubproject', task.subprojectId);
+      }
+      return selected;
     }
 
     function renderPlan(data) {
@@ -417,13 +876,82 @@
       }, 250);
     }
 
+    /* ---------------- responsibilities ---------------- */
+
+    function clearResponsibility() {
+      respState = {id: ''};
+      setSelectValue('respPick', '');
+      document.getElementById('respName').value = '';
+      document.getElementById('respDescription').value = '';
+      setSelectValue('respOwner', '');
+      setButtonLabel('respSubmit', 'manager.responsibility.create');
+    }
+
+    function loadResponsibility(quiet) {
+      var item = recordById((context && context.responsibilities) || [], value('respPick'));
+      if (!item) { clearResponsibility(); return; }
+      respState = {id: item.id};
+      document.getElementById('respName').value = item.name;
+      document.getElementById('respDescription').value = item.description || '';
+      setSelectValue('respOwner', item.ownerId || '');
+      setButtonLabel('respSubmit', 'manager.responsibility.save');
+      if (!quiet) setStatus('ok', T('manager.project.loaded', {name: item.name}));
+    }
+
+    function saveResponsibility() {
+      var submit = document.getElementById('respSubmit');
+      if (submit.disabled) return;
+      var payload = {name: value('respName'), description: value('respDescription')};
+      if (value('respOwner')) payload.ownerId = value('respOwner');
+      if (respState.id) payload.responsibilityId = respState.id;
+      submit.disabled = true;
+      call('uiSaveResponsibility', payload, function (saved) {
+        call('uiContext', undefined, function (data) {
+          respState = {id: saved.Responsibility_ID};
+          render(data);
+        });
+      }, function () { submit.disabled = false; });
+    }
+
+    function moveResponsibility(direction) {
+      var id = value('respPick') || respState.id;
+      if (!id) { setStatus('error', T('manager.responsibility.pick')); return; }
+      call('uiMoveResponsibility', {responsibilityId: id, direction: direction},
+        function () { call('uiContext', undefined, render); });
+    }
+
+    function moveResponsibilityUp() { moveResponsibility('up'); }
+    function moveResponsibilityDown() { moveResponsibility('down'); }
+
+    function retireResponsibility() {
+      var id = value('respPick') || respState.id;
+      if (!id) { setStatus('error', T('manager.responsibility.pick')); return; }
+      var item = recordById((context && context.responsibilities) || [], id);
+      if (!item) return;
+      if (!EH.confirmAction(T('manager.responsibility.retirePrompt', {name: item.name, count: item.activeProjects}))) return;
+      call('uiRetireResponsibility', {responsibilityId: id}, function () { call('uiContext', undefined, render); });
+    }
+
+    function reactivateResponsibility() {
+      var id = value('respPick') || respState.id;
+      if (!id) { setStatus('error', T('manager.responsibility.pick')); return; }
+      var item = recordById((context && context.responsibilities) || [], id);
+      if (!item) return;
+      if (!EH.confirmAction(T('manager.responsibility.reactivatePrompt', {name: item.name}))) return;
+      call('uiReactivateResponsibility', {responsibilityId: id}, function () { call('uiContext', undefined, render); });
+    }
+
+    /* ---------------- existing actions ---------------- */
+
     function saveProject() {
       var submit = document.getElementById('projectSubmit');
       if (submit.disabled) return;
       var payload = {
         name: value('projectName'),
+        responsibilityId: value('projectResponsibility'),
         category: value('projectCategory'), deadline: value('projectDeadline'),
         status: value('projectStatus'), visibility: value('projectVisibility'),
+        priority: value('projectPriority'),
         summary: value('projectSummary'), description: value('projectDescription')
       };
       // An inactive owner cannot be listed: omitting the field keeps the stored owner
@@ -435,6 +963,10 @@
         if (String(payload.deadline || '') !== String(projectState.deadline || '')) {
           if (!EH.confirmAction(T('manager.project.deadlineConfirm'))) return;
           payload.confirmDeadlineChange = true;
+        }
+        if (String(payload.responsibilityId || '') !== String(projectState.responsibilityId || '')) {
+          if (!EH.confirmAction(T('manager.responsibility.transferConfirm'))) return;
+          payload.confirmResponsibilityChange = true;
         }
       }
       submit.disabled = true;
@@ -452,17 +984,8 @@
     function publishDashboard() {
       if (!EH.confirmAction(T('settings.confirmPublishNow'))) return;
       call('uiPublishPublicationNow', undefined, function (result) {
-        var counts = (result && result.counts) || {};
-        setStatus('ok', T('manager.project.published', {
-          projects: counts.projects || 0, tasks: counts.tasks || 0
-        }));
+        setStatus('ok', T('manager.project.published', {projects: result.counts.projects, tasks: result.counts.tasks}));
       });
-    }
-
-    function createSubproject() {
-      call('uiCreateSubproject', {
-        projectId: value('subProject'), name: value('subName'), ownerId: value('subOwner')
-      }, function () { call('uiContext', undefined, render); });
     }
 
     function assignTask() {
@@ -525,9 +1048,23 @@
       });
     }
 
+    /* ---------------- wiring ---------------- */
+
     document.getElementById('projectPick').addEventListener('change', function () { loadProject(); });
+    document.getElementById('projectResponsibility').addEventListener('change', function () {
+      projectState.responsibilityId = value('projectResponsibility');
+    });
     document.getElementById('taskPick').addEventListener('change', function () { loadTask(); });
     document.getElementById('taskProject').addEventListener('change', refreshSubprojects);
+    document.getElementById('subPick').addEventListener('change', function () { loadSubproject(); });
+    document.getElementById('subProject').addEventListener('change', function () {
+      subState = {id: '', parentId: '', projectId: value('subProject')};
+      renderSubprojectState();
+    });
+    document.getElementById('respPick').addEventListener('change', function () { loadResponsibility(); });
+    VIEW_NAMES.forEach(function (name) {
+      document.getElementById('tab-' + name).addEventListener('click', function () { showView(name); });
+    });
     ['taskDeadline', 'taskDuration', 'taskUnit', 'taskBasis'].forEach(function (id) {
       document.getElementById(id).addEventListener('input', schedulePreview);
       document.getElementById(id).addEventListener('change', schedulePreview);
@@ -539,7 +1076,11 @@
       render(context);
       applyForms(kept);
     });
-    call('uiContext', undefined, render, null, true);
+    showView(EH_INITIAL_VIEW);
+    call('uiContext', undefined, function (data) {
+      render(data);
+      applyAction(EH_INITIAL_ACTION);
+    }, null, true);
   </script>
 </body>
 </html>

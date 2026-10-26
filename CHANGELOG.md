@@ -1,4 +1,94 @@
 # Changelog
+## V1.4 — responsibilities, nested subprojects and UI refinement
+
+Schema version **6** (`006_responsibilities_and_nested_subprojects`). Additive only: a new
+`RESPONSIBILITIES` table, `PROJECTS.Responsibility_ID` and `SUBPROJECTS.Parent_Subproject_ID`.
+No row, formula, custom column or stable ID is rewritten, no example responsibility is seeded and
+every migrated project stays 未分類. Work was done directly on `main`; nothing was pushed,
+deployed, migrated or emailed.
+
+Responsibilities (担当領域)
+
+- New configurable areas with a name, an internal description, an owner, a status and a display
+  order. `RESPONSIBILITY_ID` is generated, immutable and never reused, so renaming never rewrites
+  a project.
+- Create, rename, describe, re-order, retire, reactivate and transfer between areas. Retirement is
+  a status change: projects, tasks, milestones, approvals and history stay, the area stays visible
+  in lists and filters, and its projects are marked as needing reassignment.
+- Authorization lives in `Access.canManageResponsibility`: ADMIN administers every area, a MANAGER
+  only the areas they own, MEMBER and VIEWER none. Owning an area never grants access to the
+  projects inside it, and a transfer never changes `Project_Owner_ID`.
+- A retired area cannot be chosen for a new project, and only an ADMIN may move a project into one
+  (with an extra confirmation).
+- Transfers are recorded in the existing `AUDIT_LOG` (`RESPONSIBILITY_TRANSFERRED` with the previous
+  and new IDs, the actor and an optional reason); no parallel history table was added.
+
+Nested subprojects
+
+- Two subproject levels beneath a project. A blank `Parent_Subproject_ID` is a root subproject, so
+  every pre-V1.4 row keeps its meaning.
+- Parent/child validation: same project, no self-parent, no cycles, maximum depth two, and a
+  reparent is rejected when it would push a descendant to level three instead of flattening the
+  tree.
+- Archiving a subproject cascades nothing; descendant tasks leave active-work figures because
+  `Eligibility` walks the whole ancestor chain, and return on reactivation.
+- Moving a task is explicit and confirmed, stays inside the project and keeps the task's identity,
+  schedule and history. `Subproject_ID` is an existing material assignment field, so the existing
+  rule increments `Assignment_Version` once and clears the stale approval.
+
+Calculations and integrations
+
+- Parent subproject progress is the effort-weighted rollup of its own tasks plus every descendant
+  task, counted exactly once. The project rollup keeps its own grouping, so nothing is double
+  counted. Unknown estimates keep the documented fallback weight and are never turned into hours.
+- The management dashboard, Gantt fallback, workload/eligibility and the sanitized snapshot all use
+  the same helper (`Progress.subtreeTasks`), so the numbers agree.
+- The generated `DASHBOARD` sheet gained a 担当領域 column.
+
+Manager UI
+
+- The sidebar is reorganised into 案件 / タスク / 管理 with one section visible at a time, designed
+  for the real ~300px width. Roughly used fields moved into collapsed 詳細設定 panels that keep
+  their stored values. Unified colour tokens and typography.
+- Every Sheets menu entry now opens the correct section and control (`Ui.show(fileName, {view,
+  action})` passes template values, not globals).
+- New 担当領域 panel: list with owner, open/at-risk counts and Active/Retired state, plus add,
+  edit, re-order, retire (with the remaining project count) and reactivate.
+- The project form gained 担当領域 (未分類 + active areas, and the current area even when retired);
+  a change asks 「担当領域を変更しますか？ プロジェクトの担当者や期限は変更されません。」.
+- A compact subproject tree with indentation, plus create child / edit / reparent / archive /
+  reactivate actions on the selected node only.
+- 申請一覧 now leads with the request type, project, task, current and requested deadline, the
+  difference, the reason and the requester; IDs and timestamps are secondary and shown once.
+- 自動化設定 shows the effective mail mode and the emergency stop as labelled badges and groups
+  the reminder, weekly-report and integration switches under 詳細設定. システム状態 shows readable
+  sections and keeps the full diagnostic dump.
+
+Dashboard
+
+- Responsibility filter (always visible) with a 未分類-aware label and a （退職）marker for retired
+  areas; category, owner and risk moved under 詳細フィルター; active filters are listed as tags.
+- Project cards and the detail view show the responsibility name; nested subprojects are indented
+  under their parent and a parent reports its descendant task count.
+- The request form now honours `REQUEST_SUBMISSION_ENABLED`: loading, disabled and failure states
+  offer no active button and explain themselves; the backend stays the source of truth.
+- Unsent request data lives in memory and survives a language switch, a client or server
+  validation error and a temporary failure. A successful submission shows a receipt with the
+  request ID and clears only that draft; discarding a filled form asks first.
+- Snapshot contract **1.4** adds `PUBLISHED_RESPONSIBILITIES`, project responsibility labels and
+  subproject parent/level/rollup fields. An older contract is rejected rather than misread.
+
+Tests and documentation
+
+- 45 new tests (302 total): responsibilities CRUD/authorization/transfer, hierarchy validation,
+  rollups, migration 5→6 preservation and idempotency, snapshot contract 1.4, sidebar navigation,
+  the responsibility panel, the request approval layout and the dashboard request form.
+- New [docs/RESPONSIBILITIES.md](docs/RESPONSIBILITIES.md) and
+  [docs/UI_UX_GUIDELINES.md](docs/UI_UX_GUIDELINES.md); updated schema, architecture, deployment,
+  contract and workflow documentation plus the V1.4 check gates.
+- `docs/PRODUCTION_READINESS.md` stays **NOT APPROVED**: no live Google Workspace verification was
+  performed for this release.
+
 ## V1.3.1 — final pre-trial stabilization
 
 No schema change: the workbook stays at version **5**. V1.3.1 makes the existing features

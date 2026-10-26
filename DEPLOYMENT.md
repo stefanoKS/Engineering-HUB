@@ -510,3 +510,60 @@ New in V1.3.1 that a deployment must know about:
 | Publish the snapshot manually | manager sidebar 共有ダッシュボードを今すぐ公開 | `Ui.publishPublicationNow` (`uiPublishPublicationNow`) → `SharedDashboardPublisher.publish` |
 | Import and review requests | manager sidebar 申請一覧 (imports on open) | `Ui.requests` (`uiRequests`) → `Requests.importInbox` |
 
+## V1.4 upgrade (5 → 6)
+
+V1.4 adds schema version **6** (`006_responsibilities_and_nested_subprojects`): a new
+`RESPONSIBILITIES` table plus `PROJECTS.Responsibility_ID` and `SUBPROJECTS.Parent_Subproject_ID`.
+It is additive; nothing is renamed, cleared or reseeded, no example responsibility is created and
+every existing project stays 未分類.
+
+### New V1.4 installation
+
+Follow [docs/PRE_TRIAL_CHECKLIST.md](docs/PRE_TRIAL_CHECKLIST.md) unchanged. `initializeNewDatabase`
+creates every table, including `RESPONSIBILITIES`, at version 6. Initialization remains the only
+step that may write to an empty workbook and is never an upgrade path.
+
+### V1.3.1 → V1.4 upgrade
+
+1. `npm ci && npm run lint && npm test && npm run validate` in the repository. Do not continue on
+   a failure.
+2. In the **development** manager project only, confirm `ENVIRONMENT`/`BOUND_ENVIRONMENT` still
+   match the target workbook and that `BACKUP_FOLDER_ID` points at the restricted backup folder.
+3. Approve exactly the reviewed migration ID in Script Properties:
+
+   ```text
+   APPROVED_MIGRATIONS = 006_responsibilities_and_nested_subprojects
+   ```
+
+4. Run the migration from the editor (the wrapper keeps the argument out of the editor UI):
+
+   ```javascript
+   function migrateFromEditor() {
+     return upgradeExistingDatabase();
+   }
+   ```
+
+5. The migration creates and verifies its own Drive backup first, appends only the missing table
+   and columns, then re-checks every existing cell. Inspect `SCHEMA_MIGRATIONS` (one `SUCCESS` row
+   for version 6), `BACKUP_LOG`, `validateSystem()` and the `RESPONSIBILITIES` sheet (it must be
+   empty apart from the header row).
+6. Remove the temporary `APPROVED_MIGRATIONS` value.
+7. Push the reviewed source to the manager project and to the standalone dashboard project.
+   No new OAuth scope is requested.
+8. Republish: `publishSharedDashboard()` (or 共有ダッシュボードを今すぐ公開). Contract 1.4 adds the
+   `PUBLISHED_RESPONSIBILITIES` sheet and three project/subproject columns, so an old snapshot is
+   rejected by the viewer until this publication succeeds. Republishing is a normal A/B slot
+   write; a failure leaves the previous snapshot readable.
+9. Manually verify in development: the three sidebar sections, each menu entry landing on the
+   right control, responsibility create/rename/retire/transfer, the nested subproject tree, the
+   dashboard responsibility filter and the request form state. Record the result in
+   [docs/checkgates/V1_4_GATE_6.md](docs/checkgates/V1_4_GATE_6.md).
+
+### Rollback
+
+V1.4 is additive, so a code rollback does not require a data rollback: the previous release simply
+ignores the new table and columns. Do not delete the `RESPONSIBILITIES` sheet or the new columns to
+"roll back" — that would destroy operational data. If the data itself must be restored, use the
+verified pre-migration backup exactly as described in
+[BACKUP_RESTORE.md](BACKUP_RESTORE.md); restoration is always a deliberate, manual operation.
+

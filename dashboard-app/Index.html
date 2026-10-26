@@ -56,6 +56,15 @@
                   <option value="all" data-i18n="dashboard.filter.status.all">すべて</option>
                 </select>
               </label>
+              <label class="filter"><span data-i18n="dashboard.filter.responsibility">担当領域</span>
+                <select id="filter-responsibility"></select>
+              </label>
+              <button class="chip" id="filter-due" type="button" aria-pressed="false" data-i18n="dashboard.filter.dueSoon">期限7日以内</button>
+            </div>
+          </div>
+          <details class="more-filters" id="more-filters">
+            <summary data-i18n="dashboard.filter.more">詳細フィルター</summary>
+            <div class="filters">
               <label class="filter"><span data-i18n="dashboard.filter.category">カテゴリ</span><select id="filter-category"></select></label>
               <label class="filter"><span data-i18n="dashboard.filter.owner">責任者</span><select id="filter-owner"></select></label>
               <label class="filter"><span data-i18n="dashboard.filter.risk">リスク</span>
@@ -67,9 +76,9 @@
                   <option value="UNKNOWN" data-i18n="dashboard.filter.risk.UNKNOWN">日程不明</option>
                 </select>
               </label>
-              <button class="chip" id="filter-due" type="button" aria-pressed="false" data-i18n="dashboard.filter.dueSoon">期限7日以内</button>
             </div>
-          </div>
+          </details>
+          <div class="active-filters" id="active-filters" aria-live="polite"></div>
           <div class="toolbar-meta">
             <p class="result-count" id="result-count" role="status" aria-live="polite"></p>
             <button class="link-button" id="reset-filters" type="button" data-i18n="dashboard.filter.clear">条件をクリア</button>

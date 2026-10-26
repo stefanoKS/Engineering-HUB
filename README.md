@@ -1,4 +1,4 @@
-# Engineering-HUB
+﻿# Engineering-HUB
 
 Engineering project management using Google Sheets as the database, Google Apps Script as the application, and GitHub as the source-code history.
 
@@ -251,4 +251,33 @@ No schema change. V1.3.1 makes the existing features usable and safe for a first
 Gate evidence: [docs/checkgates/V1_3_1_GATE_1.md](docs/checkgates/V1_3_1_GATE_1.md) … 
 [V1_3_1_GATE_7.md](docs/checkgates/V1_3_1_GATE_7.md). Installation steps:
 [docs/PRE_TRIAL_CHECKLIST.md](docs/PRE_TRIAL_CHECKLIST.md).
+
+## V1.4 — responsibilities, nested subprojects and UI refinement
+
+Schema version **6** (`006_responsibilities_and_nested_subprojects`). Additive only; nothing is
+deployed or migrated automatically.
+
+1. **担当領域 / Responsibility** groups projects as a configurable area with an owner, a status and
+   a display order. Create, rename, re-order, retire, reactivate and transfer from 管理. Retirement
+   keeps every project: the area stays visible and its projects are marked as needing a new one.
+   Categories are unchanged and separate.
+2. **Projects can move between areas** with a confirmation. The owner, deadline, status, progress,
+   subprojects, tasks and history are not touched, and the transfer is recorded in the audit log.
+3. **Two subproject levels.** A subproject can contain one nested subproject; a third level, a
+   self-parent and a cross-project parent are refused. Reparenting validates the subtree instead
+   of flattening it, and archiving cascades nothing.
+4. **Progress stays honest.** A parent subproject rolls up its own and descendant tasks exactly
+   once; unknown estimates stay unknown and are never turned into hours.
+5. **The manager sidebar is simpler.** 案件 / タスク / 管理 with one section at a time, collapsed
+   詳細設定 panels, a compact subproject tree, and a menu entry that opens the right section.
+6. **The dashboard gains a responsibility filter and a nested hierarchy view.** Unsent request
+   data survives a language switch, and the request form is only offered when the backend says
+   submission is open.
+
+Details: [docs/RESPONSIBILITIES.md](docs/RESPONSIBILITIES.md),
+[docs/UI_UX_GUIDELINES.md](docs/UI_UX_GUIDELINES.md). Gate evidence:
+[docs/checkgates/V1_4_GATE_1.md](docs/checkgates/V1_4_GATE_1.md) …
+[V1_4_GATE_6.md](docs/checkgates/V1_4_GATE_6.md). Upgrade steps:
+[DEPLOYMENT.md](DEPLOYMENT.md#v14-upgrade-5--6).
+
 

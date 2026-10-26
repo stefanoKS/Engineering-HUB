@@ -54,14 +54,18 @@
     detailToken: 0,
     drawerToken: 0,
     query: '',
-    filters: {status: 'open', category: '', owner: '', risk: '', dueSoon: false},
+    filters: {status: 'open', responsibility: '', category: '', owner: '', risk: '', dueSoon: false},
     detail: null,
     currentProjectId: '',
     taskSort: {key: 'due', direction: 1},
     drawerOpen: false,
     drawerData: null,
     lastFocused: null,
-    requestConfig: {enabled: false}
+    // 'loading' | 'enabled' | 'disabled' | 'error'. Fail closed until the server answers.
+    requestConfig: {enabled: false, state: 'loading'},
+    // Unsent request form data lives in memory only: a language switch, a validation error
+    // or a temporary server error must never discard what the viewer typed.
+    draft: {taskId: '', type: '', fields: {}, lookup: '', receipt: null, statusResult: null}
   };
 
   /* ---------------- DOM helpers ---------------- */
@@ -95,10 +99,12 @@
     kpis: byId('kpis'),
     search: byId('search'),
     filterStatus: byId('filter-status'),
+    filterResponsibility: byId('filter-responsibility'),
     filterCategory: byId('filter-category'),
     filterOwner: byId('filter-owner'),
     filterRisk: byId('filter-risk'),
     filterDue: byId('filter-due'),
+    activeFilters: byId('active-filters'),
     reset: byId('reset-filters'),
     resultCount: byId('result-count'),
     overview: byId('overview'),
@@ -280,6 +286,7 @@
     renderNotices();
     renderKpis();
     renderFilterOptions();
+    renderActiveFilters();
     renderProjects();
   }
 
@@ -349,9 +356,28 @@
   }
 
   function renderFilterOptions() {
-    var options = state.filterOptions || {categories: [], owners: []};
+    var options = state.filterOptions || {categories: [], owners: [], responsibilities: []};
     fillSelect(dom.filterCategory, T('common.all'), options.categories || [], state.filters.category, 'category');
     fillSelect(dom.filterOwner, T('common.all'), options.owners || [], state.filters.owner, 'owner');
+    fillResponsibilitySelect(options.responsibilities || []);
+  }
+
+  /**
+   * Responsibility options are labelled by the stored name and carry the stable ID as the
+   * filter value. A retired responsibility keeps its label so historical projects stay
+   * filterable; only the label suffix marks it.
+   */
+  function fillResponsibilitySelect(responsibilities) {
+    var select = dom.filterResponsibility;
+    clear(select);
+    select.appendChild(el('option', {text: T('dashboard.filter.responsibility.all'), attrs: {value: ''}}));
+    responsibilities.forEach(function (item) {
+      var label = item.retired ? T('dashboard.filter.responsibility.retired', {name: item.name}) : item.name;
+      select.appendChild(el('option', {text: label, attrs: {value: item.responsibilityId}}));
+    });
+    var ids = responsibilities.map(function (item) { return item.responsibilityId; });
+    if (ids.indexOf(state.filters.responsibility) < 0) state.filters.responsibility = '';
+    select.value = state.filters.responsibility;
   }
 
   function fillSelect(select, allLabel, values, current, key) {
@@ -388,6 +414,7 @@
     var filters = state.filters;
     var list = state.projects.filter(function (project) {
       if (!matchesStatus(project, filters.status)) return false;
+      if (filters.responsibility && project.responsibilityId !== filters.responsibility) return false;
       if (filters.category && project.category !== filters.category) return false;
       if (filters.owner && project.ownerName !== filters.owner) return false;
       if (!matchesRisk(project, filters.risk)) return false;
@@ -456,7 +483,8 @@
     button.appendChild(el('div', {className: 'card-head'}, [
       el('div', {}, [
         el('p', {className: 'card-title', text: project.projectName}),
-        el('p', {className: 'card-sub', text: [project.category || T('dashboard.card.categoryUnset'), statusText(project.status)].join(' · ')})
+        el('p', {className: 'card-sub', text: [project.responsibilityName || T('dashboard.card.responsibilityUnset'),
+          project.category || T('dashboard.card.categoryUnset'), statusText(project.status)].join(' · ')})
       ]),
       el('span', {className: healthClass(project.health), text: project.health ? healthText(project.health) : T('common.none')})
     ]));
@@ -549,6 +577,7 @@
     dom.detailSummary.textContent = project.summary || T('dashboard.detail.noSummary');
     clear(dom.detailFacts);
     var facts = [
+      [T('dashboard.detail.responsibility'), unset(project.responsibilityName)],
       [T('dashboard.detail.owner'), unset(project.ownerName)],
       [T('dashboard.detail.status'), statusText(project.status)],
       [T('dashboard.detail.progress'), percentText(project.progress)],
@@ -561,7 +590,7 @@
     facts.forEach(function (item, index) {
       dom.detailFacts.appendChild(el('div', {}, [
         el('p', {className: 'fact-label', text: item[0]}),
-        el('p', {className: 'fact-value' + (index === 6 ? ' ' + deadlineClass(project) : ''), text: item[1]})
+        el('p', {className: 'fact-value' + (index === 7 ? ' ' + deadlineClass(project) : ''), text: item[1]})
       ]));
     });
 
@@ -623,23 +652,49 @@
     });
   }
 
+  /**
+   * Renders the subproject hierarchy.
+   *
+   * A nested subproject is indented under its parent. A parent node still shows its own
+   * directly assigned tasks; its progress figure includes every descendant task, so the
+   * two numbers never contradict each other.
+   */
   function renderGroups() {
     var detail = state.detail;
     clear(dom.detailGroups);
-    var groups = (detail.subprojects || []).filter(function (subproject) { return subproject.total > 0; });
+    var all = detail.subprojects || [];
     var known = {};
-    groups.forEach(function (subproject) { known[subproject.subprojectId] = true; });
+    all.forEach(function (subproject) { known[subproject.subprojectId] = true; });
+    var children = {};
+    all.forEach(function (subproject) {
+      var parent = subproject.parentSubprojectId || '';
+      if (!parent || !known[parent]) return;
+      if (!children[parent]) children[parent] = [];
+      children[parent].push(subproject);
+    });
 
-    groups.forEach(function (subproject) {
+    function emit(subproject) {
       var tasks = tasksFor(subproject.subprojectId);
-      dom.detailGroups.appendChild(groupBlock(subproject.name, [
+      var kids = children[subproject.subprojectId] || [];
+      if (!tasks.length && !kids.length) return;
+      var subtasks = numberOr(subproject.subtreeTotal, tasks.length);
+      var meta = [
         subproject.ownerName ? T('dashboard.table.owner') + ' ' + subproject.ownerName : '',
         statusText(subproject.status),
         T('dashboard.table.progress') + ' ' + percentText(subproject.progress),
         subproject.deadline ? T('dashboard.table.deadline') + ' ' + subproject.deadline : '',
-        T('dashboard.count', {count: tasks.length})
-      ].filter(Boolean).join(' · '), tasks, subproject.name, subproject));
-    });
+        tasks.length ? T('dashboard.count', {count: tasks.length}) : '',
+        subtasks > tasks.length ? T('dashboard.detail.subtreeCount', {count: subtasks}) : ''
+      ].filter(Boolean).join(' · ');
+      dom.detailGroups.appendChild(groupBlock(subproject.name, meta, tasks, subproject.name, subproject));
+      kids.forEach(emit);
+    }
+
+    // A node is a root when it has no parent, or when its parent is not published.
+    all.filter(function (subproject) {
+      var parent = subproject.parentSubprojectId || '';
+      return !parent || !known[parent];
+    }).forEach(emit);
 
     var ungrouped = (detail.tasks || []).filter(function (task) {
       return !task.subprojectId || !known[task.subprojectId];
@@ -651,8 +706,15 @@
     }
   }
 
-  function groupBlock(title, metaText, tasks, caption) {
-    var details = el('details', {className: 'group', attrs: {open: true}});
+  function numberOr(value, fallback) {
+    var parsed = Number(value);
+    return isFinite(parsed) ? parsed : fallback;
+  }
+
+  function groupBlock(title, metaText, tasks, caption, subproject) {
+    var level = subproject && numberOr(subproject.level, 1) > 1 ? 2 : 1;
+    var details = el('details', {className: 'group' + (level > 1 ? ' group-nested' : ''),
+      attrs: {open: true, 'data-level': String(level)}});
     details.appendChild(el('summary', {}, [
       el('span', {className: 'group-summary-main'}, [
         el('span', {className: 'group-name', text: title}),
@@ -661,7 +723,9 @@
     ]));
     var body = el('div', {className: 'group-body'});
     if (tasks.length) body.appendChild(taskTable(sortedTasks(tasks), caption));
-    else body.appendChild(el('p', {className: 'group-meta', text: T('dashboard.detail.noTasksBody')}));
+    else if (subproject && numberOr(subproject.subtreeTotal, 0) === 0) {
+      body.appendChild(el('p', {className: 'group-meta', text: T('dashboard.detail.noTasksBody')}));
+    }
     details.appendChild(body);
     return details;
   }
@@ -840,6 +904,50 @@
 
   /* ---------------- worker requests ---------------- */
 
+  /**
+   * Unsent request data.
+   *
+   * Everything the viewer typed lives in `state.draft` (memory only, never a spreadsheet).
+   * Rendering reads the draft back, so a language switch, a client validation error or a
+   * temporary server error leaves the form exactly as it was.
+   */
+  function resetDraft(taskId) {
+    if (state.draft.taskId !== taskId) {
+      state.draft = {taskId: taskId, type: '', fields: {}, lookup: '', receipt: null, statusResult: null};
+    }
+  }
+
+  function draftValue(key) {
+    var value = state.draft.fields[key];
+    return value === undefined || value === null ? '' : value;
+  }
+
+  function bindDraft(node, key) {
+    node.value = draftValue(key);
+    var store = function () { state.draft.fields[key] = node.value; };
+    node.addEventListener('input', store);
+    node.addEventListener('change', store);
+    return node;
+  }
+
+  function hasUnsavedDraft() {
+    return Object.keys(state.draft.fields).some(function (key) {
+      return String(state.draft.fields[key] === undefined ? '' : state.draft.fields[key]).trim() !== '';
+    });
+  }
+
+  function clearDraft() {
+    state.draft.type = '';
+    state.draft.fields = {};
+    state.draft.statusResult = null;
+  }
+
+  function configState() {
+    var config = state.requestConfig || {};
+    if (config.state) return config.state;
+    return config.enabled === true ? 'enabled' : 'disabled';
+  }
+
   function clientToken() {
     var token = '';
     try { token = localStorage.getItem(CLIENT_TOKEN_KEY) || ''; } catch (error) { token = ''; }
@@ -854,14 +962,34 @@
 
   function requestSection(data) {
     var task = data.task;
+    resetDraft(task.taskId);
     var section = el('div', {className: 'request-section'});
+    var mode = configState();
+
+    if (mode === 'loading') {
+      section.appendChild(el('p', {className: 'request-hint', text: T('request.config.loading')}));
+      section.appendChild(disabledButtons());
+      return section;
+    }
+    if (mode === 'error') {
+      section.appendChild(el('p', {className: 'request-error', text: T('request.config.error')}));
+      return section;
+    }
+    if (mode === 'disabled') {
+      section.appendChild(el('p', {className: 'request-hint', text: T('request.config.disabled')}));
+      return section;
+    }
 
     var actions = el('div', {className: 'request-actions'});
     var deadlineButton = el('button', {
-      className: 'request-button primary', attrs: {type: 'button'}, text: T('request.action.deadline')
+      className: 'request-button primary' + (state.draft.type === 'DEADLINE_CHANGE' ? ' is-active' : ''),
+      attrs: {type: 'button', 'aria-pressed': state.draft.type === 'DEADLINE_CHANGE' ? 'true' : 'false'},
+      text: T('request.action.deadline')
     });
     var completionButton = el('button', {
-      className: 'request-button', attrs: {type: 'button'}, text: T('request.action.completion')
+      className: 'request-button' + (state.draft.type === 'COMPLETION_REPORT' ? ' is-active' : ''),
+      attrs: {type: 'button', 'aria-pressed': state.draft.type === 'COMPLETION_REPORT' ? 'true' : 'false'},
+      text: T('request.action.completion')
     });
     actions.appendChild(deadlineButton);
     actions.appendChild(completionButton);
@@ -870,45 +998,103 @@
     var area = el('div');
     section.appendChild(area);
 
-    deadlineButton.addEventListener('click', function () {
+    function openDeadline() {
+      state.draft.type = 'DEADLINE_CHANGE';
       clear(area);
       area.appendChild(deadlineForm(data, area));
-    });
-    completionButton.addEventListener('click', function () {
+      deadlineButton.className = 'request-button primary is-active';
+      completionButton.className = 'request-button';
+    }
+    function openCompletion() {
+      state.draft.type = 'COMPLETION_REPORT';
       clear(area);
       area.appendChild(completionForm(data, area));
+      completionButton.className = 'request-button is-active';
+      deadlineButton.className = 'request-button primary';
+    }
+    deadlineButton.addEventListener('click', function () {
+      if (state.draft.type === 'DEADLINE_CHANGE') return;
+      if (!confirmDiscard()) return;
+      state.draft.fields = {};
+      openDeadline();
+    });
+    completionButton.addEventListener('click', function () {
+      if (state.draft.type === 'COMPLETION_REPORT') return;
+      if (!confirmDiscard()) return;
+      state.draft.fields = {};
+      openCompletion();
     });
 
+    if (state.draft.type === 'DEADLINE_CHANGE') openDeadline();
+    else if (state.draft.type === 'COMPLETION_REPORT') openCompletion();
+    else if (state.draft.receipt) {
+      area.appendChild(receipt(state.draft.receipt.requestId, state.draft.receipt.status,
+        state.draft.receipt.completion));
+    }
+
+    section.appendChild(statusLookup());
+    return section;
+  }
+
+  function confirmDiscard() {
+    if (!hasUnsavedDraft()) return true;
+    return window.confirm(T('request.draft.discard'));
+  }
+
+  function disabledButtons() {
+    var wrap = el('div', {className: 'request-actions'});
+    wrap.appendChild(el('button', {className: 'request-button primary',
+      attrs: {type: 'button', disabled: true}, text: T('request.action.deadline')}));
+    wrap.appendChild(el('button', {className: 'request-button',
+      attrs: {type: 'button', disabled: true}, text: T('request.action.completion')}));
+    return wrap;
+  }
+
+  function statusLookup() {
     var statusWrap = el('div', {className: 'request-form'});
     statusWrap.appendChild(el('h3', {text: T('request.status.title')}));
     var statusLabel = el('label', {text: T('request.status.lookup')});
-    var statusInput = el('input', {attrs: {type: 'text', placeholder: T('request.status.placeholder'),
-      autocomplete: 'off', spellcheck: 'false'}});
+    var statusInput = bindDraft(el('input', {attrs: {type: 'text', placeholder: T('request.status.placeholder'),
+      autocomplete: 'off', spellcheck: 'false'}}), 'lookup');
+    statusInput.setAttribute('id', 'request-status-lookup');
+    statusLabel.setAttribute('for', 'request-status-lookup');
     statusWrap.appendChild(statusLabel);
     statusWrap.appendChild(statusInput);
     var statusButton = el('button', {className: 'request-button', attrs: {type: 'button'}, text: T('request.status.lookup')});
     statusWrap.appendChild(statusButton);
     var statusResult = el('div');
     statusWrap.appendChild(statusResult);
-    section.appendChild(statusWrap);
+    if (state.draft.statusResult === 'notFound') {
+      statusResult.appendChild(el('p', {className: 'request-error', text: T('request.status.notFound')}));
+    } else if (state.draft.statusResult) {
+      statusResult.appendChild(receipt(state.draft.statusResult.requestId,
+        state.draft.statusResult.status, false));
+    }
     statusButton.addEventListener('click', function () {
       var id = statusInput.value.trim();
+      state.draft.lookup = statusInput.value;
       clear(statusResult);
-      if (!id) { statusResult.appendChild(el('p', {className: 'request-error', text: T('request.status.notFound')})); return; }
+      if (!id) {
+        state.draft.statusResult = 'notFound';
+        statusResult.appendChild(el('p', {className: 'request-error', text: T('request.status.notFound')}));
+        return;
+      }
       api.requestStatus(id).then(function (result) {
         clear(statusResult);
         if (!result || !result.ok) {
+          state.draft.statusResult = null;
           statusResult.appendChild(el('p', {className: 'request-error', text: I18n.errorMessage(language, result && result.error)}));
           return;
         }
+        state.draft.statusResult = {requestId: result.data.requestId, status: result.data.status};
         statusResult.appendChild(receipt(result.data.requestId, result.data.status, false));
       }).catch(function () {
         clear(statusResult);
+        state.draft.statusResult = null;
         statusResult.appendChild(el('p', {className: 'request-error', text: T('request.error.REQUEST_UNEXPECTED')}));
       });
     });
-
-    return section;
+    return statusWrap;
   }
 
   function readOnlyField(label, value) {
@@ -918,9 +1104,14 @@
     return wrap;
   }
 
-  function field(labelText, control) {
+  function field(labelText, control, id) {
     var wrap = el('div');
-    wrap.appendChild(el('label', {text: labelText}));
+    var label = el('label', {text: labelText});
+    if (id) {
+      control.setAttribute('id', id);
+      label.setAttribute('for', id);
+    }
+    wrap.appendChild(label);
     wrap.appendChild(control);
     return wrap;
   }
@@ -946,22 +1137,24 @@
     var form = el('div', {className: 'request-form'});
     form.appendChild(el('h3', {text: T('request.action.deadline')}));
 
-    var requested = el('input', {attrs: {type: 'date'}});
+    var requested = bindDraft(el('input', {attrs: {type: 'date'}}), 'requestedDate');
     var reason = el('select');
     REASONS.forEach(function (item) {
       reason.appendChild(el('option', {text: T(item.key), attrs: {value: item.value}}));
     });
-    var explanation = el('textarea');
-    var requester = el('input', {attrs: {type: 'text', maxlength: '120', autocomplete: 'off'}});
+    // Bind after the options exist, otherwise a restored draft cannot select its value.
+    bindDraft(reason, 'reason');
+    var explanation = bindDraft(el('textarea', {attrs: {maxlength: '1000'}}), 'explanation');
+    var requester = bindDraft(el('input', {attrs: {type: 'text', maxlength: '120', autocomplete: 'off'}}), 'requesterName');
 
     form.appendChild(readOnlyField(T('request.form.project'), task.projectName || T('common.none')));
     form.appendChild(readOnlyField(T('request.form.task'), task.name || T('common.none')));
     form.appendChild(readOnlyField(T('request.form.owner'), unset(task.ownerName)));
     form.appendChild(readOnlyField(T('request.form.currentDeadline'), unset(task.dueDate)));
-    form.appendChild(field(T('request.form.requestedDeadline'), requested));
-    form.appendChild(field(T('request.form.reason'), reason));
-    form.appendChild(field(T('request.form.explanation'), explanation));
-    form.appendChild(field(T('request.form.requester'), requester));
+    form.appendChild(field(T('request.form.requestedDeadline'), requested, 'request-deadline'));
+    form.appendChild(field(T('request.form.reason'), reason, 'request-reason'));
+    form.appendChild(field(T('request.form.explanation'), explanation, 'request-explanation'));
+    form.appendChild(field(T('request.form.requester'), requester, 'request-requester'));
     form.appendChild(el('p', {className: 'request-hint', text: T('request.form.requiredNote')}));
 
     var error = el('p', {className: 'request-error'});
@@ -970,7 +1163,11 @@
     var buttons = el('div', {className: 'request-actions'}, [submit, cancel]);
     form.appendChild(buttons);
     form.appendChild(error);
-    cancel.addEventListener('click', function () { clear(area); });
+    cancel.addEventListener('click', function () {
+      if (!confirmDiscard()) return;
+      clearDraft();
+      refreshDrawer();
+    });
 
     submit.addEventListener('click', function () {
       clear(error);
@@ -996,11 +1193,15 @@
         submit.disabled = false;
         submit.textContent = T('request.form.submit');
         if (!result || !result.ok) {
+          // The typed values stay in the draft so the viewer can correct and resend.
           error.textContent = I18n.errorMessage(language, result && result.error);
           return;
         }
-        clear(area);
-        area.appendChild(receipt(result.data.requestId, result.data.status || 'RECEIVED', false));
+        var requestId = result.data.requestId;
+        var status = result.data.status || 'RECEIVED';
+        clearDraft();
+        state.draft.receipt = {requestId: requestId, status: status, completion: false};
+        refreshDrawer();
       }).catch(function () {
         submit.disabled = false;
         submit.textContent = T('request.form.submit');
@@ -1016,14 +1217,14 @@
     var form = el('div', {className: 'request-form'});
     form.appendChild(el('h3', {text: T('request.action.completion')}));
 
-    var reporter = el('input', {attrs: {type: 'text', maxlength: '120', autocomplete: 'off'}});
-    var note = el('textarea', {attrs: {maxlength: '500'}});
+    var reporter = bindDraft(el('input', {attrs: {type: 'text', maxlength: '120', autocomplete: 'off'}}), 'reporterName');
+    var note = bindDraft(el('textarea', {attrs: {maxlength: '500'}}), 'note');
 
     form.appendChild(readOnlyField(T('request.form.project'), task.projectName || T('common.none')));
     form.appendChild(readOnlyField(T('request.form.task'), task.name || T('common.none')));
     form.appendChild(readOnlyField(T('request.form.owner'), unset(task.ownerName)));
-    form.appendChild(field(T('request.completion.reporter'), reporter));
-    form.appendChild(field(T('request.completion.note'), note));
+    form.appendChild(field(T('request.completion.reporter'), reporter, 'request-reporter'));
+    form.appendChild(field(T('request.completion.note'), note, 'request-note'));
     form.appendChild(el('p', {className: 'request-hint', text: T('request.form.requiredNote')}));
 
     var error = el('p', {className: 'request-error'});
@@ -1031,7 +1232,11 @@
     var cancel = el('button', {className: 'request-button', attrs: {type: 'button'}, text: T('request.form.cancel')});
     form.appendChild(el('div', {className: 'request-actions'}, [submit, cancel]));
     form.appendChild(error);
-    cancel.addEventListener('click', function () { clear(area); });
+    cancel.addEventListener('click', function () {
+      if (!confirmDiscard()) return;
+      clearDraft();
+      refreshDrawer();
+    });
 
     submit.addEventListener('click', function () {
       clear(error);
@@ -1051,8 +1256,11 @@
           error.textContent = I18n.errorMessage(language, result && result.error);
           return;
         }
-        clear(area);
-        area.appendChild(receipt(result.data.requestId, result.data.status || 'RECEIVED', true));
+        var requestId = result.data.requestId;
+        var status = result.data.status || 'RECEIVED';
+        clearDraft();
+        state.draft.receipt = {requestId: requestId, status: status, completion: true};
+        refreshDrawer();
       }).catch(function () {
         submit.disabled = false;
         submit.textContent = T('request.completion.button');
@@ -1064,6 +1272,14 @@
   }
 
   /* ---------------- drawer plumbing ---------------- */
+
+  /** Re-renders the open drawer without losing its scroll position. */
+  function refreshDrawer() {
+    if (!state.drawerData || !state.drawerOpen) return;
+    var scroll = dom.drawerBody.scrollTop;
+    renderTaskDrawer(state.drawerData);
+    dom.drawerBody.scrollTop = scroll;
+  }
 
   function showDrawer() {
     state.drawerOpen = true;
@@ -1129,14 +1345,36 @@
 
   function syncFilterState() {
     state.filters.status = dom.filterStatus.value;
+    state.filters.responsibility = dom.filterResponsibility.value;
     state.filters.category = dom.filterCategory.value;
     state.filters.owner = dom.filterOwner.value;
     state.filters.risk = dom.filterRisk.value;
+    renderActiveFilters();
     renderProjects();
+  }
+
+  /** Active filters stay visible so a filtered list is never mistaken for the whole set. */
+  function renderActiveFilters() {
+    clear(dom.activeFilters);
+    var filters = state.filters;
+    var labels = [];
+    if (filters.responsibility) {
+      var option = dom.filterResponsibility.options[dom.filterResponsibility.selectedIndex];
+      labels.push(T('dashboard.filter.active', {label: T('dashboard.filter.responsibility'),
+        value: option ? option.textContent : filters.responsibility}));
+    }
+    if (filters.category) labels.push(T('dashboard.filter.active', {label: T('dashboard.filter.category'), value: filters.category}));
+    if (filters.owner) labels.push(T('dashboard.filter.active', {label: T('dashboard.filter.owner'), value: filters.owner}));
+    if (filters.risk) labels.push(T('dashboard.filter.active', {label: T('dashboard.filter.risk'), value: filters.risk}));
+    if (filters.dueSoon) labels.push(T('dashboard.filter.active', {label: T('dashboard.filter.dueSoon'), value: T('common.yes')}));
+    labels.forEach(function (text) {
+      dom.activeFilters.appendChild(el('span', {className: 'filter-tag', text: text}));
+    });
   }
 
   function resetFilters() {
     dom.filterStatus.value = 'open';
+    dom.filterResponsibility.value = '';
     dom.filterCategory.value = '';
     dom.filterOwner.value = '';
     dom.filterRisk.value = '';
@@ -1169,13 +1407,11 @@
     renderNotices();
     renderKpis();
     renderFilterOptions();
+    renderActiveFilters();
     renderProjects();
     if (state.detail) renderDetail();
-    if (state.drawerData && state.drawerOpen) {
-      var scroll = dom.drawerBody.scrollTop;
-      renderTaskDrawer(state.drawerData);
-      dom.drawerBody.scrollTop = scroll;
-    }
+    // The drawer is rebuilt from state, so unsent request data survives the switch.
+    refreshDrawer();
   }
 
   function wireLanguage() {
@@ -1202,7 +1438,7 @@
         loadPortfolio(dom.search.value.trim());
       }
     });
-    [dom.filterStatus, dom.filterCategory, dom.filterOwner, dom.filterRisk].forEach(function (select) {
+    [dom.filterStatus, dom.filterResponsibility, dom.filterCategory, dom.filterOwner, dom.filterRisk].forEach(function (select) {
       select.addEventListener('change', syncFilterState);
     });
     dom.filterDue.addEventListener('click', function () {
@@ -1240,9 +1476,16 @@
     I18n.apply(language, document);
     renderLanguageButtons();
     renderSync();
+    // Request availability fails closed: nothing is offered until the server confirms it.
+    state.requestConfig = {enabled: false, state: 'loading'};
     api.requestConfig().then(function (result) {
-      state.requestConfig = (result && result.ok && result.data) ? result.data : {enabled: false};
-    }).catch(function () { state.requestConfig = {enabled: false}; });
+      var enabled = !!(result && result.ok && result.data && result.data.enabled === true);
+      state.requestConfig = {enabled: enabled, state: enabled ? 'enabled' : 'disabled'};
+      refreshDrawer();
+    }).catch(function () {
+      state.requestConfig = {enabled: false, state: 'error'};
+      refreshDrawer();
+    });
     loadPortfolio('');
   }
 

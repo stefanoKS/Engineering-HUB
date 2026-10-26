@@ -202,3 +202,52 @@ or nobody reviews publication freshness. Each has a documented mitigation in
 * Exactly-once mail delivery is not promised; ambiguous deliveries are recorded and resolved
   manually.
 
+
+## V1.4 — responsibilities and hierarchy
+
+### Responsibility administration scope
+
+`Access.canManageResponsibility` is the only policy, applied on the server for every entrypoint:
+
+| Actor | Scope |
+| --- | --- |
+| ADMIN | every responsibility, including ownership changes and transfers into a retired area |
+| MANAGER | only the responsibilities they own; may create one (becoming its owner) but may not change an owner |
+| MEMBER / VIEWER | none |
+
+A responsibility is an organizational grouping, **not** a permission boundary. Owning one never
+grants access to the projects inside it: `Access.requireProjectWrite` still requires
+`PROJECTS.Project_Owner_ID === identity.memberId` for a manager. A project transfer writes
+`Responsibility_ID` only, so `Project_Owner_ID`, deadlines, status and progress are unchanged, and
+a manager cannot use the feature to reach another manager's project.
+
+### New write paths
+
+| Entry point | Server check | Audit |
+| --- | --- | --- |
+| `uiSaveResponsibility` | `Access.requireManager` + `canManageResponsibility` | `CREATE` / `UPDATE` on `RESPONSIBILITIES` |
+| `uiMoveResponsibility` | `Access.requireManager` + per-row ownership | `RESPONSIBILITY_REORDERED` |
+| `uiRetireResponsibility` / `uiReactivateResponsibility` | ownership | `RETIRE` / `REACTIVATE` |
+| `uiTransferProject` / `uiUpdateProject` | `Access.requireProjectWrite` | `RESPONSIBILITY_TRANSFERRED` with both IDs, actor and reason |
+| `uiSaveSubproject` / `uiArchiveSubproject` / `uiReactivateSubproject` | `Access.requireManager` | `REPARENT` / `ARCHIVE` / `REACTIVATE` |
+| `uiMoveTask` | `Access.requireManager` + `Access.requireTaskWrite` | `TASK_MOVED` |
+
+A confirmation flag supplied by the browser is a user-intent gate, never authority: every one of
+these paths re-checks the role and the record scope on the server.
+
+### Published risk surface
+
+The snapshot publishes only the responsibility ID, its display name, its display order and a
+retired flag — only for areas that label a published project. The internal description, the owner,
+private project text and every log stay private. An older snapshot contract is rejected
+(`SNAPSHOT_CONTRACT_UNSUPPORTED`) rather than read as if it had the new fields.
+
+### Residual risks
+
+- A Google Sheets editor can still change the workbook and a container-bound script's source; the
+  application controls are not a substitute for Drive permissions.
+- Responsibility names are user text. They are rendered with `textContent` only, and the
+  publisher escapes a leading `=`, `+`, `-` or `@`, but a manager can still publish a confusing
+  label to every employee. Review names before enabling publication.
+- Live Workspace behaviour (session identity, sidebar sandbox, Drive ACLs) remains unverified for
+  V1.4; see [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md).

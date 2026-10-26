@@ -63,6 +63,7 @@ var Projects = (function () {
   function validate(row) {
     Domain.dates(row);
     if (row.Project_Owner_ID) Domain.required('MEMBERS', row.Project_Owner_ID);
+    if (row.Responsibility_ID) Domain.required('RESPONSIBILITIES', row.Responsibility_ID);
     if (row.Archived_At && row.Status !== 'Archived') Domain.fail('Archived_At is only valid for archived projects');
   }
 
@@ -82,6 +83,8 @@ var Projects = (function () {
     return Database.read('PROJECTS').filter(function (project) {
       if (statuses && statuses.indexOf(project.Status) < 0) return false;
       if (filter.ownerId && project.Project_Owner_ID !== filter.ownerId) return false;
+      if (filter.responsibilityId && String(project.Responsibility_ID || '') !== String(filter.responsibilityId)) return false;
+      if (filter.unassigned && String(project.Responsibility_ID || '')) return false;
       if (filter.activeOnly && !Eligibility.projectContributesWorkload(project)) return false;
       if (query) {
         var haystack = [project.Project_ID, project.Project_Name, project.Description, project.Category].join(' ').toLowerCase();

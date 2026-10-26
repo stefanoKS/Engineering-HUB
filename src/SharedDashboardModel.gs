@@ -16,7 +16,10 @@
  * until a manager reviews each project.
  */
 var SharedDashboardModel = (function () {
-  var CONTRACT_VERSION = '1.3';
+  // V1.4 adds the responsibility label and the nested-subproject hierarchy. The version is
+  // explicit so an older snapshot is rejected instead of being read as if it had the new
+  // fields (see docs/dashboard/DATA_CONTRACT.md).
+  var CONTRACT_VERSION = '1.4';
   var VISIBILITY = ['INTERNAL', 'RESTRICTED'];
   var DONE = 'Done';
   var CANCELLED = 'Cancelled';
@@ -96,6 +99,49 @@ var SharedDashboardModel = (function () {
     return names;
   }
 
+  /**
+   * Published responsibility label.
+   *
+   * Only the display name, the stable ID, the display order and a retired flag are shared.
+   * The internal description and the owner are manager-only information.
+   */
+  function responsibilityDto(row) {
+    var order = number(row.Sort_Order);
+    return {
+      responsibilityId: text(row.Responsibility_ID),
+      name: text(row.Name),
+      sortOrder: order === null ? 0 : order,
+      retired: String(row.Status || '') === 'Retired'
+    };
+  }
+
+  function responsibilityNames(responsibilities) {
+    var names = Object.create(null);
+    (responsibilities || []).forEach(function (row) {
+      names[String(row.Responsibility_ID || '')] = text(row.Name);
+    });
+    return names;
+  }
+
+  /** Nesting level inside the published hierarchy; roots are level 1. */
+  function subprojectLevels(subprojects) {
+    var parent = Object.create(null);
+    (subprojects || []).forEach(function (row) {
+      parent[String(row.Subproject_ID || '')] = String(row.Parent_Subproject_ID || '');
+    });
+    var levels = Object.create(null);
+    Object.keys(parent).forEach(function (id) {
+      var level = 1, cursor = id, guard = 0;
+      while (parent[cursor]) {
+        cursor = parent[cursor];
+        level++;
+        if (guard++ > 4) { level = 1; break; }
+      }
+      levels[id] = level;
+    });
+    return levels;
+  }
+
   /** Aggregates a project's published tasks so the portfolio needs no task payload. */
   function aggregates(tasks, today) {
     var value = {open: 0, done: 0, overdue: 0, blocked: 0, dueSoon: 0};
@@ -123,6 +169,8 @@ var SharedDashboardModel = (function () {
       projectId: text(project.Project_ID),
       projectName: text(project.Project_Name),
       category: text(project.Category),
+      responsibilityId: text(project.Responsibility_ID),
+      responsibilityName: context.responsibilityNames[String(project.Responsibility_ID || '')] || '',
       ownerName: context.memberNames[String(project.Project_Owner_ID || '')] || '',
       status: text(project.Status),
       progress: rolled.calculated ? rolled.percent : null,
@@ -142,15 +190,22 @@ var SharedDashboardModel = (function () {
   }
 
   function subprojectDto(subproject, context) {
-    var tasks = context.tasksBySubproject[subproject.Subproject_ID] || [];
-    var rolled = Progress.rollup(tasks);
+    var direct = context.tasksBySubproject[subproject.Subproject_ID] || [];
+    // A parent subproject reports its own tasks plus every descendant task, counted once.
+    var subtree = Progress.subtreeTasks(subproject.Subproject_ID, context.subprojectChildren,
+      context.tasksBySubproject);
+    var rolled = Progress.rollup(subtree);
     return {
       subprojectId: text(subproject.Subproject_ID),
       projectId: text(subproject.Project_ID),
+      parentSubprojectId: text(subproject.Parent_Subproject_ID),
+      level: context.subprojectLevels[String(subproject.Subproject_ID || '')] || 1,
       name: text(subproject.Subproject_Name),
       ownerName: context.memberNames[String(subproject.Owner_ID || '')] || '',
       status: text(subproject.Status),
       progress: rolled.calculated ? rolled.percent : null,
+      directTasks: direct.length,
+      totalTasks: subtree.length,
       deadline: day(subproject.Deadline) || day(subproject.Planned_End),
       terminal: isTerminal(subproject.Status)
     };
@@ -290,12 +345,55 @@ var SharedDashboardModel = (function () {
       publishedMilestones.push(milestone);
     });
 
+    // Filters only ever offer responsibilities that label a published project, so no
+    // unpublished organizational area leaks through the filter metadata.
+    var responsibilityIndex = Object.create(null);
+    (input.responsibilities || []).forEach(function (row) {
+      var id = String(row.Responsibility_ID || '');
+      if (id) responsibilityIndex[id] = row;
+    });
+    var publishedResponsibilities = [];
+    var publishedResponsibilityIds = Object.create(null);
+    publishedProjects.forEach(function (project) {
+      var id = String(project.Responsibility_ID || '');
+      if (!id || publishedResponsibilityIds[id]) return;
+      var source = responsibilityIndex[id];
+      if (!source) {
+        warnings.push({code: 'RESPONSIBILITY_UNKNOWN', id: id});
+        return;
+      }
+      publishedResponsibilityIds[id] = true;
+      publishedResponsibilities.push(source);
+    });
+    publishedResponsibilities.sort(function (left, right) {
+      var a = Number(left.Sort_Order), b = Number(right.Sort_Order);
+      var leftOrder = isFinite(a) ? a : Number.MAX_SAFE_INTEGER;
+      var rightOrder = isFinite(b) ? b : Number.MAX_SAFE_INTEGER;
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      return text(left.Name).localeCompare(text(right.Name), 'ja');
+    });
+
     var context = {
       today: today,
       limits: limits,
       // Aggregates and grouping use only published tasks, so a restricted sibling can
       // never change a published project's numbers.
       memberNames: memberNames(input.members),
+      responsibilities: publishedResponsibilities,
+      responsibilityNames: responsibilityNames(publishedResponsibilities),
+      subprojectLevels: subprojectLevels(publishedSubprojects),
+      subprojectChildren: (function () {
+        // Children are grouped from published rows only: an unpublished subproject can
+        // never leak a task count into a parent's rollup.
+        var children = Object.create(null);
+        publishedSubprojects.forEach(function (row) {
+          var parent = String(row.Parent_Subproject_ID || '');
+          if (!parent) return;
+          if (!children[parent]) children[parent] = [];
+          children[parent].push(String(row.Subproject_ID));
+        });
+        return children;
+      }()),
       tasksByProject: index(publishedTasks, 'Project_ID'),
       tasksBySubproject: index(publishedTasks, 'Subproject_ID'),
       milestonesByProject: index(publishedMilestones, 'Project_ID'),
@@ -306,17 +404,20 @@ var SharedDashboardModel = (function () {
 
     var projectDtos = publishedProjects.map(function (project) { return projectDto(project, context); });
     var subprojectDtos = publishedSubprojects.map(function (subproject) { return subprojectDto(subproject, context); });
+    var responsibilityDtos = publishedResponsibilities.map(responsibilityDto);
     var taskDtos = publishedTasks.map(function (task) { return taskDto(task, context); });
     var milestoneDtos = publishedMilestones.map(milestoneDto);
 
     return {
       contractVersion: CONTRACT_VERSION,
       asOf: today,
+      responsibilities: responsibilityDtos,
       projects: projectDtos,
       subprojects: subprojectDtos,
       tasks: taskDtos,
       milestones: milestoneDtos,
       counts: {
+        responsibilities: responsibilityDtos.length,
         projects: projectDtos.length,
         subprojects: subprojectDtos.length,
         tasks: taskDtos.length,
@@ -340,6 +441,7 @@ var SharedDashboardModel = (function () {
   function hash(snapshot) {
     var payload = stable({
       contractVersion: snapshot.contractVersion,
+      responsibilities: snapshot.responsibilities,
       projects: snapshot.projects,
       subprojects: snapshot.subprojects,
       tasks: snapshot.tasks,
@@ -357,10 +459,12 @@ var SharedDashboardModel = (function () {
     return Object.keys(fieldSet || {}).every(function (key) { return allowed.indexOf(key) >= 0; });
   }
 
-  var PROJECT_PUBLIC_FIELDS = ['projectId', 'projectName', 'category', 'ownerName', 'status', 'progress',
-    'health', 'committedDeadline', 'forecastDeadline', 'summary', 'lastUpdated', 'terminal',
-    'openTasks', 'doneTasks', 'overdueTasks', 'blockedTasks', 'dueSoonTasks', 'totalTasks'];
-  var SUBPROJECT_PUBLIC_FIELDS = ['subprojectId', 'projectId', 'name', 'ownerName', 'status', 'progress', 'deadline', 'terminal'];
+  var PROJECT_PUBLIC_FIELDS = ['projectId', 'projectName', 'category', 'responsibilityId', 'responsibilityName',
+    'ownerName', 'status', 'progress', 'health', 'committedDeadline', 'forecastDeadline', 'summary', 'lastUpdated',
+    'terminal', 'openTasks', 'doneTasks', 'overdueTasks', 'blockedTasks', 'dueSoonTasks', 'totalTasks'];
+  var SUBPROJECT_PUBLIC_FIELDS = ['subprojectId', 'projectId', 'parentSubprojectId', 'level', 'name', 'ownerName',
+    'status', 'progress', 'directTasks', 'totalTasks', 'deadline', 'terminal'];
+  var RESPONSIBILITY_PUBLIC_FIELDS = ['responsibilityId', 'name', 'sortOrder', 'retired'];
   var TASK_PUBLIC_FIELDS = ['taskId', 'projectId', 'subprojectId', 'name', 'ownerName', 'status', 'priority',
     'plannedStart', 'dueDate', 'progress', 'publicNote', 'revision', 'pendingRequest'];
   var MILESTONE_PUBLIC_FIELDS = ['milestoneId', 'projectId', 'subprojectId', 'name', 'targetDate', 'actualDate', 'status'];
@@ -370,8 +474,11 @@ var SharedDashboardModel = (function () {
     DUE_SOON_DAYS: DUE_SOON_DAYS,
     PROJECT_PUBLIC_FIELDS: PROJECT_PUBLIC_FIELDS,
     SUBPROJECT_PUBLIC_FIELDS: SUBPROJECT_PUBLIC_FIELDS,
+    RESPONSIBILITY_PUBLIC_FIELDS: RESPONSIBILITY_PUBLIC_FIELDS,
     TASK_PUBLIC_FIELDS: TASK_PUBLIC_FIELDS,
     MILESTONE_PUBLIC_FIELDS: MILESTONE_PUBLIC_FIELDS,
+    responsibilityDto: responsibilityDto,
+    subprojectLevels: subprojectLevels,
     visibility: visibility,
     isInternal: isInternal,
     isTerminal: isTerminal,

@@ -33,14 +33,24 @@ var Eligibility = (function () {
   /**
    * A task participates in operational reporting when the task itself is open and both
    * parents are in a working state. Archived parents keep their child rows untouched.
+   * A task in a nested subproject is governed by its whole ancestor chain, so archiving a
+   * parent removes its descendants from active-work figures without deleting anything.
    */
   function taskInActiveWork(task, projects, subprojects) {
     if (!task || !taskOpen(task)) return false;
     var project = projects && projects[task.Project_ID];
     if (!projectContributesWorkload(project)) return false;
     if (task.Subproject_ID && subprojects) {
-      var subproject = subprojects[task.Subproject_ID];
-      if (!subproject || subproject.Project_ID !== task.Project_ID || !subprojectOpen(subproject)) return false;
+      var node = subprojects[task.Subproject_ID];
+      var guard = 0;
+      while (node) {
+        if (String(node.Project_ID) !== String(task.Project_ID) || !subprojectOpen(node)) return false;
+        var parentId = String(node.Parent_Subproject_ID || '');
+        if (!parentId) break;
+        if (guard++ > 4) return false;
+        node = subprojects[parentId];
+      }
+      if (!node) return false;
     }
     return true;
   }

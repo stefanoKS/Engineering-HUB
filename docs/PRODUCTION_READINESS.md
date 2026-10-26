@@ -2,18 +2,23 @@
 
 **Release status: NOT APPROVED FOR PRODUCTION**
 
-This is the canonical release gate for Engineering-HUB V1.3.1. The status may only be changed after recorded
+This is the canonical release gate for Engineering-HUB V1.4. The status may only be changed after recorded
 evidence below supports it. A green local test run is **not** sufficient.
 
 ## 1. Identity
 
 | Field | Value |
 | --- | --- |
-| Version | 1.3.1 (pre-trial stabilization on `main`) |
-| Audited baseline SHA | `27d38e3dcaff3cedadeb0626226a2bb7b5c8e10e` (V1.3 merge, reviewed before V1.3.1) |
-| Schema version | 5 (`005_task_planning_and_requests`, additive; approval + verified backup required). V1.3.1 changes no schema |
-| Hardening commit | see the local V1.3.1 working-tree changes recorded in the V1.3.1 check gates |
+| Version | 1.4.0 (responsibilities, nested subprojects and UI refinement on `main`) |
+| Audited baseline SHA | `e147e52` (V1.3.1 documentation and installation fix) |
+| Schema version | 6 (`006_responsibilities_and_nested_subprojects`, additive; approval + verified backup required) |
+| Hardening commit | see the local V1.4 working-tree changes recorded in the V1.4 check gates |
 | Date prepared | 2026-10-26 |
+
+V1.4 was verified with local mocks and a static browser preview only. Nothing was initialized,
+migrated, published, deployed or e-mailed against Google Workspace, so the release status remains
+**NOT APPROVED FOR PRODUCTION** and every live item stays **UNVERIFIED**. The open items are listed
+in [checkgates/V1_4_GATE_6.md](checkgates/V1_4_GATE_6.md#blocked--required-before-production-readiness).
 
 ## 2. Deployment environment
 

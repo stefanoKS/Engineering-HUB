@@ -172,3 +172,58 @@ dueDate, progress, publicNote, revision, pendingRequest
 The viewer fails closed when `PUBLISHED_META.CONTRACT_VERSION` is not `1.3`, so an old
 deployment keeps reading an older snapshot until a new publication happens.
 
+
+## Contract 1.4
+
+Contract 1.4 adds the responsibility label and the nested-subproject hierarchy. **The viewer
+fails closed when `PUBLISHED_META.CONTRACT_VERSION` is not `1.4`**, so a snapshot written by an
+older release is reported as `SNAPSHOT_CONTRACT_UNSUPPORTED` instead of being read as if it had
+the new fields. Republish after deploying V1.4.
+
+### New sheet
+
+```text
+PUBLISHED_RESPONSIBILITIES
+responsibilityId name sortOrder retired
+```
+
+- Only responsibilities that label at least one **published** project appear, so no unpublished
+  organizational area leaks through the filter metadata.
+- `name` is the stored display name and is never translated. `retired` is `TRUE`/`FALSE`; a
+  retired area stays published so historical projects keep their grouping and stay filterable.
+- The description and the owner are internal and are never published.
+
+### Changed sheets
+
+```text
+PUBLISHED_PROJECTS
+projectId projectName category responsibilityId responsibilityName ownerName status progress
+health committedDeadline forecastDeadline summary lastUpdated terminal openTasks doneTasks
+overdueTasks blockedTasks dueSoonTasks totalTasks
+
+PUBLISHED_SUBPROJECTS
+subprojectId projectId parentSubprojectId level name ownerName status progress directTasks
+totalTasks deadline terminal
+```
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `responsibilityId` / `responsibilityName` | string | The published label; both are empty when the project is 未分類 |
+| `parentSubprojectId` | string | Empty for a root subproject |
+| `level` | number | 1 = root subproject, 2 = nested subproject |
+| `directTasks` | number | Tasks assigned directly to this node |
+| `totalTasks` | number | Tasks of this node plus every descendant node (counted once) |
+| `progress` | number or empty | Effort-weighted rollup of `totalTasks`, using the same weights as the manager |
+
+`PUBLISHED_TASKS` is unchanged from 1.3, and `PUBLISHED_MILESTONES` is unchanged from 1.2.
+
+`PUBLISHED_META` gains `RESPONSIBILITY_COUNT` and keeps every earlier key.
+
+### Viewer behaviour
+
+- `dashboardPortfolio` returns `filters.responsibilities` as
+  `{responsibilityId, name, retired}`, containing only areas used by a visible project.
+- `dashboardProject` returns `subprojects` in hierarchy order (a child follows its parent) with
+  `parentSubprojectId`, `level`, `totalTasks` and the hierarchical `progress`.
+- No task row is ever duplicated, and a restricted project still publishes nothing — including
+  its responsibility, unless another published project uses the same area.

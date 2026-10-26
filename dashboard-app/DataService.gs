@@ -11,7 +11,7 @@
  * task row to the browser.
  */
 var DashboardData = (function () {
-  var CONTRACT_VERSION = '1.3';
+  var CONTRACT_VERSION = '1.4';
   var META_SHEET = 'PUBLISHED_META';
   var CACHE_TTL_SECONDS = 300;
   var CACHE_MAX_CHARS = 90000;
@@ -23,11 +23,14 @@ var DashboardData = (function () {
   // Must match SharedDashboardModel.PROJECT_PUBLIC_FIELDS / ... in the manager project.
   // The pairing is asserted by tests/v1_2-dashboard.test.js so the two apps cannot drift.
   var TABLES = {
-    projects: {sheet: 'PUBLISHED_PROJECTS', fields: ['projectId', 'projectName', 'category', 'ownerName',
-      'status', 'progress', 'health', 'committedDeadline', 'forecastDeadline', 'summary', 'lastUpdated',
-      'terminal', 'openTasks', 'doneTasks', 'overdueTasks', 'blockedTasks', 'dueSoonTasks', 'totalTasks']},
-    subprojects: {sheet: 'PUBLISHED_SUBPROJECTS', fields: ['subprojectId', 'projectId', 'name', 'ownerName',
-      'status', 'progress', 'deadline', 'terminal']},
+    responsibilities: {sheet: 'PUBLISHED_RESPONSIBILITIES',
+      fields: ['responsibilityId', 'name', 'sortOrder', 'retired']},
+    projects: {sheet: 'PUBLISHED_PROJECTS', fields: ['projectId', 'projectName', 'category', 'responsibilityId',
+      'responsibilityName', 'ownerName', 'status', 'progress', 'health', 'committedDeadline', 'forecastDeadline',
+      'summary', 'lastUpdated', 'terminal', 'openTasks', 'doneTasks', 'overdueTasks', 'blockedTasks',
+      'dueSoonTasks', 'totalTasks']},
+    subprojects: {sheet: 'PUBLISHED_SUBPROJECTS', fields: ['subprojectId', 'projectId', 'parentSubprojectId',
+      'level', 'name', 'ownerName', 'status', 'progress', 'directTasks', 'totalTasks', 'deadline', 'terminal']},
     tasks: {sheet: 'PUBLISHED_TASKS', fields: ['taskId', 'projectId', 'subprojectId', 'name', 'ownerName',
       'status', 'priority', 'plannedStart', 'dueDate', 'progress', 'publicNote', 'revision', 'pendingRequest']},
     milestones: {sheet: 'PUBLISHED_MILESTONES', fields: ['milestoneId', 'projectId', 'subprojectId', 'name',
@@ -192,6 +195,8 @@ var DashboardData = (function () {
       projectId: text(project.projectId),
       projectName: text(project.projectName),
       category: text(project.category),
+      responsibilityId: text(project.responsibilityId),
+      responsibilityName: text(project.responsibilityName),
       ownerName: text(project.ownerName),
       status: text(project.status),
       statusLabel: label('status', text(project.status)),
@@ -286,6 +291,31 @@ var DashboardData = (function () {
     return out.sort(function (a, b) { return a.localeCompare(b, 'ja'); });
   }
 
+  /**
+   * Responsibility filter options.
+   *
+   * Only responsibilities that label at least one visible project are offered, in their
+   * configured display order. A retired responsibility keeps its label so historical
+   * projects never lose their grouping; the flag lets the viewer mark it.
+   */
+  function responsibilityOptions(snapshot, projects) {
+    var used = Object.create(null);
+    projects.forEach(function (project) {
+      if (project.responsibilityId) used[project.responsibilityId] = true;
+    });
+    var rows = snapshot.tables.responsibilities
+      .filter(function (row) { return !!used[text(row.responsibilityId)]; })
+      .map(function (row) {
+        return {
+          responsibilityId: text(row.responsibilityId),
+          name: text(row.name),
+          retired: bool(row.retired)
+        };
+      });
+    rows.sort(function (left, right) { return left.name.localeCompare(right.name, 'ja'); });
+    return rows;
+  }
+
   function cacheGet(key) {
     try {
       var cached = CacheService.getScriptCache().get(key);
@@ -324,7 +354,8 @@ var DashboardData = (function () {
         filters: {
           categories: unique(projects.map(function (project) { return project.category; })),
           owners: unique(projects.map(function (project) { return project.ownerName; })),
-          statuses: unique(projects.map(function (project) { return project.status; }))
+          statuses: unique(projects.map(function (project) { return project.status; })),
+          responsibilities: responsibilityOptions(snapshot, projects)
         },
         query: query
       };
@@ -364,6 +395,8 @@ var DashboardData = (function () {
           var remaining = deadline(text(subproject.deadline), bool(subproject.terminal), today);
           var subProjectSummary = {
             subprojectId: text(subproject.subprojectId),
+            parentSubprojectId: text(subproject.parentSubprojectId),
+            level: Math.max(1, Number(subproject.level) || 1),
             name: text(subproject.name),
             ownerName: text(subproject.ownerName),
             status: text(subproject.status),
@@ -373,11 +406,30 @@ var DashboardData = (function () {
             daysRemaining: remaining.days,
             deadlineKind: remaining.kind,
             deadlineLabel: remaining.label,
-            total: 0
+            total: 0,
+            subtreeTotal: number(subproject.totalTasks) || 0
           };
           subprojectNames[subProjectSummary.subprojectId] = subProjectSummary.name;
           return subProjectSummary;
         });
+      // Order the tree so a nested subproject always follows its parent.
+      var byParent = Object.create(null);
+      subprojects.forEach(function (subproject) {
+        var parent = subproject.parentSubprojectId;
+        if (!byParent[parent]) byParent[parent] = [];
+        byParent[parent].push(subproject);
+      });
+      var orderedSubprojects = [];
+      (function walk(parentId) {
+        (byParent[parentId] || []).forEach(function (subproject) {
+          orderedSubprojects.push(subproject);
+          walk(subproject.subprojectId);
+        });
+      }(''));
+      subprojects.forEach(function (subproject) {
+        if (orderedSubprojects.indexOf(subproject) < 0) orderedSubprojects.push(subproject);
+      });
+      subprojects = orderedSubprojects;
 
       var owned = snapshot.tables.tasks.filter(function (task) { return text(task.projectId) === id; });
       var order = Object.create(null);

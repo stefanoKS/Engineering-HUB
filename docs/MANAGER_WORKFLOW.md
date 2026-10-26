@@ -90,11 +90,15 @@ confirmation). The last active administrator can never be demoted or deactivated
 ## Create a project
 
 1. **設計・開発課 管理 → 新規プロジェクト**.
-2. Enter プロジェクト名, 責任者, カテゴリ, 確定期限, 状態.
+2. Enter プロジェクト名, 担当領域, 責任者, 確定期限, 状態. カテゴリ, 優先度, 社内ダッシュボードに
+   表示する and 共有用概要 live under 詳細設定.
 3. Choose 社内ダッシュボードに表示する (see [Edit a project](#edit-a-project)) and enter the
    共有用概要 that may be published.
 4. **作成**. The stable `Project_ID` is generated, the audit log records `UI_PROJECT_CREATED`, and the dashboard
    refreshes automatically.
+
+担当領域 is optional; leaving it empty means 未分類, and a retired area cannot be chosen for a new
+project. カテゴリ is a different, free-form classification and is unchanged by the area.
 
 When you leave 責任者 empty, **you become the owner** (your verified `Member_ID`). Another
 owner can be selected; after that, only that owner (or an administrator) can edit the project.
@@ -125,8 +129,35 @@ changes update `Committed_Deadline` only.
 
 ## Create a subproject
 
-1. Select the project, enter サブプロジェクト名, choose 担当者.
-2. **作成**. The subproject must belong to the selected project; projects and subprojects are never deleted.
+1. In 案件, choose the project and press **新規作成** (or select an existing node first and press
+   **子サブプロジェクトを追加** to nest under it).
+2. Enter サブプロジェクト名, 担当者. The tree above the form shows the current hierarchy.
+3. **作成**. The subproject must belong to the selected project; projects and subprojects are never deleted.
+
+Only two levels exist: プロジェクト → サブプロジェクト → サブプロジェクト. A third level, a parent in
+another project, and making a node its own parent are all refused. Changing a parent asks for
+confirmation and never moves tasks by itself. **アーカイブ** keeps the child subprojects and every
+task; while a parent is archived its descendants stop counting as active work, and
+**アーカイブ解除** restores them.
+
+## Manage responsibilities (担当領域)
+
+1. **設計・開発課 管理 → 担当領域の管理** opens 管理. The list shows each area with its owner, its
+   project counts and its Active/Retired state.
+2. **担当領域を追加** creates one and makes you its owner; **保存** renames it or edits the internal
+   description. **上へ / 下へ** change the display order only.
+3. **退職にする** asks for confirmation and tells you how many open projects stay in the area. It
+   keeps every project, task and history row; the area stays visible and filterable and its
+   projects are marked 「担当領域の再割当が必要です」. **有効に戻す** reactivates it.
+4. Owning an area lets you administer that area only. It never grants access to the projects
+   inside it, and changing a project's area never changes its owner.
+
+## Navigate the sidebar (V1.4)
+
+The sidebar is roughly 300px wide and shows **one section at a time**: 案件 (project and
+subproject), タスク (assign/edit and progress), 管理 (responsibilities, members, skills). Rarely
+used fields live under **詳細設定**, and a collapsed panel keeps the stored value. Each Sheets menu
+entry opens the right section for you.
 
 ## Assign a task
 

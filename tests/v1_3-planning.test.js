@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * V1.3 deadline + duration planning.
@@ -184,8 +184,8 @@ test('migration 005 is additive and keeps every legacy cell intact', () => {
   assert.equal(app.context.Migrations.currentVersion(), 4);
 
   const before = JSON.parse(JSON.stringify(app.context.Backup.snapshot(app.book)));
-  app.properties.setProperty('APPROVED_MIGRATIONS', '005_task_planning_and_requests');
-  assert.equal(app.context.Migrations.upgrade(), 5);
+  app.properties.setProperty('APPROVED_MIGRATIONS', '005_task_planning_and_requests,006_responsibilities_and_nested_subprojects');
+  assert.equal(app.context.Migrations.upgrade(), 6);
 
   assert.ok(app.book.getSheetByName('TASK_REQUESTS'));
   assert.ok(app.book.getSheetByName('TASK_DEADLINE_HISTORY'));

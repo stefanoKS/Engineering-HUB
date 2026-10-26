@@ -86,6 +86,35 @@ var Access = (function () {
     return current;
   }
 
+  /**
+   * Responsibility administration policy (V1.4).
+   *
+   * ADMIN administers every responsibility. A MANAGER may only administer a responsibility
+   * they own. Responsibility ownership is deliberately *not* an access path to the projects
+   * inside it: project ownership stays the only project permission boundary, so a manager
+   * never gains another manager's private project through this feature.
+   */
+  function canManageResponsibility(identity, responsibility) {
+    if (!identity || identity.active !== true) return false;
+    if (!identity.verified) return false;
+    if (identity.role === 'ADMIN') return true;
+    return identity.role === 'MANAGER' && !!responsibility &&
+      !!responsibility.Owner_Member_ID && responsibility.Owner_Member_ID === identity.memberId;
+  }
+
+  function requireResponsibilityWrite(responsibilityId, actorEmail) {
+    var current = identity(actorEmail);
+    var row = Database.find('RESPONSIBILITIES', responsibilityId);
+    if (!row) throw new Error('Unknown responsibility: ' + responsibilityId);
+    if (!canManageResponsibility(current, row)) {
+      throw new Error('この担当領域を変更する権限がありません（ADMIN または担当領域の責任者が必要です）');
+    }
+    return {identity: current, responsibility: row};
+  }
+
+  /** Changing who owns a responsibility is an administrative act. */
+  function requireResponsibilityOwnerChange(actorEmail) { return requireAdmin(actorEmail); }
+
   /** Task list visible to the caller; VIEWER sees no operational task rows. */
   function visibleTasks(current) {
     var tasks = Database.read('TASKS');
@@ -201,6 +230,9 @@ var Access = (function () {
     canEditTask: canEditTask,
     requireTaskWrite: requireTaskWrite,
     requireProjectWrite: requireProjectWrite,
+    canManageResponsibility: canManageResponsibility,
+    requireResponsibilityWrite: requireResponsibilityWrite,
+    requireResponsibilityOwnerChange: requireResponsibilityOwnerChange,
     visibleTasks: visibleTasks,
     visibleProjects: visibleProjects,
     memberDirectory: memberDirectory,

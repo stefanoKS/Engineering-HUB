@@ -36,18 +36,21 @@ function build(model, input) {
   }, input));
 }
 
-test('schema version 5 adds the dashboard and planning fields with a restrictive default', () => {
+test('schema version 6 adds responsibilities, nested subprojects and the V1.2/V1.3 fields', () => {
   const app = loadApp();
   const context = app.context;
-  assert.equal(context.Schema.version, 5);
+  assert.equal(context.Schema.version, 6);
   assert.deepEqual(plain(context.Migrations.registry.map(item => item.id)),
     ['002_task_assignment_safety', '003_management_reliability', '004_shared_dashboard',
-      '005_task_planning_and_requests']);
+      '005_task_planning_and_requests', '006_responsibilities_and_nested_subprojects']);
   const visibility = context.Schema.tables.PROJECTS.fields.find(field => field.name === 'Dashboard_Visibility');
   assert.equal(visibility.defaultValue, 'RESTRICTED');
   assert.deepEqual(plain(visibility.values), ['INTERNAL', 'RESTRICTED']);
   assert.ok(context.Schema.tables.PROJECTS.fields.some(field => field.name === 'Dashboard_Summary'));
   assert.ok(context.Schema.tables.TASKS.fields.some(field => field.name === 'Public_Note'));
+  assert.ok(context.Schema.tables.PROJECTS.fields.some(field => field.name === 'Responsibility_ID'));
+  assert.ok(context.Schema.tables.SUBPROJECTS.fields.some(field => field.name === 'Parent_Subproject_ID'));
+  assert.ok(context.Schema.tables.RESPONSIBILITIES);
 });
 
 test('only INTERNAL projects are published; blank and unknown visibility stay private', () => {

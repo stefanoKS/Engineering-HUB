@@ -41,6 +41,11 @@ var Dashboard = (function () {
     members.forEach(function (member) { memberById[member.Member_ID] = member; });
     var tasksByProject = indexBy(tasks, 'Project_ID');
     var tasksBySubproject = indexBy(tasks, 'Subproject_ID');
+    // Nested subprojects roll up their own tasks plus every descendant task exactly once.
+    var subprojectChildren = Subprojects.childrenMap(subprojects);
+    function subprojectTasks(subprojectId) {
+      return Progress.subtreeTasks(subprojectId, subprojectChildren, tasksBySubproject);
+    }
     var tasksByOwner = indexBy(tasks, 'Owner_Member_ID');
     var milestonesByProject = indexBy(milestones, 'Project_ID');
     var issuesByProject = indexBy(issues, 'Project_ID');
@@ -59,7 +64,7 @@ var Dashboard = (function () {
     };
 
     subprojects.forEach(function (subproject) {
-      var rolled = Progress.rollup(tasksBySubproject[subproject.Subproject_ID] || []);
+      var rolled = Progress.rollup(subprojectTasks(subproject.Subproject_ID));
       var value = rolled.calculated ? rolled.percent : '';
       if (!sameValue(subproject.Progress_Percent, value)) {
         patches.subprojects.push({id: subproject.Subproject_ID, patch: {Progress_Percent: value}});
@@ -108,7 +113,7 @@ var Dashboard = (function () {
           '', milestone.Target_Date || '', '', '', milestone.Status || '', milestone.Actual_Date ? '達成' : '予定']);
       });
       (subprojects.filter(function (subproject) { return subproject.Project_ID === project.Project_ID; })).forEach(function (subproject) {
-        var subRolled = Progress.rollup(tasksBySubproject[subproject.Subproject_ID] || []);
+        var subRolled = Progress.rollup(subprojectTasks(subproject.Subproject_ID));
         gantt.push(['サブプロジェクト', subproject.Subproject_ID, subproject.Subproject_Name, project.Project_Name,
           subproject.Planned_Start || '', subproject.Deadline || subproject.Planned_End || '', '',
           Progress.display(subRolled), subproject.Status, '']);

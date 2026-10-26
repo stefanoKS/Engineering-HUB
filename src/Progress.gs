@@ -66,6 +66,21 @@ var Progress = (function () {
     return result;
   }
 
+  /**
+   * Tasks of one subproject node plus every descendant node.
+   *
+   * Only tasks are counted, never child percentages, so a parent rollup cannot double
+   * count: each task belongs to exactly one node and the project rollup uses its own
+   * project grouping. Depth is bounded to two levels by Subprojects, so this stays cheap.
+   */
+  function subtreeTasks(subprojectId, children, tasksBySubproject) {
+    var collected = (tasksBySubproject[subprojectId] || []).slice();
+    (children[subprojectId] || []).forEach(function (childId) {
+      collected = collected.concat(subtreeTasks(childId, children, tasksBySubproject));
+    });
+    return collected;
+  }
+
   function display(rollupResult) { return rollupResult && rollupResult.calculated ? rollupResult.percent : '未計算'; }
 
   /** Recalculate stored project/subproject progress without touching other columns. */
@@ -74,6 +89,7 @@ var Progress = (function () {
       var tasks = Database.read('TASKS');
       var projects = Database.read('PROJECTS');
       var subprojects = Database.read('SUBPROJECTS');
+      var children = Subprojects.childrenMap(subprojects);
       var byProject = group(tasks, 'Project_ID');
       var bySubproject = group(tasks, 'Subproject_ID');
       var projectPatches = [], subprojectPatches = [], unknown = 0;
@@ -87,7 +103,8 @@ var Progress = (function () {
         }
       });
       subprojects.forEach(function (subproject) {
-        var result = rollup(bySubproject[subproject.Subproject_ID] || []);
+        // A parent reflects its own tasks plus every descendant task, exactly once.
+        var result = rollup(subtreeTasks(subproject.Subproject_ID, children, bySubproject));
         var value = result.calculated ? result.percent : '';
         if (String(subproject.Progress_Percent === '' || subproject.Progress_Percent === null || subproject.Progress_Percent === undefined ? '' : subproject.Progress_Percent) !== String(value)) {
           subprojectPatches.push({id: subproject.Subproject_ID, patch: {Progress_Percent: value}});
@@ -99,6 +116,7 @@ var Progress = (function () {
     });
   }
 
-  return {percent: percent, weight: weight, rollup: rollup, group: group, display: display, refresh: refresh};
+  return {percent: percent, weight: weight, rollup: rollup, group: group, display: display,
+    subtreeTasks: subtreeTasks, refresh: refresh};
 }());
 function refreshProgress() { return Progress.refresh(); }
