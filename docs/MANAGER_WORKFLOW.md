@@ -16,10 +16,11 @@ Japanese-first; the menu is **設計・開発課 管理**.
 | Open the sidebar | ✅ | ✅ | ⚠️ `ALLOW_MEMBER_SELF_SERVICE=true` のときのみ（自分の範囲） | ❌ |
 | Create a project | ✅ | ✅ | ❌ | ❌ |
 | Create a subproject | ✅ | ✅ | ❌ | ❌ |
-| Assign a task | ✅ | ✅ own projects | ❌ | ❌ |
-| Update progress | ✅ all tasks | ✅ own projects and own tasks | ⚠️ own tasks only (self-service opt-in) | ❌ |
-| Approve an assignment | ✅ | ✅ own scope | ❌ | ❌ |
-| Confirm a schedule | ✅ | ✅ own scope | ❌ | ❌ |
+| Manage responsibilities (create / rename / re-order / 廃止 / 再有効化) | ✅ | ✅ (owner change is ADMIN-only) | ❌ | ❌ |
+| Assign a task | ✅ | ✅ all | ❌ | ❌ |
+| Update progress | ✅ all tasks | ✅ all tasks | ⚠️ own tasks only (self-service opt-in) | ❌ |
+| Approve an assignment | ✅ | ✅ | ❌ | ❌ |
+| Confirm a schedule | ✅ | ✅ | ❌ | ❌ |
 | Review the skill matrix / gaps | ✅ | ✅ | ⚠️ own row only | ❌ |
 | Modify skill assessments | ✅ | ✅ | ❌ | ❌ |
 | Modify member records | ✅ | ✅ (roles unchanged) | ❌ | ❌ |
@@ -29,7 +30,7 @@ Japanese-first; the menu is **設計・開発課 管理**.
 | Install triggers | ✅ creator account | ✅ creator account | ❌ | ❌ |
 | Publish the shared dashboard snapshot | ✅ | ✅ (manual) | ❌ | ❌ |
 | Enable scheduled dashboard publication | ✅ + confirmation | ❌ | ❌ | ❌ |
-| Change `Dashboard_Visibility` / `Dashboard_Summary` | ✅ | ✅ own projects (domain API) | ❌ | ❌ |
+| Change `Dashboard_Visibility` / `Dashboard_Summary` | ✅ | ✅ (domain API) | ❌ | ❌ |
 
 The first administrator must be created once with `bootstrapFirstAdministrator` (deployment allowlist + exact
 confirmation). The last active administrator can never be demoted or deactivated.
@@ -146,11 +147,13 @@ task; while a parent is archived its descendants stop counting as active work, a
    project counts and its Active/Retired state.
 2. **担当領域を追加** creates one and makes you its owner; **保存** renames it or edits the internal
    description. **上へ / 下へ** change the display order only.
-3. **退職にする** asks for confirmation and tells you how many open projects stay in the area. It
+3. **廃止にする** asks for confirmation and tells you how many open projects stay in the area. It
    keeps every project, task and history row; the area stays visible and filterable and its
-   projects are marked 「担当領域の再割当が必要です」. **有効に戻す** reactivates it.
-4. Owning an area lets you administer that area only. It never grants access to the projects
-   inside it, and changing a project's area never changes its owner.
+   projects are marked 「担当領域の再割当が必要です」. **再有効化** restores it. 廃止 / 再有効化
+   describe an organizational area; 退職 / 復職 are never used for one.
+4. Any ADMIN or MANAGER administers any area — two managers can always collaborate. The owner
+   column records accountability, not permission, and changing a project's area never changes
+   its owner.
 
 ## Navigate the sidebar (V1.4)
 
@@ -165,6 +168,11 @@ entry opens the right section for you.
 2. Enter タスク名, 担当者, 期限 (required), and optionally 開始日, 見積時間, 完了条件, 優先度.
 3. Choose whether メール通知 is enabled and whether to 承認 / 日程確定 immediately.
 4. **登録して確認**.
+
+The タスク picker loads a bounded window (300 tasks) so the sidebar opens quickly. When the
+workbook holds more, the hint under the picker says how many exist; type part of a task name in
+**タスク名で絞り込み** to reach any task, including one outside the window. The selected task keeps
+its identity through a language switch and a re-render.
 
 Rules:
 

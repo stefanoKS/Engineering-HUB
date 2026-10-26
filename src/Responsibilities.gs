@@ -1,11 +1,11 @@
 /**
  * Organizational responsibility areas (担当領域).
  *
- * A responsibility groups projects for the manager, but it is deliberately *not* a
- * permission boundary: owning one never grants access to the projects inside it, and
- * moving a project never changes its owner. See docs/RESPONSIBILITIES.md.
+ * A responsibility groups projects for the manager. Any ADMIN or MANAGER administers every
+ * area; ownership is accountability, never a permission boundary, and moving a project never
+ * changes its owner. See docs/RESPONSIBILITIES.md and docs/SECURITY_MODEL.md.
  *
- * Retirement is a status change, never a deletion. Associated projects, tasks, milestones
+ * Retirement (廃止) is a status change, never a deletion. Associated projects, tasks, milestones
  * and history stay untouched and remain visible and actionable.
  */
 var Responsibilities = (function () {
@@ -77,7 +77,7 @@ var Responsibilities = (function () {
     }
     if (row.Status !== ACTIVE && row.Status !== RETIRED) fail('状態は Active または Retired を指定してください');
     if (row.Owner_Member_ID) Domain.required('MEMBERS', row.Owner_Member_ID);
-    if (row.Retired_At && row.Status !== RETIRED) fail('Retired_At は退職（Retired）状態でのみ設定できます');
+    if (row.Retired_At && row.Status !== RETIRED) fail('Retired_At は廃止（Retired）状態でのみ設定できます');
     // Only an active row can clash: a retired name stays reserved for its history.
     if (row.Status === ACTIVE) requireUniqueName(row);
   }
@@ -93,14 +93,15 @@ var Responsibilities = (function () {
   function identity() { return Access.requireManager(); }
 
   /**
-   * ADMIN administers every responsibility. A MANAGER may only administer a responsibility
-   * they own; the policy itself lives in Access.gs so every entrypoint shares it.
+   * ADMIN and MANAGER administer every responsibility. The owner column records who is
+   * accountable for the area; it grants no access and never limits another manager. The policy
+   * itself lives in Access.gs so every entrypoint shares it.
    */
   function canManage(current, row) { return Access.canManageResponsibility(current, row); }
 
   function requireManage(current, row) {
     if (!canManage(current, row)) {
-      fail('この担当領域を変更する権限がありません（ADMIN または担当領域の責任者が必要です）');
+      fail('この担当領域を変更する権限がありません（ADMIN または MANAGER が必要です）');
     }
     return row;
   }
@@ -132,8 +133,13 @@ var Responsibilities = (function () {
     patch = Object.assign({}, patch || {});
     delete patch.Responsibility_ID;
     if (Object.prototype.hasOwnProperty.call(patch, 'Owner_Member_ID') &&
-        text(patch.Owner_Member_ID) !== text(before.Owner_Member_ID) && current.role !== 'ADMIN') {
-      fail('担当領域の責任者変更は ADMIN のみが実行できます');
+        text(patch.Owner_Member_ID) !== text(before.Owner_Member_ID)) {
+      // Choosing who is accountable for an area stays an administrative act.
+      try {
+        Access.requireResponsibilityOwnerChange(current.email);
+      } catch (error) {
+        fail('担当領域の責任者変更は ADMIN のみが実行できます');
+      }
     }
     if (Object.prototype.hasOwnProperty.call(patch, 'Status')) {
       fail('状態の変更には retire / reactivate を使用してください');
@@ -143,11 +149,24 @@ var Responsibilities = (function () {
     return Domain.save('RESPONSIBILITIES', id, patch, validate, 'UPDATE');
   }
 
-  /** Reorders active responsibilities; every id in the list must be a live responsibility. */
+  /**
+   * Reorders the responsibility list.
+   *
+   * Every submitted ID must be a known responsibility and may appear only once. Only rows
+   * whose Sort_Order actually changes are written, so identity, owner, description, status,
+   * retirement timestamp and every other column are preserved. Rows that were not submitted
+   * keep their relative order after the submitted block, which makes the result deterministic
+   * and safe for concurrent managers (the whole operation runs under the script lock).
+   */
   function reorder(orderedIds) {
     var current = identity();
     var ids = (orderedIds || []).map(text).filter(function (id) { return !!id; });
     if (!ids.length) fail('並び順を指定してください');
+    var submitted = Object.create(null);
+    ids.forEach(function (id) {
+      if (submitted[id]) fail('同じ担当領域が重複しています: ' + id);
+      submitted[id] = true;
+    });
     return Database.withLock(function () {
       var rows = Database.read('RESPONSIBILITIES');
       var byId = Object.create(null);
@@ -157,20 +176,23 @@ var Responsibilities = (function () {
         if (!row) fail('担当領域が見つかりません: ' + id);
         requireManage(current, row);
       });
-      var next = 0;
-      var changes = ids.map(function (id) {
-        next += 1;
-        return {id: id, patch: {Sort_Order: next, Updated_At: Domain.now()}};
+      // Untouched rows keep their current relative order after the submitted block.
+      var remaining = all().filter(function (row) { return !submitted[row.Responsibility_ID]; })
+        .map(function (row) { return row.Responsibility_ID; });
+      var target = ids.concat(remaining);
+      var stamp = Domain.now();
+      var changes = [];
+      target.forEach(function (id, index) {
+        var row = byId[id];
+        var next = index + 1;
+        if (row.Sort_Order === '' || row.Sort_Order === null || row.Sort_Order === undefined || orderValue(row) !== next) {
+          changes.push({id: id, patch: {Sort_Order: next, Updated_At: stamp}});
+        }
       });
-      // Untouched rows keep their relative order after the reordered block.
-      var remaining = all().filter(function (row) { return ids.indexOf(row.Responsibility_ID) < 0; });
-      remaining.forEach(function (row) {
-        next += 1;
-        changes.push({id: row.Responsibility_ID, patch: {Sort_Order: next, Updated_At: Domain.now()}});
-      });
-      Database.updateMany('RESPONSIBILITIES', changes);
-      AuditLog.write('RESPONSIBILITY_REORDERED', 'RESPONSIBILITY', ids.join(','), {order: ids});
-      return {reordered: ids.length};
+      if (changes.length) Database.updateMany('RESPONSIBILITIES', changes);
+      AuditLog.write('RESPONSIBILITY_REORDERED', 'RESPONSIBILITY', ids.join(','),
+        {order: target, updated: changes.length});
+      return {reordered: ids.length, updated: changes.length};
     });
   }
 
@@ -179,9 +201,9 @@ var Responsibilities = (function () {
     var current = identity();
     var row = Domain.required('RESPONSIBILITIES', id);
     requireManage(current, row);
-    if (isRetired(row)) fail('この担当領域はすでに退職（Retired）です');
+    if (isRetired(row)) fail('この担当領域はすでに廃止されています');
     if (!options || options.confirmed !== true) {
-      fail('担当領域の退職には確認が必要です');
+      fail('担当領域の廃止には確認が必要です');
     }
     var affected = counts()[id];
     var result = Domain.save('RESPONSIBILITIES', id,
@@ -217,11 +239,8 @@ var Responsibilities = (function () {
     var destination = null;
     if (nextId) {
       destination = Domain.required('RESPONSIBILITIES', nextId);
-      if (isRetired(destination) && current.role !== 'ADMIN') {
-        fail('退職した担当領域には移動できません（ADMIN のみ許可）');
-      }
       if (isRetired(destination) && options.confirmRetired !== true) {
-        fail('退職した担当領域への移動には追加の確認が必要です');
+        fail('廃止した担当領域への移動には追加の確認が必要です');
       }
     }
     var updated = Projects.update(projectId, {Responsibility_ID: nextId});
@@ -311,4 +330,7 @@ function reorderResponsibilities(ids) { return Responsibilities.reorder(ids); }
 function transferProjectResponsibility(projectId, responsibilityId, options) {
   return Responsibilities.transferProject(projectId, responsibilityId, options);
 }
-function listResponsibilities(filter) { return Responsibilities.list(filter); }
+function listResponsibilities(filter) {
+  Access.requireManager();
+  return Responsibilities.list(filter);
+}

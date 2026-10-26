@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * V1.4 responsibilities: configurable organizational areas that group projects without
@@ -106,7 +106,7 @@ test('only ADMIN may change the responsibility owner', () => {
   assert.equal(updated.Owner_Member_ID, 'M-ENG');
 });
 
-test('a manager may only administer the responsibility they own', () => {
+test('every manager may administer every responsibility, but the owner stays an ADMIN decision', () => {
   const app = fixtures.base();
   const context = app.context;
   const mine = context.Responsibilities.create({Name: '製品設計', Owner_Member_ID: 'M-MGR'});
@@ -114,20 +114,19 @@ test('a manager may only administer the responsibility they own', () => {
 
   app.setActor(MANAGER);
   context.Responsibilities.update(mine.Responsibility_ID, {Name: '製品設計 v2'});
-  assert.throws(() => context.Responsibilities.update(other.Responsibility_ID, {Name: '乗っ取り'}),
-    /権限がありません/);
-  assert.throws(() => context.Responsibilities.retire(other.Responsibility_ID, {confirmed: true}),
-    /権限がありません/);
+  // Responsibility ownership is accountability, not a permission boundary.
+  const renamed = context.Responsibilities.update(other.Responsibility_ID, {Name: '品質改善 v2'});
+  assert.equal(renamed.Name, '品質改善 v2');
+  assert.equal(context.Responsibilities.retire(other.Responsibility_ID, {confirmed: true}).responsibility.Status, 'Retired');
 
   app.setActor('engineer@example.test');
   assert.throws(() => context.Responsibilities.create({Name: '無断作成'}), /MANAGER/);
 });
 
-test('responsibility ownership never grants access to the projects inside it', () => {
+test('responsibility ownership labels accountability without becoming a project permission', () => {
   const app = fixtures.base();
   const context = app.context;
   const area = context.Responsibilities.create({Name: '自動化・工程設計', Owner_Member_ID: 'M-MGR'});
-  // P2 belongs to M-MGR, P1 also belongs to M-MGR in the fixture; create a private one instead.
   context.Database.insert('PROJECTS', {
     Project_ID: 'P-PRIVATE', Project_Name: '他の管理者の案件', Status: 'Active',
     Project_Owner_ID: 'M-ADMIN', Responsibility_ID: area.Responsibility_ID
@@ -135,13 +134,21 @@ test('responsibility ownership never grants access to the projects inside it', (
   app.setActor(MANAGER);
   const identity = context.Roles.describe();
   assert.equal(context.Access.canManageResponsibility(identity, context.Database.find('RESPONSIBILITIES', area.Responsibility_ID)), true);
-  assert.throws(() => context.Access.requireProjectWrite('P-PRIVATE'), /outside the authorized scope/);
-  const refused = context.Ui.updateProject({
-    projectId: 'P-PRIVATE', name: '書き換え',
-    updatedAt: JSON.stringify(context.Database.find('PROJECTS', 'P-PRIVATE').Last_Updated)
+  // Department-wide access comes from the role, not from owning the responsibility.
+  assert.equal(context.Access.requireProjectWrite('P-PRIVATE').role, 'MANAGER');
+  const loaded = context.Database.find('PROJECTS', 'P-PRIVATE');
+  const saved = context.Ui.updateProject({
+    projectId: 'P-PRIVATE', name: '書き換え', updatedAt: loaded.Last_Updated
   });
-  assert.equal(refused.ok, false);
-  assert.match(refused.error, /outside the authorized scope|権限/);
+  assert.equal(saved.ok, true, saved.error);
+  assert.equal(context.Database.find('PROJECTS', 'P-PRIVATE').Project_Owner_ID, 'M-ADMIN',
+    'the responsibility owner never rewrites the project owner');
+
+  // A VIEWER cannot manage the area even though it may read published data.
+  app.setActor('viewer@example.test');
+  assert.equal(context.Access.canManageResponsibility(context.Roles.describe(),
+    context.Database.find('RESPONSIBILITIES', area.Responsibility_ID)), false);
+  assert.throws(() => context.Responsibilities.update(area.Responsibility_ID, {Name: '乗っ取り'}), /MANAGER/);
 });
 
 test('reordering changes the display order only', () => {
@@ -185,7 +192,7 @@ test('retiring keeps every project visible and marks it for reassignment', () =>
   assert.equal(item.needsReassignment, true);
 
   // Retirement needs explicit confirmation and cannot be repeated.
-  assert.throws(() => context.Responsibilities.retire(area.Responsibility_ID, {confirmed: true}), /すでに退職/);
+  assert.throws(() => context.Responsibilities.retire(area.Responsibility_ID, {confirmed: true}), /すでに廃止/);
 });
 
 test('retiring without confirmation is refused, and reactivation restores selectability', () => {
@@ -196,7 +203,7 @@ test('retiring without confirmation is refused, and reactivation restores select
   context.Responsibilities.retire(area.Responsibility_ID, {confirmed: true});
   const refused = context.Ui.createProject({name: '新案件', responsibilityId: area.Responsibility_ID});
   assert.equal(refused.ok, false);
-  assert.match(refused.error, /退職した担当領域/);
+  assert.match(refused.error, /廃止した担当領域/);
   const restored = context.Responsibilities.reactivate(area.Responsibility_ID);
   assert.equal(restored.Status, 'Active');
   assert.equal(restored.Retired_At, '');
@@ -231,7 +238,7 @@ test('a project transfer changes only the responsibility and is audited with bot
   assert.equal(audit[0].Actor, ADMIN);
 });
 
-test('a transfer requires confirmation and the authorization of the target project', () => {
+test('a transfer requires confirmation and a known target project for any manager', () => {
   const app = withResponsibilities();
   const context = app.context;
   const area = byName(context, '製品設計');
@@ -243,11 +250,14 @@ test('a transfer requires confirmation and the authorization of the target proje
   context.Database.insert('PROJECTS', {
     Project_ID: 'P-OTHER', Project_Name: '他の案件', Status: 'Active', Project_Owner_ID: 'M-ADMIN'
   });
-  assert.throws(() => context.Responsibilities.transferProject('P-OTHER', area.Responsibility_ID, {confirmed: true}),
-    /outside the authorized scope/);
+  const transferred = context.Responsibilities.transferProject('P-OTHER', area.Responsibility_ID, {confirmed: true});
+  assert.equal(transferred.changed, true, 'another manager\'s project is inside the same scope');
+  assert.equal(context.Database.find('PROJECTS', 'P-OTHER').Project_Owner_ID, 'M-ADMIN');
+  assert.throws(() => context.Responsibilities.transferProject('P-MISSING', area.Responsibility_ID, {confirmed: true}),
+    /not found|見つかりません|Unknown project/);
 });
 
-test('a retired responsibility is only a destination for an ADMIN with an extra confirmation', () => {
+test('a retired responsibility needs an extra confirmation from any manager', () => {
   const app = withResponsibilities();
   const context = app.context;
   const area = byName(context, '製品設計');
@@ -257,6 +267,13 @@ test('a retired responsibility is only a destination for an ADMIN with an extra 
   const result = context.Responsibilities.transferProject('P1', area.Responsibility_ID,
     {confirmed: true, confirmRetired: true});
   assert.equal(result.changed, true);
+
+  // A manager reaches the same destination once the extra confirmation is supplied.
+  app.setActor(MANAGER);
+  context.Database.insert('PROJECTS', {Project_ID: 'P-MGR', Project_Name: '管理案件', Status: 'Active', Project_Owner_ID: 'M-MGR'});
+  const managed = context.Responsibilities.transferProject('P-MGR', area.Responsibility_ID,
+    {confirmed: true, confirmRetired: true});
+  assert.equal(managed.changed, true);
 });
 
 test('projects without a responsibility stay unassigned rather than invented', () => {

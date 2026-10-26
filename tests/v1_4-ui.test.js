@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 /**
  * V1.4 UI behaviour: manager section navigation, responsibility controls, the nested
@@ -273,7 +273,7 @@ test('the dashboard offers a responsibility filter and marks a retired one', asy
   assert.equal(options[0].value, '');
   const labels = options.map(item => item.label);
   assert.ok(labels.some(label => /自動化・工程設計/.test(label)));
-  assert.ok(labels.some(label => /研究開発（旧）（退職）/.test(label)), 'a retired area stays filterable');
+  assert.ok(labels.some(label => /研究開発（旧）（廃止）/.test(label)), 'a retired area stays filterable');
   const cardText = client.document.getElementById('project-list').textContent;
   assert.match(cardText, /自動化・工程設計/);
 });

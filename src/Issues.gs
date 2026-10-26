@@ -21,5 +21,11 @@ var Issues = (function () {
     }
   };
 })();
-function createIssue(data) { return Issues.create(data); }
-function updateIssue(id, patch) { return Issues.update(id, patch); }
+function createIssue(data) {
+  Access.requireProjectWrite(data && data.Project_ID);
+  return Issues.create(data);
+}
+function updateIssue(id, patch) {
+  Access.requireManager();
+  return Issues.update(id, patch);
+}

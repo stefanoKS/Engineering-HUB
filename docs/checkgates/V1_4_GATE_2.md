@@ -1,6 +1,11 @@
 # V1.4 gate 2 — responsibilities and authorization
 
-Status: **PASS (local only)**
+Status: **PASS (local only, superseded)** — replaced by [V1_4_1_GATE_2.md](V1_4_1_GATE_2.md)
+
+This file records the V1.4 local result and is kept as history. V1.4.1 replaced the owner-scoped
+MANAGER policy described here with a department-wide role policy, so the rows below about
+"only the areas they own" and "ADMIN-only retired destination" no longer describe the
+implementation. See [V1_4_1_GATE_2.md](V1_4_1_GATE_2.md) for the current behaviour.
 
 Scope: the responsibility lifecycle, the unique-name rule, ordering, retirement/reactivation,
 project transfer and the server-side permission policy.

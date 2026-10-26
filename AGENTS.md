@@ -32,7 +32,7 @@
 
 25. Preserve operational records: never delete projects, tasks, members, skills, notification history or audit rows. Archive instead of deleting, and never clear an operational sheet.
 26. Never bypass authorization. Every write reachable from the UI or a trigger must call `Access`/`Roles` on the server. A role, actor, owner or confirmation supplied by the browser is data, not authority.
-27. Test every role privilege change: granting/revoking `ADMIN`/`MANAGER`, self-change, the last active administrator, cross-member and cross-project task edits, and VIEWER refusal.
+27. Test every role privilege change: granting/revoking `ADMIN`/`MANAGER`, self-change, the last active administrator, cross-member task edits, department-wide manager access and VIEWER refusal.
 28. Treat every stored string as untrusted browser text. Render with `textContent`/DOM creation; `innerHTML`, `outerHTML`, `insertAdjacentHTML` and `document.write` are prohibited in `src/*.html` and are rejected by `npm run validate`.
 29. Keep email safe by default. OFF is the default, emergency stop is on, unconfigured workbooks fail closed, and any transition to an effective LIVE state requires ADMIN, the exact confirmation and a passing preflight.
 30. Preserve migration compatibility: additive migrations only, verified backup first, cell-by-cell preservation checks, no schema change without a reviewed migration ID, and no initialization of an existing workbook.
@@ -85,7 +85,7 @@
 57. Responsibilities are configurable data in the `RESPONSIBILITIES` table, never source constants, and the number of responsibilities is never assumed. Keep `PROJECTS.Category`; a responsibility is a different concept.
 58. A blank `PROJECTS.Responsibility_ID` means 未分類. Never seed example responsibilities or assign historical projects automatically, and never invent an owner `Member_ID`.
 59. Retirement is a status change, never a deletion: keep every project, task, milestone, approval and history row, keep the area visible in lists and filters, and keep its projects actionable and marked for reassignment.
-60. Responsibility ownership never becomes a project permission. `PROJECTS.Project_Owner_ID` stays the only project boundary, and a responsibility change never rewrites the owner, the deadline or the status.
+60. Ownership is accountability, not permission. `ADMIN` and `MANAGER` manage every project, subproject, task and responsibility; `MEMBER` keeps only the own-task boundary. `PROJECTS.Project_Owner_ID`, `SUBPROJECTS.Owner_ID` and `RESPONSIBILITIES.Owner_Member_ID` never gate a write, and a responsibility change never rewrites the owner, the deadline or the status.
 61. A responsibility transfer requires explicit confirmation and an `AUDIT_LOG` record containing the previous ID, the new ID, the actor and the reason if supplied. Do not add a parallel history table.
 62. Nested subprojects stop at two levels beneath a project. Reject a self-parent, a cross-project parent and a circular link, and validate the whole subtree on reparent instead of flattening it.
 63. Archiving a subproject cascades nothing. Descendant eligibility follows the whole ancestor chain, and only explicit actions move tasks or reassign work.
@@ -93,5 +93,18 @@
 65. Publish only the responsibility label, the hierarchy and the hierarchy progress. Never publish a responsibility description, its owner, or a private project field, and never read an older snapshot contract as the new one.
 66. The request form must honour `REQUEST_SUBMISSION_ENABLED` and fail closed while loading or on error. Unsent request data stays in memory across a language switch, a validation error and a temporary failure, and is never written to a spreadsheet.
 67. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_4_GATE_<n>.md`, keep live Workspace verification separate from local results, and keep `docs/PRODUCTION_READINESS.md` NOT APPROVED until that evidence exists.
+
+## V1.4.1 mandatory rules (pre-trial hardening)
+
+68. Keep authorization simple and role-based. `ADMIN` and `MANAGER` manage the whole department; `MEMBER` keeps the own-task boundary and `VIEWER` stays read-only. Never add per-project, per-responsibility or per-subproject ACLs, owner barriers for `MANAGER`, permission inheritance or approval chains for ordinary edits.
+69. Every callable entrypoint re-checks the verified role on the server. A record-mutating top-level Apps Script function must call `Access` before delegating to a domain service, and a manager-only read entrypoint must be gated. A role, actor, owner or confirmation supplied by the browser is data, never authority.
+70. One logical operation is one write. Validate every input, the concurrency marker, the destination and the confirmations before mutating, then apply a single row update. Never report failure after part of the change was already committed, and never claim multi-row atomicity that Google Sheets cannot provide.
+71. Reordering must validate every submitted ID, refuse duplicates and unknown IDs, preserve identity/owner/status and write only the `Sort_Order` values that change.
+72. Hierarchy and subtree walks must be bounded. Malformed parent links raise a documented error instead of recursing, and a task is never placed into a subproject whose ancestor is archived.
+73. One ancestor-aware eligibility rule serves active work, reminders, reports and published aggregates. Archiving changes no stored progress on its own and marks no task done.
+74. The sidebar may bound the task list it loads, but it must report the total, never truncate silently, and keep every task reachable through a server-side search that preserves the selected task.
+75. Japanese user-facing terms for organizational areas are 廃止 / 再有効化; 退職 / 復職 are reserved for people. Never change the stored enum values.
+76. A fresh workbook initializes at schema 6 and records `INITIALIZE_V6`; `006_responsibilities_and_nested_subprojects` exists only for an existing V5 workbook. Never use initialization to upgrade an existing database.
+77. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_4_1_GATE_<n>.md` for this release, and keep `docs/PRODUCTION_READINESS.md` NOT APPROVED until live evidence exists.
 
 

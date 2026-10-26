@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Canonical translation dictionary for 設計・開発課 管理.
  *
  * This file is the single source of truth. `npm run sync:i18n` copies it to
@@ -308,6 +308,8 @@ var EH_I18N = (function () {
 
       'manager.task.legend': 'タスク割当 / 編集（完了期限と必要期間から開始日を計算）',
       'manager.task.pick': '編集するタスク',
+      'manager.task.search': 'タスク名で絞り込み',
+      'manager.task.searchHint': '表示中 {shown} / 全 {total} 件。名前で絞り込むと古いタスクも選べます。',
       'manager.task.new': '新規作成',
       'manager.task.editHint': '既存のタスクを選ぶと編集できます。タスクIDは変更されません。',
       'manager.task.loaded': '読み込みました: {name}',
@@ -348,7 +350,7 @@ var EH_I18N = (function () {
       'manager.progress.value': '進捗率 (0-100)',
       'manager.progress.next': '次のアクション',
       'manager.progress.update': '更新',
-      'manager.progress.hint': '自分の担当タスクのみ更新できます（管理者は管理範囲内）。',
+      'manager.progress.hint': '自分の担当タスクのみ更新できます（ADMIN・MANAGER は全部署のタスクを更新できます）。',
 
       'manager.member.legend': 'メンバー',
       'manager.member.id': 'メンバーID（更新時）',
@@ -525,17 +527,17 @@ var EH_I18N = (function () {
       'manager.responsibility.empty': '担当領域がまだありません',
       'manager.responsibility.projects': '案件 {count} 件（進行中 {active} / 要注意 {risk}）',
       'manager.responsibility.active': '有効',
-      'manager.responsibility.retired': '退職',
-      'manager.responsibility.retire': '退職にする',
-      'manager.responsibility.reactivate': '有効に戻す',
-      'manager.responsibility.retirePrompt': '「{name}」を退職にします。案件 {count} 件は削除されず、そのまま残ります。よろしいですか？',
-      'manager.responsibility.reactivatePrompt': '「{name}」を有効に戻します。よろしいですか？',
+      'manager.responsibility.retired': '廃止',
+      'manager.responsibility.retire': '廃止にする',
+      'manager.responsibility.reactivate': '再有効化',
+      'manager.responsibility.retirePrompt': '「{name}」を廃止にします。案件 {count} 件は削除されず、そのまま残ります。よろしいですか？',
+      'manager.responsibility.reactivatePrompt': '「{name}」を再有効化します。よろしいですか？',
       'manager.responsibility.up': '上へ',
       'manager.responsibility.down': '下へ',
       'manager.responsibility.needsReassign': '担当領域の再割当が必要です',
       'manager.responsibility.unassigned': '未分類',
       'manager.responsibility.transferConfirm': '担当領域を変更しますか？\nプロジェクトの担当者や期限は変更されません。',
-      'manager.responsibility.transferRetired': '退職した担当領域に移動します。よろしいですか？',
+      'manager.responsibility.transferRetired': '廃止した担当領域に移動します。よろしいですか？',
       'manager.responsibility.transferred': '担当領域を変更しました: {name}',
       'manager.project.responsibility': '担当領域',
       'manager.project.responsibilityHint': '担当領域は案件の分類です。カテゴリとは別に管理されます。',
@@ -550,6 +552,7 @@ var EH_I18N = (function () {
       'manager.subproject.reparent': '親を変更',
       'manager.subproject.reparentPrompt': '階層を変更します。タスクは移動しません。よろしいですか？',
       'manager.subproject.archive': 'アーカイブ',
+      'manager.subproject.archived': 'アーカイブ済み',
       'manager.subproject.reactivate': 'アーカイブ解除',
       'manager.subproject.archivePrompt': '「{name}」をアーカイブします。子サブプロジェクトとタスクは削除されません。よろしいですか？',
       'manager.subproject.moveTask': 'タスクを移動',
@@ -571,7 +574,7 @@ var EH_I18N = (function () {
 
       'dashboard.filter.responsibility': '担当領域',
       'dashboard.filter.responsibility.all': 'すべて',
-      'dashboard.filter.responsibility.retired': '{name}（退職）',
+      'dashboard.filter.responsibility.retired': '{name}（廃止）',
       'dashboard.filter.more': '詳細フィルター',
       'dashboard.filter.active': '{label}: {value}',
       'dashboard.card.responsibilityUnset': '未分類',
@@ -870,6 +873,8 @@ var EH_I18N = (function () {
 
       'manager.task.legend': 'Assign / edit task (the planned start is calculated from the deadline and duration)',
       'manager.task.pick': 'Task to edit',
+      'manager.task.search': 'Filter by task name',
+      'manager.task.searchHint': 'Showing {shown} of {total}. Filter by name to reach older tasks.',
       'manager.task.new': 'Create a new task',
       'manager.task.editHint': 'Select an existing task to edit it. The task ID never changes.',
       'manager.task.loaded': 'Loaded: {name}',
@@ -910,7 +915,7 @@ var EH_I18N = (function () {
       'manager.progress.value': 'Progress (0-100)',
       'manager.progress.next': 'Next action',
       'manager.progress.update': 'Update',
-      'manager.progress.hint': 'Members update their own tasks; managers update within their scope.',
+      'manager.progress.hint': 'Members update their own tasks; ADMIN and MANAGER update any task.',
 
       'manager.member.legend': 'Members',
       'manager.member.id': 'Member ID (for updates)',
@@ -1112,6 +1117,7 @@ var EH_I18N = (function () {
       'manager.subproject.reparent': 'Change parent',
       'manager.subproject.reparentPrompt': 'Change the hierarchy? Tasks are not moved. Continue?',
       'manager.subproject.archive': 'Archive',
+      'manager.subproject.archived': 'archived',
       'manager.subproject.reactivate': 'Unarchive',
       'manager.subproject.archivePrompt': 'Archive "{name}"? Child subprojects and tasks are not deleted. Continue?',
       'manager.subproject.moveTask': 'Move task',

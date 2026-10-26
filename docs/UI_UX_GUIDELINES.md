@@ -29,7 +29,7 @@ Both applications define the same tokens. The manager sidebars declare them in e
 
 Colour meaning is fixed: blue = navigation and primary action, green = done, amber = caution,
 red = overdue/error/destructive, gray = inactive or secondary. Colour is never the only signal —
-every state also has a text label («進行中», «2日超過», «承認待ち», «退職»).
+every state also has a text label («進行中», «2日超過», «承認待ち», «廃止»).
 
 ## 2. Contrast
 

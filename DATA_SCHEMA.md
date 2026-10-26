@@ -42,8 +42,8 @@ Required: `Project_Name`, `Status`. `Project_Owner_ID` references `MEMBERS`; `Re
 `RESPONSIBILITIES` and may be blank.
 
 - `Responsibility_ID` is the organizational area (担当領域). Blank means 未分類. It is a grouping concept, not a
-  permission boundary: it never grants access to the project and never changes `Project_Owner_ID`.
-  `Category` is a separate, free-form classification and is unchanged by V1.4.
+  permission boundary: any ADMIN or MANAGER may file or move a project here, and a change never rewrites
+  `Project_Owner_ID`. `Category` is a separate, free-form classification and is unchanged by V1.4.
 
 - `Original_Deadline` is captured at creation and is immutable; `Committed_Deadline` may change.
 - `Progress_Percent` and `Health` are computed by refresh and may be overwritten.
@@ -75,8 +75,10 @@ never reused. `Owner_Member_ID` references `MEMBERS`.
 - `Retired_At` is set by retirement and cleared by reactivation; both are status changes, never deletions.
 - Retirement keeps every project, task, milestone and history row. A retired responsibility stays visible in lists
   and filters and is no longer selectable for new work.
-- The owner administers the responsibility only. Project ownership remains the only project permission boundary.
-  See [docs/RESPONSIBILITIES.md](docs/RESPONSIBILITIES.md).
+- `Owner_Member_ID` records who is accountable for the area. It grants no data access and never limits another
+  manager: every ADMIN and MANAGER administers every responsibility (simplified V1.4.1 policy). Only an ADMIN may
+  change this owner. See [docs/RESPONSIBILITIES.md](docs/RESPONSIBILITIES.md) and
+  [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md).
 
 ### SUBPROJECTS
 

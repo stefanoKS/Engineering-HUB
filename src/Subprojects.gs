@@ -46,18 +46,30 @@ var Subprojects = (function () {
     return level;
   }
 
-  /** Deepest nesting below a node; 0 means the node has no children. */
-  function heightOf(id, children) {
+  /**
+   * Deepest nesting below a node; 0 means the node has no children.
+   *
+   * The walk is path-bounded: malformed data that forms a cycle raises the documented error
+   * instead of recursing forever.
+   */
+  function heightOf(id, children, trail) {
+    var path = trail || Object.create(null);
+    if (path[id]) throw new Error('サブプロジェクトの階層が循環しています');
+    path[id] = true;
     var kids = children[id] || [];
-    if (!kids.length) return 0;
-    return 1 + Math.max.apply(null, kids.map(function (kid) { return heightOf(kid, children); }));
+    var deepest = 0;
+    kids.forEach(function (kid) { deepest = Math.max(deepest, heightOf(kid, children, path)); });
+    delete path[id];
+    return kids.length ? deepest + 1 : 0;
   }
 
   function descendants(id, rows) {
     var children = childrenMap(rows);
-    var out = [];
+    var out = [], seen = Object.create(null);
     (function walk(node) {
       (children[node] || []).forEach(function (kid) {
+        if (seen[kid]) return;
+        seen[kid] = true;
         out.push(kid);
         walk(kid);
       });
@@ -66,6 +78,33 @@ var Subprojects = (function () {
   }
 
   function hasDescendants(id) { return descendants(id).length > 0; }
+
+  /**
+   * True when the node or any ancestor is archived.
+   *
+   * Used for explicit operations such as a task move, so work is never placed inside an
+   * archived branch by accident. A cycle or an over-long chain is treated as unsafe, which
+   * keeps malformed data from looping.
+   */
+  function archivedChain(subprojectId, index) {
+    var rows = index;
+    if (!rows) {
+      rows = Object.create(null);
+      Database.read('SUBPROJECTS').forEach(function (row) { rows[String(row.Subproject_ID)] = row; });
+    }
+    var cursor = String(subprojectId === undefined || subprojectId === null ? '' : subprojectId);
+    var seen = Object.create(null), guard = 0;
+    while (cursor) {
+      var node = rows[cursor];
+      if (!node) return false;
+      if (seen[cursor]) return true;
+      seen[cursor] = true;
+      if (node.Status === 'Archived') return true;
+      cursor = String(node.Parent_Subproject_ID || '');
+      if (guard++ > 10) return true;
+    }
+    return false;
+  }
 
   /**
    * Validates the hierarchy for a candidate row. The stored parent of the row being
@@ -123,6 +162,7 @@ var Subprojects = (function () {
     heightOf: heightOf,
     descendants: descendants,
     hasDescendants: hasDescendants,
+    archivedChain: archivedChain,
     parentMap: parentMap,
     childrenMap: childrenMap,
     validateHierarchy: validateHierarchy,
@@ -179,7 +219,8 @@ var Subprojects = (function () {
         if (String(destination.Project_ID) !== String(task.Project_ID)) {
           fail('タスクは同じプロジェクト内でのみ移動できます');
         }
-        if (destination.Status === 'Archived') fail('アーカイブされたサブプロジェクトへは移動できません');
+        // The whole ancestor chain matters: a child of an archived parent is archived too.
+        if (archivedChain(target)) fail('アーカイブされたサブプロジェクトへは移動できません');
       }
       if (target === String(task.Subproject_ID || '')) return task;
       if (!confirmed(options)) fail('タスクの移動には確認が必要です');
@@ -190,11 +231,27 @@ var Subprojects = (function () {
     }
   };
 })();
-function createSubproject(data) { return Subprojects.create(data); }
-function updateSubproject(id, patch) { return Subprojects.update(id, patch); }
-function reparentSubproject(id, parentId, options) { return Subprojects.reparent(id, parentId, options); }
-function archiveSubproject(id) { return Subprojects.archive(id); }
-function reactivateSubproject(id) { return Subprojects.reactivate(id); }
+/* Global entrypoints re-check the verified role before any hierarchy write. */
+function createSubproject(data) {
+  Access.requireManager();
+  return Subprojects.create(data);
+}
+function updateSubproject(id, patch) {
+  Access.requireSubprojectWrite(id);
+  return Subprojects.update(id, patch);
+}
+function reparentSubproject(id, parentId, options) {
+  Access.requireSubprojectWrite(id);
+  return Subprojects.reparent(id, parentId, options);
+}
+function archiveSubproject(id) {
+  Access.requireSubprojectWrite(id);
+  return Subprojects.archive(id);
+}
+function reactivateSubproject(id) {
+  Access.requireSubprojectWrite(id);
+  return Subprojects.reactivate(id);
+}
 function moveTaskToSubproject(taskId, subprojectId, options) {
   return Subprojects.moveTask(taskId, subprojectId, options);
 }

@@ -1,4 +1,80 @@
 # Changelog
+## V1.4.1 — simplified authorization and pre-trial hardening
+
+No schema change (still **6**) and no snapshot contract change (still **1.4**). Every change was
+validated locally with mocks and a static browser preview; nothing was deployed, migrated or
+emailed, and live Google Workspace behaviour remains unverified.
+
+Authorization (simplified)
+
+- One role policy: ADMIN and MANAGER manage every project, subproject, task and responsibility in
+  the department; MEMBER keeps own-task self-service; VIEWER stays read-only. Responsibility,
+  project and subproject owners are accountability labels, never permission boundaries, so two
+  managers can always collaborate on the same work.
+- Removed the manager ownership check from `Access.requireProjectWrite`, `Access.canEditTask`,
+  `Access.visibleTasks` and `Access.canManageResponsibility`. `Access.managedProjectIds` is gone.
+- A retired responsibility is now a valid transfer destination for a manager once the extra
+  confirmation is supplied; the ADMIN-only gate was an unnecessary permission error.
+- Every record-mutating top-level Apps Script function (`createProject`, `updateProject`,
+  `archiveProject`, `createSubproject`, `updateSubproject`, `reparentSubproject`,
+  `archiveSubproject`, `reactivateSubproject`, `createTask`, `updateTask`, `reassignTask`,
+  `completeTask`, `recordTaskBlocker`, `createResponsibility`, `updateResponsibility`,
+  `retireResponsibility`, `reactivateResponsibility`, `reorderResponsibilities`,
+  `transferProjectResponsibility`, `createMember`, `updateMember`, `deactivateMember`,
+  `createIssue`, `updateIssue`, `createMilestone`, `updateMilestone`, `createSkill`, `updateSkill`,
+  `setMemberSkill`, `createDatabaseBackup`) re-checks the verified role, so
+  `google.script.run` and the editor cannot bypass a sidebar guard.
+- Manager-only read entrypoints are gated (`listMembers`, `listResponsibilities`,
+  `pendingRequests`, `healthCheck`, `validateSystem`, `analyzeManagement`), and `listProjects` /
+  `listTasks` return only rows visible to the caller.
+- `createMember` still accepts the first row of an empty workbook: no role can exist yet, and it
+  is the documented bootstrap step. The scheduled backup calls the service directly so a
+  time-driven trigger without an interactive user keeps working.
+
+Correctness
+
+- `Ui.updateProject` now validates the ordinary fields, the optimistic-concurrency marker, the
+  responsibility destination and its confirmation, the retired-destination confirmation and the
+  deadline before writing, then applies one coordinated project row update. A refused transfer no
+  longer leaves earlier fields committed.
+- `Responsibilities.reorder` validates every submitted ID, rejects duplicates and unknown IDs,
+  preserves identity, owner, description, status and `Retired_At`, writes only the `Sort_Order`
+  values that change, is deterministic on a repeated call and records the resulting order.
+- Responsibility changes that touch the owner stay ADMIN-only, with a clear Japanese message.
+
+Hierarchy and eligibility
+
+- `Subprojects.heightOf`, `Subprojects.descendants` and `Progress.subtreeTasks` are bounded, and
+  `Subprojects.archivedChain` treats a cycle as unsafe, so malformed hierarchy data raises the
+  documented error instead of recursing without end.
+- A task can no longer be created or moved into a subproject whose ancestor is archived. An
+  existing task inside an archived branch stays editable so it can be finished or moved out.
+- `Eligibility.subprojectInActiveWork` is the single ancestor-aware rule, reused by active work,
+  reminders (`Eligibility.taskNotifiable`), the weekly report and the published snapshot
+  aggregates. Archived work leaves the active figures exactly once, and historic progress is not
+  rewritten by an archive.
+
+Usability
+
+- The sidebar task picker still loads a bounded, deterministic 300-task window, but now reports
+  `taskTotal` / `tasksTruncated`, shows a hint with the total, and offers a server-side
+  「タスク名で絞り込み」 search that reaches any task. The selected task keeps its identity through
+  a re-render and a language switch.
+- Organizational areas are 廃止 / 再有効化 in Japanese; 退職 / 復職 are no longer used for areas.
+  The stored enum is unchanged (`Active` / `Retired`).
+
+Documentation
+
+- `INITIALIZE_V6` (schema 6) replaces the stale `INITIALIZE_V5` instructions in `DEPLOYMENT.md`
+  and `docs/PRE_TRIAL_CHECKLIST.md`, including which migration IDs an existing V1.1/V1.2/V1.3.1
+  workbook must approve.
+- Simplified-authorization statements updated in `AGENTS.md`, `ARCHITECTURE.md`, `DATA_SCHEMA.md`,
+  `README.md`, `README_JP.md`, `docs/MANAGER_WORKFLOW.md`, `docs/RESPONSIBILITIES.md` and
+  `docs/SECURITY_MODEL.md`.
+- Local test total: **328 passing**, 0 failing. `docs/PRODUCTION_READINESS.md` stays
+  **NOT APPROVED FOR PRODUCTION**.
+- Gate evidence: `docs/checkgates/V1_4_1_GATE_1.md` … `V1_4_1_GATE_6.md`.
+
 ## V1.4 — responsibilities, nested subprojects and UI refinement
 
 Schema version **6** (`006_responsibilities_and_nested_subprojects`). Additive only: a new
@@ -15,9 +91,9 @@ Responsibilities (担当領域)
 - Create, rename, describe, re-order, retire, reactivate and transfer between areas. Retirement is
   a status change: projects, tasks, milestones, approvals and history stay, the area stays visible
   in lists and filters, and its projects are marked as needing reassignment.
-- Authorization lives in `Access.canManageResponsibility`: ADMIN administers every area, a MANAGER
-  only the areas they own, MEMBER and VIEWER none. Owning an area never grants access to the
-  projects inside it, and a transfer never changes `Project_Owner_ID`.
+- Authorization lives in `Access.canManageResponsibility`: ADMIN and MANAGER administer every area
+  (V1.4.1 simplified this from an owner-only MANAGER scope), MEMBER and VIEWER none. Owning an
+  area never grants or restricts project access, and a transfer never changes `Project_Owner_ID`.
 - A retired area cannot be chosen for a new project, and only an ADMIN may move a project into one
   (with an extra confirmation).
 - Transfers are recorded in the existing `AUDIT_LOG` (`RESPONSIBILITY_TRANSFERRED` with the previous

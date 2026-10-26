@@ -71,12 +71,16 @@ var Progress = (function () {
    *
    * Only tasks are counted, never child percentages, so a parent rollup cannot double
    * count: each task belongs to exactly one node and the project rollup uses its own
-   * project grouping. Depth is bounded to two levels by Subprojects, so this stays cheap.
+   * project grouping. Depth is bounded to two levels by Subprojects, and the visited map
+   * keeps malformed hierarchy data from recursing forever.
    */
-  function subtreeTasks(subprojectId, children, tasksBySubproject) {
+  function subtreeTasks(subprojectId, children, tasksBySubproject, seen) {
+    var visited = seen || Object.create(null);
+    if (visited[subprojectId]) return [];
+    visited[subprojectId] = true;
     var collected = (tasksBySubproject[subprojectId] || []).slice();
     (children[subprojectId] || []).forEach(function (childId) {
-      collected = collected.concat(subtreeTasks(childId, children, tasksBySubproject));
+      collected = collected.concat(subtreeTasks(childId, children, tasksBySubproject, visited));
     });
     return collected;
   }

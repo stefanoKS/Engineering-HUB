@@ -62,7 +62,7 @@ var Ui = (function () {
     if (!id) return '';
     var row = Database.find('RESPONSIBILITIES', id);
     if (!row) throw new Error('担当領域が見つかりません');
-    if (row.Status === 'Retired') throw new Error('退職した担当領域は新規案件に指定できません');
+    if (row.Status === 'Retired') throw new Error('廃止した担当領域は新規案件に指定できません');
     return id;
   }
 
@@ -74,9 +74,13 @@ var Ui = (function () {
     return status;
   }
 
+  /**
+   * Any ADMIN or MANAGER may edit any project. Project ownership is accountability, not a
+   * permission boundary, so two managers can always collaborate on the same project.
+   */
   function canManageProject(current, project) {
-    if (current.role === 'ADMIN') return true;
-    return current.role === 'MANAGER' && !!project.Project_Owner_ID && project.Project_Owner_ID === current.memberId;
+    if (!project) return false;
+    return current.role === 'ADMIN' || current.role === 'MANAGER';
   }
 
   function text(value, label) {
@@ -100,6 +104,44 @@ var Ui = (function () {
    */
   var VIEWS = ['project', 'task', 'admin'];
   var ACTIONS = ['create', 'assign', 'progress', 'edit'];
+
+  /**
+   * The sidebar loads a bounded, deterministic task window so the first render stays fast.
+   * The window is never a silent cut-off: `taskTotal`/`tasksTruncated` are returned and
+   * `taskOptions()` lets the manager search or narrow to a project to reach any task.
+   */
+  var TASK_WINDOW = 300;
+  var TASK_OPTIONS_WINDOW = 500;
+
+  /** Open work first, then the nearest deadline, then a stable ID order. */
+  function compareTasks(left, right) {
+    var closedLeft = left.Status === 'Done' || left.Status === 'Cancelled';
+    var closedRight = right.Status === 'Done' || right.Status === 'Cancelled';
+    if (closedLeft !== closedRight) return closedLeft ? 1 : -1;
+    var dueLeft = left.Due_Date ? String(left.Due_Date) : '9999-12-31';
+    var dueRight = right.Due_Date ? String(right.Due_Date) : '9999-12-31';
+    if (dueLeft !== dueRight) return dueLeft < dueRight ? -1 : 1;
+    return String(left.Task_ID || '').localeCompare(String(right.Task_ID || ''));
+  }
+
+  function taskItem(current, task) {
+    return {
+      id: task.Task_ID, name: task.Task_Name, projectId: task.Project_ID,
+      subprojectId: task.Subproject_ID || '', ownerId: task.Owner_Member_ID,
+      status: task.Status, priority: task.Priority || 'Medium',
+      progress: task.Progress_Percent, due: dateText(task.Due_Date),
+      plannedStart: dateText(task.Planned_Start),
+      durationValue: task.Planned_Duration_Value === '' || task.Planned_Duration_Value === undefined ? '' : task.Planned_Duration_Value,
+      durationUnit: task.Planned_Duration_Unit || 'DAY',
+      durationBasis: task.Planned_Duration_Basis || 'WORKING_DAYS',
+      acceptance: task.Acceptance_Criteria || '',
+      estimated: task.Estimated_Hours,
+      notify: task.Notification_Enabled === true,
+      approved: !!task.Assignment_Approved_At,
+      updatedAt: timestamp(task.Last_Updated),
+      canEdit: Access.canEditTask(current, task)
+    };
+  }
 
   function show(fileName, options) {
     var ui;
@@ -127,7 +169,6 @@ var Ui = (function () {
       var current = Access.requireUiAccess();
       var tasks = Access.visibleTasks(current);
       var projects = Access.visibleProjects(current, tasks);
-      var managedProjects = Access.managedProjectIds(current);
       var projectIds = Object.create(null);
       projects.forEach(function (project) { projectIds[project.Project_ID] = true; });
       var allSubprojects = Database.read('SUBPROJECTS');
@@ -207,24 +248,36 @@ var Ui = (function () {
         skills: skills.skills.map(function (skill) {
           return {id: skill.Skill_ID, name: skill.Skill_Name, category: skill.Category};
         }),
-        tasks: tasks.slice(0, 300).map(function (task) {
-          return {
-            id: task.Task_ID, name: task.Task_Name, projectId: task.Project_ID,
-            subprojectId: task.Subproject_ID || '', ownerId: task.Owner_Member_ID,
-            status: task.Status, priority: task.Priority || 'Medium',
-            progress: task.Progress_Percent, due: dateText(task.Due_Date),
-            plannedStart: dateText(task.Planned_Start),
-            durationValue: task.Planned_Duration_Value === '' || task.Planned_Duration_Value === undefined ? '' : task.Planned_Duration_Value,
-            durationUnit: task.Planned_Duration_Unit || 'DAY',
-            durationBasis: task.Planned_Duration_Basis || 'WORKING_DAYS',
-            acceptance: task.Acceptance_Criteria || '',
-            estimated: task.Estimated_Hours,
-            notify: task.Notification_Enabled === true,
-            approved: !!task.Assignment_Approved_At,
-            updatedAt: timestamp(task.Last_Updated),
-            canEdit: Access.canEditTask(current, task, {managedProjects: managedProjects})
-          };
-        })
+        tasks: tasks.slice().sort(compareTasks).slice(0, TASK_WINDOW).map(function (task) {
+          return taskItem(current, task);
+        }),
+        taskTotal: tasks.length,
+        tasksTruncated: tasks.length > TASK_WINDOW
+      };
+    });
+  }
+
+  /**
+   * Lookup endpoint for the task pickers. A manager reaches any task by narrowing to a project
+   * or typing part of a name, so a large workbook never silently hides work.
+   */
+  function taskOptions(payload) {
+    return guard(function () {
+      payload = payload || {};
+      var current = Access.requireUiAccess();
+      var projectId = String(payload.projectId || '').trim();
+      var query = String(payload.query || '').trim().toLowerCase();
+      var requested = Number(payload.limit);
+      var limit = isFinite(requested) && requested > 0 && requested <= TASK_OPTIONS_WINDOW ? Math.floor(requested) : TASK_OPTIONS_WINDOW;
+      var matches = Access.visibleTasks(current).filter(function (task) {
+        if (projectId && String(task.Project_ID) !== projectId) return false;
+        if (!query) return true;
+        return (String(task.Task_ID || '') + ' ' + String(task.Task_Name || '')).toLowerCase().indexOf(query) >= 0;
+      }).sort(compareTasks);
+      return {
+        tasks: matches.slice(0, limit).map(function (task) { return taskItem(current, task); }),
+        total: matches.length,
+        truncated: matches.length > limit
       };
     });
   }
@@ -265,6 +318,11 @@ var Ui = (function () {
    * Only the fields present in the payload are written, so an edit of one field never
    * blanks another. Project_ID, Original_Deadline, Created_At and the migration/audit
    * identifiers are not editable here.
+   *
+   * Google Sheets has no multi-row transaction, so every validation — including the
+   * responsibility destination and the deadline confirmation — runs before anything is
+   * written, and the whole edit is applied as one coordinated project row update. A refused
+   * change therefore never leaves earlier fields already committed.
    */
   function updateProject(payload) {
     return guard(function () {
@@ -273,7 +331,7 @@ var Ui = (function () {
       var projectId = text(payload.projectId, 'プロジェクト');
       Access.requireProjectWrite(projectId, current.email);
       var before = Database.find('PROJECTS', projectId);
-      if (!before) throw new Error('Unknown project: ' + projectId);
+      if (!before) throw new Error('プロジェクトが見つかりません');
       if (stampChanged(payload.updatedAt, before.Last_Updated)) {
         throw new Error('このプロジェクトは読み込み後に更新されています。再読み込みしてから保存してください');
       }
@@ -286,17 +344,28 @@ var Ui = (function () {
       if (payload.description !== undefined) patch.Description = String(payload.description);
       if (payload.summary !== undefined) patch.Dashboard_Summary = String(payload.summary);
       if (payload.visibility !== undefined) patch.Dashboard_Visibility = visibilityValue(payload.visibility);
-      // A responsibility change is a separate, audited transfer; it never touches the owner.
+      // A responsibility change is validated here and folded into the same row write.
       var transfer = null;
       if (payload.responsibilityId !== undefined) {
         var targetResponsibility = String(payload.responsibilityId === null ? '' : payload.responsibilityId).trim();
-        if (targetResponsibility !== String(before.Responsibility_ID || '')) {
+        var currentResponsibility = String(before.Responsibility_ID || '');
+        if (targetResponsibility !== currentResponsibility) {
           if (payload.confirmResponsibilityChange !== true) {
             throw new Error('担当領域の変更には確認が必要です');
           }
+          var destination = null;
+          if (targetResponsibility) {
+            destination = Database.find('RESPONSIBILITIES', targetResponsibility);
+            if (!destination) throw new Error('担当領域が見つかりません');
+            if (destination.Status === 'Retired' && payload.confirmRetiredResponsibility !== true) {
+              throw new Error('廃止した担当領域への移動には追加の確認が必要です');
+            }
+          }
+          patch.Responsibility_ID = targetResponsibility;
           transfer = {
-            id: targetResponsibility,
-            confirmRetired: payload.confirmRetiredResponsibility === true,
+            previous: currentResponsibility,
+            next: targetResponsibility,
+            nextName: destination ? destination.Name : '',
             reason: String(payload.responsibilityReason || '').slice(0, 200)
           };
         }
@@ -308,7 +377,7 @@ var Ui = (function () {
         }
         patch.Committed_Deadline = deadline;
       }
-      if (!Object.keys(patch).length && !transfer) throw new Error('変更する項目がありません');
+      if (!Object.keys(patch).length) throw new Error('変更する項目がありません');
       if (patch.Status === 'Completed') {
         var rolled = Progress.rollup(Database.read('TASKS').filter(function (task) { return task.Project_ID === projectId; }));
         if (!rolled.calculated || rolled.percent !== 100) {
@@ -316,11 +385,14 @@ var Ui = (function () {
         }
         patch.Progress_Percent = 100;
       }
-      var project = Object.keys(patch).length ? Projects.update(projectId, patch) : before;
+      var project = Projects.update(projectId, patch);
       if (transfer) {
-        Responsibilities.transferProject(projectId, transfer.id,
-          {confirmed: true, confirmRetired: transfer.confirmRetired, reason: transfer.reason});
-        project = Database.find('PROJECTS', projectId);
+        AuditLog.write('RESPONSIBILITY_TRANSFERRED', 'PROJECT', projectId, {
+          previousResponsibilityId: transfer.previous,
+          newResponsibilityId: transfer.next,
+          reason: transfer.reason,
+          actor: current.email
+        });
       }
       AuditLog.write('UI_PROJECT_UPDATED', 'PROJECT', projectId, {
         fields: Object.keys(patch).join(','), owner: project.Project_Owner_ID,
@@ -940,6 +1012,7 @@ var Ui = (function () {
     MENU: MENU,
     show: show,
     context: context,
+    taskOptions: taskOptions,
     createProject: createProject,
     updateProject: updateProject,
     createSubproject: createSubproject,
@@ -1036,6 +1109,7 @@ function refreshDashboardFromMenu() {
 
 /** google.script.run bridges. */
 function uiContext() { return Ui.context(); }
+function uiTaskOptions(payload) { return Ui.taskOptions(payload); }
 function uiCreateProject(payload) { return Ui.createProject(payload); }
 function uiUpdateProject(payload) { return Ui.updateProject(payload); }
 function uiCreateSubproject(payload) { return Ui.createSubproject(payload); }

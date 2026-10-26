@@ -25,6 +25,38 @@ var Eligibility = (function () {
 
   function subprojectOpen(subproject) { return !subproject || NOTIFY_PROJECT.indexOf(subproject.Status) >= 0; }
 
+  /** Bounded walk guard: the hierarchy allows two levels, so a longer chain is malformed data. */
+  var MAX_CHAIN = 8;
+
+  /**
+   * The single ancestor-aware rule for "is this subproject node part of active work?".
+   *
+   * Returns false when the node is missing, belongs to another project, sits beneath an
+   * archived (or otherwise non-working) ancestor, or when the stored links form a cycle or
+   * point at a missing parent. `subprojects` is an index keyed by Subproject_ID.
+   */
+  function subprojectInActiveWork(subprojectId, projectId, subprojects) {
+    var id = String(subprojectId === undefined || subprojectId === null ? '' : subprojectId);
+    if (!id) return true;
+    if (!subprojects) return false;
+    var node = subprojects[id];
+    var guard = 0;
+    var seen = Object.create(null);
+    while (node) {
+      var key = String(node.Subproject_ID || '');
+      if (seen[key]) return false;
+      seen[key] = true;
+      if (projectId !== undefined && projectId !== null && String(node.Project_ID) !== String(projectId)) return false;
+      if (!subprojectOpen(node)) return false;
+      var parentId = String(node.Parent_Subproject_ID || '');
+      if (!parentId) return true;
+      if (guard++ > MAX_CHAIN) return false;
+      node = subprojects[parentId];
+    }
+    // A missing parent means the stored hierarchy is broken; treat the branch as inactive.
+    return false;
+  }
+
   /** Project switch is opt-out: blank means "inherit the legacy behaviour" (enabled). */
   function projectNotificationsAllowed(project) { return !project || project.Notification_Enabled !== false; }
 
@@ -40,19 +72,20 @@ var Eligibility = (function () {
     if (!task || !taskOpen(task)) return false;
     var project = projects && projects[task.Project_ID];
     if (!projectContributesWorkload(project)) return false;
-    if (task.Subproject_ID && subprojects) {
-      var node = subprojects[task.Subproject_ID];
-      var guard = 0;
-      while (node) {
-        if (String(node.Project_ID) !== String(task.Project_ID) || !subprojectOpen(node)) return false;
-        var parentId = String(node.Parent_Subproject_ID || '');
-        if (!parentId) break;
-        if (guard++ > 4) return false;
-        node = subprojects[parentId];
-      }
-      if (!node) return false;
-    }
-    return true;
+    return subprojectInActiveWork(task.Subproject_ID, task.Project_ID, subprojects);
+  }
+
+  /**
+   * Reminder eligibility. The immediate subproject used to be the only check, which let a task
+   * beneath an archived parent still produce reminders; the ancestor chain is now shared.
+   */
+  function taskNotifiable(task, project, subprojects) {
+    if (!taskNotifiableBase(task, project)) return false;
+    return subprojectInActiveWork(task.Subproject_ID, task && task.Project_ID, subprojects);
+  }
+
+  function taskNotifiableBase(task, project) {
+    return taskNotificationsAllowed(task) && projectOpen(project) && taskReminderEligible(task);
   }
 
   return {
@@ -65,7 +98,9 @@ var Eligibility = (function () {
     taskOpen: taskOpen,
     taskReminderEligible: taskReminderEligible,
     subprojectOpen: subprojectOpen,
+    subprojectInActiveWork: subprojectInActiveWork,
     taskNotificationsAllowed: taskNotificationsAllowed,
-    taskInActiveWork: taskInActiveWork
+    taskInActiveWork: taskInActiveWork,
+    taskNotifiable: taskNotifiable
   };
 }());

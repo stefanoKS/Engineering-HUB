@@ -284,5 +284,11 @@ var Dashboard = (function () {
 
   return {analyze: analyze, refresh: refresh, dashboardRows: dashboardRows};
 })();
-function refreshDashboard(asOf) { return Dashboard.refresh(asOf); }
-function analyzeManagement(asOf) { return Dashboard.analyze(asOf); }
+function refreshDashboard(asOf) {
+  Access.requireManager();
+  return Dashboard.refresh(asOf);
+}
+function analyzeManagement(asOf) {
+  Access.requireManager();
+  return Dashboard.analyze(asOf);
+}

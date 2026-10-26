@@ -1,4 +1,4 @@
-# 試験運用前チェックリスト / Pre-trial checklist (V1.3.1)
+﻿# 試験運用前チェックリスト / Pre-trial checklist (V1.3.1)
 
 This is the **primary first-time installation guide** for Engineering-HUB **設計・開発課 管理**.
 It installs a Google Workspace **DEVELOPMENT** trial. `DEPLOYMENT.md`,
@@ -220,9 +220,12 @@ Run it once and approve the OAuth consent for the operator account. On success i
 * sets the spreadsheet time zone to `Asia/Tokyo`,
 * creates the schema tables and automation defaults,
 * writes `SETTINGS` = `DATABASE_ENVIRONMENT / DEVELOPMENT`,
-* writes `SCHEMA_MIGRATIONS` = `INITIALIZE_V5` (schema version **5**),
+* writes `SCHEMA_MIGRATIONS` = `INITIALIZE_V6` (schema version **6**),
 * deletes `INITIALIZATION_SPREADSHEET_ID` automatically,
-* returns `5`.
+* returns `6`.
+
+A fresh V1.4 workbook is created at schema **6**, so it never records `006_responsibilities_and_nested_subprojects`.
+That migration only upgrades an existing V5 workbook.
 
 Then:
 
@@ -232,10 +235,14 @@ Then:
    formulas, and it is never the tool for an existing database — use the migration path below.
 
 **Existing database instead?** Do not create or run this wrapper. Take a verified backup, list
-only reviewed IDs in `APPROVED_MIGRATIONS` (V1.2 → V1.3:
-`002_task_assignment_safety,003_management_reliability,004_shared_dashboard,005_task_planning_and_requests`)
-and run `upgradeExistingDatabase()` from an editor wrapper. See
-[DEPLOYMENT.md §8.7](../DEPLOYMENT.md).
+only reviewed IDs in `APPROVED_MIGRATIONS` and run `upgradeExistingDatabase()` from an editor
+wrapper:
+
+* V1.3.1 (schema 5) → V1.4: approve exactly `006_responsibilities_and_nested_subprojects`.
+* V1.2 (schema 4) → V1.4: approve `005_task_planning_and_requests,006_responsibilities_and_nested_subprojects`.
+* V1.1 (schema 3) → V1.4: approve `004_shared_dashboard,005_task_planning_and_requests,006_responsibilities_and_nested_subprojects`.
+
+Each approved step takes its own verified backup. See [DEPLOYMENT.md §8.7](../DEPLOYMENT.md).
 
 ## 10. Create the first operator member and bootstrap ADMIN
 
@@ -562,7 +569,7 @@ function backupFromEditor() {
 
 | Check | Result | Evidence (screenshot / note) |
 | --- | --- | --- |
-| Database initialized (or upgraded) — `SCHEMA_MIGRATIONS` shows `INITIALIZE_V5` | PASS / FAIL / BLOCKED | |
+| Database initialized (or upgraded) — `SCHEMA_MIGRATIONS` shows `INITIALIZE_V6` (fresh) or the approved `006_…` row (upgrade) | PASS / FAIL / BLOCKED | |
 | Operator member created with a generated `Member_ID` | | |
 | ADMIN bootstrap | | |
 | Employee registered | | |
@@ -625,5 +632,5 @@ Before a V1.4 trial, additionally verify in the **development** deployment:
    area) and the indented nested subproject, and refuses a V1.3.1 snapshot with a friendly message.
 7. `REQUEST_SUBMISSION_ENABLED` still decides whether the employee request form is offered.
 
-`npm run lint`, `npm test` (310 tests) and `npm run validate` must all pass before pushing to
+`npm run lint`, `npm test` (328 tests) and `npm run validate` must all pass before pushing to
 development. Local results are not Workspace verification.

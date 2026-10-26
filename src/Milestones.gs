@@ -17,5 +17,11 @@ var Milestones = (function () {
     }
   };
 })();
-function createMilestone(data) { return Milestones.create(data); }
-function updateMilestone(id, patch) { return Milestones.update(id, patch); }
+function createMilestone(data) {
+  Access.requireProjectWrite(data && data.Project_ID);
+  return Milestones.create(data);
+}
+function updateMilestone(id, patch) {
+  Access.requireManager();
+  return Milestones.update(id, patch);
+}

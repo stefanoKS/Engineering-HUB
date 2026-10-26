@@ -8,11 +8,11 @@ Engineering project management using Google Sheets as the database, Google Apps 
 
 | Field | Value |
 | --- | --- |
-| Release | V1.3.1 (final pre-trial stabilization) on top of V1.3 (planning, requests, Japanese/English UI), V1.2 (shared read-only dashboard) and V1.1 + production hardening |
-| Version | `1.3.1` |
-| Local test count | **257 passing** (`npm test`), 0 failing; `npm run lint` and `npm run validate` pass |
-| Schema version | **5** — `005_task_planning_and_requests` (additive only; approval + verified backup required). V1.3.1 adds **no** schema change |
-| Verified locally | Project visibility controls and manager ownership default, project/task edit modes with partial patches, stale-edit refusal, automatic request import with idempotency and lock, unknown-vs-zero estimates, deadline-only assignment, separated approval/schedule confirmation, eligibility policy, weighted progress, deterministic health, role enforcement (ADMIN/MANAGER/MEMBER/VIEWER), safe DOM rendering, first-admin bootstrap, OFF/PREVIEW/LIVE matrix, reminder offsets and catch-up, weekly report, trigger drift recreation, ledger states, data preservation on upgrade, sanitized dashboard DTO allowlist, `INTERNAL`-only publication, A/B snapshot commit and rollback-on-failure, read-only viewer API, deadline wording in Asia/Tokyo |
+| Release | V1.4.1 (final pre-trial stabilization) on top of V1.4 (responsibilities, nested subprojects, UI refinement), V1.3 (planning, requests, Japanese/English UI), V1.2 (shared read-only dashboard) and V1.1 + production hardening |
+| Version | `1.4.1` |
+| Local test count | **328 passing** (`npm test`), 0 failing; `npm run lint` and `npm run validate` pass |
+| Schema version | **6** — `006_responsibilities_and_nested_subprojects` (additive only; approval + verified backup required). V1.4.1 adds **no** schema change |
+| Verified locally | Simplified role policy (ADMIN/MANAGER manage the whole department, MEMBER keeps own-task self-service), server-side re-checks on every global RPC wrapper, validated responsibility reordering, a single coordinated project edit (ordinary fields + responsibility transfer), bounded hierarchy walks on malformed data, ancestor-aware active-work and reminder eligibility, a bounded task selector with server search, project visibility controls, partial-patch project/task editing, stale-edit refusal, automatic request import with idempotency and lock, unknown-vs-zero estimates, deadline-only assignment, separated approval/schedule confirmation, weighted progress, deterministic health, safe DOM rendering, first-admin bootstrap, OFF/PREVIEW/LIVE matrix, reminder offsets and catch-up, weekly report, trigger drift recreation, ledger states, data preservation on upgrade, sanitized dashboard DTO allowlist, `INTERNAL`-only publication, A/B snapshot commit and rollback-on-failure, read-only viewer API, deadline wording in Asia/Tokyo |
 | Known production blockers | No live Google Workspace execution of any kind; development/production projects not created; roles blank after migration until bootstrap; real Sheets quota/performance unmeasured; repository visibility undecided; dashboard deployment ACL, Drive ACLs and scheduled publication unverified; request submission flag intentionally OFF until the operator enables it |
 | Google Workspace verification | **UNVERIFIED** — nothing in this repository has been run against a real Workspace |
 
@@ -279,5 +279,33 @@ Details: [docs/RESPONSIBILITIES.md](docs/RESPONSIBILITIES.md),
 [docs/checkgates/V1_4_GATE_1.md](docs/checkgates/V1_4_GATE_1.md) …
 [V1_4_GATE_6.md](docs/checkgates/V1_4_GATE_6.md). Upgrade steps:
 [DEPLOYMENT.md](DEPLOYMENT.md#v14-upgrade-5--6).
+
+## V1.4.1 — simplified authorization and pre-trial hardening
+
+No schema change (still **6**) and no dashboard contract change (still **1.4**). This release
+makes the application simpler to operate and closes the defects found in the final code review.
+
+1. **One simple role policy.** ADMIN and MANAGER manage every project, subproject, task and
+   responsibility in the department; MEMBER keeps own-task self-service and VIEWER stays
+   read-only. Responsibility, project and subproject owners are accountability labels, not
+   permission boundaries, so two managers can always collaborate.
+2. **Every callable entrypoint re-checks the role.** The global Apps Script functions that write
+   records now call `Access` before delegating to the domain service, so `google.script.run` and
+   the editor cannot bypass a sidebar check.
+3. **One coordinated project save.** A name/summary/deadline edit and a responsibility transfer
+   are validated together and written as one project row update, so a refused transfer no longer
+   leaves earlier fields committed.
+4. **Reordering is deterministic.** Every submitted responsibility ID is validated, duplicates
+   and unknown IDs are refused, and only rows whose `Sort_Order` actually changes are written.
+5. **Hierarchy safety.** Malformed parent links can no longer recurse without bound, and a task
+   is never placed inside an archived branch by accident.
+6. **One eligibility rule.** Active work, reminders, reports and the published snapshot all use
+   the same ancestor-aware subproject test.
+7. **Task selection at scale.** The sidebar loads a bounded task window but tells the manager how
+   many tasks exist and offers a server-side name search, so no task is silently unreachable.
+8. **Clearer Japanese.** Organizational areas are 廃止 / 再有効化, never 退職 / 復職.
+
+Gate evidence: [docs/checkgates/V1_4_1_GATE_1.md](docs/checkgates/V1_4_1_GATE_1.md) …
+[V1_4_1_GATE_6.md](docs/checkgates/V1_4_1_GATE_6.md).
 
 

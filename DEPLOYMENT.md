@@ -129,8 +129,8 @@ function initializeDevelopmentFromEditor() {
 ```
 
 Run only after verifying the environment and workbook. A successful run writes the schema
-(`SCHEMA_MIGRATIONS` = `INITIALIZE_V5`, version **5**), seeds the automation defaults, records
-`SETTINGS` = `DATABASE_ENVIRONMENT`, deletes `INITIALIZATION_SPREADSHEET_ID` and returns `5`.
+(`SCHEMA_MIGRATIONS` = `INITIALIZE_V6`, version **6**), seeds the automation defaults, records
+`SETTINGS` = `DATABASE_ENVIRONMENT`, deletes `INITIALIZATION_SPREADSHEET_ID` and returns `6`.
 Delete the wrapper afterward. Never rerun initialization against an operational workbook;
 initialization refuses any workbook that already contains a value or formula.
 
@@ -355,7 +355,9 @@ function initializeDevelopmentFromEditor() {
 
 Set `INITIALIZATION_SPREADSHEET_ID` to the same ID first, run once, then delete the wrapper.
 Initialization refuses any workbook that already contains a value or formula, deletes
-`INITIALIZATION_SPREADSHEET_ID` itself, writes `SCHEMA_MIGRATIONS` = `INITIALIZE_V5` and returns `5`.
+`INITIALIZATION_SPREADSHEET_ID` itself, writes `SCHEMA_MIGRATIONS` = `INITIALIZE_V6` and returns `6`.
+A fresh V1.4 workbook therefore never records a `006_…` migration row: that migration exists only
+to upgrade an existing V5 (V1.3.1) workbook.
 
 ### 8.6 First administrator bootstrap
 

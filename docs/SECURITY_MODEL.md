@@ -23,13 +23,18 @@ application*, not privilege escalation by someone who can edit the spreadsheet o
 `MEMBERS.Role` holds `ADMIN`, `MANAGER`, `MEMBER` or `VIEWER`. A blank role (for example after migrating a V1
 workbook) is treated as `VIEWER` — no privilege is invented by a migration.
 
+Engineering-HUB is an internal departmental tool, so the policy is deliberately simple. There is no
+per-project, per-responsibility or per-subproject access control: an ADMIN or MANAGER manages the
+department's work, and ownership columns record accountability only.
+
 | Capability | ADMIN | MANAGER | MEMBER | VIEWER |
 | --- | --- | --- | --- | --- |
 | Open the manager sidebar (`Ui.context`) | ✅ | ✅ | ⚠️ only with `ALLOW_MEMBER_SELF_SERVICE=true` (own scope) | ❌ |
-| Create project / subproject | ✅ all | ✅ | ❌ | ❌ |
-| Assign a task to someone | ✅ all | ✅ own projects | ❌ | ❌ |
-| Update task progress | ✅ all tasks | ✅ own projects and own tasks | ⚠️ own tasks only, self-service opt-in | ❌ |
-| Approve an assignment / confirm a schedule | ✅ all | ✅ own projects and own tasks | ❌ | ❌ |
+| Create / edit / archive project or subproject | ✅ all | ✅ all | ❌ | ❌ |
+| Create / edit / re-order / retire responsibilities | ✅ all | ✅ all (owner change is ADMIN-only) | ❌ | ❌ |
+| Assign a task to someone | ✅ all | ✅ all | ❌ | ❌ |
+| Update task progress | ✅ all tasks | ✅ all tasks | ⚠️ own tasks only, self-service opt-in | ❌ |
+| Approve an assignment / confirm a schedule | ✅ all | ✅ all | ❌ | ❌ |
 | View member directory | ✅ full | ✅ full | ⚠️ id/name/active only (+ own record) | ❌ |
 | View skill matrix | ✅ full | ✅ full | ⚠️ own row only | ❌ |
 | Edit skill assessments | ✅ | ✅ | ❌ | ❌ |
@@ -47,8 +52,9 @@ MEMBER/VIEWER caller is refused with `Member self-service is disabled: manager a
 member code path exists and is tested, but enabling it requires accepting that the member can already read every
 sheet in the workbook — the application scope then adds no confidentiality.
 
-"Own tasks" means `TASKS.Owner_Member_ID` equals the caller's verified `Member_ID`. "Own projects" means
-`PROJECTS.Project_Owner_ID` or `SUBPROJECTS.Owner_ID` equals the caller's `Member_ID`.
+"Own tasks" means `TASKS.Owner_Member_ID` equals the caller's verified `Member_ID`. That is the only
+ownership test left in an authorization decision; `PROJECTS.Project_Owner_ID`, `SUBPROJECTS.Owner_ID`
+and `RESPONSIBILITIES.Owner_Member_ID` are accountability labels that never gate a write.
 
 ## 3. Privilege-escalation prevention
 
@@ -211,29 +217,46 @@ or nobody reviews publication freshness. Each has a documented mitigation in
 
 | Actor | Scope |
 | --- | --- |
-| ADMIN | every responsibility, including ownership changes and transfers into a retired area |
-| MANAGER | only the responsibilities they own; may create one (becoming its owner) but may not change an owner |
+| ADMIN | every responsibility, including ownership changes |
+| MANAGER | every responsibility; may create one (becoming its owner) but may not change an owner |
 | MEMBER / VIEWER | none |
 
-A responsibility is an organizational grouping, **not** a permission boundary. Owning one never
-grants access to the projects inside it: `Access.requireProjectWrite` still requires
-`PROJECTS.Project_Owner_ID === identity.memberId` for a manager. A project transfer writes
-`Responsibility_ID` only, so `Project_Owner_ID`, deadlines, status and progress are unchanged, and
-a manager cannot use the feature to reach another manager's project.
+A responsibility is an organizational grouping, **not** a permission boundary. It neither grants
+nor restricts access: `Access.requireProjectWrite` admits any verified ADMIN or MANAGER for any
+project, so two managers can always collaborate and no ownership column stands between them and
+the department's work. A project transfer writes `Responsibility_ID` only, so `Project_Owner_ID`,
+deadlines, status and progress are unchanged.
 
 ### New write paths
 
 | Entry point | Server check | Audit |
 | --- | --- | --- |
-| `uiSaveResponsibility` | `Access.requireManager` + `canManageResponsibility` | `CREATE` / `UPDATE` on `RESPONSIBILITIES` |
-| `uiMoveResponsibility` | `Access.requireManager` + per-row ownership | `RESPONSIBILITY_REORDERED` |
-| `uiRetireResponsibility` / `uiReactivateResponsibility` | ownership | `RETIRE` / `REACTIVATE` |
+| `uiSaveResponsibility` | `Access.requireManager` + `canManageResponsibility` (+ ADMIN for an owner change) | `CREATE` / `UPDATE` on `RESPONSIBILITIES` |
+| `uiMoveResponsibility` | `Access.requireManager`; validated, de-duplicated ID list | `RESPONSIBILITY_REORDERED` |
+| `uiRetireResponsibility` / `uiReactivateResponsibility` | `Access.requireManager` | `RETIRE` / `REACTIVATE` |
 | `uiTransferProject` / `uiUpdateProject` | `Access.requireProjectWrite` | `RESPONSIBILITY_TRANSFERRED` with both IDs, actor and reason |
 | `uiSaveSubproject` / `uiArchiveSubproject` / `uiReactivateSubproject` | `Access.requireManager` | `REPARENT` / `ARCHIVE` / `REACTIVATE` |
 | `uiMoveTask` | `Access.requireManager` + `Access.requireTaskWrite` | `TASK_MOVED` |
 
 A confirmation flag supplied by the browser is a user-intent gate, never authority: every one of
 these paths re-checks the role and the record scope on the server.
+
+### Direct callable surface
+
+Apps Script exposes every top-level function to the editor and to `google.script.run`. The
+record-mutating globals (`createProject`, `updateProject`, `archiveProject`, `createSubproject`,
+`updateSubproject`, `reparentSubproject`, `archiveSubproject`, `reactivateSubproject`,
+`createTask`, `updateTask`, `reassignTask`, `completeTask`, `recordTaskBlocker`,
+`createResponsibility`, `updateResponsibility`, `retireResponsibility`,
+`reactivateResponsibility`, `reorderResponsibilities`, `transferProjectResponsibility`,
+`createMember`, `updateMember`, `deactivateMember`, `createIssue`, `updateIssue`,
+`createMilestone`, `updateMilestone`, `createSkill`, `updateSkill`, `setMemberSkill`,
+`createDatabaseBackup`) re-check the verified role before delegating to the domain service.
+Read entrypoints that expose manager-only data (`listMembers`, `listResponsibilities`,
+`pendingRequests`, `healthCheck`, `validateSystem`, `analyzeManagement`) are manager-gated, and
+`listProjects` / `listTasks` return only rows visible to the caller. `createMember` accepts the
+first row of an empty workbook, because no role can exist yet; that is the documented bootstrap
+step and every later member requires a manager.
 
 ### Published risk surface
 

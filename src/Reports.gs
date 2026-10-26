@@ -42,7 +42,9 @@ var Reports = (function () {
         Health.day(task.Due_Date) < asOf &&
         Eligibility.taskInActiveWork(task, projectById, subprojectById);
     });
-    var blocked = tasks.filter(function (task) { return task.Status === 'Blocked'; });
+    var blocked = tasks.filter(function (task) {
+      return task.Status === 'Blocked' && Eligibility.taskInActiveWork(task, projectById, subprojectById);
+    });
     var missingEstimates = tasks.filter(function (task) {
       return Eligibility.taskInActiveWork(task, projectById, subprojectById) && Estimates.unknown(task.Estimated_Hours);
     });
@@ -56,7 +58,8 @@ var Reports = (function () {
     var upcoming = tasks.filter(function (task) {
       if (!task.Due_Date || task.Status === 'Done' || task.Status === 'Cancelled') return false;
       var due = Health.day(task.Due_Date);
-      return due >= asOf && (new Date(due + 'T00:00:00Z') - new Date(asOf + 'T00:00:00Z')) / 86400000 <= 14;
+      return due >= asOf && (new Date(due + 'T00:00:00Z') - new Date(asOf + 'T00:00:00Z')) / 86400000 <= 14 &&
+        Eligibility.taskInActiveWork(task, projectById, subprojectById);
     });
 
     var recentProjects = analysis.projects.filter(function (item) {

@@ -135,10 +135,8 @@ var Notifications = (function () {
   function eligible(task, projects, subprojects, activated) {
     var approved = date(task.Assignment_Approved_At);
     var project = projects[task.Project_ID];
-    var subproject = task.Subproject_ID ? subprojects[task.Subproject_ID] : null;
-    return Eligibility.taskNotificationsAllowed(task) && Eligibility.projectOpen(project) &&
-      (!task.Subproject_ID || (subproject && subproject.Project_ID === task.Project_ID && Eligibility.subprojectOpen(subproject))) &&
-      Eligibility.taskReminderEligible(task) &&
+    // The whole ancestor chain decides: a task beneath an archived parent is not reminded.
+    return Eligibility.taskNotifiable(task, project, subprojects) &&
       Number.isInteger(Number(task.Assignment_Version)) && Number(task.Assignment_Version) > 0 &&
       !!date(task.Due_Date) && !!approved && approved.getTime() > activated.getTime() &&
       matches(task);

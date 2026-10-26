@@ -501,5 +501,8 @@ var Requests = (function () {
 /* Administrative entry points (Apps Script editor / triggers). */
 function importRequestInbox() { return Requests.importInbox(AuditLog.actor()); }
 function initializeRequestInbox(confirmation) { return Requests.initializeInbox(confirmation); }
-function pendingRequests() { return Requests.queue(); }
+function pendingRequests() {
+  Access.requireManager();
+  return Requests.queue();
+}
 function pendingRequestReminders() { return Notifications.sendPendingRequestReminder(); }

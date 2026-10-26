@@ -47,7 +47,9 @@ function scheduledDailyBackup() {
     return {disabled: true};
   }
   try {
-    var reference = createDatabaseBackup();
+    // The scheduled path runs without an interactive user, so it calls the service directly;
+    // the manual `createDatabaseBackup()` entrypoint stays ADMIN-only.
+    var reference = Database.withLock(function () { return Backup.create(); });
     AutomationSettings.setStatus('LAST_BACKUP_TIME', Domain.now());
     AutomationSettings.setStatus('LAST_BACKUP_RESULT', 'VERIFIED');
     return {reference: reference};
@@ -65,7 +67,11 @@ function dailyAutomation() {
     backup: scheduledDailyBackup()
   };
 }
-function previewPendingNotifications(nowValue) { return Notifications.preview(nowValue); }
+/** Manager-only diagnostics: they expose workbook and automation internals. */
+function previewPendingNotifications(nowValue) {
+  Access.requireManager();
+  return Notifications.preview(nowValue);
+}
 function reconcileUncertainDeliveries(actorEmail, confirmation) {
   return Notifications.reconcileUncertain(actorEmail, confirmation);
 }
@@ -73,6 +79,7 @@ function notifyWeeklyManagementReport() {
   return Notifications.sendWeeklyReport();
 }
 function healthCheck() {
+  Access.requireManager();
   Config.require('SPREADSHEET_ID');
   Config.require('ENVIRONMENT');
   var config = Config.get();
@@ -88,6 +95,7 @@ function healthCheck() {
   };
 }
 function systemStatus() {
+  Access.requireManager();
   var validation = validateSystem();
   return {
     health: healthCheck(),
@@ -101,6 +109,7 @@ function systemStatus() {
   };
 }
 function validateSystem() {
+  Access.requireManager();
   var health = healthCheck();
   var tables = Object.keys(Schema.tables);
   var counts = {};

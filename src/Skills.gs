@@ -93,8 +93,23 @@ var Skills = (function () {
     gapMatrix: gapMatrix
   };
 })();
-function createSkill(data) { return Skills.create(data); }
-function updateSkill(id, patch) { return Skills.update(id, patch); }
-function setMemberSkill(memberId, skillId, level, details) { return Skills.setMember(memberId, skillId, level, details); }
-function refreshSkillMatrix() { return Skills.matrix(); }
-function skillGaps() { return Skills.gaps(); }
+function createSkill(data) {
+  Access.requireManager();
+  return Skills.create(data);
+}
+function updateSkill(id, patch) {
+  Access.requireManager();
+  return Skills.update(id, patch);
+}
+function setMemberSkill(memberId, skillId, level, details) {
+  Access.requireManager();
+  return Skills.setMember(memberId, skillId, level, details);
+}
+function refreshSkillMatrix() {
+  Access.requireManager();
+  return Skills.matrix();
+}
+function skillGaps() {
+  Access.requireManager();
+  return Skills.gaps();
+}

@@ -116,7 +116,27 @@ var Projects = (function () {
     list: list
   };
 })();
-function createProject(data) { return Projects.create(data); }
-function updateProject(id, patch) { return Projects.update(id, patch); }
-function archiveProject(id) { return Projects.archive(id); }
-function listProjects(filter) { return Projects.list(filter); }
+/**
+ * Global entrypoints. They are reachable from the Apps Script editor and from
+ * `google.script.run`, so each one re-checks the verified role on the server: a browser value
+ * can never authorize a write.
+ */
+function createProject(data) {
+  Access.requireManager();
+  return Projects.create(data);
+}
+function updateProject(id, patch) {
+  Access.requireProjectWrite(id);
+  return Projects.update(id, patch);
+}
+function archiveProject(id) {
+  Access.requireProjectWrite(id);
+  return Projects.archive(id);
+}
+function listProjects(filter) {
+  var current = Access.requireUiAccess();
+  var visible = Access.visibleProjects(current, Access.visibleTasks(current));
+  var allowed = Object.create(null);
+  visible.forEach(function (project) { allowed[project.Project_ID] = true; });
+  return Projects.list(filter).filter(function (project) { return allowed[project.Project_ID] === true; });
+}

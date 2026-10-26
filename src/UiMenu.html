@@ -44,9 +44,10 @@
     .lang-option.is-active { background: var(--accent); border-color: var(--accent); color: #fff; }
     .lang-sep { color: var(--border); }
 
-    .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 12px; }
     .tab {
-      flex: 1; padding: 9px 4px; min-height: 40px; font-size: 14px; cursor: pointer;
+      flex: 1 1 auto; min-width: 0; padding: 9px 4px; min-height: 40px; font-size: 14px; cursor: pointer;
+      overflow-wrap: anywhere;
       background: var(--surface); color: var(--text-soft);
       border: 1px solid var(--border); border-radius: var(--radius);
     }
@@ -227,6 +228,8 @@
     <fieldset>
       <legend data-i18n="manager.task.legend">タスク割当 / 編集（完了期限と必要期間から開始日を計算）</legend>
       <label for="taskPick" data-i18n="manager.task.pick">編集するタスク</label>
+      <input id="taskSearch" type="search" data-i18n-placeholder="manager.task.search" placeholder="タスク名で絞り込み">
+      <div class="hint" id="taskListNote"></div>
       <select id="taskPick"></select>
       <div class="hint" data-i18n="manager.task.editHint">既存のタスクを選ぶと編集できます。タスクIDは変更されません。</div>
       <div class="hint" id="taskProgressNote"></div>
@@ -303,8 +306,8 @@
         <button class="secondary" onclick="moveResponsibilityDown()" data-i18n="manager.responsibility.down">下へ</button>
       </div>
       <div class="row tight">
-        <button class="danger" onclick="retireResponsibility()" data-i18n="manager.responsibility.retire">退職にする</button>
-        <button class="secondary" onclick="reactivateResponsibility()" data-i18n="manager.responsibility.reactivate">有効に戻す</button>
+        <button class="danger" onclick="retireResponsibility()" data-i18n="manager.responsibility.retire">廃止にする</button>
+        <button class="secondary" onclick="reactivateResponsibility()" data-i18n="manager.responsibility.reactivate">再有効化</button>
       </div>
     </fieldset>
 
@@ -425,10 +428,10 @@
       EH.fillSelect(document.getElementById('projectOwner'), activeMembers, 'id', 'name', T('common.unset'));
       EH.fillSelect(document.getElementById('subProject'), data.projects, 'id', 'name', '');
       EH.fillSelect(document.getElementById('subOwner'), activeMembers, 'id', 'name', T('common.unset'));
-      EH.fillSelect(document.getElementById('taskPick'), editableTasks(), 'id', 'name', T('manager.task.new'));
+      renderTaskSelects();
+      renderTaskNote();
       EH.fillSelect(document.getElementById('taskProject'), data.projects, 'id', 'name', '');
       EH.fillSelect(document.getElementById('taskOwner'), activeMembers, 'id', 'name', '');
-      EH.fillSelect(document.getElementById('progressTask'), data.tasks, 'id', 'name', '');
       EH.fillSelect(document.getElementById('skillMember'), activeMembers, 'id', 'name', '');
       EH.fillSelect(document.getElementById('skillName'), data.skills, 'id', 'name', '');
       EH.fillSelect(document.getElementById('skillAssessor'), activeMembers, 'id', 'name', T('common.unset'));
@@ -448,6 +451,8 @@
       renderSubprojectTree();
       refreshSubprojects();
       syncSelections();
+      // Re-apply an active search against fresh data instead of a stale narrowed list.
+      if (String(value('taskSearch') || '').trim()) applyTaskFilter();
     }
 
     /** 未分類 plus active responsibilities, keeping a retired current value visible. */
@@ -544,7 +549,7 @@
       var project = projectState.id ? recordById(context.projects, projectState.id) : null;
       if (project && project.canEdit) { setSelectValue('projectPick', project.id); loadProject(true); }
       else if (projectState.id) clearProject();
-      var task = taskState.id ? recordById(context.tasks, taskState.id) : null;
+      var task = taskState.id ? recordById(allTaskItems(), taskState.id) : null;
       if (task && task.canEdit) { setSelectValue('taskPick', task.id); loadTask(true); }
       else if (taskState.id) clearTask();
       if (subState.id && recordById(context.subprojects, subState.id)) {
@@ -563,7 +568,7 @@
 
     var FORM_FIELDS = ['projectPick', 'projectName', 'projectResponsibility', 'projectOwner', 'projectCategory',
       'projectPriority', 'projectDeadline', 'projectStatus', 'projectVisibility', 'projectSummary',
-      'projectDescription', 'subPick', 'subProject', 'subParent', 'subName', 'subOwner', 'taskPick',
+      'projectDescription', 'subPick', 'subProject', 'subParent', 'subName', 'subOwner', 'taskPick', 'taskSearch',
       'taskProject', 'taskSubproject', 'taskName', 'taskOwner', 'taskDeadline', 'taskDuration',
       'taskUnit', 'taskBasis', 'taskEstimate', 'taskAcceptance', 'taskPriority', 'progressTask',
       'progressValue', 'progressNext', 'respPick', 'respName', 'respDescription', 'respOwner'];
@@ -596,9 +601,62 @@
       return (context.projects || []).filter(function (project) { return project.canEdit; });
     }
 
-    function editableTasks() {
-      if (!context) return [];
-      return (context.tasks || []).filter(function (task) { return task.canEdit; });
+    /**
+     * The sidebar loads a bounded task window. A search narrows the list on the server, so a
+     * task outside that window is still reachable, and a task found that way keeps its
+     * identity for the current selection.
+     */
+    var taskWindow = null;
+
+    function allTaskItems() {
+      var merged = (context && context.tasks ? context.tasks : []).slice();
+      if (taskWindow && taskWindow.tasks) {
+        taskWindow.tasks.forEach(function (item) {
+          if (!merged.some(function (existing) { return existing.id === item.id; })) merged.push(item);
+        });
+      }
+      return merged;
+    }
+
+    function renderTaskSelects() {
+      var items = taskWindow ? taskWindow.tasks : allTaskItems();
+      var keepTask = value('taskPick');
+      EH.fillSelect(document.getElementById('taskPick'), items.filter(function (task) { return task.canEdit; }),
+        'id', 'name', T('manager.task.new'));
+      if (keepTask && items.some(function (item) { return item.id === keepTask; })) setSelectValue('taskPick', keepTask);
+      var keepProgress = value('progressTask');
+      EH.fillSelect(document.getElementById('progressTask'), items, 'id', 'name', '');
+      if (keepProgress && items.some(function (item) { return item.id === keepProgress; })) {
+        setSelectValue('progressTask', keepProgress);
+      }
+    }
+
+    function renderTaskNote() {
+      var note = document.getElementById('taskListNote');
+      if (taskWindow && taskWindow.truncated) {
+        note.textContent = T('manager.task.searchHint', {shown: taskWindow.tasks.length, total: taskWindow.total});
+        return;
+      }
+      if (!taskWindow && context && context.tasksTruncated) {
+        note.textContent = T('manager.task.searchHint', {shown: (context.tasks || []).length, total: context.taskTotal});
+        return;
+      }
+      note.textContent = '';
+    }
+
+    function applyTaskFilter() {
+      var query = String(value('taskSearch') || '').trim();
+      if (!query) {
+        taskWindow = null;
+        renderTaskSelects();
+        renderTaskNote();
+        return;
+      }
+      call('uiTaskOptions', {query: query}, function (data) {
+        taskWindow = data;
+        renderTaskSelects();
+        renderTaskNote();
+      }, null, true);
     }
 
     function recordById(list, id) {
@@ -794,7 +852,7 @@
     }
 
     function loadTask(quiet) {
-      var task = recordById(context ? context.tasks : [], value('taskPick'));
+      var task = recordById(allTaskItems(), value('taskPick'));
       if (!task) { clearTask(); return; }
       taskState = {id: task.id, updatedAt: task.updatedAt};
       setSelectValue('taskProject', task.projectId);
@@ -824,17 +882,22 @@
     function refreshSubprojects() {
       if (!context) return;
       var project = value('taskProject');
-      var items = (context.subprojects || []).filter(function (sub) { return sub.projectId === project; });
+      var current = taskState.id ? recordById(allTaskItems(), taskState.id) : null;
+      var currentSubprojectId = current ? String(current.subprojectId || '') : '';
+      // An archived node is never offered as a destination; a task that already sits there
+      // keeps its own value so it can be moved out explicitly.
+      var items = (context.subprojects || []).filter(function (sub) {
+        if (sub.projectId !== project) return false;
+        if (sub.status === 'Archived' && sub.id !== currentSubprojectId) return false;
+        return true;
+      });
       items.sort(function (left, right) { return left.level - right.level; });
       var labels = items.map(function (sub) {
-        return {id: sub.id, name: sub.level > 1 ? '└ ' + sub.name : sub.name};
+        return {id: sub.id, name: (sub.level > 1 ? '└ ' : '') + sub.name + (sub.status === 'Archived' ? '（' + T('manager.subproject.archived') + '）' : '')};
       });
       EH.fillSelect(document.getElementById('taskSubproject'), labels, 'id', 'name', T('manager.subproject.none'));
       var selected = document.getElementById('taskSubproject').value;
-      if (taskState.id) {
-        var task = recordById(context.tasks, taskState.id);
-        if (task && task.subprojectId) setSelectValue('taskSubproject', task.subprojectId);
-      }
+      if (current && current.subprojectId) setSelectValue('taskSubproject', current.subprojectId);
       return selected;
     }
 
@@ -937,7 +1000,7 @@
       if (!id) { setStatus('error', T('manager.responsibility.pick')); return; }
       var item = recordById((context && context.responsibilities) || [], id);
       if (!item) return;
-      if (!EH.confirmAction(T('manager.responsibility.reactivatePrompt', {name: item.name}))) return;
+      // Reactivation is the safe inverse of 廃止, so it does not add another dialog.
       call('uiReactivateResponsibility', {responsibilityId: id}, function () { call('uiContext', undefined, render); });
     }
 
@@ -1055,6 +1118,12 @@
       projectState.responsibilityId = value('projectResponsibility');
     });
     document.getElementById('taskPick').addEventListener('change', function () { loadTask(); });
+    var taskSearchTimer = null;
+    document.getElementById('taskSearch').addEventListener('input', function () {
+      if (taskSearchTimer) window.clearTimeout(taskSearchTimer);
+      taskSearchTimer = window.setTimeout(applyTaskFilter, 250);
+    });
+    document.getElementById('taskSearch').addEventListener('search', applyTaskFilter);
     document.getElementById('taskProject').addEventListener('change', refreshSubprojects);
     document.getElementById('subPick').addEventListener('change', function () { loadSubproject(); });
     document.getElementById('subProject').addEventListener('change', function () {

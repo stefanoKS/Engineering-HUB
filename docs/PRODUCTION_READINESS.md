@@ -9,16 +9,17 @@ evidence below supports it. A green local test run is **not** sufficient.
 
 | Field | Value |
 | --- | --- |
-| Version | 1.4.0 (responsibilities, nested subprojects and UI refinement on `main`) |
-| Audited baseline SHA | `e147e52` (V1.3.1 documentation and installation fix) |
+| Version | 1.4.1 (simplified authorization and pre-trial hardening on `main`) |
+| Audited baseline SHA | `eda32ee` (V1.4 responsibilities, hierarchy and UI refinement) |
 | Schema version | 6 (`006_responsibilities_and_nested_subprojects`, additive; approval + verified backup required) |
-| Hardening commit | see the local V1.4 working-tree changes recorded in the V1.4 check gates |
-| Date prepared | 2026-10-26 |
+| Dashboard contract | 1.4 (unchanged by V1.4.1) |
+| Hardening commit | see the local V1.4.1 working-tree changes recorded in the V1.4.1 check gates |
+| Date prepared | 2026-10-27 |
 
-V1.4 was verified with local mocks and a static browser preview only. Nothing was initialized,
+V1.4.1 was verified with local mocks and a static browser preview only. Nothing was initialized,
 migrated, published, deployed or e-mailed against Google Workspace, so the release status remains
 **NOT APPROVED FOR PRODUCTION** and every live item stays **UNVERIFIED**. The open items are listed
-in [checkgates/V1_4_GATE_6.md](checkgates/V1_4_GATE_6.md#blocked--required-before-production-readiness).
+in [checkgates/V1_4_1_GATE_6.md](checkgates/V1_4_1_GATE_6.md).
 
 ## 2. Deployment environment
 
@@ -34,8 +35,10 @@ No real Google Workspace resource was created, changed or inspected while prepar
 ```text
 npm ci            -> lockfile install, 0 vulnerabilities
 npm run lint      -> pass
-npm test          -> 257 tests, 257 pass, 0 fail (V1.3.1 adds 40: 24 stabilization + 16 sidebar wiring)
-npm run validate  -> 32 Apps Script files, 3 dashboard files, both manifests and 452 translation keys validated
+npm test          -> 328 tests, 328 pass, 0 fail, 0 skipped
+                     (V1.4.1 adds 18 stabilization tests; the 310 V1.4 tests still run)
+npm run validate  -> 33 Apps Script files, 3 dashboard files, both manifests and 532 translation keys validated
+npm run preview:dashboard -> static preview written (browser-only, not Workspace evidence)
 ```
 
 Local validation covers mocked Google services only. It does not prove OAuth consent, permission inheritance,
@@ -63,11 +66,23 @@ quota behaviour, trigger timing, or mail delivery.
 | V1.3.1-5 | UI polish | PASS (local) / browser-unverified | [V1_3_1_GATE_5.md](checkgates/V1_3_1_GATE_5.md) |
 | V1.3.1-6 | Installation and trial documentation | PASS (files updated) | [V1_3_1_GATE_6.md](checkgates/V1_3_1_GATE_6.md) |
 | V1.3.1-7 | Final automated verification | PASS (local) / Workspace UNVERIFIED | [V1_3_1_GATE_7.md](checkgates/V1_3_1_GATE_7.md) |
+| V1.4-1 … V1.4-6 | Responsibilities, hierarchy, UI, dashboard, release | PASS (local) | `checkgates/V1_4_GATE_1..6.md` |
+| V1.4.1-1 | Simplified authorization policy | PASS (local) / Workspace UNVERIFIED | [V1_4_1_GATE_1.md](checkgates/V1_4_1_GATE_1.md) |
+| V1.4.1-2 | Responsibilities, coordinated project edit, subproject consistency | PASS (local) | [V1_4_1_GATE_2.md](checkgates/V1_4_1_GATE_2.md) |
+| V1.4.1-3 | Hierarchy safety, eligibility and calculations | PASS (local) | [V1_4_1_GATE_3.md](checkgates/V1_4_1_GATE_3.md) |
+| V1.4.1-4 | UI, accessibility and task scale | PASS (local) / Sheets-unverified | [V1_4_1_GATE_4.md](checkgates/V1_4_1_GATE_4.md) |
+| V1.4.1-5 | Dashboard contract, requests and reliability | PASS (local) / LIVE UNVERIFIED | [V1_4_1_GATE_5.md](checkgates/V1_4_1_GATE_5.md) |
+| V1.4.1-6 | Documentation, installation and release assessment | PASS (files updated) / Workspace UNVERIFIED | [V1_4_1_GATE_6.md](checkgates/V1_4_1_GATE_6.md) |
 
 ## 5. Security gate status
 
-- Role grants, self-elevation, last-admin protection, task ownership and cross-project scope are enforced
-  server-side and covered by negative tests.
+- Role grants, self-elevation, last-admin protection, the MEMBER own-task boundary and the
+  department-wide ADMIN/MANAGER scope are enforced server-side and covered by negative tests.
+- Ownership columns (`Project_Owner_ID`, `Subproject.Owner_ID`, `Responsibility.Owner_Member_ID`)
+  are accountability labels only; no write is gated by them. Only a responsibility owner change is
+  reserved to ADMIN.
+- Every record-mutating top-level Apps Script function re-checks the verified role, so a direct
+  `google.script.run` or editor call cannot bypass a sidebar guard.
 - Operational text is rendered with `textContent`; `npm run validate` rejects `innerHTML`/`insertAdjacentHTML`/
   `document.write` in any template.
 - First-administrator bootstrap is one-time, allowlisted, audited and refused on an operational workbook.
@@ -133,6 +148,7 @@ Record each item in [dashboard/SMOKE_TEST.md](dashboard/SMOKE_TEST.md).
 | 9 | Publication failure/recovery drill not executed live | Deployment owner | Execute smoke test section D |
 | 10 | Request submissions are closed by default (`REQUEST_SUBMISSION_ENABLED` absent) | Operator | Enable submissions only after the inbox is initialized and reviewed |
 | 11 | V1.3.1 sidebar behaviours (visibility controls, edit modes, auto-import) unverified in a real Workspace | Deployment owner | Execute `dashboard/SMOKE_TEST.md` E1–E11 and record evidence |
+| 12 | V1.4.1 authorization, sidebar fit and task search unverified against a real Sheets sidebar | Deployment owner | Re-run the gate 1 and gate 4 checklist items in the development deployment with all four roles |
 
 ## 10. Backup and rollback readiness
 

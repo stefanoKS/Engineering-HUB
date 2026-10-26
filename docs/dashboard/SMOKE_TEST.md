@@ -118,7 +118,7 @@ development deployment records the result.
 | --- | --- | --- | --- | --- |
 | F1 | `PUBLISHED_RESPONSIBILITIES_A` exists after the first V1.4 publication and lists only areas used by a published project | Header plus one row per area | UNVERIFIED | |
 | F2 | A published project shows its responsibility name on the card and as the first detail fact | Stored name, untranslated | UNVERIFIED | |
-| F3 | The responsibility filter offers すべて, the active areas and a retired area marked （退職） | Retired area still selectable | UNVERIFIED | |
+| F3 | The responsibility filter offers すべて, the active areas and a retired area marked （廃止） | Retired area still selectable | UNVERIFIED | |
 | F4 | A nested subproject is indented under its parent and the parent shows 「配下を含む n 件」 | Indentation and count | UNVERIFIED | |
 | F5 | The parent subproject progress equals the manager's rollup for the same project | Equal numbers | UNVERIFIED | |
 | F6 | No responsibility description, owner, e-mail or private project text appears in any published sheet | None found | UNVERIFIED | |

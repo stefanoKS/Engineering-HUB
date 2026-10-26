@@ -53,19 +53,21 @@ migrated project starts.
 ## 3. Authorization
 
 The policy is defined once in `src/Access.gs` (`canManageResponsibility`) and used by every
-entrypoint.
+entrypoint. Engineering-HUB is a single-department application, so authorization is
+role-based and deliberately simple: there is no per-project, per-area or per-owner access
+control.
 
 | Role | Responsibility administration |
 | --- | --- |
-| ADMIN | Create, edit, re-order, retire, reactivate, change the owner, transfer any project, and move a project into a retired area with an extra confirmation. |
-| MANAGER | Create a responsibility they own, and administer only the responsibilities they own. May transfer projects they are already authorized to edit, and may not move a project into a retired area. May not change the owner of a responsibility. |
+| ADMIN | Create, edit, re-order, retire, reactivate, change the owner, and transfer any project, including into a retired area with an extra confirmation. |
+| MANAGER | Everything above except changing the owner: any manager administers any responsibility, and no ownership check stands between two collaborating managers. |
 | MEMBER / VIEWER | None. |
 
-Two boundaries are deliberately preserved:
+Two invariants are deliberately preserved:
 
-- **Owning a responsibility grants no access to the projects inside it.** Project ownership
-  (`PROJECTS.Project_Owner_ID`) is still the only project permission boundary, so a manager who
-  owns an area never gains another manager's private project through this feature.
+- **A responsibility is a grouping, never a permission.** Owning an area grants no extra
+  access and restricts nothing; MANAGER access covers the department's projects because of
+  the role, not because of an ownership column.
 - **Changing `Responsibility_ID` never changes `Project_Owner_ID`.** The transfer writes one
   column plus the update timestamp and an audit record.
 
@@ -79,12 +81,15 @@ data, never authority.
 | Create | `Responsibilities.create` → `uiSaveResponsibility` | The creating manager becomes the owner. |
 | Rename / describe | `Responsibilities.update` | The ID and history link are untouched. |
 | Change owner | `Responsibilities.update` | ADMIN only. |
-| Re-order | `Responsibilities.reorder` → `uiMoveResponsibility` | One step up or down; recorded as `RESPONSIBILITY_REORDERED`. |
-| Retire | `Responsibilities.retire` → `uiRetireResponsibility` | Requires explicit confirmation; reports the number of open projects that remain. |
-| Reactivate | `Responsibilities.reactivate` → `uiReactivateResponsibility` | Clears `Retired_At`. |
+| Re-order | `Responsibilities.reorder` → `uiMoveResponsibility` | Every submitted ID is validated, duplicates and unknown IDs are refused, only changed `Sort_Order` values are written, and the result is recorded as `RESPONSIBILITY_REORDERED`. |
+| Retire (廃止) | `Responsibilities.retire` → `uiRetireResponsibility` | Requires explicit confirmation; reports the number of open projects that remain. |
+| Reactivate (再有効化) | `Responsibilities.reactivate` → `uiReactivateResponsibility` | Clears `Retired_At`. |
 | Transfer a project | `Responsibilities.transferProject` → `uiUpdateProject` / `uiTransferProject` | Requires confirmation; recorded as `RESPONSIBILITY_TRANSFERRED` with both IDs and an optional reason. |
 
-### Retirement behaviour
+### Retirement behaviour (廃止)
+
+The user-facing Japanese term is **廃止**, and the inverse action is **再有効化**; 退職/復職 are
+reserved for people, never for organizational areas. The stored enum stays `Active` / `Retired`.
 
 1. The manager sees the active-project count and confirms.
 2. `Status` becomes `Retired` and `Retired_At` is stamped.
@@ -194,8 +199,8 @@ way to upgrade an existing database.
   deadline/health rules inside each area, as before.
 - The dashboard publishes the responsibility label only. It cannot be renamed from the viewer,
   and a retired label stays visible for historical projects.
-- Responsibility ownership is an administration scope, not a data scope: a manager who owns an
-  area still sees only their own projects and tasks.
+- Responsibility ownership is an accountability label, not an administration scope or a data
+  scope: it neither grants nor restricts access, and every manager sees the whole department.
 - Everything in this document was verified with local mocks. Live Google Workspace behaviour
   (sidebar fit, menu routing, Drive backup permissions) still needs a development deployment; see
   [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md), which stays **NOT APPROVED**.

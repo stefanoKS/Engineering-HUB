@@ -254,3 +254,5 @@ assert(fs.existsSync(path.join(root, 'docs', 'UI_UX_GUIDELINES.md')),
   'docs/UI_UX_GUIDELINES.md must document the shared visual language');
 assert(fs.existsSync(path.join(root, 'docs', 'checkgates', 'V1_4_GATE_6.md')),
   'docs/checkgates/V1_4_GATE_6.md must record the V1.4 release review');
+assert(fs.existsSync(path.join(root, 'docs', 'checkgates', 'V1_4_1_GATE_6.md')),
+  'docs/checkgates/V1_4_1_GATE_6.md must record the V1.4.1 release review');

@@ -99,7 +99,7 @@ test('invalid role text is rejected instead of silently downgraded', () => {
   assert.equal(app.context.Database.find('MEMBERS', 'M-ENG').Role, 'MEMBER');
 });
 
-test('members may update only their own tasks; managers stay inside their scope', () => {
+test('members may update only their own tasks while managers cover the whole department', () => {
   const app = fixtures.base({ actor: 'engineer@example.test', properties: { ALLOW_MEMBER_SELF_SERVICE: 'true' } });
   const db = app.context.Database;
   db.insert('TASKS', { Task_ID: 'T-FOREIGN', Project_ID: 'P1', Task_Name: '他人の作業', Owner_Member_ID: 'M-MGR', Status: 'Assigned', Due_Date: '2026-12-20', Estimated_Hours: 4 });
@@ -107,7 +107,7 @@ test('members may update only their own tasks; managers stay inside their scope'
   assert.equal(app.context.Ui.updateProgress({ taskId: 'T1', progress: 40 }).ok, true);
   const foreign = app.context.Ui.updateProgress({ taskId: 'T-FOREIGN', progress: 40 });
   assert.equal(foreign.ok, false);
-  assert.match(foreign.error, /outside the authorized scope/);
+  assert.match(foreign.error, /権限がありません/);
   assert.equal(db.find('TASKS', 'T-FOREIGN').Progress_Percent, 0);
 
   const forged = app.context.Ui.updateProgress({ taskId: 'T-FOREIGN', progress: 90, actor: 'admin@example.test', role: 'ADMIN', ownerId: 'M-MGR' });
@@ -118,6 +118,7 @@ test('members may update only their own tasks; managers stay inside their scope'
   assert.equal(viewer.context.Ui.updateProgress({ taskId: 'T1', progress: 10 }).ok, false);
   assert.equal(viewer.context.Database.find('TASKS', 'T1').Progress_Percent, 25);
 
+  // A manager works across the department: project ownership is never a permission barrier.
   const manager = fixtures.base({ actor: 'manager@example.test' });
   manager.context.Database.insert('PROJECTS', { Project_ID: 'P-MINE', Project_Name: '管理案件', Status: 'Active', Project_Owner_ID: 'M-MGR' });
   manager.context.Database.insert('TASKS', { Task_ID: 'T-MINE', Project_ID: 'P-MINE', Task_Name: '管理下の作業', Owner_Member_ID: 'M-ENG', Status: 'Assigned', Due_Date: '2026-12-20' });
@@ -125,8 +126,8 @@ test('members may update only their own tasks; managers stay inside their scope'
   assert.equal(manager.context.Ui.updateProgress({ taskId: 'T1', progress: 30 }).ok, true, 'M-MGR owns P1');
   manager.context.Database.insert('PROJECTS', { Project_ID: 'P-ENG', Project_Name: '設計主導案件', Status: 'Active', Project_Owner_ID: 'M-ENG' });
   manager.context.Database.insert('TASKS', { Task_ID: 'T-ENG', Project_ID: 'P-ENG', Task_Name: '設計主導の作業', Owner_Member_ID: 'M-ENG', Status: 'Assigned', Due_Date: '2026-12-20' });
-  assert.equal(manager.context.Ui.updateProgress({ taskId: 'T-ENG', progress: 30 }).ok, false,
-    'a manager cannot edit work of a project they do not own');
+  assert.equal(manager.context.Ui.updateProgress({ taskId: 'T-ENG', progress: 30 }).ok, true,
+    'another manager\'s project is inside the same department scope');
 
   const admin = fixtures.base();
   admin.context.Database.insert('TASKS', { Task_ID: 'T-ADMIN', Project_ID: 'P1', Task_Name: '管理者確認', Owner_Member_ID: 'M-MGR', Status: 'Assigned', Due_Date: '2026-12-20' });

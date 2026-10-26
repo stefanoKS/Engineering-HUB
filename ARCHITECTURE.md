@@ -274,8 +274,8 @@ SUBPROJECTS.Parent_Subproject_ID  -> blank = root; at most two levels
 
 * **Responsibilities are data, not code.** `Responsibilities` owns validation, the unique-name
   rule for active rows, re-ordering, retirement and transfer. `Access.canManageResponsibility`
-  is the single policy: ADMIN administers every area, a MANAGER only the areas they own, and
-  nobody gains project access from an area. A transfer ends in `Projects.update` with one column
+  is the single policy: ADMIN and MANAGER administer every area, and nobody gains or loses
+  project access from an area. A transfer ends in `Projects.update` with one column
   changed plus an `AUDIT_LOG` entry (`RESPONSIBILITY_TRANSFERRED`).
 * **A bounded hierarchy.** `Subprojects.validateHierarchy` builds the parent map once, rejects a
   self-parent, a cross-project parent, a cycle and any level beyond two, and validates the whole
@@ -307,4 +307,46 @@ Details: [docs/RESPONSIBILITIES.md](docs/RESPONSIBILITIES.md),
 [docs/UI_UX_GUIDELINES.md](docs/UI_UX_GUIDELINES.md). Gates:
 [docs/checkgates/V1_4_GATE_1.md](docs/checkgates/V1_4_GATE_1.md) …
 [V1_4_GATE_6.md](docs/checkgates/V1_4_GATE_6.md).
+
+## V1.4.1 — simplified authorization and pre-trial hardening
+
+No schema change (still **6**) and no snapshot contract change (still **1.4**).
+
+```text
+ADMIN   -> every record + privileged administration (roles, migrations, automation)
+MANAGER -> every project, subproject, task and responsibility in the department
+MEMBER  -> only the tasks assigned to their own verified member record
+VIEWER  -> read-only
+```
+
+* **Ownership is accountability, not permission.** `Access.requireProjectWrite` admits any
+  verified ADMIN or MANAGER for any project; `Access.canEditTask` returns true for both roles and
+  keeps the MEMBER own-task boundary. `PROJECTS.Project_Owner_ID`,
+  `SUBPROJECTS.Owner_ID` and `RESPONSIBILITIES.Owner_Member_ID` never gate a write.
+* **Every callable path re-checks the role.** The top-level Apps Script functions
+  (`createProject`, `updateTask`, `createSubproject`, `createResponsibility`, `createMember`, …)
+  call `Access` before delegating to the domain service, so `google.script.run` and the editor
+  cannot skip a sidebar guard. The domain services stay internal and are reached through these
+  guarded entrypoints or through other already-authorized domain code.
+* **One write for one logical operation.** `Ui.updateProject` validates the ordinary fields, the
+  concurrency marker, the responsibility destination, the retirement confirmation and the
+  deadline together, then applies a single project row update. Google Sheets has no multi-row
+  transaction, so nothing is written before every check passes.
+* **Deterministic reordering.** `Responsibilities.reorder` rejects duplicates and unknown IDs,
+  preserves identity/owner/status/`Retired_At`, writes only the `Sort_Order` values that change,
+  and records `RESPONSIBILITY_REORDERED` with the resulting order.
+* **Bounded hierarchy walks.** `Subprojects.heightOf`, `descendants`, `Progress.subtreeTasks` and
+  `Eligibility.subprojectInActiveWork` all carry a visited set or depth guard, so a hand-edited
+  cycle raises the documented error instead of recursing forever.
+* **One eligibility rule.** `Eligibility.subprojectInActiveWork` walks the ancestor chain and is
+  reused by active work, reminders (`taskNotifiable`), reports and the published snapshot
+  aggregates. Historic progress is never recomputed by an archive.
+* **Sidebar scale.** `Ui.context` returns a deterministic 300-task window plus `taskTotal` and
+  `tasksTruncated`; `Ui.taskOptions` (bridge `uiTaskOptions`) searches by name on the server, so
+  an older task is reachable without loading thousands of rows.
+
+Details: [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md),
+[docs/RESPONSIBILITIES.md](docs/RESPONSIBILITIES.md). Gates:
+[docs/checkgates/V1_4_1_GATE_1.md](docs/checkgates/V1_4_1_GATE_1.md) …
+[V1_4_1_GATE_6.md](docs/checkgates/V1_4_1_GATE_6.md).
 

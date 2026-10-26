@@ -11,7 +11,9 @@ function fixture() {
     app.spreadsheet.insertSheet(name).appendRow(definition.fields.map(field => field.name));
   }
   const c = app.context;
-  const member = c.createMember({ Name: 'Engineer', Email: 'engineer@example.test', Weekly_Capacity_Hours: 40 });
+  const member = c.createMember({ Name: 'Operator', Email: 'admin@example.test', Weekly_Capacity_Hours: 40 });
+  // The documented first-administrator bootstrap promotes the seeded operator (DEPLOYMENT.md).
+  c.Database.update('MEMBERS', member.Member_ID, { Role: 'ADMIN' });
   const project = c.createProject({ Project_Name: 'Product', Status: 'Active', Committed_Deadline: '2026-11-30' });
   const subproject = c.createSubproject({ Project_ID: project.Project_ID, Subproject_Name: 'Prototype' });
   function task(overrides = {}) {
@@ -48,8 +50,12 @@ test('cross-project references, inactive owners, invalid dates and progress are 
   assert.throws(() => task({ Due_Date: '2026-10-01' }), /exceed/);
   assert.throws(() => task({ Progress_Percent: 101 }), /range/);
   assert.throws(() => task({ Status: 'Done', Progress_Percent: 20 }), /100%/);
-  c.updateMember(member.Member_ID, { Active: false });
-  assert.throws(() => task(), /active/);
+  // An inactive owner cannot receive work. The department administrator stays active, so a
+  // separate member is deactivated here.
+  const temp = c.createMember({ Name: 'Temp', Email: 'temp@example.test', Weekly_Capacity_Hours: 8 });
+  c.updateMember(temp.Member_ID, { Active: false });
+  assert.throws(() => task({ Owner_Member_ID: temp.Member_ID }), /active/);
+  assert.equal(c.updateMember(member.Member_ID, { Position: '管理' }).Position, '管理');
   assert.throws(() => c.updateSubproject(subproject.Subproject_ID, { Project_ID: 'missing' }), /not found/);
 });
 

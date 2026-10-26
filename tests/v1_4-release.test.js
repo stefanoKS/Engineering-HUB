@@ -79,7 +79,7 @@ test('the manager templates share one token set and Japanese-first font stack', 
 test('production readiness stays unapproved for V1.4', () => {
   const readiness = read('docs/PRODUCTION_READINESS.md');
   assert.match(readiness, /NOT APPROVED FOR PRODUCTION/);
-  assert.match(readiness, /Version \| 1\.4\.0/);
+  assert.match(readiness, /Version \| 1\.4\.[01]/);
   assert.match(readiness, /Schema version \| 6/);
 });
 

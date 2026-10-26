@@ -43,5 +43,7 @@ var Backup = (function () {
 }());
 
 function createDatabaseBackup() {
+  // Writing a Drive backup is a privileged operational act.
+  Access.requireAdmin();
   return Database.withLock(function () { return Backup.create(); });
 }

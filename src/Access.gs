@@ -5,11 +5,15 @@
  * payload. Every management entrypoint calls into this module so a forged role, actor or
  * owner value cannot escalate privileges.
  *
- * Scope model (documented in docs/SECURITY_MODEL.md):
- * - ADMIN   : every record in the workbook.
- * - MANAGER : records of projects/subprojects they own, plus tasks they own.
+ * Simplified scope model (documented in docs/SECURITY_MODEL.md):
+ * - ADMIN   : every record plus privileged administration (roles, migrations, automation).
+ * - MANAGER : every project, subproject, task and responsibility in the department.
  * - MEMBER  : only tasks assigned to their own verified member record.
  * - VIEWER  : read-only, no operational task list; privileged surfaces are refused.
+ *
+ * Responsibility Owner, Project Owner, Subproject Owner and Task Owner record who is
+ * accountable for the work. They are organisational labels, never permission boundaries,
+ * so two managers can always collaborate on the same project.
  */
 var Access = (function () {
   function identity(actorEmail) {
@@ -44,27 +48,16 @@ var Access = (function () {
     return current;
   }
 
-  function managedProjectIds(identity) {
-    var ids = Object.create(null);
-    Database.read('PROJECTS').forEach(function (project) {
-      if (project.Project_Owner_ID === identity.memberId) ids[project.Project_ID] = true;
-    });
-    Database.read('SUBPROJECTS').forEach(function (subproject) {
-      if (subproject.Owner_ID === identity.memberId) ids[subproject.Project_ID] = true;
-    });
-    return ids;
-  }
-
-  /** Pure permission check for one task. Kept side-effect free for testability. */
-  function canEditTask(identity, task, context) {
+  /**
+   * Pure permission check for one task.
+   *
+   * ADMIN and MANAGER may edit any task in the department; a MEMBER may edit only the tasks
+   * assigned to their own member record. Kept side-effect free for testability.
+   */
+  function canEditTask(identity, task) {
     if (!identity || !identity.active) return false;
     if (!task) return false;
-    if (identity.role === 'ADMIN') return true;
-    if (identity.role === 'MANAGER') {
-      if (task.Owner_Member_ID && task.Owner_Member_ID === identity.memberId) return true;
-      var managed = (context && context.managedProjects) || managedProjectIds(identity);
-      return !!managed[task.Project_ID];
-    }
+    if (identity.role === 'ADMIN' || identity.role === 'MANAGER') return true;
     return identity.role === 'MEMBER' && !!task.Owner_Member_ID && task.Owner_Member_ID === identity.memberId;
   }
 
@@ -72,34 +65,33 @@ var Access = (function () {
     var current = identity(actorEmail);
     var task = Database.find('TASKS', taskId);
     if (!task) throw new Error('Unknown task: ' + taskId);
-    if (!canEditTask(current, task)) throw new Error('This task is outside the authorized scope of the signed-in account');
+    if (!canEditTask(current, task)) throw new Error('このタスクを変更する権限がありません（担当者または管理者が必要です）');
     return {identity: current, task: task};
   }
 
+  /** Any ADMIN or MANAGER may change any project; ownership is not a permission boundary. */
   function requireProjectWrite(projectId, actorEmail) {
     var current = identity(actorEmail);
-    if (current.role === 'ADMIN') return current;
-    if (current.role !== 'MANAGER') throw new Error('Insufficient role: MANAGER required');
-    var project = Database.find('PROJECTS', projectId);
-    if (!project) throw new Error('Unknown project: ' + projectId);
-    if (project.Project_Owner_ID !== current.memberId) throw new Error('This project is outside the authorized scope of the signed-in account');
+    if (current.role !== 'ADMIN' && current.role !== 'MANAGER') {
+      throw new Error('Insufficient role: MANAGER required');
+    }
+    if (projectId) {
+      var project = Database.find('PROJECTS', projectId);
+      if (!project) throw new Error('Unknown project: ' + projectId);
+    }
     return current;
   }
 
   /**
-   * Responsibility administration policy (V1.4).
+   * Responsibility administration policy (V1.4.1).
    *
-   * ADMIN administers every responsibility. A MANAGER may only administer a responsibility
-   * they own. Responsibility ownership is deliberately *not* an access path to the projects
-   * inside it: project ownership stays the only project permission boundary, so a manager
-   * never gains another manager's private project through this feature.
+   * ADMIN and MANAGER administer every responsibility. The owner column records who is
+   * accountable for the area; it grants no access, and it never limits another manager.
    */
   function canManageResponsibility(identity, responsibility) {
     if (!identity || identity.active !== true) return false;
     if (!identity.verified) return false;
-    if (identity.role === 'ADMIN') return true;
-    return identity.role === 'MANAGER' && !!responsibility &&
-      !!responsibility.Owner_Member_ID && responsibility.Owner_Member_ID === identity.memberId;
+    return identity.role === 'ADMIN' || identity.role === 'MANAGER';
   }
 
   function requireResponsibilityWrite(responsibilityId, actorEmail) {
@@ -107,7 +99,7 @@ var Access = (function () {
     var row = Database.find('RESPONSIBILITIES', responsibilityId);
     if (!row) throw new Error('Unknown responsibility: ' + responsibilityId);
     if (!canManageResponsibility(current, row)) {
-      throw new Error('この担当領域を変更する権限がありません（ADMIN または担当領域の責任者が必要です）');
+      throw new Error('この担当領域を変更する権限がありません（ADMIN または MANAGER が必要です）');
     }
     return {identity: current, responsibility: row};
   }
@@ -118,17 +110,26 @@ var Access = (function () {
   /** Task list visible to the caller; VIEWER sees no operational task rows. */
   function visibleTasks(current) {
     var tasks = Database.read('TASKS');
-    if (current.role === 'ADMIN') return tasks;
-    if (current.role === 'MANAGER') {
-      var managed = managedProjectIds(current);
-      return tasks.filter(function (task) {
-        return task.Owner_Member_ID === current.memberId || !!managed[task.Project_ID];
-      });
-    }
+    if (current.role === 'ADMIN' || current.role === 'MANAGER') return tasks;
     if (current.role === 'MEMBER') {
       return tasks.filter(function (task) { return task.Owner_Member_ID === current.memberId; });
     }
     return [];
+  }
+
+  /**
+   * Structure guard for a subproject write. The subproject must exist and its project must be
+   * readable, so a forged ID cannot create work outside the department's projects.
+   */
+  function requireSubprojectWrite(subprojectId, actorEmail) {
+    var current = identity(actorEmail);
+    if (current.role !== 'ADMIN' && current.role !== 'MANAGER') {
+      throw new Error('Insufficient role: MANAGER required');
+    }
+    var row = Database.find('SUBPROJECTS', subprojectId);
+    if (!row) throw new Error('サブプロジェクトが見つかりません: ' + subprojectId);
+    if (!Database.find('PROJECTS', row.Project_ID)) throw new Error('プロジェクトが見つかりません: ' + row.Project_ID);
+    return {identity: current, subproject: row};
   }
 
   function visibleProjects(current, tasks) {
@@ -226,10 +227,10 @@ var Access = (function () {
     requireMember: requireMember,
     requireUiAccess: requireUiAccess,
     selfServiceEnabled: selfServiceEnabled,
-    managedProjectIds: managedProjectIds,
     canEditTask: canEditTask,
     requireTaskWrite: requireTaskWrite,
     requireProjectWrite: requireProjectWrite,
+    requireSubprojectWrite: requireSubprojectWrite,
     canManageResponsibility: canManageResponsibility,
     requireResponsibilityWrite: requireResponsibilityWrite,
     requireResponsibilityOwnerChange: requireResponsibilityOwnerChange,

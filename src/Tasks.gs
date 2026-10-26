@@ -35,6 +35,13 @@ var Tasks = (function () {
 
   function validate(row, before) {
     Domain.projectLink(row);
+    // New or moved work is never placed inside an archived branch. A task that already sits
+    // there stays editable so a manager can finish it or move it out explicitly.
+    var destinationChanged = !before || String(row.Subproject_ID || '') !== String(before.Subproject_ID || '') ||
+      String(row.Project_ID || '') !== String(before.Project_ID || '');
+    if (destinationChanged && row.Subproject_ID && Subprojects.archivedChain(row.Subproject_ID)) {
+      Domain.fail('アーカイブされたサブプロジェクトにはタスクを割り当てできません');
+    }
     Domain.dates(row);
     Domain.number(row.Estimated_Hours, 'Estimated_Hours', 0);
     Domain.number(row.Actual_Hours, 'Actual_Hours', 0);
@@ -161,11 +168,32 @@ var Tasks = (function () {
     recordBlocker: recordBlocker
   };
 })();
-function createTask(data) { return Tasks.create(data); }
-function updateTask(id, patch) { return Tasks.update(id, patch); }
+/* Global entrypoints re-check the verified role; the domain services below stay internal. */
+function createTask(data) {
+  Access.requireProjectWrite(data && data.Project_ID);
+  return Tasks.create(data);
+}
+function updateTask(id, patch) {
+  Access.requireTaskWrite(id);
+  return Tasks.update(id, patch);
+}
 function approveTaskAssignment(id, actorEmail, confirmation) { return Notifications.approveAssignment(id, actorEmail, confirmation); }
 function confirmTaskSchedule(id, actorEmail, confirmation) { return Tasks.confirmSchedule(id, actorEmail, confirmation); }
-function reassignTask(id, ownerMemberId) { return Tasks.reassign(id, ownerMemberId); }
-function completeTask(id) { return Tasks.complete(id); }
-function recordTaskBlocker(id, note) { return Tasks.recordBlocker(id, note); }
-function listTasks(filter) { return Tasks.list(filter); }
+function reassignTask(id, ownerMemberId) {
+  Access.requireTaskWrite(id);
+  return Tasks.reassign(id, ownerMemberId);
+}
+function completeTask(id) {
+  Access.requireTaskWrite(id);
+  return Tasks.complete(id);
+}
+function recordTaskBlocker(id, note) {
+  Access.requireTaskWrite(id);
+  return Tasks.recordBlocker(id, note);
+}
+function listTasks(filter) {
+  var current = Access.requireUiAccess();
+  var allowed = Object.create(null);
+  Access.visibleTasks(current).forEach(function (task) { allowed[task.Task_ID] = true; });
+  return Tasks.list(filter).filter(function (task) { return allowed[task.Task_ID] === true; });
+}

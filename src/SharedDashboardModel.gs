@@ -142,17 +142,34 @@ var SharedDashboardModel = (function () {
     return levels;
   }
 
-  /** Aggregates a project's published tasks so the portfolio needs no task payload. */
-  function aggregates(tasks, today) {
+  /**
+   * Aggregates a project's published tasks so the portfolio needs no task payload.
+   *
+   * `done` and `total` stay historical, while open/blocked/overdue/due-soon describe active
+   * work: a task beneath an archived (or otherwise non-working) subproject is excluded with
+   * the same ancestor rule the manager dashboards use. Nothing is deleted or re-stamped.
+   */
+  function aggregates(tasks, context) {
     var value = {open: 0, done: 0, overdue: 0, blocked: 0, dueSoon: 0};
     (tasks || []).forEach(function (task) {
-      if (task.Status === DONE) value.done++;
-      else if (task.Status !== CANCELLED) value.open++;
+      if (task.Status === DONE) { value.done++; return; }
+      if (task.Status === CANCELLED) return;
+      if (!taskActive(task, context)) return;
+      value.open++;
       if (task.Status === 'Blocked') value.blocked++;
-      if (overdue(task, today)) value.overdue++;
-      if (dueSoon(task, today)) value.dueSoon++;
+      if (overdue(task, context.today)) value.overdue++;
+      if (dueSoon(task, context.today)) value.dueSoon++;
     });
     return value;
+  }
+
+  /** True when the task's whole published subproject chain is still working. */
+  function taskActive(task, context) {
+    if (!task.Subproject_ID) return true;
+    var index = context.subprojectById || Object.create(null);
+    // An unpublished or dangling node cannot be proven inactive, so its tasks stay counted.
+    if (!index[String(task.Subproject_ID)]) return true;
+    return Eligibility.subprojectInActiveWork(task.Subproject_ID, task.Project_ID, index);
   }
 
   function projectDto(project, context) {
@@ -164,7 +181,7 @@ var SharedDashboardModel = (function () {
       issues: context.issuesByProject[project.Project_ID] || [],
       limits: context.limits
     });
-    var counts = aggregates(owned, context.today);
+    var counts = aggregates(owned, context);
     return {
       projectId: text(project.Project_ID),
       projectName: text(project.Project_Name),
@@ -396,6 +413,11 @@ var SharedDashboardModel = (function () {
       }()),
       tasksByProject: index(publishedTasks, 'Project_ID'),
       tasksBySubproject: index(publishedTasks, 'Subproject_ID'),
+      subprojectById: (function () {
+        var rows = Object.create(null);
+        publishedSubprojects.forEach(function (row) { rows[String(row.Subproject_ID)] = row; });
+        return rows;
+      }()),
       milestonesByProject: index(publishedMilestones, 'Project_ID'),
       issuesByProject: index(input.issues || [], 'Project_ID'),
       // Only a boolean indicator is published; request text stays in the private workbook.

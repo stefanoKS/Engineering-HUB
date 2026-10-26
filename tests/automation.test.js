@@ -20,7 +20,7 @@ function fixture(properties = {}, options = {}) {
       sheet.appendRow(Schema.tables[name].fields.map(function(field) { return field.name; }));
     });
     Database.insert('MEMBERS', {Member_ID:'m1',Name:'Owner',Email:'owner@example.test',Active:true});
-    Database.insert('MEMBERS', {Member_ID:'m2',Name:'Manager',Email:'admin@example.test',Active:true});
+    Database.insert('MEMBERS', {Member_ID:'m2',Name:'Manager',Email:'admin@example.test',Active:true,Role:'ADMIN'});
     Database.insert('PROJECTS', {Project_ID:'p1',Project_Name:'Project',Status:'Active'});
     Database.insert('TASKS', {Task_ID:'t1',Project_ID:'p1',Task_Name:'Task',
       Owner_Member_ID:'m1',Status:'Assigned',Due_Date:'2030-02-01',Notification_Enabled:true});

@@ -167,16 +167,25 @@ test('a manager owns a new project by default and can then edit it', () => {
   assert.equal(app.context.Database.find('PROJECTS', created.data.Project_ID).Category, '設計');
 });
 
-test('a manager cannot edit a project owned by somebody else', () => {
+test('any manager can edit a project owned by another manager', () => {
   const app = fixtures.base({actor: 'manager@example.test'});
   const created = app.context.Ui.createProject({name: '他の責任者の案件', ownerId: 'M-ADMIN'});
   assert.equal(created.ok, true, created.error);
   assert.equal(created.data.Project_Owner_ID, 'M-ADMIN');
 
-  const refused = app.context.Ui.updateProject({projectId: created.data.Project_ID, visibility: 'INTERNAL'});
+  // Project ownership is accountability, so a second manager collaborates without an error.
+  const edited = app.context.Ui.updateProject({projectId: created.data.Project_ID, visibility: 'INTERNAL'});
+  assert.equal(edited.ok, true, edited.error);
+  const stored = app.context.Database.find('PROJECTS', created.data.Project_ID);
+  assert.equal(stored.Dashboard_Visibility, 'INTERNAL');
+  assert.equal(stored.Project_Owner_ID, 'M-ADMIN', 'the owner is not rewritten by an edit');
+
+  // A MEMBER still cannot edit the project structure.
+  const member = fixtures.base({actor: 'engineer@example.test'});
+  const refused = member.context.Ui.updateProject({projectId: 'P1', visibility: 'INTERNAL'});
   assert.equal(refused.ok, false);
-  assert.match(refused.error, /outside the authorized scope/);
-  assert.equal(app.context.Database.find('PROJECTS', created.data.Project_ID).Dashboard_Visibility, 'RESTRICTED');
+  assert.match(refused.error, /MANAGER/);
+  assert.equal(member.context.Database.find('PROJECTS', 'P1').Dashboard_Visibility, 'RESTRICTED');
 });
 
 test('a member cannot create or publish a project', () => {
@@ -293,13 +302,25 @@ test('editing the deadline or duration recalculates the derived planned start', 
   assert.equal(app.context.Database.find('TASKS', 'T2').Planned_Duration_Value, '');
 });
 
-test('a task cannot be moved into a project outside the manager scope', () => {
+test('a task moves into any project for a manager, but never for a member', () => {
   const app = fixtures.base({actor: 'manager@example.test'});
   app.context.Database.insert('PROJECTS', {Project_ID: 'P9', Project_Name: '他部署', Project_Owner_ID: 'M-ADMIN', Status: 'Active'});
-  const refused = app.context.Ui.assignTask({taskId: 'T1', projectId: 'P9'});
-  assert.equal(refused.ok, false);
-  assert.match(refused.error, /outside the authorized scope/);
+  const moved = app.context.Ui.assignTask({taskId: 'T2', projectId: 'P9'});
+  assert.equal(moved.ok, true, moved.error);
+  assert.equal(app.context.Database.find('TASKS', 'T2').Project_ID, 'P9');
+
+  // A task that still points at another project's subproject is refused, never silently moved.
+  const crossProject = app.context.Ui.assignTask({taskId: 'T1', projectId: 'P9'});
+  assert.equal(crossProject.ok, false);
+  assert.match(crossProject.error, /Subproject|サブプロジェクト/);
   assert.equal(app.context.Database.find('TASKS', 'T1').Project_ID, 'P1');
+
+  const member = fixtures.base({actor: 'engineer@example.test', properties: {ALLOW_MEMBER_SELF_SERVICE: 'true'}});
+  member.context.Database.insert('PROJECTS', {Project_ID: 'P9', Project_Name: '他部署', Project_Owner_ID: 'M-ADMIN', Status: 'Active'});
+  const refused = member.context.Ui.assignTask({taskId: 'T2', projectId: 'P9'});
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /MANAGER/);
+  assert.equal(member.context.Database.find('TASKS', 'T2').Project_ID, 'P1');
 });
 
 test('a stale task edit is refused instead of overwriting newer data', () => {
@@ -316,16 +337,20 @@ test('a stale task edit is refused instead of overwriting newer data', () => {
   assert.equal(app.context.Database.find('TASKS', 'T1').Progress_Percent, 60);
 });
 
-test('a manager cannot edit a task in a project they neither own nor are assigned to', () => {
+test('a manager edits any task in the department while a member stays inside their own work', () => {
   const app = fixtures.base({actor: 'manager@example.test'});
   app.context.Database.insert('PROJECTS', {Project_ID: 'P9', Project_Name: '他部署', Project_Owner_ID: 'M-ADMIN', Status: 'Active'});
   app.context.Database.insert('TASKS', {
     Task_ID: 'T9', Project_ID: 'P9', Task_Name: '他部署の作業', Owner_Member_ID: 'M-ADMIN', Status: 'Assigned'
   });
-  const refused = app.context.Ui.assignTask({taskId: 'T9', taskName: '書き換え'});
+  const edited = app.context.Ui.assignTask({taskId: 'T9', taskName: '書き換え'});
+  assert.equal(edited.ok, true, edited.error);
+  assert.equal(app.context.Database.find('TASKS', 'T9').Task_Name, '書き換え');
+
+  const member = fixtures.base({actor: 'engineer@example.test', properties: {ALLOW_MEMBER_SELF_SERVICE: 'true'}});
+  const refused = member.context.Ui.assignTask({taskId: 'T9', taskName: '乗っ取り'});
   assert.equal(refused.ok, false);
-  assert.match(refused.error, /outside the authorized scope/);
-  assert.equal(app.context.Database.find('TASKS', 'T9').Task_Name, '他部署の作業');
+  assert.match(refused.error, /MANAGER/);
 });
 
 test('project status changes stay explicit and consistent with the tasks', () => {

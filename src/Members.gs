@@ -96,7 +96,22 @@ var Members = (function () {
     roles: ASSIGNABLE_ROLES
   };
 })();
-function createMember(data) { return Members.create(data); }
-function updateMember(id, patch) { return Members.update(id, patch); }
-function deactivateMember(id) { return Members.deactivate(id); }
-function listMembers(filter) { return Members.list(filter); }
+/* Global entrypoints: member administration is manager-level; role changes stay ADMIN-only. */
+function createMember(data) {
+  // The very first row is the documented bootstrap step for an empty workbook (DEPLOYMENT.md):
+  // no role can exist yet, so it cannot be authorized. Every later member needs a manager.
+  if (Database.read('MEMBERS').length) Access.requireManager();
+  return Members.create(data);
+}
+function updateMember(id, patch) {
+  Access.requireManager();
+  return Members.update(id, patch);
+}
+function deactivateMember(id) {
+  Access.requireManager();
+  return Members.deactivate(id);
+}
+function listMembers(filter) {
+  Access.requireManager();
+  return Members.list(filter);
+}
