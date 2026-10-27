@@ -289,6 +289,10 @@ It needs `ENVIRONMENT`, `BOUND_ENVIRONMENT` and `SPREADSHEET_ID` (already set in
 operator address in `ADMIN_BOOTSTRAP_ALLOWLIST`, and a domain that `ALLOWED_RECIPIENT_DOMAINS`
 accepts. It refuses to run when any member row already exists, so it cannot seed a second time.
 
+Rows 2–1000 of every table with a checkbox column (for example `MEMBERS.Active`) show unchecked
+checkboxes. Sheets reports those cells as `FALSE`, but they are preformatted rows, not records:
+`Database.read('MEMBERS')` returns `[]` and the first real member is written to row 2.
+
 **10b. Verify the generated row** before bootstrapping. Open spreadsheet **A** → `MEMBERS` and
 confirm exactly one row with a generated `Member_ID` (for example `MEMBER_1a2b…`), your e-mail,
 `Active = TRUE`, `Role = MEMBER`.
@@ -601,6 +605,8 @@ evidence. Record live results in [docs/dashboard/SMOKE_TEST.md](dashboard/SMOKE_
 | `Initialization refuses any existing content` | spreadsheet A already has a value or formula | use a new empty workbook; never clear an existing one to force it |
 | `Member email domain is not allowed` | `ALLOWED_RECIPIENT_DOMAINS` does not contain the operator's domain | set your real domain, or leave the property empty |
 | `Members already exist; do not seed twice` | the operator wrapper ran on a workbook that already has members | stop; use the existing row instead of re-seeding |
+| `Malformed record in MEMBERS at row 3: Member_ID is missing` | a row holds data but lost its stable ID; unchecked-checkbox-only rows never cause this | fill the missing ID (or clear the leftover row) in the sheet before continuing; the application never overwrites it |
+| `Missing stable ID in TASKS at row 12` / `Missing or duplicate stable ID in …` | the approved migration validation found a real data defect | repair the row in the sheet, then rerun the approved migration |
 | `This account is not in the deployment administrator allowlist` | `ADMIN_BOOTSTRAP_ALLOWLIST` missing the address | add it, rerun, then remove it |
 | `Create an active member record for this account before bootstrap` | the member row was not created through `Members.create` | run step 10a and verify the generated `Member_ID` |
 | `Admin bootstrap has already been used …` | the bootstrap marker exists | the installation is already bootstrapped; do not re-seed |

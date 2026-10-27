@@ -47,7 +47,15 @@ class MockRange {
   getA1Notation() { return `R${this.row}C${this.column}`; }
   setFormula(formula) { return this.setValue(formula); }
   setFormulas(values) { return this.setValues(values); }
-  getFormulas() { return this.getValues().map(row => row.map(v => typeof v === 'string' && v.startsWith('=') ? v : '')); }
+  getFormula() { return this.getFormulas()[0][0]; }
+  // A prefilled formula may evaluate to '' (for example =IF($A2="","",$B2)); Sheets still counts
+  // that cell as content. Tests may register such a formula with MockSheet.setFormulaCell.
+  getFormulas() {
+    const values = this.getValues();
+    return values.map((row, r) => row.map((value, c) =>
+      this.sheet.formulaCells.get(`${this.row + r}:${this.column + c}`) ??
+      (typeof value === 'string' && value.startsWith('=') ? value : '')));
+  }
   createFilter() { this.sheet.filter = { remove: () => { this.sheet.filter = null; } }; return this.sheet.filter; }
   getFilter() { return this.sheet.filter; }
   sort(spec) {
@@ -93,6 +101,7 @@ class MockSheet {
     this.formatting = [];
     this.charts = [];
     this.rules = [];
+    this.formulaCells = new Map();
     this.filter = null;
     this.maxRows = Math.max(1000, this.rows.length);
     this.maxColumns = Math.max(26, ...this.rows.map(row => row.length));
@@ -105,18 +114,27 @@ class MockSheet {
   getSheetId() { return this.book ? this.book.sheets.indexOf(this) + 1 : 1; }
   getParent() { return this.book; }
   getLastRow() {
+    let last = 0;
     for (let i = this.rows.length - 1; i >= 0; i--) {
-      if (this.rows[i]?.some(v => v !== '' && v !== null && v !== undefined)) return i + 1;
+      if (this.rows[i]?.some(v => v !== '' && v !== null && v !== undefined)) { last = i + 1; break; }
     }
-    return 0;
+    for (const key of this.formulaCells.keys()) last = Math.max(last, Number(key.split(':')[0]));
+    return last;
   }
   getLastColumn() {
-    return this.rows.reduce((max, row) => {
+    let used = this.rows.reduce((max, row) => {
       for (let i = row.length - 1; i >= 0; i--) {
         if (row[i] !== '' && row[i] !== null && row[i] !== undefined) return Math.max(max, i + 1);
       }
       return max;
     }, 0);
+    for (const key of this.formulaCells.keys()) used = Math.max(used, Number(key.split(':')[1]));
+    return used;
+  }
+  /** Registers a formula whose evaluated value stays blank, as Sheets reports for prefilled rows. */
+  setFormulaCell(row, column, formula) {
+    this.formulaCells.set(`${row}:${column}`, formula);
+    return this;
   }
   getMaxRows() { return this.maxRows; }
   // Sheets guarantees the grid is at least as wide as its widest row; keep the mock faithful
@@ -143,7 +161,7 @@ class MockSheet {
     return new MockRange(this, ...(typeof row === 'string' ? parseA1(row, this) : [row, column, rows, columns]));
   }
   appendRow(row) { this.getRange(this.getLastRow() + 1, 1, 1, row.length).setValues([row]); return this; }
-  clearContents() { this.rows = []; return this; }
+  clearContents() { this.rows = []; this.formulaCells.clear(); return this; }
   clear() { return this.clearContents(); }
   getFilter() { return this.filter; }
   getCharts() { return [...this.charts]; }
@@ -260,6 +278,10 @@ function createGoogleMocks(options = {}) {
           const cloned = new MockSpreadsheet(copy.id, Object.fromEntries(
             original.getSheets().map(sheet => [sheet.getName(), sheet.getDataRange().getValues()])
           ));
+          original.getSheets().forEach(source => {
+            const target = cloned.getSheetByName(source.getName());
+            source.formulaCells.forEach((formula, key) => target.formulaCells.set(key, formula));
+          });
           cloned.name = copyName;
           spreadsheets.set(copy.id, cloned);
         }

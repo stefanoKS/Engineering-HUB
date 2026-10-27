@@ -31,11 +31,33 @@ var Database = (function () {
     if (headers.some(function (h, i) { return !h || headers.indexOf(h) !== i; })) throw new Error('Invalid headers: ' + name);
     return { sheet: sheet, values: values, headers: headers };
   }
+  // Google Sheets materializes an unchecked checkbox as FALSE. A row holding nothing but blank
+  // cells and FALSE checkbox values is an empty preformatted row, not a record.
+  function checkboxColumns(name, headers) {
+    var def = definition(name), columns = {};
+    headers.forEach(function (header, i) {
+      if (def.fields.some(function (f) { return f.name === header && f.type === 'boolean'; })) columns[i] = true;
+    });
+    return columns;
+  }
+  function recordData(boxes, row) {
+    return (row || []).some(function (value, i) {
+      if (blank(value)) return false;
+      return !(boxes[i] && value === false);
+    });
+  }
   function read(name) {
-    var d = data(name);
-    return d.values.slice(1).filter(function (row) { return row.some(function (v) { return v !== ''; }); }).map(function (row) {
+    var def = definition(name), d = data(name), boxes = checkboxColumns(name, d.headers);
+    var idColumn = d.headers.indexOf(def.id);
+    return d.values.slice(1).filter(function (row, i) {
+      if (!recordData(boxes, row)) return false;
+      if (idColumn < 0) throw new Error('Missing column: ' + name + '.' + def.id);
+      // Never discard a filled row that lost its identity: an operator must repair it first.
+      if (blank(row[idColumn])) throw new Error('Malformed record in ' + name + ' at row ' + (i + 2) + ': ' + def.id + ' is missing');
+      return true;
+    }).map(function (row) {
       var obj = {};
-      d.headers.forEach(function (h, i) { obj[h] = row[i]; });
+      d.headers.forEach(function (h, c) { obj[h] = row[c]; });
       return obj;
     });
   }
@@ -78,6 +100,20 @@ var Database = (function () {
     // Operational text must remain text, never a user-supplied Sheets formula.
     return typeof v === 'string' && /^[=+\-@]/.test(v) ? "'" + v : v;
   }
+  function hasFormula(sheet, row, columns) {
+    return sheet.getRange(row, 1, 1, columns).getFormulas()[0].some(function (formula) { return formula !== ''; });
+  }
+  // Reuse preformatted rows from the top so records stay contiguous, but never write over a row
+  // that holds data, a formula or a custom value.
+  function freeRow(name, d) {
+    var boxes = checkboxColumns(name, d.headers);
+    for (var index = 1; index < d.values.length; index++) {
+      if (recordData(boxes, d.values[index])) continue;
+      if (hasFormula(d.sheet, index + 1, d.headers.length)) continue;
+      return index + 1;
+    }
+    return d.values.length + 1;
+  }
   function insert(name, values) {
     var def = definition(name);
     var obj = {};
@@ -90,8 +126,9 @@ var Database = (function () {
     validate(name, obj);
     var d = data(name);
     def.fields.forEach(function (f) { if (d.headers.indexOf(f.name) < 0) throw new Error('Missing column: ' + f.name); });
-    ensureSize(d.sheet, d.sheet.getLastRow() + 1, d.headers.length);
-    d.sheet.getRange(d.sheet.getLastRow() + 1, 1, 1, d.headers.length).setValues([d.headers.map(function (h) { return cell(obj[h] === undefined ? '' : obj[h]); })]);
+    var row = freeRow(name, d);
+    ensureSize(d.sheet, row, d.headers.length);
+    d.sheet.getRange(row, 1, 1, d.headers.length).setValues([d.headers.map(function (h) { return cell(obj[h] === undefined ? '' : obj[h]); })]);
     return obj;
   }
   function update(name, id, patch) {
@@ -163,5 +200,6 @@ var Database = (function () {
     return sheet;
   }
   return { book: book, read: read, find: find, insert: insert, update: update, validate: validate,
-    withLock: withLock, writeGenerated: writeGenerated, ensureSize: ensureSize, updateMany: updateMany };
+    withLock: withLock, writeGenerated: writeGenerated, ensureSize: ensureSize, updateMany: updateMany,
+    checkboxColumns: checkboxColumns, recordData: recordData };
 }());

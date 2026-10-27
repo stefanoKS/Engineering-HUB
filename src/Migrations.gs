@@ -44,13 +44,15 @@ var Migrations = (function () {
       if (!sheet || !sheet.getLastRow()) return;
       var values = sheet.getDataRange().getValues(), headers = values[0], id = Schema.tables[name].id;
       if (headers.some(function (h, i) { return !h || headers.indexOf(h) !== i; })) throw new Error('Invalid headers: ' + name);
-      var idCol = headers.indexOf(id);
-      var rows = values.slice(1).filter(function (r) { return r.some(function (v) { return v !== ''; }); });
-      if (rows.length && idCol < 0) throw new Error('Cannot infer permanent IDs in ' + name);
-      var seen = {};
-      rows.forEach(function (r) {
-        var key = r[idCol];
-        if (!key || seen[key]) throw new Error('Missing or duplicate stable ID in ' + name);
+      var idCol = headers.indexOf(id), boxes = Database.checkboxColumns(name, headers), seen = {};
+      // Preformatted checkbox rows are empty: only rows carrying real data need a stable ID.
+      var records = values.slice(1).map(function (row, i) { return { row: i + 2, values: row }; })
+        .filter(function (entry) { return Database.recordData(boxes, entry.values); });
+      if (records.length && idCol < 0) throw new Error('Cannot infer permanent IDs in ' + name);
+      records.forEach(function (entry) {
+        var key = entry.values[idCol];
+        if (!key) throw new Error('Missing stable ID in ' + name + ' at row ' + entry.row);
+        if (seen[key]) throw new Error('Missing or duplicate stable ID in ' + name + ' at row ' + entry.row);
         seen[key] = true;
       });
     });

@@ -280,6 +280,27 @@ Details: [docs/RESPONSIBILITIES.md](docs/RESPONSIBILITIES.md),
 [V1_4_GATE_6.md](docs/checkgates/V1_4_GATE_6.md). Upgrade steps:
 [DEPLOYMENT.md](DEPLOYMENT.md#v14-upgrade-5--6).
 
+## V1.4.2 — checkbox-only rows are never records (database correctness patch)
+
+No schema change (still **6**) and no dashboard contract change (still **1.4**).
+
+1. **Phantom records removed.** Google Sheets materializes an unchecked checkbox as `FALSE`, so a
+   freshly initialized table ends at row 1000 with 999 `FALSE` values and no stable IDs. Those
+   preformatted rows are no longer read as records, and `Database.read` derives the checkbox
+   columns from `Schema` instead of a hardcoded table or column.
+2. **Records survive their own booleans.** A row with a stable ID is read even when every boolean
+   field is `FALSE`; `0`, `TRUE`, text, dates and formulas are never treated as empty.
+3. **No silent data loss.** A row holding data without a stable ID is reported as
+   `Malformed record in <table> at row <n>` and is never discarded or overwritten.
+4. **Correct insert position.** New records reuse the first preformatted row (row 2, then 3, …)
+   instead of `getLastRow() + 1`. Formulas, custom columns and existing values are preserved, and
+   no sheet row is deleted.
+5. **Migrations unchanged in intent.** Fresh V6 initialization and approved V5→V6 upgrades still
+   reject missing or duplicate stable IDs on meaningful rows and still preserve every legacy cell.
+
+Live Google Workspace verification of this patch is still outstanding. Regression tests:
+`tests/v1_4_2-checkbox-rows.test.js`.
+
 ## V1.4.1 — simplified authorization and pre-trial hardening
 
 No schema change (still **6**) and no dashboard contract change (still **1.4**). This release

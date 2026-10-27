@@ -1,4 +1,31 @@
 # Changelog
+## V1.4.2 — checkbox-only rows are never records (database correctness patch)
+
+No schema change (still **6**) and no dashboard contract change (still **1.4**). This is a
+database correctness patch found during live Google Workspace testing; no feature was added.
+
+- **Root cause.** Google Sheets materializes an unchecked checkbox as `FALSE`, so a freshly
+  initialized table already "ends" at row 1000 with 999 `FALSE` values and no stable IDs.
+  `Database.read` treated any non-empty value as a record, so `FALSE !== ''` made those 999
+  preformatted rows look like 999 members and `createFirstOperatorFromEditor` reported
+  `Members already exist`. The same defect affected every table with a checkbox column.
+- **`Database.read`** now derives the checkbox columns from `Schema` (no hardcoded table or
+  column) and ignores rows that hold nothing but blank cells and `FALSE` checkbox values. A row
+  with a stable ID is always read, including records whose boolean fields are `FALSE`; `0`,
+  `TRUE`, text, dates and formulas stay meaningful. A row carrying data but no stable ID is
+  reported as `Malformed record in <table> at row <n>` instead of being silently dropped.
+- **`Database.insert`** writes to the first reusable row (row 2 on a preformatted sheet, then
+  3, …) instead of `getLastRow() + 1`. Rows holding data, custom values or formulas are never
+  overwritten, and no sheet row is deleted.
+- **`Migrations`** validation uses the same rule, so fresh V6 initialization and approved
+  V5→V6 upgrades accept preformatted checkbox rows while still rejecting missing stable IDs,
+  duplicate IDs, malformed records and missing headers.
+- Regression tests reproduce the live behaviour in the project mocks (999 `FALSE` rows, first
+  and second insert position, `Active = FALSE` records, preformatted formulas and custom
+  columns, duplicate IDs, V5→V6 upgrade).
+
+Nothing was deployed, migrated or emailed; live Workspace verification remains outstanding.
+
 ## V1.4.1 — simplified authorization and pre-trial hardening
 
 No schema change (still **6**) and no snapshot contract change (still **1.4**). Every change was
