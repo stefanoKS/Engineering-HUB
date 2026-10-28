@@ -2,6 +2,7 @@
 
 Date: 2026-10-28
 Branch: fix/v1.6.2-reliability
+Implementation commit: bae3897650ed2a85cdd144b8c2476a6abab5c2c3
 Host: Microsoft Windows NT 10.0.22000.0; local mocks only
 
 Live Workspace verification is BLOCKED / NOT_RUN. Nothing in this record is Workspace evidence.

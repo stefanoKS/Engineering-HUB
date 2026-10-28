@@ -120,6 +120,6 @@ render time, not browser paint.
 **PASS** locally (implementation, 8 gate tests, lint, validation, benchmark) — **BLOCKED** for live Workspace
 verification.
 
-Implementation commit SHA: sealed in the release-sealing commit of `fix/v1.6.2-reliability`.
+Implementation commit SHA: `bae3897650ed2a85cdd144b8c2476a6abab5c2c3` (recorded by this evidence commit).
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
