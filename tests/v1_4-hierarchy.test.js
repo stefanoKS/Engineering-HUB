@@ -41,12 +41,17 @@ test('a nested subproject is created beneath a root subproject and keeps stable 
   assert.equal(app.context.Subprojects.levelOf('S1-CHILD', app.context.Subprojects.parentMap()), 2);
 });
 
-test('a third level, a self-parent and a cross-project parent are refused', () => {
+test('four levels are accepted and a fifth level, a self-parent and a cross-project parent are refused', () => {
   const app = nested();
   const context = app.context;
+  // V1.6 allows four subproject levels beneath a project; the existing two-level data above
+  // is untouched and the deeper nodes are additive.
+  context.Subprojects.create({Subproject_ID: 'S1-L3', Project_ID: 'P1', Parent_Subproject_ID: 'S1-CHILD', Subproject_Name: '断面検討'});
+  context.Subprojects.create({Subproject_ID: 'S1-L4', Project_ID: 'P1', Parent_Subproject_ID: 'S1-L3', Subproject_Name: '最終確認'});
+  assert.equal(context.Subprojects.levelOf('S1-L4', context.Subprojects.parentMap()), 4);
   assert.throws(() => context.Subprojects.create({
-    Project_ID: 'P1', Parent_Subproject_ID: 'S1-CHILD', Subproject_Name: '深すぎる階層'
-  }), /2階層まで/);
+    Project_ID: 'P1', Parent_Subproject_ID: 'S1-L4', Subproject_Name: '深すぎる階層'
+  }), /4階層まで/);
   assert.throws(() => context.Subprojects.update('S1-CHILD', {Parent_Subproject_ID: 'S1-CHILD'}),
     /自身の親/);
   assert.throws(() => context.Subprojects.create({
@@ -60,14 +65,17 @@ test('a third level, a self-parent and a cross-project parent are refused', () =
 test('reparenting a root that has children is refused instead of flattening the tree', () => {
   const app = nested();
   const context = app.context;
+  context.Subprojects.create({Subproject_ID: 'S1-L3', Project_ID: 'P1', Parent_Subproject_ID: 'S1-CHILD', Subproject_Name: '断面検討'});
+  context.Subprojects.create({Subproject_ID: 'S1-L4', Project_ID: 'P1', Parent_Subproject_ID: 'S1-L3', Subproject_Name: '最終確認'});
   context.Subprojects.create({Project_ID: 'P1', Subproject_Name: '電気設計', Status: 'Active'});
   const root = context.Database.read('SUBPROJECTS').filter(row => row.Subproject_Name === '電気設計')[0];
-  // S1 has a child, so moving it under another root would push the child to level three.
+  // S1 already carries three descendant levels, so moving the whole subtree under another
+  // root would exceed the configured depth.
   const result = context.Ui.saveSubproject({
     subprojectId: 'S1', parentId: root.Subproject_ID, confirmReparent: true
   });
   assert.equal(result.ok, false);
-  assert.match(result.error, /2階層まで/);
+  assert.match(result.error, /4階層まで/);
   assert.equal(context.Database.find('SUBPROJECTS', 'S1').Parent_Subproject_ID, '');
   assert.equal(context.Database.find('SUBPROJECTS', 'S1-CHILD').Parent_Subproject_ID, 'S1');
 });
@@ -91,8 +99,8 @@ test('a valid reparent is audited and never moves tasks', () => {
 test('a parent subproject rolls up its own and descendant tasks exactly once', () => {
   const app = nested();
   const context = app.context;
-  context.Tasks.create({Task_ID: 'T-CHILD', Project_ID: 'P1', Subproject_ID: 'S1-CHILD', Task_Name: 'カメラ取付',
-    Owner_Member_ID: 'M-ENG', Status: 'Done', Progress_Percent: 100, Estimated_Hours: 10, Due_Date: '2026-12-10'});
+  fixtures.completedTask({context: context}, {Task_ID: 'T-CHILD', Project_ID: 'P1', Subproject_ID: 'S1-CHILD', Task_Name: 'カメラ取付',
+    Owner_Member_ID: 'M-ENG', Estimated_Hours: 10, Due_Date: '2026-12-10'});
   context.Progress.refresh();
 
   const parent = context.Database.find('SUBPROJECTS', 'S1');
@@ -184,8 +192,8 @@ test('the snapshot publishes the responsibility label, the hierarchy and hierarc
   const context = app.context;
   const area = context.Responsibilities.create({Name: '自動化・工程設計', Owner_Member_ID: 'M-MGR'});
   context.Projects.update('P1', {Responsibility_ID: area.Responsibility_ID, Dashboard_Visibility: 'INTERNAL'});
-  context.Tasks.create({Task_ID: 'T-CHILD', Project_ID: 'P1', Subproject_ID: 'S1-CHILD', Task_Name: 'カメラ取付',
-    Owner_Member_ID: 'M-ENG', Status: 'Done', Progress_Percent: 100, Estimated_Hours: 10, Due_Date: '2026-12-10'});
+  fixtures.completedTask({context: context}, {Task_ID: 'T-CHILD', Project_ID: 'P1', Subproject_ID: 'S1-CHILD', Task_Name: 'カメラ取付',
+    Owner_Member_ID: 'M-ENG', Estimated_Hours: 10, Due_Date: '2026-12-10'});
   context.Progress.refresh();
 
   const viewer = snapshotOf(app);

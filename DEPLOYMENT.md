@@ -1,8 +1,23 @@
 # Deployment and activation
 
-## V1.5 manager browser deployment (current)
+## V1.6 release deployment (current)
 
-Use [MANAGER_WEB_APP_DEPLOYMENT.md](docs/MANAGER_WEB_APP_DEPLOYMENT.md) for the existing DEVELOPMENT manager project. rootDir remains src; employee rootDir remains dashboard-app in its own project. Deploy manager HTML Service as User accessing the web app, domain restricted; set mandatory MANAGER_WEB_ALLOWED_DOMAINS. Trusted ADMIN/MANAGER require underlying A permissions; employees must not receive A access. clasp push uploads source and is distinct from creating/updating a versioned web deployment. No schema migration is needed. No live deployment was performed. **NOT APPROVED FOR PRODUCTION.**
+V1.6 adds one additive migration (`007_responsibility_hierarchy_and_lifecycle`, schema 6 → 7) and employee contract
+1.5. Follow [docs/V1_6_DEPLOYMENT_RUNBOOK.md](docs/V1_6_DEPLOYMENT_RUNBOOK.md) in DEV in this order: verified backup
+→ approved migration → manager code upload → new manager web deployment → employee contract compatibility check →
+employee upload/deployment → publication verification → worker request and completion approval tests → role matrix
+→ rollback rehearsal. `rootDir` stays `src` for the manager project and `dashboard-app` for the employee project;
+`MANAGER_WEB_ALLOWED_DOMAINS` remains mandatory; the manager web app still runs as *User accessing the web app*,
+domain restricted; the employee app still runs as the deployer. Nothing is migrated, deployed, initialized,
+triggered or published automatically. **NOT APPROVED FOR PRODUCTION.**
+
+Rollback: redeploy the previous Apps Script version (the new columns stay in place and are ignored while blank) or
+restore the pre-migration backup into a new spreadsheet with the documented procedure. Never clear or re-initialize
+an existing workbook.
+
+## V1.5 manager browser deployment (historical)
+
+Use [MANAGER_WEB_APP_DEPLOYMENT.md](docs/MANAGER_WEB_APP_DEPLOYMENT.md) for the existing DEVELOPMENT manager project. rootDir remains src; employee rootDir remains dashboard-app in its own project. Deploy manager HTML Service as User accessing the web app, domain restricted; set mandatory MANAGER_WEB_ALLOWED_DOMAINS. Trusted ADMIN/MANAGER require underlying A permissions; employees must not receive A access. clasp push uploads source and is distinct from creating/updating a versioned web deployment. V1.5 required no schema migration. No live deployment was performed.
 
 
 > **First-time installation?** Follow [docs/PRE_TRIAL_CHECKLIST.md](docs/PRE_TRIAL_CHECKLIST.md)

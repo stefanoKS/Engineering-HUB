@@ -69,8 +69,12 @@ test('UI progress updates and validation keep task invariants', () => {
   const app = fixtures.base({ actor: 'engineer@example.test', properties: { ALLOW_MEMBER_SELF_SERVICE: 'true' } });
   const context = app.context;
   const updated = context.Ui.updateProgress({ taskId: 'T1', progress: 100 });
-  assert.equal(updated.ok, true, updated.error);
-  assert.equal(context.Database.find('TASKS', 'T1').Status, 'Done');
+  // V1.6: 100 % means Done, so it needs the reviewed completion workflow.
+  assert.equal(updated.ok, false);
+  assert.match(updated.error, /完了報告と管理者の承認/);
+  assert.equal(context.Database.find('TASKS', 'T1').Status, 'In Progress');
+  const nearComplete = context.Ui.updateProgress({ taskId: 'T1', progress: 90 });
+  assert.equal(nearComplete.ok, true, nearComplete.error);
 
   const invalid = context.Ui.updateProgress({ taskId: 'T2', progress: 120 });
   assert.equal(invalid.ok, false);

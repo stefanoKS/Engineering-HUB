@@ -305,18 +305,26 @@ function nested(app) {
   return context;
 }
 
-test('the hierarchy stops at two levels and rejects self, cycle and cross-project parents', () => {
+test('the hierarchy stops at four levels and rejects self, cycle and cross-project parents', () => {
   const app = fixtures.base({ actor: MANAGER });
   const context = nested(app);
 
-  assert.throws(() => context.Subprojects.create({
+  // V1.6 allows four subproject levels beneath a project.
+  context.Subprojects.create({
     Subproject_ID: 'S-LEVEL3', Project_ID: 'P1', Parent_Subproject_ID: 'S-CHILD', Subproject_Name: '三段目'
-  }), /2階層/);
+  });
+  context.Subprojects.create({
+    Subproject_ID: 'S-LEVEL4', Project_ID: 'P1', Parent_Subproject_ID: 'S-LEVEL3', Subproject_Name: '四段目'
+  });
+  assert.throws(() => context.Subprojects.create({
+    Subproject_ID: 'S-LEVEL5', Project_ID: 'P1', Parent_Subproject_ID: 'S-LEVEL4', Subproject_Name: '五段目'
+  }), /4階層/);
   assert.throws(() => context.Subprojects.create({
     Subproject_ID: 'S-SELF', Project_ID: 'P1', Parent_Subproject_ID: 'S-SELF', Subproject_Name: '自己'
   }), /自身/);
-  // Reparenting a root beneath a nested node would push the subtree to level three.
-  assert.throws(() => context.Subprojects.reparent('S1', 'S-CHILD', { confirmed: true }), /2階層/);
+  // Reparenting S1 beneath a nested node is valid at level three in V1.6.
+  context.Subprojects.reparent('S1', 'S-CHILD', { confirmed: true });
+  assert.equal(context.Database.find('SUBPROJECTS', 'S1').Parent_Subproject_ID, 'S-CHILD');
   // A parent that is a descendant of the moved node is a cycle, not a move.
   assert.throws(() => context.Subprojects.reparent('S-ROOT', 'S-CHILD', { confirmed: true }), /循環/);
   context.Database.insert('PROJECTS', { Project_ID: 'P9', Project_Name: '別案件', Status: 'Active' });
@@ -324,7 +332,7 @@ test('the hierarchy stops at two levels and rejects self, cycle and cross-projec
   assert.throws(() => context.Subprojects.reparent('S-ROOT', 'S-OTHER', { confirmed: true }), /同じプロジェクト/);
 
   const ids = plain(context.Database.read('SUBPROJECTS').map(row => row.Subproject_ID)).sort();
-  assert.deepEqual(ids, ['S-CHILD', 'S-OTHER', 'S-ROOT', 'S1'], 'no id is regenerated or lost');
+  assert.deepEqual(ids, ['S-CHILD', 'S-LEVEL3', 'S-LEVEL4', 'S-OTHER', 'S-ROOT', 'S1'], 'no id is regenerated or lost');
 });
 
 test('malformed hierarchy data cannot recurse without bound', () => {
@@ -494,16 +502,16 @@ test('an approved request applies its deadline once and records one history row'
  * G. Installation record
  * ================================================================ */
 
-test('a new workbook records INITIALIZE_V6 and never pretends to have migrated', () => {
+test('a new workbook records INITIALIZE_V7 and never pretends to have migrated', () => {
   const app = fixtures.app();
   const rows = app.context.Database.read('SCHEMA_MIGRATIONS');
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].Migration_ID, 'INITIALIZE_V6');
-  assert.equal(Number(rows[0].New_Version), 6);
+  assert.equal(rows[0].Migration_ID, 'INITIALIZE_V7');
+  assert.equal(Number(rows[0].New_Version), 7);
   assert.equal(rows[0].Result, 'SUCCESS');
-  assert.equal(app.context.Migrations.currentVersion(), 6);
-  assert.ok(!rows.some(row => String(row.Migration_ID).indexOf('006_') === 0),
-    'a fresh V6 workbook does not run migration 006');
+  assert.equal(app.context.Migrations.currentVersion(), 7);
+  assert.ok(!rows.some(row => String(row.Migration_ID).indexOf('007_') === 0),
+    'a fresh V7 workbook does not run migration 007');
   assert.equal(app.context.Database.read('RESPONSIBILITIES').length, 0, 'no example area is seeded');
 });
 

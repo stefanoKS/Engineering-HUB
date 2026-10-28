@@ -161,6 +161,25 @@ class MockSheet {
     return new MockRange(this, ...(typeof row === 'string' ? parseA1(row, this) : [row, column, rows, columns]));
   }
   appendRow(row) { this.getRange(this.getLastRow() + 1, 1, 1, row.length).setValues([row]); return this; }
+  /**
+   * Sheets removes a whole row and shifts the rows below it up. The mock keeps that semantic so
+   * a reviewed deletion path can be exercised locally; only Deletion.gs may call it.
+   */
+  deleteRow(position) {
+    if (!Number.isInteger(position) || position < 1 || position > this.getMaxRows()) {
+      throw new Error('Invalid row deletion');
+    }
+    if (position <= this.rows.length) this.rows.splice(position - 1, 1);
+    this.maxRows = Math.max(1, this.maxRows - 1);
+    const shifted = new Map();
+    this.formulaCells.forEach((formula, key) => {
+      const [row, column] = key.split(':').map(Number);
+      if (row === position) return;
+      shifted.set(`${row > position ? row - 1 : row}:${column}`, formula);
+    });
+    this.formulaCells = shifted;
+    return this;
+  }
   clearContents() { this.rows = []; this.formulaCells.clear(); return this; }
   clear() { return this.clearContents(); }
   getFilter() { return this.filter; }

@@ -164,11 +164,20 @@ test('nested subprojects are created, archived and moved through the sidebar bri
   assert.equal(child.ok, true);
   assert.equal(child.data.Parent_Subproject_ID, parent.data.Subproject_ID);
 
-  const refused = app.context.uiCreateSubproject({
-    projectId: 'P1', parentId: child.data.Subproject_ID, name: '深すぎる'
+  const grandChild = app.context.uiCreateSubproject({
+    projectId: 'P1', parentId: child.data.Subproject_ID, name: '断面検討'
   });
-  assert.equal(refused.ok, false);
-  assert.match(refused.error, /2階層まで/);
+  assert.equal(grandChild.ok, true, 'V1.6 allows a third level');
+
+  const refused = app.context.uiCreateSubproject({
+    projectId: 'P1', parentId: grandChild.data.Subproject_ID, name: '深すぎる'
+  });
+  assert.equal(refused.ok, true, 'a fourth level is still inside the configured maximum');
+  const tooDeep = app.context.uiCreateSubproject({
+    projectId: 'P1', parentId: refused.data.Subproject_ID, name: '五段目'
+  });
+  assert.equal(tooDeep.ok, false);
+  assert.match(tooDeep.error, /4階層まで/);
 
   const moved = app.context.uiMoveTask({taskId: 'T1', subprojectId: child.data.Subproject_ID});
   assert.equal(moved.ok, true);

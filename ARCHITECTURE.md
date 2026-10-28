@@ -1,15 +1,47 @@
-﻿# Architecture
+# Architecture
 
-## V1.5.1 current manager architecture
+## V1.6 current manager architecture
 
-The manager has a browser-first HTML Service UI in the existing src project: doGet → ManagerWebIndex/Styles/Client → google.script.run → ManagerWeb/ManagerWebApi → existing Ui/domain services → private A. The original container-bound sidebar remains a fallback; no second backend exists. dashboard-app remains a separate employee deployment reading B and writing only its request inbox C.
+V1.6 keeps the V1.5.1 browser-first manager UI (`doGet` → ManagerWebIndex/Styles/Client → `google.script.run` →
+ManagerWeb/ManagerWebApi → existing Ui/domain services → private A) and adds an organisation layer:
 
-Ordinary navigation is answered from an authorized in-memory snapshot instead of one RPC per view. `managerWebRead('bootstrap')` returns the overview values, the reference choices, every project summary and the task count in one execution; `managerWebRead('taskIndex')` returns the compact columnar task summaries. Both run inside `Database.withReadContext`, so each source table is read at most once per call and nothing is written. The browser keeps that snapshot for the session (no localStorage/IndexedDB, no server-side cache), paints cached views synchronously, deduplicates identical in-flight reads, discards superseded responses and revalidates in the background once a dataset is older than 30 seconds or after a relevant write. Datasets are all-or-nothing (`TASK_INDEX_LIMIT = 3000`, `PROJECT_INDEX_LIMIT = 1000`): above a bound the server reports `complete: false` and the browser falls back to the paginated `tasks`/`projects` operations, so a partial list never claims to be complete. Free-text search remains a server operation (it also covers description and acceptance criteria); typing only narrows the locally held fields. Every call still re-checks `Session.getActiveUser()`, the allowed domains and `Access.requireManager()`; a revocation clears the snapshot and the unsent drafts.
+- **Responsibilities first.** `ManagerWeb.responsibilitySummaries` computes per-area counts and weighted progress
+  from the same authorised read as the overview; the browser renders them as a strip, keeps the selected
+  `Responsibility_ID` in page memory and filters the snapshot locally. There is no per-area ACL — ADMIN and
+  MANAGER keep department-wide access (AGENTS.md rule 79).
+- **Two bounded hierarchies.** `Subprojects.MAX_DEPTH = 4` and `TaskTree.MAX_DEPTH = 3` are the only limits.
+  `TaskTree.buildIndex` builds one parent/child index per response; every walk is visited-set and depth guarded and
+  raises on malformed data instead of recursing.
+- **Containers are not work.** `Progress.rollup` excludes any task that has children; a container's own progress
+  and status are derived from its leaf work for display only. The stored columns are never rewritten, so each write
+  stays one row update.
+- **One completion policy.** `Completion.guard` runs inside `Tasks.validate` and therefore covers `Tasks.complete`,
+  `Tasks.update`, `Ui.updateProgress`, `Ui.assignTask`, the manager web form, the sidebar and triggers. Only
+  `Requests.decide` (via `Completion.withApproval`) and the explicit ADMIN override can write Done.
+- **Narrow deletion.** `Deletion.gs` is the single module that may remove a row: ADMIN, empty dependency preflight,
+  exact typed confirmation, required reason, verified backup, script lock and a `RECORD_DELETED` tombstone. Every
+  other module is still rejected by `npm run validate` if it touches a destructive Sheets API.
+- **Contract 1.5.** The publisher/reader pair adds the responsibility colour, the parent task, the container flag,
+  the review state and the completion date, with the same A/B slot commit, header check, row-count and hash
+  verification.
 
-Request-scoped reads reuse source tables and one workbook, invalidate after mutations and reload before locked revision checks. Writes patch the affected local summaries, drop only the affected detail/aggregate entries and revalidate; duplicate record saves are serialized and "Saved" is shown only after the server confirmed the write. Project/task/member lists are paginated. Heavy report generation is explicit. `Requests.decide` holds one reusable script lock through claim/effect/history/finalization. Sheets writes remain nontransactional. See [full manager architecture](docs/MANAGER_WEB_APP.md) and [performance](docs/MANAGER_WEB_APP_PERFORMANCE.md).
+Ordinary navigation is still answered from an authorized in-memory snapshot. `managerWebRead('bootstrap')` returns
+the overview values, the responsibility cards, the reference choices, every project summary and the task count in one
+execution; `managerWebRead('taskIndex')` returns the compact columnar task summaries including the hierarchy fields.
+Both run inside `Database.withReadContext`, so each source table is read at most once per call and nothing is written.
+The browser keeps that snapshot for the session (no localStorage/IndexedDB, no server-side cache), paints cached
+views synchronously, deduplicates identical in-flight reads, discards superseded responses and revalidates in the
+background once a dataset is older than 30 seconds or after a relevant write. Datasets stay all-or-nothing
+(`TASK_INDEX_LIMIT = 3000`, `PROJECT_INDEX_LIMIT = 1000`): above a bound the server reports `complete: false` and
+the browser falls back to the paginated `tasks`/`projects` operations. Free-text search remains a server operation
+(it also covers description and acceptance criteria). Every call re-checks `Session.getActiveUser()`, the allowed
+domains and `Access.requireManager()`; a revocation clears the snapshot and the unsent drafts.
 
-`ManagerWeb` never returns the stored `PROJECTS.Progress_Percent` / `PROJECTS.Health` columns: `Dashboard.projectMetrics` derives progress, health, task counts and the neutral deadline state from the current TASKS/MILESTONES/ISSUES rows on each read (each table read once per execution, tasks grouped by project once, no writes). That keeps the browser correct after a task save, which deliberately skips `Dashboard.refresh`; the stored columns remain the output of the explicit report refresh only, so there is still exactly one writer for each of them.
-
+`ManagerWeb` never returns the stored `PROJECTS.Progress_Percent` / `PROJECTS.Health` columns:
+`Dashboard.projectMetrics` derives progress (leaf-only), health, task counts and the neutral deadline state from the
+current TASKS/MILESTONES/ISSUES rows on each read. The stored columns remain the output of the explicit report
+refresh only. Sheets writes remain nontransactional; see [full manager architecture](docs/MANAGER_WEB_APP.md),
+[performance](docs/MANAGER_WEB_APP_PERFORMANCE.md) and the [V1.6 runbook](docs/V1_6_DEPLOYMENT_RUNBOOK.md).
 
 ## Boundaries and source of truth
 

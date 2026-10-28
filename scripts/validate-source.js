@@ -38,7 +38,11 @@ const sources = files.map(name => {
   new vm.Script(source, { filename: name });
   // Only the schema-guarded generated-sheet writer may replace sheet contents.
   const generatedWriter = /function writeGenerated\(name, rows\) \{\s*(?:if \(readContext && !readContext\.allowWrites\) throw new Error\("Writes are forbidden in a read context"\);\s*)?if \(Schema\.generated\.indexOf\(name\) < 0\) throw new Error\('[^']*'\);\s*var sheet = book\(\)\.getSheetByName\(name\) \|\| book\(\)\.insertSheet\(name\);\s*sheet\.clearContents\(\);/;
-  const checkedSource = name === 'Database.gs' ? source.replace(generatedWriter, '') : source;
+  // V1.6 adds exactly one reviewed row-removal surface, guarded by Deletion.preflight.
+  const deletionWriter = /^\s*sheet\.deleteRow\(index \+ 1\);$/m;
+  const checkedSource = name === 'Database.gs' ? source.replace(generatedWriter, '')
+    : name === 'Deletion.gs' ? source.replace(deletionWriter, '')
+    : source;
   assert(!DESTRUCTIVE.test(checkedSource), `${name}: destructive APIs are prohibited in production source`);
   return source;
 });

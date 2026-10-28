@@ -1,9 +1,38 @@
-# Shared dashboard data contract (V1.2)
+# Shared dashboard data contract (V1.6)
 
-## V1.5 date boundary correction (contract remains 1.4)
+## Contract 1.5 (V1.6)
 
-The publisher and employee reader now normalize known snapshot Date fields (including committedDeadline and date-only lastUpdated) to yyyy-MM-dd before comparison/hash/use. The publisher also applies plain-text formatting to date columns. Slot verification and snapshot hashes remain mandatory; no fields or permissions changed. The local Date-returning Sheets mock passes publication and employee delivery. The reported live PUBLISHED_PROJECTS_B row 2 column 10 mismatch still requires DEV retesting; live status UNVERIFIED. See [manager DEV test 13](../MANAGER_WEB_APP_SMOKE_TEST.md).
+V1.6 adds the nested-task hierarchy, the responsibility colour and the completion review state.
+`CONTRACT_VERSION` is now **1.5**; the publisher and the employee reader were updated together, the
+A/B slot commit and the row-count/hash verification are unchanged, and an older snapshot is still
+refused instead of read as if it had the new fields.
 
+Added public fields:
+
+| Sheet | Added fields |
+| --- | --- |
+| `PUBLISHED_RESPONSIBILITIES` | `color` (validated `#RRGGBB`, never a private field) |
+| `PUBLISHED_TASKS` | `parentTaskId`, `container`, `reviewState`, `completedAt` |
+
+Behavioural rules:
+
+- A task that contains subtasks publishes its **derived** status/progress (from leaf work) and
+  `container = true`. Only leaf work is counted in project and subproject aggregates.
+- `reviewState` is `''`, `PENDING` or `STALE`. The completion note, the reporter and the decision
+  text are never published; `pendingRequest` remains a boolean.
+- `completedAt` is a date-only value (the approved completion date), never a timestamp with a zone.
+- Rows carrying a deletion marker are excluded. A hard-deleted record simply no longer exists in the
+  next publication; the previously committed snapshot stays readable until that publication.
+
+Rollout: deploy the manager publisher and the employee app together. An employee app still on
+contract 1.4 refuses a 1.5 snapshot with `SNAPSHOT_CONTRACT_UNSUPPORTED`, which is the documented,
+fail-closed behaviour. `PUBLISHED_META.CONTRACT_VERSION` is the switch.
+
+## V1.5 date boundary correction
+
+The publisher and employee reader normalize known snapshot Date fields (including committedDeadline
+and date-only lastUpdated/completedAt) to yyyy-MM-dd before comparison/hash/use. Slot verification and
+snapshot hashes remain mandatory; no permission changed.
 
 The shared dashboard never reads the private management workbook. It reads one **sanitized
 snapshot spreadsheet** whose structure is defined here. Everything in this document is
@@ -14,7 +43,7 @@ enforced by code and by tests:
 - `dashboard-app/DataService.gs` – reads the snapshot, validates headers, fails closed.
 - `tests/v1_2-model.test.js`, `tests/v1_2-publisher.test.js`, `tests/v1_2-dashboard.test.js`.
 
-Contract version: **1.2** (`PUBLISHED_META.CONTRACT_VERSION`). A reader that meets a different
+Contract version: **1.5** (`PUBLISHED_META.CONTRACT_VERSION`). A reader that meets a different
 contract version refuses to serve data instead of guessing.
 
 ## 1. Snapshot workbook layout
@@ -38,25 +67,29 @@ Row 1 of every data sheet is the field list below, in this exact order. The view
 an exact match; a mismatch is reported as `SNAPSHOT_CONTRACT_UNSUPPORTED`.
 
 ```text
+PUBLISHED_RESPONSIBILITIES
+responsibilityId name sortOrder retired color
+
 PUBLISHED_PROJECTS
-projectId projectName category ownerName status progress health committedDeadline
-forecastDeadline summary lastUpdated terminal openTasks doneTasks overdueTasks
+projectId projectName category responsibilityId responsibilityName ownerName status progress health
+committedDeadline forecastDeadline summary lastUpdated terminal openTasks doneTasks overdueTasks
 blockedTasks dueSoonTasks totalTasks
 
 PUBLISHED_SUBPROJECTS
-subprojectId projectId name ownerName status progress deadline terminal
+subprojectId projectId parentSubprojectId level name ownerName status progress directTasks totalTasks
+deadline terminal
 
 PUBLISHED_TASKS
-taskId projectId subprojectId name ownerName status priority plannedStart dueDate
-progress publicNote
+taskId projectId subprojectId parentTaskId container name ownerName status priority plannedStart
+dueDate progress publicNote revision pendingRequest reviewState completedAt
 
 PUBLISHED_MILESTONES
 milestoneId projectId subprojectId name targetDate actualDate status
 ```
 
 `PUBLISHED_META` keys: `CONTRACT_VERSION`, `ACTIVE_SLOT`, `SNAPSHOT_VERSION`, `PUBLISHED_AT`,
-`PUBLISHER_VERSION`, `CONTENT_HASH`, `AS_OF`, `PREVIOUS_SLOT`, `PROJECT_COUNT`,
-`SUBPROJECT_COUNT`, `TASK_COUNT`, `MILESTONE_COUNT`, `RESULT`.
+`PUBLISHER_VERSION`, `CONTENT_HASH`, `AS_OF`, `PREVIOUS_SLOT`, `RESPONSIBILITY_COUNT`,
+`PROJECT_COUNT`, `SUBPROJECT_COUNT`, `TASK_COUNT`, `MILESTONE_COUNT`, `RESULT`.
 
 ## 2. Field mapping and provenance
 

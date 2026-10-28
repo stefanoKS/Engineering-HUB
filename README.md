@@ -1,22 +1,48 @@
-﻿# Engineering-HUB
+# Engineering-HUB
 
-## Current release — V1.5.1
+## Current release — V1.6
 
-**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+**IMPLEMENTED — DEV MIGRATION AND WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 
-Version **1.5.1** is a performance release for the standalone manager browser UI introduced in V1.5. It adds one authorized snapshot (`bootstrap`) plus a compact task index, so ordinary navigation, filtering, sorting and previously opened records render from memory instead of waiting for `google.script.run`. Google Sheets stays the only authoritative store; there is no second database and no server-side cache. Schema **6**, employee contract **1.4**; no migration, no Apps Script execute-as change, no new trigger, mail or Calendar activation.
+Version **1.6.0** makes responsibilities the top organisational level of the manager dashboard and finishes the
+work hierarchy. Responsibilities (担当領域) are editable data, each with a colour, owner, project count, open and
+overdue task counts and progress; selecting one filters projects, tasks, KPIs and deadlines from the in-memory
+snapshot without another Apps Script call. Projects created in the dashboard must name an active responsibility;
+existing projects stay untouched and show 未分類. Subprojects nest to four levels and tasks to three, where a task
+with children is a work container whose progress comes from leaf work only and is never counted twice. An employee
+completion report no longer marks a task done: a manager approval (or an explicit ADMIN correction with a reason
+and its own audit record) is the only path to Done / 100 %. A narrow, ADMIN-only deletion of genuinely mistaken
+empty records was added with a dependency preflight, a typed confirmation, a verified backup and an immutable
+tombstone; archive remains the default and everything with history refuses deletion. Schema **7**
+(`007_responsibility_hierarchy_and_lifecycle`, additive, approval + verified backup required), employee contract
+**1.5**, no execute-as change, no trigger, mail or Calendar activation.
 
-Measured locally on identical fixtures: overview→projects→tasks cost the previous client **4 read RPCs** and now cost **0** after the first load (navigation p50 0.57–1.45 ms; local filter p50 0.06–1.80 ms; cached project open ≤0.08 ms). The first load and the first project open do pay for the snapshot: `bootstrap` reads the same nine tables as the previous overview but returns 8.5–131 KB and a compact task index of 15–468 KB, so at 300 projects first load is 104.3 ms versus 105.3 ms and a first (uncached) project open is 13.8 ms. Real Workspace latency remains **NOT_RUN**; only correctness and mock read/RPC counts are verified.
+Local verification: `npm ci`, `npm run lint`, `npm test`, `npm run validate` and
+`node scripts/manager-web-benchmark.js` all pass; **462 tests, 462 pass, 0 fail, 0 skipped** and the twelve V1.6
+checkgates record local PASS results with their live criteria BLOCKED (see
+[V1_6_GATE_12.md](docs/checkgates/V1_6_GATE_12.md)). Cached navigation stays at 0.78–2.01 ms and local filtering
+at 0.07–1.50 ms; `bootstrap` costs 4.40 / 37.86 / 115.34 ms and 10.5 / 57.3 / 152.7 KB for 10/100/300 projects,
+which is +2 to +7 % latency and +15 to +17 % payload versus V1.5.1 for the area cards and new task fields. Real
+Workspace latency, the DEV migration, the request round trip and production rendering remain **NOT_RUN**.
 
-Stale-while-revalidate keeps the snapshot honest: 最終更新/更新中… indicators, manual refresh, tab-focus and visibility revalidation, deduplicated in-flight reads, discarding of superseded responses, selective invalidation after a write, draft-preserving save failures, and clearing of every cached view plus unsent drafts when the server stops authorizing the user. Pressing 検索 still searches description and acceptance criteria on the server, so local filtering never hides a record it cannot see.
+Preview: npm run preview:manager-web → http://127.0.0.1:4175/ (synthetic data only). The 計測 / Diagnostics button
+in the header shows the same timings without Chrome DevTools.
 
-Local verification: **406 tests, 406 pass**, 0 failures/skips; npm ci, lint and source validation pass; the mock benchmark ran. Google identity, sharing, live latency, the browser paint timing and native 200% zoom remain unverified. See [manager guide](docs/MANAGER_WEB_APP.md), [DEV deployment](docs/MANAGER_WEB_APP_DEPLOYMENT.md), [performance](docs/MANAGER_WEB_APP_PERFORMANCE.md), [20-case smoke plan](docs/MANAGER_WEB_APP_SMOKE_TEST.md) and [checkgates](docs/checkgates/V1_5_1_GATE_10.md).
+## Historical V1.5.1 release record
 
-Preview: npm run preview:manager-web → http://127.0.0.1:4175/ (synthetic data only). The 計測 / Diagnostics button in the header shows the same timings without Chrome DevTools.
+V1.5.1 added one authorized snapshot (`bootstrap`) plus a compact task index, so ordinary navigation, filtering,
+sorting and previously opened records render from memory instead of waiting for `google.script.run`. Its local
+result at that release was **406 tests, 406 pass**; measurements stay in
+[V1_5_1_PERFORMANCE.json](docs/checkgates/V1_5_1_PERFORMANCE.json) as historical evidence, and
+[the ten V1.5.1 checkgates](docs/checkgates/V1_5_1_GATE_10.md) keep that release's local results and BLOCKED status.
 
 ## Historical V1.5 release record
 
-V1.5 added the standalone manager browser UI (5 routes, ja/en, one form per record type, current project health/progress derived on read, employee requests and controlled administration) on top of the private workbook. Its implementation and review-correction SHAs are recorded in [the ten V1.5 checkgates](docs/checkgates/V1_5_GATE_1.md); its measurements stay in [V1_5_PERFORMANCE.json](docs/checkgates/V1_5_PERFORMANCE.json) as historical evidence.
+V1.5 added the standalone manager browser UI (5 routes, ja/en, one form per record type, current project
+health/progress derived on read, employee requests and controlled administration) on top of the private workbook.
+Its implementation and review-correction SHAs are recorded in
+[the ten V1.5 checkgates](docs/checkgates/V1_5_GATE_1.md); its measurements stay in
+[V1_5_PERFORMANCE.json](docs/checkgates/V1_5_PERFORMANCE.json) as historical evidence.
 
 
 ## Historical V1.4.1 release record
@@ -26,7 +52,7 @@ The following release table is retained as historical evidence, not the current 
 
 Engineering project management using Google Sheets as the database, Google Apps Script as the application, and GitHub as the source-code history.
 
-[日本語](README_JP.md) · [Architecture](ARCHITECTURE.md) · [Data schema](DATA_SCHEMA.md) · [Deployment](DEPLOYMENT.md) · [Backup and restore](BACKUP_RESTORE.md) · [Pre-trial checklist](docs/PRE_TRIAL_CHECKLIST.md) · [Manager workflow](docs/MANAGER_WORKFLOW.md) · [Automation settings](docs/AUTOMATION_SETTINGS.md) · [Shared dashboard](docs/dashboard/ARCHITECTURE.md) · [Dashboard data contract](docs/dashboard/DATA_CONTRACT.md) · [Workspace smoke test](docs/GOOGLE_WORKSPACE_SMOKE_TEST.md) · [Security model](docs/SECURITY_MODEL.md) · [Operations runbook](docs/OPERATIONS_RUNBOOK.md)
+[日本語](README_JP.md) · [Architecture](ARCHITECTURE.md) · [Data schema](DATA_SCHEMA.md) · [Deployment](DEPLOYMENT.md) · [V1.6 runbook](docs/V1_6_DEPLOYMENT_RUNBOOK.md) · [Backup and restore](BACKUP_RESTORE.md) · [Pre-trial checklist](docs/PRE_TRIAL_CHECKLIST.md) · [Manager workflow](docs/MANAGER_WORKFLOW.md) · [Automation settings](docs/AUTOMATION_SETTINGS.md) · [Shared dashboard](docs/dashboard/ARCHITECTURE.md) · [Dashboard data contract](docs/dashboard/DATA_CONTRACT.md) · [Workspace smoke test](docs/GOOGLE_WORKSPACE_SMOKE_TEST.md) · [Security model](docs/SECURITY_MODEL.md) · [Operations runbook](docs/OPERATIONS_RUNBOOK.md)
 
 ## Release status — NOT APPROVED FOR PRODUCTION
 

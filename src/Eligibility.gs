@@ -25,8 +25,11 @@ var Eligibility = (function () {
 
   function subprojectOpen(subproject) { return !subproject || NOTIFY_PROJECT.indexOf(subproject.Status) >= 0; }
 
-  /** Bounded walk guard: the hierarchy allows two levels, so a longer chain is malformed data. */
-  var MAX_CHAIN = 8;
+  /** Bounded walk guard: the hierarchy allows four levels, so a longer chain is malformed data. */
+  function maxChain() {
+    var depth = typeof Subprojects !== 'undefined' && Subprojects.MAX_DEPTH ? Subprojects.MAX_DEPTH : 4;
+    return depth + 2;
+  }
 
   /**
    * The single ancestor-aware rule for "is this subproject node part of active work?".
@@ -50,7 +53,7 @@ var Eligibility = (function () {
       if (!subprojectOpen(node)) return false;
       var parentId = String(node.Parent_Subproject_ID || '');
       if (!parentId) return true;
-      if (guard++ > MAX_CHAIN) return false;
+      if (guard++ > maxChain()) return false;
       node = subprojects[parentId];
     }
     // A missing parent means the stored hierarchy is broken; treat the branch as inactive.

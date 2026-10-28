@@ -55,6 +55,8 @@ var Tasks = (function () {
     Domain.number(row.Required_Skill_Level, 'Required_Skill_Level', 0, 4);
     if (row.Status === 'Done' && row.Progress_Percent !== 100) Domain.fail('Completed tasks must have 100% progress');
     if (row.Progress_Percent === 100 && row.Status !== 'Done') Domain.fail('100% progress requires Done status');
+    // V1.6: Done is reachable only through the reviewed completion workflow.
+    Completion.guard(row, before);
     row.Completed_At = row.Status === 'Done' ? ((before && before.Completed_At) || Domain.now()) : '';
     row.Dependency_IDs = dependencies(row.Dependency_IDs).join(',');
     // V1.3: a manager-entered duration and deadline derive the planned start. Legacy rows
@@ -63,6 +65,7 @@ var Tasks = (function () {
     var graph = Database.read('TASKS').filter(function (task) { return !before || task.Task_ID !== before.Task_ID; });
     graph.push(Object.assign({}, row, { Task_ID: row.Task_ID || '__new_task__' }));
     validateGraph(graph);
+    TaskTree.validate(Object.assign({}, row, { Task_ID: row.Task_ID || '__new_task__' }), before, graph);
     if (!before || assignmentFields.some(function (field) { return row[field] !== before[field]; })) {
       row.Assignment_Version = before ? Number(before.Assignment_Version || 0) + 1 : 1;
       row.Assignment_Approved_At = '';
@@ -159,7 +162,15 @@ var Tasks = (function () {
 
   function reassign(id, ownerId) { return update(id, { Owner_Member_ID: ownerId }); }
 
-  function complete(id) { return update(id, { Status: 'Done', Progress_Percent: 100 }); }
+  /**
+   * Direct completion is refused by the lifecycle guard. A task becomes Done only after a
+   * worker completion report is approved by a manager (or an ADMIN correction override).
+   */
+  function complete(id) {
+    var task = Domain.required('TASKS', id);
+    Completion.guard({Status: 'Done', Progress_Percent: 100}, task);
+    return update(id, { Status: 'Done', Progress_Percent: 100 });
+  }
 
   function recordBlocker(id, note) {
     return update(id, { Status: 'Blocked', Next_Action: note || 'ブロッカー対応' });

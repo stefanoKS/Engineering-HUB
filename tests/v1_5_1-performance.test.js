@@ -40,7 +40,7 @@ test('bootstrap reads every source table once and never ships private task field
   assert.equal(result.metrics.tableReads, 9);
   const payload = JSON.stringify(result.data);
   assert.doesNotMatch(payload, /Acceptance_Criteria|acceptanceCriteria|Estimated_Hours|estimatedHours|"description"/i);
-  assert.equal(result.data.contract, '1.5.1');
+  assert.equal(result.data.contract, '1.6');
   assert.equal(result.data.projects.complete, true);
   assert.equal(result.data.tasks.total, 100);
   assert.equal(result.data.tasks.rows, undefined);
@@ -56,10 +56,10 @@ test('the compact task index is columnar, allowlisted and paged-safe', () => {
   const result = c.managerWebRead('taskIndex');
   assert.equal(result.ok, true, result.error);
   // SETTINGS is the environment marker read, not a data table.
-  assert.deepEqual(Object.keys(reads).sort(), ['MEMBERS', 'PROJECTS', 'SETTINGS', 'TASKS']);
+  assert.deepEqual(Object.keys(reads).sort(), ['MEMBERS', 'PROJECTS', 'SETTINGS', 'TASKS', 'TASK_REQUESTS']);
   assert.ok(Object.values(reads).every(count => count === 1), JSON.stringify(reads));
-  assert.equal(result.metrics.tableReads, 3);
-  assert.deepEqual(plain(result.data.columns), ['id', 'name', 'projectId', 'project', 'subprojectId', 'ownerId', 'owner', 'responsibilityId', 'deadline', 'status', 'progress', 'priority']);
+  assert.equal(result.metrics.tableReads, 4);
+  assert.deepEqual(plain(result.data.columns), ['id', 'name', 'projectId', 'project', 'subprojectId', 'ownerId', 'owner', 'responsibilityId', 'deadline', 'status', 'progress', 'priority', 'parentId', 'container', 'depth', 'reviewState']);
   assert.equal(result.data.rows.length, 100);
   assert.equal(result.data.complete, true);
   assert.ok(result.data.rows.every(row => row.length === result.data.columns.length));

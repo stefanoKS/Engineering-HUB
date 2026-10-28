@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 /**
  * V1.4 responsibilities: configurable organizational areas that group projects without
@@ -40,14 +40,14 @@ function version5() {
   const history = app.book.getSheetByName('SCHEMA_MIGRATIONS');
   const versionColumn = history.rows[0].indexOf('New_Version');
   history.rows.forEach((row, index) => { if (index > 0) row[versionColumn] = 5; });
-  app.properties.setProperty('APPROVED_MIGRATIONS', '006_responsibilities_and_nested_subprojects');
+  app.properties.setProperty('APPROVED_MIGRATIONS', '006_responsibilities_and_nested_subprojects,007_responsibility_hierarchy_and_lifecycle');
   return app;
 }
 
-test('schema version 6 adds the responsibility table and project link with a blank default', () => {
+test('schema version 7 keeps the V1.4 responsibility table and adds the V1.6 lifecycle columns', () => {
   const app = fixtures.app();
   const context = app.context;
-  assert.equal(context.Schema.version, 6);
+  assert.equal(context.Schema.version, 7);
   assert.ok(context.Schema.tables.RESPONSIBILITIES);
   const link = context.Schema.tables.PROJECTS.fields.find(field => field.name === 'Responsibility_ID');
   assert.equal(link.defaultValue, '');
@@ -57,6 +57,14 @@ test('schema version 6 adds the responsibility table and project link with a bla
   assert.equal(parent.ref, 'SUBPROJECTS');
   // The project category is a different concept and must survive.
   assert.ok(context.Schema.tables.PROJECTS.fields.some(field => field.name === 'Category'));
+  // V1.6 additions are additive and blank by default, so existing rows keep their meaning.
+  const nested = context.Schema.tables.TASKS.fields.find(field => field.name === 'Parent_Task_ID');
+  assert.equal(nested.defaultValue, '');
+  assert.equal(nested.ref, 'TASKS');
+  assert.ok(context.Schema.tables.RESPONSIBILITIES.fields.some(field => field.name === 'Color_Hex'));
+  ['PROJECTS', 'SUBPROJECTS', 'TASKS'].forEach(table => {
+    assert.ok(context.Schema.tables[table].fields.some(field => field.name === 'Deleted_At'), table + ' has a deletion marker');
+  });
 });
 
 test('a responsibility gets a stable ID and can be renamed without touching projects', () => {
@@ -287,7 +295,7 @@ test('projects without a responsibility stay unassigned rather than invented', (
   assert.equal(context.Responsibilities.needsReassignment(context.Database.find('PROJECTS', 'P2')), false);
 });
 
-test('migration 006 is additive and preserves every legacy cell, formula and custom column', () => {
+test('migrations 006 and 007 are additive and preserve every legacy cell, formula and custom column', () => {
   const app = version5();
   const projects = app.book.getSheetByName('PROJECTS');
   projects.rows[0].push('Manual_Notes');
@@ -301,13 +309,14 @@ test('migration 006 is additive and preserves every legacy cell, formula and cus
   assert.equal(app.context.Migrations.currentVersion(), 5);
 
   const before = JSON.parse(JSON.stringify(app.context.Backup.snapshot(app.book)));
-  assert.equal(app.context.Migrations.upgrade(), 6);
+  assert.equal(app.context.Migrations.upgrade(), 7);
 
   const legacy = app.context.Database.find('PROJECTS', 'P1');
   assert.equal(legacy.Responsibility_ID, '', 'existing projects stay unassigned');
   assert.equal(legacy.Manual_Notes, 'retain this note');
   assert.equal(app.context.Database.find('SUBPROJECTS', 'S1').Parent_Subproject_ID, '', 'legacy subprojects stay root');
   assert.equal(app.context.Database.read('RESPONSIBILITIES').length, 0, 'no example responsibility is seeded');
+  assert.equal(app.context.Database.find('TASKS', 'T1').Parent_Task_ID, '', 'legacy tasks stay top-level');
 
   for (const old of before) {
     if (['SCHEMA_MIGRATIONS', 'BACKUP_LOG'].includes(old.name)) continue;
@@ -320,7 +329,7 @@ test('migration 006 is additive and preserves every legacy cell, formula and cus
   assert.equal(projects.getDataRange().getValues()[1][custom], 'retain this note');
 });
 
-test('repeating migration 006 changes nothing and duplicates no column', () => {
+test('repeating the V1.4 and V1.6 migrations changes nothing and duplicates no column', () => {
   const app = version5();
   app.context.Migrations.upgrade();
   const after = JSON.stringify(app.context.Backup.snapshot(app.book));
@@ -331,21 +340,26 @@ test('repeating migration 006 changes nothing and duplicates no column', () => {
   assert.equal(app.context.Database.read('RESPONSIBILITIES').length, 0);
 });
 
-test('migration 006 refuses to run without explicit approval and takes a verified backup', () => {
+test('each migration refuses to run without its own explicit approval and takes a verified backup', () => {
   const app = version5();
   app.properties.setProperty('APPROVED_MIGRATIONS', '005_task_planning_and_requests');
   assert.throws(() => app.context.Migrations.upgrade(), /not approved/);
   assert.equal(app.backups.length, 0);
   assert.equal(app.book.getSheetByName('RESPONSIBILITIES'), null);
 
+  // Approving only V1.4's migration is not enough: V1.6 has its own reviewed identifier.
   app.properties.setProperty('APPROVED_MIGRATIONS', '006_responsibilities_and_nested_subprojects');
-  assert.equal(app.context.Migrations.upgrade(), 6);
-  assert.equal(app.backups.length, 1);
+  assert.throws(() => app.context.Migrations.upgrade(), /007_responsibility_hierarchy_and_lifecycle/);
+
+  app.properties.setProperty('APPROVED_MIGRATIONS',
+    '006_responsibilities_and_nested_subprojects,007_responsibility_hierarchy_and_lifecycle');
+  assert.equal(app.context.Migrations.upgrade(), 7);
+  assert.equal(app.backups.length, 2);
 });
 
 test('a new database initializes with the responsibility table and no seed rows', () => {
   const app = fixtures.app();
   assert.ok(app.book.getSheetByName('RESPONSIBILITIES'));
   assert.equal(app.context.Database.read('RESPONSIBILITIES').length, 0);
-  assert.equal(app.context.Migrations.currentVersion(), 6);
+  assert.equal(app.context.Migrations.currentVersion(), 7);
 });

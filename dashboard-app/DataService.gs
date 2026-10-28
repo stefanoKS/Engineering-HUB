@@ -11,7 +11,7 @@
  * task row to the browser.
  */
 var DashboardData = (function () {
-  var CONTRACT_VERSION = '1.4';
+  var CONTRACT_VERSION = '1.5';
   var META_SHEET = 'PUBLISHED_META';
   var CACHE_TTL_SECONDS = 300;
   var CACHE_MAX_CHARS = 90000;
@@ -24,15 +24,16 @@ var DashboardData = (function () {
   // The pairing is asserted by tests/v1_2-dashboard.test.js so the two apps cannot drift.
   var TABLES = {
     responsibilities: {sheet: 'PUBLISHED_RESPONSIBILITIES',
-      fields: ['responsibilityId', 'name', 'sortOrder', 'retired']},
+      fields: ['responsibilityId', 'name', 'sortOrder', 'retired', 'color']},
     projects: {sheet: 'PUBLISHED_PROJECTS', fields: ['projectId', 'projectName', 'category', 'responsibilityId',
       'responsibilityName', 'ownerName', 'status', 'progress', 'health', 'committedDeadline', 'forecastDeadline',
       'summary', 'lastUpdated', 'terminal', 'openTasks', 'doneTasks', 'overdueTasks', 'blockedTasks',
       'dueSoonTasks', 'totalTasks']},
     subprojects: {sheet: 'PUBLISHED_SUBPROJECTS', fields: ['subprojectId', 'projectId', 'parentSubprojectId',
       'level', 'name', 'ownerName', 'status', 'progress', 'directTasks', 'totalTasks', 'deadline', 'terminal']},
-    tasks: {sheet: 'PUBLISHED_TASKS', fields: ['taskId', 'projectId', 'subprojectId', 'name', 'ownerName',
-      'status', 'priority', 'plannedStart', 'dueDate', 'progress', 'publicNote', 'revision', 'pendingRequest']},
+    tasks: {sheet: 'PUBLISHED_TASKS', fields: ['taskId', 'projectId', 'subprojectId', 'parentTaskId', 'container',
+      'name', 'ownerName', 'status', 'priority', 'plannedStart', 'dueDate', 'progress', 'publicNote', 'revision',
+      'pendingRequest', 'reviewState', 'completedAt']},
     milestones: {sheet: 'PUBLISHED_MILESTONES', fields: ['milestoneId', 'projectId', 'subprojectId', 'name',
       'targetDate', 'actualDate', 'status']}
   };
@@ -79,9 +80,9 @@ var DashboardData = (function () {
     }
   }
 
-  // Contract 1.4 date-only fields may be materialized by Sheets as Date objects.
+  // Contract date-only fields may be materialized by Sheets as Date objects.
   function snapshotDate(field, value) {
-    if (["committedDeadline","forecastDeadline","deadline","plannedStart","dueDate","targetDate","actualDate","lastUpdated"].indexOf(field) >= 0 && value instanceof Date) {
+    if (["committedDeadline","forecastDeadline","deadline","plannedStart","dueDate","targetDate","actualDate","lastUpdated","completedAt"].indexOf(field) >= 0 && value instanceof Date) {
       return Utilities.formatDate(value, 'Asia/Tokyo', 'yyyy-MM-dd');
     }
     return value;
@@ -229,15 +230,19 @@ var DashboardData = (function () {
     };
   }
 
-  function taskSummary(task, today, projectName, subprojectName) {
+  function taskSummary(task, today, projectName, subprojectName, depth) {
     var completed = text(task.status) === 'Done';
     var remaining = deadline(text(task.dueDate), completed, today);
+    var review = text(task.reviewState);
     return {
       taskId: text(task.taskId),
       projectId: text(task.projectId),
       projectName: projectName || '',
       subprojectId: text(task.subprojectId),
       subprojectName: subprojectName || '',
+      parentTaskId: text(task.parentTaskId),
+      container: bool(task.container),
+      depth: Math.max(0, Number(depth) || 0),
       name: text(task.name),
       ownerName: text(task.ownerName),
       status: text(task.status),
@@ -250,6 +255,9 @@ var DashboardData = (function () {
       publicNote: text(task.publicNote),
       revision: text(task.revision),
       pendingRequest: bool(task.pendingRequest),
+      reviewState: review,
+      reviewLabel: review === 'PENDING' ? '承認待ち' : review === 'STALE' ? '再報告が必要' : '',
+      completedAt: text(task.completedAt),
       daysRemaining: remaining.days,
       deadlineKind: remaining.kind,
       deadlineLabel: remaining.label
@@ -428,12 +436,16 @@ var DashboardData = (function () {
         byParent[parent].push(subproject);
       });
       var orderedSubprojects = [];
-      (function walk(parentId) {
+      var seenSubprojects = Object.create(null);
+      (function walk(parentId, level) {
+        if (level > 4) return;
         (byParent[parentId] || []).forEach(function (subproject) {
+          if (seenSubprojects[subproject.subprojectId]) return;
+          seenSubprojects[subproject.subprojectId] = true;
           orderedSubprojects.push(subproject);
-          walk(subproject.subprojectId);
+          walk(subproject.subprojectId, level + 1);
         });
-      }(''));
+      }('', 0));
       subprojects.forEach(function (subproject) {
         if (orderedSubprojects.indexOf(subproject) < 0) orderedSubprojects.push(subproject);
       });
@@ -452,9 +464,20 @@ var DashboardData = (function () {
         return text(a.name).localeCompare(text(b.name), 'ja');
       });
 
-      var counts = {total: owned.length, open: 0, done: 0, overdue: 0, blocked: 0};
+      var counts = {total: 0, open: 0, done: 0, overdue: 0, blocked: 0};
       var perSubproject = Object.create(null);
+      // A task that contains subtasks is a container: only leaf work is counted, so a parent
+      // and its children are never counted twice.
+      var ownedById = Object.create(null);
+      owned.forEach(function (task) { ownedById[text(task.taskId)] = task; });
+      var parentIds = Object.create(null);
       owned.forEach(function (task) {
+        var parent = text(task.parentTaskId);
+        if (parent && ownedById[parent] && parent !== text(task.taskId)) parentIds[parent] = true;
+      });
+      var leaves = owned.filter(function (task) { return !parentIds[text(task.taskId)]; });
+      counts.total = leaves.length;
+      leaves.forEach(function (task) {
         var status = text(task.status);
         if (status === 'Done') counts.done++;
         else if (status !== 'Cancelled') counts.open++;
@@ -466,6 +489,35 @@ var DashboardData = (function () {
       });
       subprojects.forEach(function (subproject) { subproject.total = perSubproject[subproject.subprojectId] || 0; });
 
+      // Parents precede their children; the bounded walk also keeps malformed data from looping.
+      var childrenOf = Object.create(null), roots = [], seenTasks = Object.create(null);
+      owned.forEach(function (task) {
+        var parent = text(task.parentTaskId);
+        if (parent && ownedById[parent] && parent !== text(task.taskId)) {
+          if (!childrenOf[parent]) childrenOf[parent] = [];
+          childrenOf[parent].push(task);
+          return;
+        }
+        roots.push(task);
+      });
+      var orderedTasks = [];
+      (function walk(list, level) {
+        (list || []).forEach(function (task) {
+          var key = text(task.taskId);
+          if (seenTasks[key] || level > 3) return;
+          seenTasks[key] = true;
+          task.__depth = level;
+          orderedTasks.push(task);
+          walk(childrenOf[key], level + 1);
+        });
+      }(roots, 0));
+      owned.forEach(function (task) {
+        if (seenTasks[text(task.taskId)]) return;
+        task.__depth = 0;
+        orderedTasks.push(task);
+      });
+      owned = orderedTasks;
+
       var visible = owned.slice(0, limit);
       var payload = {
         meta: metaPayload(snapshot, config),
@@ -476,7 +528,7 @@ var DashboardData = (function () {
         tasks: visible.map(function (task) {
           var subprojectId = text(task.subprojectId);
           var name = subprojectId ? subprojectNames[subprojectId] : '';
-          return taskSummary(task, today, summary.projectName, name || '');
+          return taskSummary(task, today, summary.projectName, name || '', task.__depth);
         }),
         taskTotal: owned.length,
         taskLimit: limit,

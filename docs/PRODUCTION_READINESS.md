@@ -1,18 +1,52 @@
 # Production readiness
 
-## Current assessment — V1.5.1 (2026-10-28)
+## Current assessment — V1.6 (2026-10-28)
 
-**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+**IMPLEMENTED — DEV MIGRATION AND WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 
-Version 1.5.1; schema 6; employee contract 1.4. Starting SHA: adde446e856f992d16aca18b116489126b9a57c7. The delivery SHA is recorded in [V1_5_1_GATE_10.md](checkgates/V1_5_1_GATE_10.md).
+Version 1.6.0; schema **7** (`007_responsibility_hierarchy_and_lifecycle`); employee contract **1.5**. Starting SHA:
+`c769cb5006b13130e1358df3cbad436068a3c3f8`. The delivery SHA is recorded in
+[V1_6_GATE_12.md](checkgates/V1_6_GATE_12.md).
 
-Actual local results: 406 tests, 406 pass, 0 fail, 0 skipped; npm ci/lint/validate exit 0; validator covers 35 manager files, 3 employee files and 709 translation keys; the mock benchmark ran. The old 328-test figures below are historical V1.4.1 results and do not describe current evidence.
+| Field | Value |
+| --- | --- |
+| Version | 1.6.0 |
+| Schema version | 7 |
+| Employee contract | 1.5 |
+| Local tests | **462 tests, 462 pass, 0 fail, 0 skipped** (`npm test`); `npm run lint` and `npm run validate` green |
+| Google Workspace verification | **UNVERIFIED** — nothing in this repository has been run against a real Workspace |
 
-V1.5.1 changes only how the manager page obtains and refreshes data: one authorized snapshot (`bootstrap`) plus a compact task index, an in-memory store with stale-while-revalidate, local filtering with an authoritative server search, selective invalidation after writes, and revocation handling. Schema, contract, authorization, revisions, audit, publication, the sidebar and the employee app are unchanged. The measured speed figures in [MANAGER_WEB_APP_PERFORMANCE.md](MANAGER_WEB_APP_PERFORMANCE.md) are mock values; **no live Workspace latency was measured** and none is claimed.
+V1.6 makes responsibilities the top organisational level (colour, owner, counts, weighted progress, a global filter
+that stays local), nests subprojects to four levels and tasks to three (a container is never counted as extra work),
+routes every completion through a manager approval (with a separately audited ADMIN correction), adds a narrow
+ADMIN-only deletion of mistaken empty records, adds member current/previous/activity views, and publishes contract
+1.5. Schema, authorization, revisions, audit, publication safety, the sidebar and the employee app are otherwise
+unchanged.
 
-All ten V1.5.1 checkgates record local PASS results and the release stays **BLOCKED** for live verification. Required remaining work: real ADMIN/MANAGER and denied-account identity matrix; A sharing isolation; complete DEV CRUD/request/publication/audit workflow; concurrent-manager/quota recovery; original sidebar; real latency/service attribution; the seven local-first smoke cases (21–27) that can only confirm the perceived-speed improvement in DEV; actual 200 % browser zoom and assistive technology. In particular the prior committedDeadline snapshot mismatch is locally fixed but its live retest remains UNVERIFIED.
+All twelve V1.6 checkgates record local PASS results and the release stays **BLOCKED** for live verification. Required
+remaining work: the DEV migration of a real workbook with its verified backup and preservation checks; the real
+ADMIN/MANAGER/denied-account identity matrix; A sharing isolation; the complete DEV CRUD/request/publication/audit
+workflow including the employee→manager completion round trip and the request inbox; a live rollback rehearsal; the
+actual 200 % browser zoom and assistive-technology checks; and real Workspace latency plus long-session memory
+measurement. **No live Workspace run of any kind was performed in this repository session, no workbook was migrated
+and nothing was deployed.** The measured numbers in [MANAGER_WEB_APP_PERFORMANCE.md](MANAGER_WEB_APP_PERFORMANCE.md)
+are mock values; the raw file records `liveWorkspace: NOT_RUN`.
 
-Use the existing DEVELOPMENT resources described by the operator; their actual creation/sharing/deployment state was not inspected here. No code was uploaded with clasp, no live deployment/data/migration/trigger/email/Calendar action was performed. Follow [DEV installation](MANAGER_WEB_APP_DEPLOYMENT.md) and [the smoke plan](MANAGER_WEB_APP_SMOKE_TEST.md). No production activation without reviewed evidence.
+Use the existing DEVELOPMENT resources described by the operator; their actual creation/sharing/deployment state was
+not inspected here. No code was uploaded with clasp, no live deployment/data/migration/trigger/email/Calendar action
+was performed. Follow [the V1.6 runbook](V1_6_DEPLOYMENT_RUNBOOK.md), [DEV installation](MANAGER_WEB_APP_DEPLOYMENT.md)
+and [the smoke plan](MANAGER_WEB_APP_SMOKE_TEST.md). No production activation without reviewed evidence.
+
+## Historical V1.5.1 assessment
+
+Version 1.5.1; schema 6; employee contract 1.4. Starting SHA: adde446e856f992d16aca18b116489126b9a57c7. Local
+results at that release: 406 tests, 406 pass, 0 fail, 0 skipped. Its ten checkgates record local PASS results and the
+release stayed BLOCKED for live verification.
+
+V1.5.1 changed only how the manager page obtains and refreshes data: one authorized snapshot (`bootstrap`) plus a
+compact task index, an in-memory store with stale-while-revalidate, local filtering with an authoritative server
+search, selective invalidation after writes, and revocation handling. Its measured speed figures are mock values; no
+live Workspace latency was measured.
 
 ## Historical V1.5 assessment
 

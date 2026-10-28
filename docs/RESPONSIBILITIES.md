@@ -1,4 +1,37 @@
-# Responsibilities (担当領域) and nested subprojects
+# Responsibilities (担当領域), subprojects and nested tasks
+
+## V1.6 responsibility-centered model
+
+Responsibilities are the top organisational level and the only grouping of projects. The relationship is the
+stable `PROJECTS.Responsibility_ID`; a responsibility is never duplicated into its own project table and an existing
+project is never auto-assigned.
+
+- **Manager home.** The dashboard opens with one card per area: name, colour, owner, active project count, open
+  task count, overdue task count and weighted progress, plus `すべての担当領域` and `+ 担当領域を追加`.
+- **Global filter.** Selecting an area filters the overview, the project list, the task list, the KPIs and the
+  upcoming deadlines from the in-memory snapshot (no extra read RPC). The selection lives in page memory using the
+  stable ID, so renaming or reordering an area never breaks it. `未分類` is a separate bucket for blank links.
+- **Colour.** `Color_Hex` is an optional validated `#RRGGBB` value; a new area takes the next unused entry of the
+  documented palette and a legacy blank value falls back to its palette position. Colour is display metadata only.
+- **Creation.** A project created in the manager dashboard must name an active responsibility (server-set
+  requirement). The legacy Sheets sidebar keeps the V1.4 unassigned path. A retired area is never a destination for
+  new work but keeps every project, task, milestone and history row and stays visible in lists and filters.
+- **Ownership is accountability, not permission.** Any ADMIN or MANAGER administers every area; a responsibility
+  change never rewrites the owner, the deadline or the status. Only an ADMIN may change the area's owner.
+- **Four subproject levels.** `Subprojects.MAX_DEPTH = 4`, same-project parents only, no self parent, no cycle, no
+  move into an archived branch, whole-subtree validation on reparent. Existing two-level data is unchanged.
+- **Three task levels.** `TASKS.Parent_Task_ID` is organisation; the parent must be in the same project **and the
+  same subproject**, at most three levels, cycle-free, and must not already carry recorded work. A task with
+  children is a work container: progress and completion come from its leaf work and are never counted twice. Its
+  stored `Status`/`Progress_Percent` are not authoritative and are not rewritten. `Dependency_IDs` remains the
+  separate sequencing constraint.
+- **History.** Retirement, archive and a rejection are never deletions. The only permanent removal is the narrow
+  ADMIN path in [V1_6_GATE_7](checkgates/V1_6_GATE_7.md) for a mistaken, empty record.
+
+See [DATA_SCHEMA](../DATA_SCHEMA.md), [SECURITY_MODEL](SECURITY_MODEL.md) and
+[MANAGER_WORKFLOW](MANAGER_WORKFLOW.md).
+
+## Historical V1.4 record
 
 V1.4 adds two organizational tools to `設計・開発課 管理`:
 

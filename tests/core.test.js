@@ -1,4 +1,4 @@
-﻿'use strict';
+'use strict';
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -25,7 +25,7 @@ function oldDatabase() {
     const col = tasks.rows[0].indexOf(field);
     tasks.rows.forEach(row => row.splice(col, 1));
   }
-  app.properties.setProperty('APPROVED_MIGRATIONS', '002_task_assignment_safety,003_management_reliability,004_shared_dashboard,005_task_planning_and_requests,006_responsibilities_and_nested_subprojects');
+  app.properties.setProperty('APPROVED_MIGRATIONS', '002_task_assignment_safety,003_management_reliability,004_shared_dashboard,005_task_planning_and_requests,006_responsibilities_and_nested_subprojects,007_responsibility_hierarchy_and_lifecycle');
   return app;
 }
 
@@ -33,7 +33,7 @@ test('initialization requires explicit designation and confirmation, creates no 
   const app = loadApp();
   assert.throws(() => app.context.initializeNewDatabase('wrong'), /confirmation/);
   app.context.initializeNewDatabase('INITIALIZE test-db');
-  assert.equal(app.context.Migrations.currentVersion(), 6);
+  assert.equal(app.context.Migrations.currentVersion(), 7);
   assert.equal(app.sentEmails.length, 0);
   assert.equal(app.triggers.length, 0);
   assert.equal(app.calendarEvents.length, 0);
@@ -66,9 +66,9 @@ test('workbook environment marker prevents development from accessing production
 test('approved upgrade preserves project, task ownership, skill records and existing cell positions', () => {
   const app = oldDatabase();
   const before = JSON.parse(JSON.stringify(app.context.Backup.snapshot(app.book)));
-  assert.equal(app.context.upgradeExistingDatabase(), 6);
+  assert.equal(app.context.upgradeExistingDatabase(), 7);
   // Each approved migration takes its own verified pre-migration backup.
-  assert.equal(app.backups.length, 5);
+  assert.equal(app.backups.length, 6);
   assert.equal(app.context.Database.find('PROJECTS', 'P001').Project_Name, 'Inspection cell');
   assert.equal(app.context.Database.find('TASKS', 'T001').Owner_Member_ID, 'M001');
   assert.equal(app.context.Database.find('TASKS', 'T001').Assignment_Approved_At, '');
@@ -86,7 +86,7 @@ test('repeating an applied migration changes no cells and creates no further bac
   const before = JSON.stringify(app.context.Backup.snapshot(app.book));
   app.context.upgradeExistingDatabase();
   assert.equal(JSON.stringify(app.context.Backup.snapshot(app.book)), before);
-  assert.equal(app.backups.length, 5);
+  assert.equal(app.backups.length, 6);
 });
 
 test('missing tables and missing columns are appended without replacing manual columns', () => {
@@ -98,8 +98,11 @@ test('missing tables and missing columns are appended without replacing manual c
   app.context.upgradeExistingDatabase();
   assert.equal(app.context.Database.find('PROJECTS', 'P001').Manual_Notes, 'retain this note');
   assert.ok(app.book.getSheetByName('HOLIDAYS'));
-  assert.equal(app.book.getSheetByName('TASKS').rows[0].slice(-3).join(','),
-    'Assignment_Version,Assignment_Approved_At,Notification_Baseline');
+  // The removed V1.1 columns are appended again and the V1.6 columns are added, without
+  // reordering or replacing the manual columns that were already there.
+  const taskHeaders = app.book.getSheetByName('TASKS').rows[0];
+  ['Assignment_Version', 'Assignment_Approved_At', 'Notification_Baseline', 'Parent_Task_ID', 'Deleted_At']
+    .forEach(field => assert.ok(taskHeaders.indexOf(field) >= 0, field + ' must be restored or added'));
 });
 
 test('migration refuses unapproved changes without a backup or schema writes', () => {

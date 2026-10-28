@@ -16,10 +16,10 @@
  * until a manager reviews each project.
  */
 var SharedDashboardModel = (function () {
-  // V1.4 adds the responsibility label and the nested-subproject hierarchy. The version is
-  // explicit so an older snapshot is rejected instead of being read as if it had the new
-  // fields (see docs/dashboard/DATA_CONTRACT.md).
-  var CONTRACT_VERSION = '1.4';
+  // V1.5 adds the nested-task hierarchy, the responsibility colour and the completion review
+  // state. The version is explicit so an older snapshot is rejected instead of being read as
+  // if it had the new fields (see docs/dashboard/DATA_CONTRACT.md).
+  var CONTRACT_VERSION = '1.5';
   var VISIBILITY = ['INTERNAL', 'RESTRICTED'];
   var DONE = 'Done';
   var CANCELLED = 'Cancelled';
@@ -111,7 +111,9 @@ var SharedDashboardModel = (function () {
       responsibilityId: text(row.Responsibility_ID),
       name: text(row.Name),
       sortOrder: order === null ? 0 : order,
-      retired: String(row.Status || '') === 'Retired'
+      retired: String(row.Status || '') === 'Retired',
+      // A validated #RRGGBB value; blank when the manager has not chosen one.
+      color: /^#[0-9A-Fa-f]{6}$/.test(text(row.Color_Hex)) ? text(row.Color_Hex).toUpperCase() : ''
     };
   }
 
@@ -135,7 +137,7 @@ var SharedDashboardModel = (function () {
       while (parent[cursor]) {
         cursor = parent[cursor];
         level++;
-        if (guard++ > 4) { level = 1; break; }
+        if (guard++ > 8) { level = 1; break; }
       }
       levels[id] = level;
     });
@@ -151,7 +153,8 @@ var SharedDashboardModel = (function () {
    */
   function aggregates(tasks, context) {
     var value = {open: 0, done: 0, overdue: 0, blocked: 0, dueSoon: 0};
-    (tasks || []).forEach(function (task) {
+    // Leaf work only: a task that contains subtasks is not an extra unit of work.
+    TaskTree.leaves(tasks || []).forEach(function (task) {
       if (task.Status === DONE) { value.done++; return; }
       if (task.Status === CANCELLED) return;
       if (!taskActive(task, context)) return;
@@ -202,7 +205,7 @@ var SharedDashboardModel = (function () {
       overdueTasks: counts.overdue,
       blockedTasks: counts.blocked,
       dueSoonTasks: counts.dueSoon,
-      totalTasks: owned.length
+      totalTasks: TaskTree.leaves(owned).length
     };
   }
 
@@ -221,8 +224,8 @@ var SharedDashboardModel = (function () {
       ownerName: context.memberNames[String(subproject.Owner_ID || '')] || '',
       status: text(subproject.Status),
       progress: rolled.calculated ? rolled.percent : null,
-      directTasks: direct.length,
-      totalTasks: subtree.length,
+      directTasks: TaskTree.leaves(direct).length,
+      totalTasks: TaskTree.leaves(subtree).length,
       deadline: day(subproject.Deadline) || day(subproject.Planned_End),
       terminal: isTerminal(subproject.Status)
     };
@@ -246,22 +249,32 @@ var SharedDashboardModel = (function () {
   }
 
   function taskDto(task, context) {
+    // A task with subtasks reports the derived completion of its leaf work, so the viewer
+    // never shows a container as an independent unit of progress. The hierarchy index is
+    // built once per snapshot, not once per task.
+    var view = context.taskIndex ? TaskTree.viewIn(task, context.taskIndex)
+      : {container: false, progress: Progress.percent(task), status: text(task.Status)};
     return {
       taskId: text(task.Task_ID),
       projectId: text(task.Project_ID),
       subprojectId: text(task.Subproject_ID),
+      parentTaskId: text(task.Parent_Task_ID),
+      container: view.container,
       name: text(task.Task_Name),
       ownerName: context.memberNames[String(task.Owner_Member_ID || '')] || '',
-      status: text(task.Status),
+      status: text(view.status),
       priority: text(task.Priority),
       plannedStart: day(task.Planned_Start),
       dueDate: day(task.Due_Date),
-      progress: Progress.percent(task),
+      progress: view.progress,
       // Public_Note is the only approved free-text field. Description, Next_Action and
       // Acceptance_Criteria are private and are never substituted.
       publicNote: text(task.Public_Note),
       revision: revision(task),
-      pendingRequest: !!(context.pendingRequests && context.pendingRequests[String(task.Task_ID)])
+      pendingRequest: !!(context.pendingRequests && context.pendingRequests[String(task.Task_ID)]),
+      // '' | 'PENDING' | 'STALE' — a state only, never the reporter or the note.
+      reviewState: (context.reviewStates || {})[String(task.Task_ID)] || '',
+      completedAt: day(task.Completed_At)
     };
   }
 
@@ -298,6 +311,7 @@ var SharedDashboardModel = (function () {
     var publishedIds = Object.create(null);
     projects.forEach(function (project) {
       if (!project.Project_ID) { excluded.projects++; warnings.push({code: 'PROJECT_WITHOUT_ID', id: ''}); return; }
+      if (text(project.Deleted_At)) { excluded.projects++; return; }
       if (!isInternal(project)) { excluded.projects++; return; }
       publishedProjects.push(project);
       publishedIds[String(project.Project_ID)] = true;
@@ -314,6 +328,7 @@ var SharedDashboardModel = (function () {
       var id = String(subproject.Subproject_ID || '');
       var projectId = String(subproject.Project_ID || '');
       if (!id) { excluded.subprojects++; warnings.push({code: 'SUBPROJECT_WITHOUT_ID', id: ''}); return; }
+      if (text(subproject.Deleted_At)) { excluded.subprojects++; return; }
       if (!publishedIds[projectId]) { excluded.subprojects++; return; }
       publishedSubprojects.push(subproject);
       subprojectById[id] = subproject;
@@ -324,6 +339,7 @@ var SharedDashboardModel = (function () {
       var id = String(task.Task_ID || '');
       var projectId = String(task.Project_ID || '');
       if (!id) { excluded.tasks++; warnings.push({code: 'TASK_WITHOUT_ID', id: ''}); return; }
+      if (text(task.Deleted_At)) { excluded.tasks++; return; }
       if (!publishedIds[projectId]) { excluded.tasks++; return; }
       var subprojectId = String(task.Subproject_ID || '');
       if (subprojectId) {
@@ -348,6 +364,7 @@ var SharedDashboardModel = (function () {
       var id = String(milestone.Milestone_ID || '');
       var projectId = String(milestone.Project_ID || '');
       if (!id) { excluded.milestones++; warnings.push({code: 'MILESTONE_WITHOUT_ID', id: ''}); return; }
+      if (text(milestone.Deleted_At)) { excluded.milestones++; return; }
       if (!publishedIds[projectId]) { excluded.milestones++; return; }
       var subprojectId = String(milestone.Subproject_ID || '');
       if (subprojectId) {
@@ -413,6 +430,10 @@ var SharedDashboardModel = (function () {
       }()),
       tasksByProject: index(publishedTasks, 'Project_ID'),
       tasksBySubproject: index(publishedTasks, 'Subproject_ID'),
+      // The published task list and one hierarchy index, used to derive container progress
+      // from leaf work only.
+      tasks: publishedTasks,
+      taskIndex: TaskTree.buildIndex(publishedTasks),
       subprojectById: (function () {
         var rows = Object.create(null);
         publishedSubprojects.forEach(function (row) { rows[String(row.Subproject_ID)] = row; });
@@ -420,8 +441,10 @@ var SharedDashboardModel = (function () {
       }()),
       milestonesByProject: index(publishedMilestones, 'Project_ID'),
       issuesByProject: index(input.issues || [], 'Project_ID'),
-      // Only a boolean indicator is published; request text stays in the private workbook.
-      pendingRequests: input.pendingRequests || Object.create(null)
+      // Only a boolean indicator and a review state are published; request text stays in the
+      // private workbook.
+      pendingRequests: input.pendingRequests || Object.create(null),
+      reviewStates: input.reviewStates || Object.create(null)
     };
 
     var projectDtos = publishedProjects.map(function (project) { return projectDto(project, context); });
@@ -486,9 +509,10 @@ var SharedDashboardModel = (function () {
     'terminal', 'openTasks', 'doneTasks', 'overdueTasks', 'blockedTasks', 'dueSoonTasks', 'totalTasks'];
   var SUBPROJECT_PUBLIC_FIELDS = ['subprojectId', 'projectId', 'parentSubprojectId', 'level', 'name', 'ownerName',
     'status', 'progress', 'directTasks', 'totalTasks', 'deadline', 'terminal'];
-  var RESPONSIBILITY_PUBLIC_FIELDS = ['responsibilityId', 'name', 'sortOrder', 'retired'];
-  var TASK_PUBLIC_FIELDS = ['taskId', 'projectId', 'subprojectId', 'name', 'ownerName', 'status', 'priority',
-    'plannedStart', 'dueDate', 'progress', 'publicNote', 'revision', 'pendingRequest'];
+  var RESPONSIBILITY_PUBLIC_FIELDS = ['responsibilityId', 'name', 'sortOrder', 'retired', 'color'];
+  var TASK_PUBLIC_FIELDS = ['taskId', 'projectId', 'subprojectId', 'parentTaskId', 'container', 'name',
+    'ownerName', 'status', 'priority', 'plannedStart', 'dueDate', 'progress', 'publicNote', 'revision',
+    'pendingRequest', 'reviewState', 'completedAt'];
   var MILESTONE_PUBLIC_FIELDS = ['milestoneId', 'projectId', 'subprojectId', 'name', 'targetDate', 'actualDate', 'status'];
 
   return {

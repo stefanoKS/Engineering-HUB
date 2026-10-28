@@ -1,6 +1,24 @@
-# Manager Web App performance — V1.5.1 local-first navigation
+# Manager Web App performance — V1.6
 
-Measured 2026-10-28 on Windows, Node v24.21.0, mocked Google services. **Real Workspace timings: NOT_RUN.** Raw results: [V1_5_1_PERFORMANCE.json](checkgates/V1_5_1_PERFORMANCE.json) (V1.5.1) and [V1_5_PERFORMANCE.json](checkgates/V1_5_PERFORMANCE.json) (V1.5, kept as historical evidence). Reproduce with `node scripts/manager-web-benchmark.js`.
+Measured 2026-10-28 on Windows, Node v24.21.0, mocked Google services. **Real Workspace timings: NOT_RUN.** Raw
+results: [V1_6_PERFORMANCE.json](checkgates/V1_6_PERFORMANCE.json) (V1.6), [V1_5_1_PERFORMANCE.json](checkgates/V1_5_1_PERFORMANCE.json)
+(V1.5.1) and [V1_5_PERFORMANCE.json](checkgates/V1_5_PERFORMANCE.json) (V1.5), kept as historical evidence.
+Reproduce with `node scripts/manager-web-benchmark.js` (writes `V1_6_PERFORMANCE.json`).
+
+## V1.6 comparison with V1.5.1
+
+| Dataset | bootstrap p50 | bootstrap payload | taskIndex p50 | taskIndex payload | cached nav p50 | local filter p50 | RPC after load |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 10 / 100 | 4.40 ms (4.01) | 10.5 KB (8.5) | 2.08 ms (1.75) | 16.5 KB (15.1) | 0.78 ms | 0.07 ms | 2 |
+| 100 / 1,000 | 37.86 ms (35.25) | 57.3 KB (48.7) | 16.49 ms (15.52) | 166.8 KB (152.7) | 2.01 ms | 0.42 ms | 2 |
+| 300 / 3,000 | 115.34 ms (113.22) | 152.7 KB (130.9) | 48.48 ms (47.99) | 509.8 KB (467.5) | 1.01 ms | 1.50 ms | 3 |
+
+Figures in brackets are the V1.5.1 values. The increase is the responsibility cards, the four new task-index columns
+(`parentId`, `container`, `depth`, `reviewState`) and the extra cached `TASK_REQUESTS` read used for the review state.
+Cached navigation (< 100 ms) and local filtering (< 50 ms) targets are met with a wide margin, and the RPC count after
+the first load is unchanged.
+
+## Historical V1.5.1 measurements
 
 ## V1.5.1: what changed and what it measured
 

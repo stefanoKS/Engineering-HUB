@@ -19,7 +19,7 @@
  *   duplicates tasks.
  */
 var SharedDashboardPublisher = (function () {
-  var PUBLISHER_VERSION = '1.5.1';
+  var PUBLISHER_VERSION = '1.6';
   var CONTRACT_VERSION = SharedDashboardModel.CONTRACT_VERSION;
   var DESTINATION_PROPERTY = 'SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID';
   var META_SHEET = 'PUBLISHED_META';
@@ -78,9 +78,9 @@ var SharedDashboardPublisher = (function () {
     return {book: book, config: config};
   }
 
-  // Contract 1.4 date-only fields may be materialized by Sheets as Date objects.
+  // Contract date-only fields may be materialized by Sheets as Date objects.
   function snapshotDate(field, value) {
-    if (["committedDeadline","forecastDeadline","deadline","plannedStart","dueDate","targetDate","actualDate","lastUpdated"].indexOf(field) >= 0 && value instanceof Date) {
+    if (["committedDeadline","forecastDeadline","deadline","plannedStart","dueDate","targetDate","actualDate","lastUpdated","completedAt"].indexOf(field) >= 0 && value instanceof Date) {
       return Utilities.formatDate(value, 'Asia/Tokyo', 'yyyy-MM-dd');
     }
     return value;
@@ -234,7 +234,11 @@ var SharedDashboardPublisher = (function () {
   function collect() {
     return {
       today: Domain.today(),
-      responsibilities: Database.read('RESPONSIBILITIES'),
+      // A stored blank colour still gets a predictable palette value, so the viewer never has
+      // to invent one from the record order.
+      responsibilities: Database.read('RESPONSIBILITIES').map(function (row, index) {
+        return Object.assign({}, row, {Color_Hex: Responsibilities.colorOf(row, index)});
+      }),
       projects: Database.read('PROJECTS'),
       subprojects: Database.read('SUBPROJECTS'),
       tasks: Database.read('TASKS'),
@@ -242,7 +246,8 @@ var SharedDashboardPublisher = (function () {
       members: Database.read('MEMBERS'),
       issues: Database.read('ISSUES'),
       limits: Health.thresholds(),
-      pendingRequests: pendingRequests()
+      pendingRequests: pendingRequests(),
+      reviewStates: completionStates()
     };
   }
 
@@ -250,6 +255,15 @@ var SharedDashboardPublisher = (function () {
   function pendingRequests() {
     try {
       return Requests.pendingByTask();
+    } catch (error) {
+      return Object.create(null);
+    }
+  }
+
+  /** Per-task completion review state ('' / PENDING / STALE); never the report text. */
+  function completionStates() {
+    try {
+      return Requests.pendingCompletionStates();
     } catch (error) {
       return Object.create(null);
     }

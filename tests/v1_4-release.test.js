@@ -38,20 +38,21 @@ test('every V1.4 gate records an explicit status with evidence', () => {
 
 test('the schema, migration and contract versions are documented consistently', () => {
   const schema = read('src/Schema.gs');
-  assert.match(schema, /return \{ version: 6,/);
+  assert.match(schema, /return \{ version: 7,/);
   const migrations = read('src/Migrations.gs');
   assert.match(migrations, /006_responsibilities_and_nested_subprojects', from: 5, to: 6/);
-  assert.match(read('DATA_SCHEMA.md'), /current schema version is \*\*6\*\*/);
+  assert.match(read('DATA_SCHEMA.md'), /current schema version is \*\*7\*\*/);
   assert.match(read('DATA_SCHEMA.md'), /006_responsibilities_and_nested_subprojects/);
+  assert.match(read('DATA_SCHEMA.md'), /007_responsibility_hierarchy_and_lifecycle/);
   assert.match(read('DEPLOYMENT.md'), /V1\.4 upgrade \(5 → 6\)/);
-  assert.match(read('docs/dashboard/DATA_CONTRACT.md'), /## Contract 1\.4/);
+  assert.match(read('docs/dashboard/DATA_CONTRACT.md'), /## Contract 1\.5/);
 });
 
-test('the publisher and the viewer agree on contract 1.4', () => {
+test('the publisher and the viewer agree on the published contract version', () => {
   const manager = loadApp();
   const viewer = loadDashboard();
   const published = manager.context.SharedDashboardModel.CONTRACT_VERSION;
-  assert.equal(published, '1.4');
+  assert.equal(published, '1.5');
   assert.equal(viewer.context.DashboardData.CONTRACT_VERSION, published);
   // Field lists must match exactly, or a publication would be unreadable.
   var model = manager.context.SharedDashboardModel;

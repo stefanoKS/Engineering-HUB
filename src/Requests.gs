@@ -279,7 +279,7 @@ var Requests = (function () {
       .sort(function (a, b) { return String(b.changedAt).localeCompare(String(a.changedAt)); });
   }
 
-  /** Tasks with at least one open request. Published as a boolean indicator only. */
+    /** Tasks with at least one open request. Published as a boolean indicator only. */
   function pendingByTask() {
     var pending = Object.create(null);
     Database.read('TASK_REQUESTS').forEach(function (request) {
@@ -288,6 +288,23 @@ var Requests = (function () {
     });
     return pending;
   }
+
+    /**
+     * Open completion reports keyed by task ID.
+     *
+     * Only the review state is exposed ('PENDING' / 'STALE'); the note, the requester and the
+     * decision text stay in the private workbook.
+     */
+    function pendingCompletionStates() {
+      var states = Object.create(null);
+      Database.read('TASK_REQUESTS').forEach(function (request) {
+        if (text(request.Request_Type) !== 'COMPLETION_REPORT') return;
+        var status = text(request.Status).toUpperCase();
+        if (OPEN_STATUSES.indexOf(status) < 0) return;
+        states[text(request.Task_ID)] = status === 'STALE' ? 'STALE' : 'PENDING';
+      });
+      return states;
+    }
 
   function summary() {
     var counts = {PENDING: 0, STALE: 0, APPROVED: 0, REJECTED: 0, RETURNED: 0, PROCESSING: 0, WITHDRAWN: 0};
@@ -394,7 +411,10 @@ var Requests = (function () {
     }
     if (alreadyApplied(request, task)) return task;
     if (text(request.Request_Type) === 'COMPLETION_REPORT') {
-      return Tasks.update(task.Task_ID, {Status: 'Done', Progress_Percent: 100});
+      // Manager approval is the only ordinary path to Done / 100 %.
+      return Completion.withApproval(function () {
+        return Tasks.update(task.Task_ID, {Status: 'Done', Progress_Percent: 100});
+      });
     }
     return Tasks.update(task.Task_ID, {Due_Date: day(request.Requested_Due_Date)});
   }
@@ -497,6 +517,7 @@ var Requests = (function () {
     queue: queue,
     history: history,
     pendingByTask: pendingByTask,
+    pendingCompletionStates: pendingCompletionStates,
     summary: summary,
     decide: decide
   };

@@ -27,8 +27,11 @@ test('a task save immediately changes the project list and overview without a re
   assert.equal(p1.health, 'GREEN');
 
   const t2 = c.managerWebRead('task', {id: 'T2'}).data.record;
-  const done = c.managerWebWrite('taskSave', {taskId: 'T2', revision: t2._revision, progress: 100});
-  assert.equal(done.ok, true, done.error);
+  // V1.6: Done/100 % comes from the reviewed completion workflow, never from an ordinary save.
+  const refused = c.managerWebWrite('taskSave', {taskId: 'T2', revision: t2._revision, progress: 100});
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /承認/);
+  c.Completion.withApproval(() => c.Tasks.update('T2', {Status: 'Done', Progress_Percent: 100}));
   assert.equal(c.Database.find('PROJECTS', 'P1').Progress_Percent, 0);
   p1 = project(a, 'P1');
   assert.equal(p1.progress, 26.83);

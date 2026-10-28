@@ -11,5 +11,5 @@ test('snapshot Date objects normalize to contract date strings before hash verif
  }
  const result=a.context.publishSharedDashboard();assert.equal(result.published,true);
  const viewer=dashboardFor(snapshot);const portfolio=viewer.context.dashboardPortfolio();assert.equal(portfolio.ok,true,JSON.stringify(portfolio));const text=JSON.stringify(portfolio.data);assert.match(text,/2026-12-31/);assert.doesNotMatch(text,/GMT|T15:00/);
- assert.equal(a.context.SharedDashboardModel.CONTRACT_VERSION,'1.4');
+ assert.equal(a.context.SharedDashboardModel.CONTRACT_VERSION,'1.5');
 });

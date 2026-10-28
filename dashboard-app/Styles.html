@@ -709,4 +709,14 @@
     display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px;
     background: var(--amber-soft); color: var(--amber); font-size: 12.5px; font-weight: 600;
   }
+  /* V1.6 hierarchy and completion review. */
+  .tree-mark { display: inline-block; color: var(--text-soft); margin-right: 6px; }
+  .task-depth-1 .task-name-button { font-weight: 500; }
+  .task-depth-2 .task-name-button, .task-depth-3 .task-name-button { font-weight: 400; color: var(--text-soft); }
+  .container-badge, .review-badge {
+    display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px;
+    background: var(--green-soft); color: var(--green); font-size: 12.5px; font-weight: 600;
+  }
+  .review-badge { background: var(--amber-soft); color: var(--amber); }
+  .review-badge.stale { background: var(--red-soft, #f9eceb); color: var(--red); }
 </style>

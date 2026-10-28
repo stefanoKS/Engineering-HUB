@@ -45,6 +45,25 @@ function approve(instance, taskId) {
   return instance.context.approveTaskAssignment(taskId, 'admin@example.test', 'APPROVE ASSIGNMENT');
 }
 
+/**
+ * Seeds an approved completion.
+ *
+ * V1.6 makes manager approval the only ordinary path to Done / 100 %, so fixtures that need
+ * completed work use the same privileged path the approval service uses instead of writing
+ * Done directly. Production entrypoints cannot reach it from a browser payload.
+ */
+function complete(instance, taskId) {
+  return instance.context.Completion.withApproval(function () {
+    return instance.context.Tasks.update(taskId, {Status: 'Done', Progress_Percent: 100});
+  });
+}
+
+/** Creates a task and immediately records its approved completion. */
+function completedTask(instance, data) {
+  const created = instance.context.Tasks.create(Object.assign({}, data, {Status: 'Assigned', Progress_Percent: 0}));
+  return complete(instance, created.Task_ID);
+}
+
 function activate(instance) {
   return instance.context.activateNotifications('admin@example.test', 'ACTIVATE NOTIFICATIONS');
 }
@@ -59,4 +78,4 @@ function live(options = {}) {
   return instance;
 }
 
-module.exports = { DOMAIN, app, base, bulk, settings, approve, activate, live };
+module.exports = { DOMAIN, app, base, bulk, settings, approve, complete, completedTask, activate, live };

@@ -1,6 +1,28 @@
 # Manager workflow
 
-## V1.5 browser workflow
+## V1.6 workflow
+
+1. **Choose the area.** The manager home opens with the responsibility section. Selecting 製品設計 filters every
+   list and KPI to that area; `すべての担当領域` restores the overview.
+2. **Create the project.** 案件 → 新規作成 asks for 担当領域 first (required, active only, preselected from the
+   current area), then name, owner, description, committed deadline, priority, status and visibility.
+3. **Structure the work.** Add subprojects to four levels, then tasks (three levels). A task with children is a
+   container: its progress comes from its leaf work. A parent that already has hours, a progress value, an approval
+   or a completion is refused as a container — start a new container task or use a subproject instead.
+4. **Assign.** Owner, deadline and required duration remain the schedule inputs; duration is a schedule length, not
+   labour hours. Assignment approval and schedule confirmation stay separate.
+5. **Report and approve.** A worker reports completion from the shared dashboard. The manager sees 承認待ち in the
+   task list and in 申請. Approving is the only way to Done / 100 %; returning or rejecting keeps the task open.
+   An ADMIN correction needs a reason and is recorded separately (`COMPLETION_OVERRIDDEN`).
+6. **Review by member.** メンバー → a member shows current work, previous (approved) work with its dates and
+   acceptance, and the recorded activity. Attribution uses owner/task IDs, never a typed name.
+7. **Remove a mistake.** Archive is the default. A genuinely empty mistaken project/subproject/task may be deleted
+   by an ADMIN after the dependency preflight, with a reason, the typed `DELETE <id>` confirmation and a verified
+   backup; the shared dashboard only changes at the next publication.
+8. **Publish.** Publication stays explicit, A/B transactional and OFF by default; a visibility change appears in the
+   shared dashboard at the next publication, never instantly.
+
+## V1.5 browser workflow (historical)
 
 Open/bookmark the manager DEV /exec URL provided by the administrator. The header displays your verified actor/role and V1.5. Use Overview, Projects, Tasks, Requests and Administration. You do not need Sheets open for daily CRUD. Projects open the two-level subproject hierarchy; its task button scopes the task list. Task creation asks for duration and deadline and uses the existing backward schedule. Confirm assignment and schedule separately. Requests import explicitly, then show reasons/dates/notes and approval controls/history.
 

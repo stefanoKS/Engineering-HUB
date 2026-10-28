@@ -8,14 +8,15 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('package, publisher, README and UI agree on V1.5.1', () => {
-  assert.match(read('package.json'), /"version": "1\.5\.1"/);
-  assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.5\.1'/);
-  assert.match(read('README.md'), /## Current release — V1\.5\.1/);
-  assert.match(read('README_JP.md'), /## 現行リリース — V1\.5\.1/);
+test('package, publisher, README and UI agree on the current release', () => {
+  assert.match(read('package.json'), /"version": "1\.6\.0"/);
+  assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.6'/);
+  assert.match(read('README.md'), /## Current release — V1\.6/);
+  assert.match(read('README_JP.md'), /## 現行リリース — V1\.6/);
+  // The V1.5.1 result is kept as history, exactly as released.
   assert.match(read('README.md'), /406 tests, 406 pass/);
-  assert.match(read('README_JP.md'), /406件成功/);
-  assert.match(read('src/ManagerWebIndex.html'), /V1\.5\.1/);
+  assert.match(read('README_JP.md'), /406件すべて成功/);
+  assert.match(read('src/ManagerWebIndex.html'), /V1\.6/);
 });
 
 test('the ten V1.5.1 checkgates exist and keep the release status honest', () => {
@@ -46,8 +47,8 @@ test('raw V1.5.1 performance evidence exists and never claims a live measurement
 });
 
 test('schema, contract, execute-as and the production status are unchanged', () => {
-  assert.equal(read('src/Schema.gs').match(/version:\s*6/)[0].replace(/\s/g, ''), 'version:6');
-  assert.match(read('src/SharedDashboardModel.gs'), /CONTRACT_VERSION = '1\.4'/);
+  assert.equal(read('src/Schema.gs').match(/version:\s*7/)[0].replace(/\s/g, ''), 'version:7');
+  assert.match(read('src/SharedDashboardModel.gs'), /CONTRACT_VERSION = '1\.5'/);
   const manager = JSON.parse(read('src/appsscript.json'));
   const employee = JSON.parse(read('dashboard-app/appsscript.json'));
   assert.deepEqual(manager.webapp, {access: 'DOMAIN', executeAs: 'USER_ACCESSING'});

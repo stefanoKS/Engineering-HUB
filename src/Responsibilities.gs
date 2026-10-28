@@ -14,6 +14,9 @@ var Responsibilities = (function () {
   var NAME_MAX = 60;
   var DESCRIPTION_MAX = 500;
   var TERMINAL_PROJECT = ['Completed', 'Cancelled', 'Archived'];
+  // Validated display palette (docs/UI_UX_GUIDELINES.md). A new area takes the next unused
+  // entry, so the colours stay predictable without hardcoding any particular area name.
+  var PALETTE = ['#357C9B', '#6A65A8', '#328568', '#C38A39', '#A74646', '#304E70', '#4C6B33', '#7A5C3E'];
 
   function fail(message) { Domain.fail(message); }
 
@@ -63,6 +66,38 @@ var Responsibilities = (function () {
     return name;
   }
 
+  /** Only a validated #RRGGBB value is stored; anything else is refused, never guessed. */
+  function normalizeColor(value) {
+    var raw = text(value);
+    if (!raw) return '';
+    if (!/^#[0-9a-fA-F]{6}$/.test(raw)) fail('担当領域の色は #RRGGBB 形式で指定してください');
+    return raw.toUpperCase();
+  }
+
+  /** Predictable palette assignment: the first entry that no active area uses yet. */
+  function nextColor() {
+    var used = Object.create(null);
+    Database.read('RESPONSIBILITIES').forEach(function (row) {
+      var color = normalizeColorSafe(row.Color_Hex);
+      if (color) used[color] = true;
+    });
+    for (var i = 0; i < PALETTE.length; i++) if (!used[PALETTE[i]]) return PALETTE[i];
+    return PALETTE[Database.read('RESPONSIBILITIES').length % PALETTE.length];
+  }
+
+  function normalizeColorSafe(value) {
+    var raw = text(value);
+    return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw.toUpperCase() : '';
+  }
+
+  /** Display colour for a row; a legacy blank value falls back to its position in the palette. */
+  function colorOf(row, index) {
+    var explicit = normalizeColorSafe(row && row.Color_Hex);
+    if (explicit) return explicit;
+    var position = typeof index === 'number' ? index : all().map(function (item) { return item.Responsibility_ID; }).indexOf(row && row.Responsibility_ID);
+    return PALETTE[(position < 0 ? 0 : position) % PALETTE.length];
+  }
+
   function requireUniqueName(row) {
     var clash = Database.read('RESPONSIBILITIES').filter(function (other) {
       return other.Responsibility_ID !== row.Responsibility_ID && isActive(other) && sameName(other.Name, row.Name);
@@ -72,6 +107,7 @@ var Responsibilities = (function () {
 
   function validate(row, before) {
     row.Name = requireName(row.Name);
+    row.Color_Hex = normalizeColor(row.Color_Hex);
     if (String(row.Description || '').length > DESCRIPTION_MAX) {
       fail('説明は' + DESCRIPTION_MAX + '文字以内で入力してください');
     }
@@ -120,6 +156,7 @@ var Responsibilities = (function () {
       Owner_Member_ID: owner,
       Status: ACTIVE,
       Retired_At: '',
+      Color_Hex: data.Color_Hex === undefined || data.Color_Hex === '' ? nextColor() : data.Color_Hex,
       Sort_Order: data.Sort_Order === undefined ? nextOrder() : data.Sort_Order,
       Updated_At: Domain.now()
     });
@@ -304,6 +341,7 @@ var Responsibilities = (function () {
     ACTIVE: ACTIVE,
     RETIRED: RETIRED,
     NAME_MAX: NAME_MAX,
+    PALETTE: PALETTE,
     all: all,
     active: active,
     list: list,
@@ -319,7 +357,9 @@ var Responsibilities = (function () {
     transferProject: transferProject,
     counts: counts,
     needsReassignment: needsReassignment,
-    retiredMap: retiredMap
+    retiredMap: retiredMap,
+    normalizeColor: normalizeColor,
+    colorOf: colorOf
   };
 }());
 function createResponsibility(data) { return Responsibilities.create(data); }

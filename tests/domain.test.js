@@ -64,7 +64,9 @@ test('task dependencies are explicit, same-project and acyclic', () => {
   const first = task(), second = task({ Dependency_IDs: first.Task_ID });
   assert.throws(() => c.updateTask(first.Task_ID, { Dependency_IDs: second.Task_ID }), /Cyclic/);
   assert.throws(() => task({ Dependency_IDs: 'missing' }), /Unknown/);
-  const done = c.updateTask(first.Task_ID, { Status: 'Done', Progress_Percent: 100 });
+  // V1.6: Done is not reachable through an ordinary update; the approved path still records it.
+  assert.throws(() => c.updateTask(first.Task_ID, { Status: 'Done', Progress_Percent: 100 }), /承認/);
+  const done = c.Completion.withApproval(() => c.Tasks.update(first.Task_ID, { Status: 'Done', Progress_Percent: 100 }));
   assert.ok(done.Completed_At);
   assert.equal(c.Database.find('TASKS', first.Task_ID).Dependency_IDs, '');
 });

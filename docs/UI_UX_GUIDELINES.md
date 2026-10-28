@@ -1,6 +1,30 @@
 # UI/UX guidelines
 
-## V1.5 web UI
+## V1.6 desktop design
+
+The application is desktop-first (1366–2560 px) and must stay usable with normal window resizing and 125–150 %
+browser zoom. No mobile-specific layout is required.
+
+- **Tokens.** Background `#F4F6F8`, surfaces `#FFFFFF`, primary text `#27333E`, secondary text `#526170`, borders
+  `#D7DEE5`; accents: navigation `#304E70`, product design `#357C9B`, automation `#6A65A8`, completed `#328568`,
+  pending approval `#C38A39`, overdue/critical `#A74646`.
+- **Responsibility colours** come from a validated palette (`Responsibilities.PALETTE`) or a manager-entered
+  `#RRGGBB`; no area name is hardcoded and the number of areas is never assumed.
+- **Typography.** Noto Sans JP / Inter when available, otherwise the system UI font. Page titles are strong, project
+  names bold, subproject headings medium, descriptions normal, metadata small and muted. Status is never conveyed by
+  font weight or colour alone: every state has a text label plus a chip/pill.
+- **Navigation.** The responsibility section sits at the top (all areas, one button per area, 未分類 when needed),
+  followed by 概要 / 案件 / タスク / 申請 / メンバー / 管理. The active area is marked with `aria-current` in the
+  navigation and `aria-pressed` on its card.
+- **Hierarchy.** Subprojects render as a collapsible tree (max four levels) and tasks indent by depth (max three)
+  with a `↳` marker, a container chip and review chips. Branches render only what is visible; long lists paginate.
+- **Deletion.** The ADMIN panel is visually distinct (critical border): dependency summary, reason, typed
+  confirmation, then one action. A blocked record explains why and points at archive.
+- **Accessibility.** Visible focus ring, ≥44 px targets, `role="progressbar"` with a value, status as text, skip
+  link, `aria-live` notice region. No colour-only meaning.
+- **No framework.** Plain CSS/DOM only; no large UI dependency and no blocking web-font request.
+
+## V1.5 web UI (historical)
 
 ManagerWebStyles uses the existing calm palette, Japanese-friendly 15px body type, 44px controls, visible focus, skip link, labelled native controls and dialog, live status messages and reduced-motion rules. Five main navigation choices adapt to a horizontal wrapped row below 900px; forms use one column below 480px. The rail can collapse. Content is rendered with DOM/textContent only.
 

@@ -1,0 +1,40 @@
+V1.6 local validation — 2026-10-28 21:13 (Windows, Node v24.21.0)
+
+== npm ci ==
+123 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+exit=0
+
+== npm run lint ==
+
+> engineering-hub@1.6.0 lint
+> eslint .
+
+exit=0
+
+== npm run validate ==
+
+> engineering-hub@1.6.0 validate
+> node scripts/validate-source.js
+
+Validated 38 manager Apps Script files, 3 dashboard files, both manifests and 779 translation keys
+exit=0
+
+== npm test ==
+ℹ tests 462
+ℹ suites 0
+ℹ pass 462
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 12257.945
+exit=0
+
+== node scripts/manager-web-benchmark.js ==
+exit=0 (raw output in V1_6_PERFORMANCE.json)
+
+Live Workspace verification: NOT_RUN (no Google credentials or DEV resources in this session).
+DEV migration, request round trip, publication flip, real browser rendering and real latency remain BLOCKED.

@@ -11,9 +11,15 @@ var lang = EH_I18N.read(), view = 'overview', sequence = 0, drawerSequence = 0;
 var FRESH_MS = 30000, PAGE = 50, PREFETCH_TASKS = 1000;
 var cache = new Map(), inflight = new Map(), tokens = Object.create(null);
 var drafts = new Map(), pending = new Set(), queue = [], running = 0;
-var store = {actor: null, references: null, responsibilities: [], projects: null, tasks: null, overview: null, at: {}};
+var store = {actor: null, references: null, responsibilities: [], responsibilityCards: {items: [], unassigned: null}, projects: null, tasks: null, overview: null, at: {}};
 var stats = {rpc: 0, hits: 0, stale: 0, writes: 0};
 var filters = {}, currentData = null, currentEditor = null, actorRole = '', metrics = [];
+/**
+ * Active organisation filter. It lives in this page's memory only (never localStorage) and
+ * uses the stable Responsibility_ID, so renaming an area never breaks the selection.
+ * '' = every area, '__none__' = the 未分類 bucket.
+ */
+var activeResponsibility = '', activeResponsibilityName = '', UNASSIGNED = '__none__';
 var resultsHost = null, syncError = '', refreshing = false, revoked = false;
 var byId = function (id) { return document.getElementById(id); };
 function t(key, vars) { return EH_I18N.t(lang, 'web.' + key, vars); }
@@ -85,7 +91,7 @@ var api = {
     keys.forEach(function (key) { tokens[key] = (tokens[key] || 0) + 1; });
     cache.clear(); inflight.clear();
     store.overview = null; store.projects = null; store.tasks = null;
-    store.references = null; store.responsibilities = []; store.at = {};
+    store.references = null; store.responsibilities = []; store.responsibilityCards = {items: [], unassigned: null}; store.at = {};
   }
 };
 window.ManagerWebClient = {api: api, metrics: metrics, drafts: drafts, store: store, stats: stats};
@@ -128,6 +134,7 @@ function applyBootstrap(data) {
   if (data.actor) { actorRole = data.actor.role; byId('actor').textContent = data.actor.name + ' · ' + data.actor.role; }
   store.references = data.references || null;
   store.responsibilities = data.responsibilities || [];
+  store.responsibilityCards = data.responsibilityCards || {items: [], unassigned: null};
   store.projects = data.projects;
   // Task rows arrive separately (taskIndex) so the first paint never waits for them. A loaded
   // index survives a revalidation while its record count is unchanged, keeping navigation
@@ -142,6 +149,8 @@ function applyBootstrap(data) {
   store.at.bootstrap = at;
   cache.set(keyOf('bootstrap', {}), {at: at, data: data});
   if (store.references) cache.set(keyOf('references', {}), {at: at, data: store.references});
+  // The responsibility section mirrors the snapshot, so the navigation is refreshed with it.
+  if (byId('nav')) renderNav();
   syncTaskIndex(false);
 }
 /** Loads or refreshes the compact task index; a large index loads only when the view opens. */
@@ -164,6 +173,32 @@ function syncTaskIndex(force) {
 function indexedTasks() {
   return !!(store.tasks && store.tasks.loaded && store.tasks.complete === true);
 }
+/** True when the record belongs to the active organisation filter. */
+function inActiveArea(record) {
+  if (!activeResponsibility) return true;
+  var id = String((record && record.responsibilityId) || '');
+  return activeResponsibility === UNASSIGNED ? !id : id === activeResponsibility;
+}
+/** Selects an area as the global filter; offsets of the previous area are reset. */
+function setActiveResponsibility(id, name) {
+  activeResponsibility = id || '';
+  activeResponsibilityName = name || '';
+  Object.keys(filters).forEach(function (kind) { if (filters[kind]) filters[kind].offset = 0; });
+  clearNotice();
+  renderNav();
+  load(false);
+}
+/** Request payload for a view: the active area is always resolved server-side as well. */
+function viewFilters(name) {
+  var values = Object.assign({}, filters[name] || {});
+  delete values.responsibilityId;
+  delete values.unassigned;
+  if ((name === 'projects' || name === 'tasks') && activeResponsibility) {
+    if (activeResponsibility === UNASSIGNED) values.unassigned = true;
+    else values.responsibilityId = activeResponsibility;
+  }
+  return values;
+}
 function localDataset(kind) {
   var source = kind === 'projects' ? store.projects : (kind === 'tasks' ? store.tasks : null);
   return source || {items: [], total: 0, complete: false};
@@ -184,6 +219,9 @@ function matchesTask(task, input, query) {
   if (input.ownerId && task.ownerId !== input.ownerId) return false;
   if (input.status && task.status !== input.status) return false;
   if (input.responsibilityId && String(task.responsibilityId || '') !== String(input.responsibilityId)) return false;
+  if (input.unassigned && String(task.responsibilityId || '')) return false;
+  if (input.priority && task.priority !== input.priority) return false;
+  if (!inActiveArea(task)) return false;
   if (input.deadlineBefore && (!task.deadline || task.deadline > input.deadlineBefore)) return false;
   if (input.deadlineAfter && (!task.deadline || task.deadline < input.deadlineAfter)) return false;
   if (query && [task.id, task.name, task.project, task.owner, task.subprojectId].join(' ').toLowerCase().indexOf(query) < 0) return false;
@@ -191,6 +229,9 @@ function matchesTask(task, input, query) {
 }
 function matchesProject(project, input, query) {
   if (input.responsibilityId && String(project.responsibilityId || '') !== String(input.responsibilityId)) return false;
+  if (input.unassigned && String(project.responsibilityId || '')) return false;
+  if (!inActiveArea(project)) return false;
+  if (input.priority && project.priority !== input.priority) return false;
   if (input.ownerId && project.ownerId !== input.ownerId) return false;
   if (input.status && project.status !== input.status) return false;
   if (input.deadlineBefore && (!project.deadline || project.deadline > input.deadlineBefore)) return false;
@@ -211,10 +252,10 @@ function peekView(name) {
   if (revoked) return null;
   if (name === 'overview') return store.overview;
   if (name === 'projects' || name === 'tasks') {
-    var cached = api.peek(name, filters[name] || {});
+    var cached = api.peek(name, viewFilters(name));
     if (cached) return cached;
     var dataset = localDataset(name);
-    if (dataset.complete && (name === 'projects' || indexedTasks())) return localPage(name, dataset, filters[name] || {});
+    if (dataset.complete && (name === 'projects' || indexedTasks())) return localPage(name, dataset, viewFilters(name));
     return null;
   }
   return api.peek(name, filters[name] || {});
@@ -261,9 +302,29 @@ function submitFilters(kind) {
   notice(t('searching'));
   fetchView(kind, true);
 }
+/** One responsibility choice in the navigation; the stable ID is the value. */
+function areaButton(nav, id, name, color) {
+  var b = el('button', name); b.type = 'button'; b.className = 'area-nav';
+  if (color) b.setAttribute('style', 'border-left:6px solid ' + color);
+  if (activeResponsibility === id) b.setAttribute('aria-current', 'true');
+  b.addEventListener('click', function () { setActiveResponsibility(id, name); });
+  nav.appendChild(b);
+  return b;
+}
 function renderNav() {
   var nav = byId('nav'); nav.replaceChildren();
-  ['overview','projects','tasks','requests','admin'].forEach(function (name) { var b = button(name, function () { navigate(name); }, nav); if (view === name || (view === 'project' && name === 'projects')) b.setAttribute('aria-current', 'page'); });
+  // Responsibility selection stays at the top: it is the primary organisation filter.
+  nav.appendChild(el('p', t('navResponsibilities'), 'nav-section'));
+  areaButton(nav, '', t('allResponsibilities'), '#9aa7b3');
+  var cards = (store.responsibilityCards && store.responsibilityCards.items) || [];
+  cards.forEach(function (area) { areaButton(nav, area.id, area.name, area.color); });
+  var unassigned = store.responsibilityCards && store.responsibilityCards.unassigned;
+  if (unassigned && unassigned.totalProjects) areaButton(nav, UNASSIGNED, t('unassigned'), '#9aa7b3');
+  nav.appendChild(el('p', t('navViews'), 'nav-section'));
+  ['overview','projects','tasks','requests','members','admin'].forEach(function (name) {
+    var b = button(name, function () { navigate(name); }, nav);
+    if (view === name || (view === 'project' && name === 'projects') || (view === 'member' && name === 'members')) b.setAttribute('aria-current', 'page');
+  });
   byId('navToggle').setAttribute('aria-label', t('navigation'));
   if (byId('diagnostics')) byId('diagnostics').textContent = t('diagnostics');
   document.documentElement.lang = lang;
@@ -291,11 +352,25 @@ function listFilters(kind, host) {
     filterField(bar, kind, 'projectId', values.projectId || '', [{id:'',name:t('all')}].concat(references().projects), function (v) { values.projectId=v;delete values.subprojectId;delete values.subprojectName;values.offset=0; });
     filterField(bar, kind, 'ownerId', values.ownerId || '', [{id:'',name:t('all')}].concat(references().members), function (v) { values.ownerId=v; values.offset=0; });
     filterField(bar, kind, 'statusField', values.status || '', ['','Not Started','Assigned','In Progress','Blocked','On Hold','Done','Cancelled'], function (v) {values.status=v; values.offset=0;});
+    filterField(bar, kind, 'priority', values.priority || '', [{id:'',name:t('all')}].concat(['Low','Medium','High','Critical'].map(function(v){return {id:v,name:EH_I18N.priority(lang,v)};})), function (v) {values.priority=v; values.offset=0;});
+    filterField(bar, kind, 'treeScope', values.treeScope || '', [{id:'',name:t('all')},{id:'TOP',name:t('topLevel')}], function (v) {values.treeScope=v; values.offset=0;});
     filterField(bar, kind, 'deadlineBefore', values.deadlineBefore || '', null, function(v){values.deadlineBefore=v;values.offset=0;}, 'date');
     filterField(bar, kind, 'deadlineAfter', values.deadlineAfter || '', null, function(v){values.deadlineAfter=v;values.offset=0;}, 'date');
     filterField(bar, kind, 'sort', values.sort || 'deadline', [{id:'deadline',name:t('deadline')},{id:'priority',name:t('priority')}], function(v){values.sort=v;values.offset=0;});
   }
-  if (kind === 'tasks' || kind === 'projects') filterField(bar, kind, 'responsibilityId', values.responsibilityId || '', [{id:'',name:t('all')}].concat(references().responsibilities), function(v){values.responsibilityId=v;values.offset=0;});
+  if (kind === 'projects') {
+    filterField(bar, kind, 'priority', values.priority || '', [{id:'',name:t('all')}].concat(['Low','Medium','High','Critical'].map(function(v){return {id:v,name:EH_I18N.priority(lang,v)};})), function (v) {values.priority=v; values.offset=0;});
+    filterField(bar, kind, 'statusField', values.status || '', ['','Planned','Active','On Hold','Completed','Cancelled','Archived'], function (v) {values.status=v; values.offset=0;});
+  }
+  if (kind === 'tasks' || kind === 'projects') {
+    // The organisation filter is shared with the responsibility section at the top of the page.
+    var areaChoices=[{id:'',name:t('allResponsibilities')}].concat(areaItems().map(function(area){return {id:area.id,name:area.name};}));
+    var unassignedArea=store.responsibilityCards&&store.responsibilityCards.unassigned;
+    if(unassignedArea&&unassignedArea.totalProjects)areaChoices.push({id:UNASSIGNED,name:t('unassigned')});
+    field(bar,'filterResponsibility',activeResponsibility||'',areaChoices,function(v){
+      setActiveResponsibility(v||'',v?(v===UNASSIGNED?t('unassigned'):areaNameOf(v)):'');
+    });
+  }
   var submit = el('button', t('search')); submit.type='submit'; bar.appendChild(submit);
   bar.appendChild(el('span', t(localDataset(kind).complete ? 'localHint' : 'serverHint'), 'muted hint-wide'));
   bar.addEventListener('submit', function(e){e.preventDefault();submitFilters(kind);}); host.appendChild(bar);
@@ -323,6 +398,91 @@ function deadlineText(p) {
   if (p.deadlineKind === 'closed') return '';
   return EH_I18N.deadline(lang, p.deadlineKind, p.daysRemaining, false);
 }
+/* ---------------------------------------------------------------- *
+ * Responsibility-first organisation
+ * ---------------------------------------------------------------- */
+function areaItems() { return (store.responsibilityCards && store.responsibilityCards.items) || []; }
+function areaNameOf(id) {
+  if (!id) return '';
+  if (id === UNASSIGNED) return t('unassigned');
+  var found = areaItems().filter(function (area) { return area.id === id; })[0];
+  return found ? found.name : '';
+}
+/** Heading of the active organisation filter, so the current scope is never ambiguous. */
+function responsibilityHeading() {
+  return activeResponsibility ? areaNameOf(activeResponsibility) : t('allResponsibilities');
+}
+/** Card for the "all areas" choice or one organisation area. */
+function areaCard(area) {
+  var node = el('button', undefined, 'area-card' + (area.overdueTasks > 0 ? ' is-overdue' : ''));
+  node.type = 'button';
+  node.setAttribute('aria-pressed', activeResponsibility === area.id ? 'true' : 'false');
+  if (area.color) node.setAttribute('style', 'border-left-color:' + area.color);
+  node.appendChild(el('span', area.name, 'area-name'));
+  if (!area.aggregate) {
+    var meta = el('span', undefined, 'area-meta');
+    [[t('areaProjects'), area.projects], [t('areaOpenTasks'), area.openTasks], [t('areaOverdue'), area.overdueTasks]]
+      .forEach(function (pair, position) {
+        var item = el('span', undefined, 'area-metric' + (position === 2 && area.overdueTasks > 0 ? ' area-overdue' : ''));
+        item.append(el('span', pair[0] + ': '), el('strong', pair[1] === undefined || pair[1] === null ? '—' : String(pair[1])));
+        meta.appendChild(item);
+      });
+    node.appendChild(meta);
+    if (typeof area.progress === 'number') {
+      var bar = el('span', undefined, 'area-progress'), fill = el('span');
+      fill.setAttribute('style', 'width:' + Math.max(0, Math.min(100, area.progress)) + '%');
+      bar.appendChild(fill);
+      node.appendChild(bar);
+    }
+    if (area.owner) node.appendChild(el('span', t('areaOwner') + ': ' + area.owner, 'area-meta'));
+    if (area.status === 'Retired') node.appendChild(el('span', t('retire') + ' · ' + statusLabel('Retired'), 'area-meta'));
+  } else {
+    node.appendChild(el('span', t('allResponsibilities'), 'area-meta'));
+  }
+  node.addEventListener('click', function () { setActiveResponsibility(area.id, area.name); });
+  return node;
+}
+function responsibilityStrip(host) {
+  var strip = el('div', undefined, 'area-strip');
+  strip.appendChild(areaCard({id: '', name: responsibilityHeading(), color: '#9aa7b3', aggregate: true}));
+  areaItems().forEach(function (area) { strip.appendChild(areaCard(area)); });
+  var unassigned = store.responsibilityCards && store.responsibilityCards.unassigned;
+  if (unassigned && unassigned.totalProjects) {
+    strip.appendChild(areaCard(Object.assign({}, unassigned, {id: UNASSIGNED, name: t('unassigned'), color: '#9aa7b3'})));
+  }
+  var add = el('button', '+ ' + t('addResponsibility'), 'area-card area-add');
+  add.type = 'button';
+  add.addEventListener('click', function () { openEditor('responsibility', null, null, {}); });
+  strip.appendChild(add);
+  host.appendChild(strip);
+}
+function localToday() {
+  var now = new Date();
+  return now.getFullYear() + '-' + ('0' + (now.getMonth() + 1)).slice(-2) + '-' + ('0' + now.getDate()).slice(-2);
+}
+/** KPIs for the active area, computed from the in-memory snapshot where it is complete. */
+function filteredKpis(data) {
+  if (!activeResponsibility) return data.kpis;
+  var projects = ((store.projects && store.projects.items) || []).filter(inActiveArea);
+  var active = projects.filter(function (p) { return ['Archived', 'Cancelled', 'Completed'].indexOf(p.status) < 0; });
+  var result = {active: active.length,
+    risk: active.filter(function (p) { return ['RED', 'YELLOW', 'UNKNOWN'].indexOf(p.health) >= 0; }).length,
+    soon: null, overdue: null};
+  if (indexedTasks()) {
+    var today = localToday(), weekLater = new Date(); weekLater.setDate(weekLater.getDate() + 7);
+    var end = weekLater.getFullYear() + '-' + ('0' + (weekLater.getMonth() + 1)).slice(-2) + '-' + ('0' + weekLater.getDate()).slice(-2);
+    result.soon = 0; result.overdue = 0;
+    store.tasks.items.filter(inActiveArea).forEach(function (task) {
+      if (['Done', 'Cancelled'].indexOf(task.status) >= 0) return;
+      var due = task.deadline || '';
+      if (!due) return;
+      if (due < today) result.overdue++;
+      else if (due <= end) result.soon++;
+    });
+  }
+  return result;
+}
+function kpiValue(value) { return value === null || value === undefined ? '—' : String(value); }
 function projectCards(data, host) {
   var grid=el('div',undefined,'cards');
   if(!data.items.length) grid.appendChild(el('p',t('empty')));
@@ -344,7 +504,23 @@ function projectCards(data, host) {
 }
 function tasks(data, host) {
   if(!data.items.length)host.appendChild(el('p',t('empty')));
-  data.items.forEach(function(task){var card=el('article',undefined,'card');var row=el('div',undefined,'row');row.append(el('strong',task.name),el('span',task.project),el('span',task.owner),el('span',task.deadline||'—'),el('span',statusLabel(task.status)),el('span',String(task.progress||0)+'%'));button('edit',function(){openEditor('task',task.id);},row);card.appendChild(row);host.appendChild(card);});
+  data.items.forEach(function(task){
+    var depth=Number(task.depth)||0;
+    var card=el('article',undefined,'card task-card'+(depth?' task-nested task-depth-'+Math.min(3,depth):''));
+    var row=el('div',undefined,'row');
+    if(depth)row.appendChild(el('span','↳','task-branch'));
+    row.appendChild(el('strong',task.name));
+    if(task.container)row.appendChild(el('span',t('containerTask'),'chip chip-container'));
+    if(task.reviewState==='PENDING')row.appendChild(el('span',t('reviewPending'),'chip chip-review'));
+    else if(task.reviewState==='STALE')row.appendChild(el('span',t('reviewStale'),'chip chip-review is-stale'));
+    if(!activeResponsibility&&task.responsibilityId)row.appendChild(el('span',areaNameOf(task.responsibilityId),'chip'));
+    row.append(el('span',task.project),el('span',task.owner),el('span',task.deadline||'—'),el('span',statusLabel(task.status)),el('span',String(task.progress||0)+'%'));
+    button('edit',function(){openEditor('task',task.id);},row);
+    // A subtask is only offered while the three-level limit still allows another level.
+    if(depth<2&&task.projectId)button('addSubtask',function(){openEditor('task',null,null,{projectId:task.projectId,subprojectId:task.subprojectId||'',parentTaskId:task.id,parentTaskName:task.name});},row);
+    if(actorRole==='ADMIN')button('deleteRecord',function(){deletionPanel(card,'TASKS',task.id,task.name);},row);
+    card.appendChild(row);host.appendChild(card);
+  });
 }
 /** Projects/tasks results only: filters keep their DOM and their focus. */
 function renderList() {
@@ -434,7 +610,7 @@ function bootstrapFetch(first) {
 }
 function fetchView(name, fresh, first) {
   var seq = ++sequence, start = performance.now();
-  api.read(name, filters[name] || {}, fresh === true).then(function (data) {
+  api.read(name, viewFilters(name), fresh === true).then(function (data) {
     if (!data || seq !== sequence) return;
     currentData = data; syncError = ''; store.at[name] = Date.now();
     if (first) clearNotice();
@@ -444,7 +620,7 @@ function fetchView(name, fresh, first) {
 function revalidateView(name) {
   if (revoked) return;
   if (name === 'projects' || name === 'tasks') {
-    var servedByServer = !!api.peek(name, filters[name] || {});
+    var servedByServer = !!api.peek(name, viewFilters(name));
     var local = name === 'projects' ? localDataset(name).complete : indexedTasks();
     if (servedByServer || !local) { fetchView(name, true); return; }
   }
@@ -474,7 +650,9 @@ function revoke() {
   revoked = true;
   api.clear();
   store.actor = null; store.references = null; store.responsibilities = [];
+  store.responsibilityCards = {items: [], unassigned: null};
   store.projects = null; store.tasks = null; store.overview = null; store.at = {};
+  activeResponsibility = ''; activeResponsibilityName = '';
   drafts.clear(); pending.clear();
   currentData = null; currentEditor = null; syncError = ''; refreshing = false;
   try { if (byId('editor').open) byId('editor').close(); } catch (ignored) { /* no open dialog */ }
@@ -482,6 +660,102 @@ function revoke() {
   byId('actor').textContent = '';
   notice(t('accessDenied'), 'error');
 }
+/* ---------------------------------------------------------------- *
+ * Member work and history
+ * ---------------------------------------------------------------- */
+function memberProfileView(data, host) {
+  var member=data.member||{};
+  host.appendChild(el('h2',member.name||''));
+  rowValues(host,[[t('department'),member.department],[t('position'),member.position],[t('role'),member.role],[t('enabled'),member.active?'✓':'—']]);
+  host.appendChild(el('div',undefined,'section-title')).appendChild(el('h2',t('currentWork')));
+  tasks({items:data.current||[],total:(data.current||[]).length},host);
+  host.appendChild(el('div',undefined,'section-title')).appendChild(el('h2',t('previousWork')));
+  (data.previous||[]).forEach(function(task){
+    var card=el('article',undefined,'card');
+    card.appendChild(el('strong',task.name));
+    rowValues(card,[[t('project'),task.project],[t('completedAt'),task.completedAt||'—'],
+      [t('acceptedCompletion'),task.acceptedAt?String(task.acceptedAt).replace('T',' ').slice(0,16):t('notConfirmed')],
+      [t('reviewState'),task.acceptance||'—'],[t('deadline'),task.deadline||'—']]);
+    host.appendChild(card);
+  });
+  if(!(data.previous||[]).length)host.appendChild(el('p',t('empty')));
+  host.appendChild(el('div',undefined,'section-title')).appendChild(el('h2',t('activityHistory')));
+  // Every entry is an existing append-only record; nothing is reconstructed or invented.
+  if(!(data.activity||[]).length)host.appendChild(el('p',t('noHistory')));
+  (data.activity||[]).forEach(function(entry){
+    var item=el('article',undefined,'card');
+    rowValues(item,[[t('task'),entry.taskId],[t('statusField'),entry.action],
+      [t('member'),entry.actor||t('unknown')],[t('at'),String(entry.at||'').replace('T',' ').slice(0,19)]]);
+    host.appendChild(item);
+  });
+}
+
+/* ---------------------------------------------------------------- *
+ * ADMIN-only permanent deletion (V1.6)
+ * ---------------------------------------------------------------- */
+function deletionAction(table){return table==='PROJECTS'?'projectDelete':table==='SUBPROJECTS'?'subprojectDelete':'taskDelete';}
+function deletionKey(table){return table==='PROJECTS'?'projectId':table==='SUBPROJECTS'?'subprojectId':'taskId';}
+function deleteCodeLabel(code){
+  var key='deleteCode.'+code;
+  return EH_I18N.has('web.'+key)?t(key):String(code);
+}
+function loadRevision(table,id){
+  if(table==='TASKS')return api.read('task',{id:id},true).then(function(result){return result.record._revision;});
+  return api.read('project',{id:id},true).then(function(result){
+    if(table==='PROJECTS')return result.record._revision;
+    var found=(result.subprojects||[]).filter(function(sub){return sub.Subproject_ID===id;})[0];
+    return found?found._revision:'';
+  });
+}
+/**
+ * Dependency preflight, then an explicit confirmation. Nothing is deleted before the server
+ * has reported an empty dependency list and verified the backup.
+ */
+function deletionPanel(container,table,id,name,revision){
+  if(container.querySelector&&container.querySelector('.deletion-panel'))return;
+  var draftKey='delete:'+table+':'+id,draft=drafts.get(draftKey)||{reason:'',confirmation:'',cascade:false,revision:revision||''};
+  drafts.set(draftKey,draft);
+  var panel=el('section',undefined,'deletion-panel');
+  panel.appendChild(el('h3',t('deleteRecord')+': '+name));
+  var summary=el('div');
+  summary.appendChild(el('p',t('loading'),'muted'));
+  panel.appendChild(summary);
+  var execute=el('button',t('deleteRecord'),'primary');execute.type='button';execute.disabled=true;
+  field(panel,'deleteReason',draft.reason,null,function(v){draft.reason=v;});
+  field(panel,'deleteConfirmation',draft.confirmation,null,function(v){draft.confirmation=v;});
+  field(panel,'cascade',draft.cascade,null,function(v){draft.cascade=v;},'checkbox');
+  var actions=el('div',undefined,'toolbar');
+  actions.appendChild(execute);
+  button('close',function(){panel.remove();},actions);
+  panel.appendChild(actions);
+  execute.addEventListener('click',function(){
+    api.write(deletionAction(table),Object.assign({confirmed:true,reason:draft.reason,confirmation:draft.confirmation,cascade:draft.cascade}, (function(){var p={};p[deletionKey(table)]=id;p.revision=draft.revision;return p;}())))
+      .then(function(result){drafts.delete(draftKey);panel.remove();success(t('deleted')+' · '+t('needsPublication'));settle(deletionAction(table),{projectId:table==='PROJECTS'?id:undefined,taskId:table==='TASKS'?id:undefined},result);})
+      .catch(function(error){notice(error.message,'error');});
+  });
+  container.appendChild(panel);
+  var ready=revision?Promise.resolve(revision):loadRevision(table,id);
+  Promise.all([api.read('deletion',{table:table,id:id},true),ready]).then(function(results){
+    var state=results[0],rev=results[1]||'';
+    draft.revision=rev;
+    summary.replaceChildren();
+    summary.appendChild(el('p',t('deleteSafe'),'muted'));
+    if(state.blocked){
+      summary.appendChild(el('p',t('deleteBlocked'),'error'));
+      var list=el('ul');
+      (state.blocking||[]).forEach(function(item){
+        list.appendChild(el('li',deleteCodeLabel(item.code)+(item.table?' · '+item.table:'')+(item.count?' · '+item.count:'')));
+      });
+      summary.appendChild(list);
+      return;
+    }
+    execute.disabled=!rev;
+  }).catch(function(error){summary.replaceChildren(el('p',error.message,'error'));});
+}
+function openDeletionFor(table,id,name,revision,container){
+  deletionPanel(container||byId('content'),table,id,name,revision);
+}
+
 function render() {
   var host=byId('content');host.replaceChildren();var data=currentData;resultsHost=null;title(view,host);
   var top=el('div',undefined,'toolbar');button('refresh',function(){load(true);},top);host.appendChild(top);
@@ -489,9 +763,19 @@ function render() {
   if(syncError){var banner=el('div',undefined,'error');banner.appendChild(el('p',syncError));button('retry',function(){load(true);},banner);host.appendChild(banner);}
   if(view==='overview'&&data&&data.actor) {
     actorRole=data.actor.role;byId('actor').textContent=data.actor.name+' · '+data.actor.role;
-    var kpis=el('div',undefined,'kpis');['active','risk','soon','overdue'].forEach(function(k){var box=el('article',t(k),'kpi');box.appendChild(el('strong',data.kpis[k]));kpis.appendChild(box);});host.appendChild(kpis);
-    host.appendChild(el('p',t('refresh')+': '+clockText(Date.parse(data.refreshedAt)||Date.now()),'muted'));projectCards(data.projects,host);
-    host.appendChild(el('h2',t('upcoming')));tasks(data.upcoming,host);button('requests',function(){navigate('requests');},host);host.appendChild(el('span',' '+t('pending')+': '+data.pending));
+    var areaHeading=el('div',undefined,'section-title');areaHeading.appendChild(el('h2',t('navResponsibilities')));
+    if(activeResponsibility)areaHeading.appendChild(el('span',responsibilityHeading(),'chip'));
+    host.appendChild(areaHeading);
+    responsibilityStrip(host);
+    var kpis=filteredKpis(data),kpiBox=el('div',undefined,'kpis');['active','risk','soon','overdue'].forEach(function(k){var box=el('article',t(k),'kpi');box.appendChild(el('strong',kpiValue(kpis[k])));kpiBox.appendChild(box);});host.appendChild(kpiBox);
+    host.appendChild(el('p',t('refresh')+': '+clockText(Date.parse(data.refreshedAt)||Date.now()),'muted'));
+    var projectHeading=el('div',undefined,'section-title');projectHeading.appendChild(el('h2',t('projects')));host.appendChild(projectHeading);
+    var overviewProjects=data.projects||{items:[],total:0};
+    projectCards(activeResponsibility?{items:(overviewProjects.items||[]).filter(inActiveArea),total:(overviewProjects.items||[]).filter(inActiveArea).length}:overviewProjects,host);
+    host.appendChild(el('h2',t('upcoming')));
+    var upcomingItems=((data.upcoming&&data.upcoming.items)||[]).filter(function(item){return !activeResponsibility||inActiveArea(item);});
+    tasks({items:upcomingItems,total:upcomingItems.length},host);
+    button('requests',function(){navigate('requests');},host);host.appendChild(el('span',' '+t('pending')+': '+data.pending));
   } else if(view==='projects') {button('new',function(){openEditor('project');},top);listFilters('projects',host);resultsHost=el('div');host.appendChild(resultsHost);renderList();
   } else if(view==='tasks') {button('new',function(){openEditor('task',null,null,{projectId:(filters.tasks||{}).projectId||'',subprojectId:(filters.tasks||{}).subprojectId||''});},top);listFilters('tasks',host);resultsHost=el('div');host.appendChild(resultsHost);renderList();
   } else if(view==='diagnostics') {renderDiagnostics(host);
@@ -499,18 +783,44 @@ function render() {
     var choices=el('div',undefined,'toolbar');['members','responsibilities','skills','automation','publication','status'].forEach(function(k){button(k,function(){navigate(k);},choices);});host.appendChild(choices);button('reportRefresh',function(){act('reportRefresh',{},true);},host);
   } else if(!data) {
     host.appendChild(el('p',t('loading'),'muted'));
+  } else if(view==='member') {
+    memberProfileView(data,host);
   } else if(view==='project') {
     var p=data.record;host.appendChild(el('h2',p.Project_Name));button('edit',function(){openEditor('project',p.Project_ID,p);},top);
     button('archive',function(){act('projectArchive',{projectId:p.Project_ID,revision:p._revision},true);},top);
     button('subproject',function(){openEditor('subproject',null,null,{projectId:p.Project_ID});},top);
     button('tasks',function(){navigate('tasks',{projectId:p.Project_ID});},top);
     host.appendChild(el('p',p.Description));host.appendChild(el('p',t('progress')+': '+(data.progress.calculated?data.progress.percent:'—')));host.appendChild(el('h2',t('hierarchy')));
-    data.subprojects.filter(function(s){return !s.Parent_Subproject_ID;}).reduce(function(all,root){return all.concat([root],data.subprojects.filter(function(s){return s.Parent_Subproject_ID===root.Subproject_ID;}));},[]).forEach(function(s){var card=el('article',undefined,'card tree'+(s.Parent_Subproject_ID?' child':''));card.appendChild(el('h3',s.Subproject_Name+' · '+statusLabel(s.Status)));card.appendChild(el('p',t('progress')+': '+(s._progress&&s._progress.calculated?s._progress.percent:'—')));button('edit',function(){openEditor('subproject',s.Subproject_ID,s);},card);button('tasks',function(){navigate('tasks',{projectId:p.Project_ID,subprojectId:s.Subproject_ID,subprojectName:s.Subproject_Name});},card);if(!s.Parent_Subproject_ID)button('new',function(){openEditor('subproject',null,null,{projectId:p.Project_ID,parentId:s.Subproject_ID});},card);button(s.Status==='Archived'?'reactivate':'archive',function(){act(s.Status==='Archived'?'subprojectReactivate':'subprojectArchive',{subprojectId:s.Subproject_ID,revision:s._revision},true);},card);host.appendChild(card);});
+    button('deleteRecord',function(){openDeletionFor('PROJECTS',p.Project_ID,p.Project_Name,p._revision,host);},top);
+    // Bounded, collapsible tree: four subproject levels, parents before children, and any
+    // orphan (unknown parent) still rendered so nothing silently disappears.
+    var childrenOfSub=Object.create(null);(data.subprojects||[]).forEach(function(s){var pid=s.Parent_Subproject_ID||'';(childrenOfSub[pid]=childrenOfSub[pid]||[]).push(s);});
+    var collapsed=filters.collapsed||(filters.collapsed={});
+    var rendered=Object.create(null);
+    function renderSub(s,depth){
+      if(rendered[s.Subproject_ID])return;rendered[s.Subproject_ID]=true;
+      var card=el('article',undefined,'card tree'+(depth?' child':''));
+      if(depth)card.setAttribute('style','margin-left:'+(depth*22)+'px');
+      var head=el('h3');var children=childrenOfSub[s.Subproject_ID]||[];
+      if(children.length){var toggle=el('button',collapsed[s.Subproject_ID]?'▶':'▼','tree-toggle');toggle.type='button';toggle.setAttribute('aria-expanded',collapsed[s.Subproject_ID]?'false':'true');toggle.setAttribute('aria-label',t('hierarchy'));toggle.addEventListener('click',function(){collapsed[s.Subproject_ID]=!collapsed[s.Subproject_ID];render();});head.appendChild(toggle);}
+      head.appendChild(el('span',s.Subproject_Name+' · '+statusLabel(s.Status)));card.appendChild(head);
+      card.appendChild(el('p',t('progress')+': '+(s._progress&&s._progress.calculated?s._progress.percent:'—')));
+      button('edit',function(){openEditor('subproject',s.Subproject_ID,s);},card);
+      button('tasks',function(){navigate('tasks',{projectId:p.Project_ID,subprojectId:s.Subproject_ID,subprojectName:s.Subproject_Name});},card);
+      if(depth<3)button('new',function(){openEditor('subproject',null,null,{projectId:p.Project_ID,parentId:s.Subproject_ID});},card);
+      button(s.Status==='Archived'?'reactivate':'archive',function(){act(s.Status==='Archived'?'subprojectReactivate':'subprojectArchive',{subprojectId:s.Subproject_ID,revision:s._revision},true);},card);
+      if(actorRole==='ADMIN')button('deleteRecord',function(){openDeletionFor('SUBPROJECTS',s.Subproject_ID,s.Subproject_Name,s._revision,card);},card);
+      host.appendChild(card);
+      if(collapsed[s.Subproject_ID])return;
+      (childrenOfSub[s.Subproject_ID]||[]).forEach(function(child){renderSub(child,depth+1);});
+    }
+    (childrenOfSub['']||[]).forEach(function(root){renderSub(root,0);});
+    (data.subprojects||[]).forEach(function(s){if(!rendered[s.Subproject_ID])renderSub(s,0);});
   } else if(view==='members'||view==='responsibilities'||view==='skills') {
     var type=view==='members'?'member':view==='skills'?'skill':'responsibility';button('new',function(){openEditor(type);},top);
     if(view==='members')listFilters('members',host);
     if(view==='skills')button('skillAssess',function(){openEditor('skillAssess');},top);
-    (data.items||[]).forEach(function(r){var card=el('article',undefined,'card');card.appendChild(el('h2',r.Name||r.Skill_Name));if(type==='member'){rowValues(card,[[t('department'),r.Department],[t('role'),r.Role],[t('capacity'),r.Weekly_Capacity_Hours],[t('enabled'),r.Active]]);button('edit',function(){openEditor(type,r.Member_ID,r);},card);button('showWork',function(){navigate('tasks',{ownerId:r.Member_ID});},card);}else if(type==='responsibility'){card.appendChild(el('p',r.Description));card.appendChild(el('p',statusLabel(r.Status)));button('edit',function(){openEditor(type,r.Responsibility_ID,r);},card);['up','down'].forEach(function(dir){button(dir,function(){act('responsibilityMove',{responsibilityId:r.Responsibility_ID,revision:r._revision,direction:dir});},card);});button(r.Status==='Retired'?'reactivate':'retire',function(){act(r.Status==='Retired'?'responsibilityReactivate':'responsibilityRetire',{responsibilityId:r.Responsibility_ID,revision:r._revision},true);},card);button('projects',function(){navigate('projects',{responsibilityId:r.Responsibility_ID});},card);}host.appendChild(card);});if(!data.items.length)host.appendChild(el('p',t('empty')));pagination(data,view,host);if(view==='skills'&&data.assessments){(data.assessments.matrix||[]).forEach(function(row,index){var card=el('article',undefined,'card');card.appendChild(el(index?'p':'h2',row.join(' · ')));host.appendChild(card);});}
+    (data.items||[]).forEach(function(r){var card=el('article',undefined,'card');card.appendChild(el('h2',r.Name||r.Skill_Name));if(type==='member'){rowValues(card,[[t('department'),r.Department],[t('role'),r.Role],[t('capacity'),r.Weekly_Capacity_Hours],[t('enabled'),r.Active]]);button('edit',function(){openEditor(type,r.Member_ID,r);},card);button('openMember',function(){navigate('member',{id:r.Member_ID});},card);}else if(type==='responsibility'){card.appendChild(el('p',r.Description));card.appendChild(el('p',statusLabel(r.Status)));if(r.Color_Hex)card.appendChild(el('span',r.Color_Hex,'chip'));button('edit',function(){openEditor(type,r.Responsibility_ID,r);},card);['up','down'].forEach(function(dir){button(dir,function(){act('responsibilityMove',{responsibilityId:r.Responsibility_ID,revision:r._revision,direction:dir});},card);});button(r.Status==='Retired'?'reactivate':'retire',function(){act(r.Status==='Retired'?'responsibilityReactivate':'responsibilityRetire',{responsibilityId:r.Responsibility_ID,revision:r._revision},true);},card);button('projects',function(){navigate('projects',{responsibilityId:r.Responsibility_ID});},card);}host.appendChild(card);});if(!data.items.length)host.appendChild(el('p',t('empty')));pagination(data,view,host);if(view==='skills'&&data.assessments){(data.assessments.matrix||[]).forEach(function(row,index){var card=el('article',undefined,'card');card.appendChild(el(index?'p':'h2',row.join(' · ')));host.appendChild(card);});}
   } else if(view==='requests') {
     button('requestImport',function(){act('requestImport',{});},top);
     field(top,'showDecided',!!(filters.requests&&filters.requests.includeDecided),null,function(v){filters.requests={includeDecided:v};load(true);},'checkbox');
@@ -563,9 +873,10 @@ function patchSummary(action, payload, result) {
     var owner = {};
     ((store.references && store.references.members) || []).forEach(function (m) { if (m.id === row.Owner_Member_ID) owner = m; });
     var summary = {id: row.Task_ID, name: row.Task_Name, projectId: row.Project_ID, project: project.name || '',
-      subprojectId: row.Subproject_ID || '', ownerId: row.Owner_Member_ID || '', owner: owner.name || '',
+      subprojectId: row.Subproject_ID || '', parentId: row.Parent_Task_ID || '', container: false, depth: 0,
+      ownerId: row.Owner_Member_ID || '', owner: owner.name || '',
       responsibilityId: project.responsibilityId || '', deadline: dayText(row.Due_Date), status: row.Status,
-      progress: row.Progress_Percent, priority: row.Priority};
+      progress: row.Progress_Percent, priority: row.Priority, reviewState: ''};
     var known = store.tasks.items.some(function (item) { return item.id === summary.id; });
     store.tasks.items = known ? store.tasks.items.map(function (item) { return item.id === summary.id ? summary : item; })
       : store.tasks.items.concat([summary]);
@@ -581,11 +892,11 @@ function act(action,payload,confirm) {
 }
 // One create/edit form per record type. Field mapping sends partial patches only.
 var schemas={
- project:{id:'Project_ID',key:'projectId',create:'projectCreate',save:'projectSave',fields:{name:'Project_Name',description:'Description',responsibilityId:'Responsibility_ID',ownerId:'Project_Owner_ID',deadline:'Committed_Deadline',statusField:'Status',category:'Category',priority:'Priority',summary:'Dashboard_Summary',visibility:'Dashboard_Visibility'}},
+ project:{id:'Project_ID',key:'projectId',create:'projectCreate',save:'projectSave',fields:{responsibilityId:'Responsibility_ID',name:'Project_Name',ownerId:'Project_Owner_ID',description:'Description',deadline:'Committed_Deadline',priority:'Priority',statusField:'Status',visibility:'Dashboard_Visibility',category:'Category',summary:'Dashboard_Summary'}},
  subproject:{id:'Subproject_ID',key:'subprojectId',create:'subprojectCreate',save:'subprojectSave',fields:{name:'Subproject_Name',projectId:'Project_ID',parentId:'Parent_Subproject_ID',ownerId:'Owner_ID'}},
- task:{id:'Task_ID',key:'taskId',create:'taskSave',save:'taskSave',fields:{taskName:'Task_Name',description:'Description',projectId:'Project_ID',subprojectId:'Subproject_ID',ownerId:'Owner_Member_ID',deadline:'Due_Date',durationValue:'Planned_Duration_Value',durationUnit:'Planned_Duration_Unit',durationBasis:'Planned_Duration_Basis',plannedStart:'Planned_Start',statusField:'Status',progress:'Progress_Percent',priority:'Priority',estimatedHours:'Estimated_Hours',actualHours:'Actual_Hours',acceptanceCriteria:'Acceptance_Criteria',nextAction:'Next_Action'}},
+ task:{id:'Task_ID',key:'taskId',create:'taskSave',save:'taskSave',fields:{taskName:'Task_Name',description:'Description',projectId:'Project_ID',subprojectId:'Subproject_ID',parentTaskId:'Parent_Task_ID',ownerId:'Owner_Member_ID',deadline:'Due_Date',durationValue:'Planned_Duration_Value',durationUnit:'Planned_Duration_Unit',durationBasis:'Planned_Duration_Basis',plannedStart:'Planned_Start',statusField:'Status',progress:'Progress_Percent',priority:'Priority',estimatedHours:'Estimated_Hours',actualHours:'Actual_Hours',acceptanceCriteria:'Acceptance_Criteria',nextAction:'Next_Action'}},
  member:{id:'Member_ID',key:'memberId',create:'memberSave',save:'memberSave',fields:{name:'Name',email:'Email',department:'Department',position:'Position',capacity:'Weekly_Capacity_Hours',role:'Role',enabled:'Active'}},
- responsibility:{id:'Responsibility_ID',key:'responsibilityId',create:'responsibilitySave',save:'responsibilitySave',fields:{name:'Name',description:'Description',ownerId:'Owner_Member_ID'}},
+ responsibility:{id:'Responsibility_ID',key:'responsibilityId',create:'responsibilitySave',save:'responsibilitySave',fields:{name:'Name',description:'Description',ownerId:'Owner_Member_ID',color:'Color_Hex'}},
  skill:{create:'skillCreate',fields:{name:'Skill_Name',category:'Category',description:'Description',requiredLevel:'Required_Level'}},
  skillAssess:{create:'skillAssess',fields:{memberId:'Member_ID',skillId:'Skill_ID',level:'Current_Level',evidence:'Evidence',trainingAction:'Training_Action',nextReviewDate:'Next_Review_Date'}}
 };
@@ -593,7 +904,7 @@ function openEditor(type,id,record,defaults) {
   var seq=++drawerSequence, key=type+':'+(id||'new'), old=drafts.get(key), fromCache=!record&&!!id&&!!api.peek(type,{id:id}), loading=!(record||fromCache);
   if(loading)notice(t('loading'));
   var fetch=record?Promise.resolve(record):id?detail(type,id,false):Promise.resolve({});
-  Promise.all([fetch,api.read('references')]).then(function(results){if(seq!==drawerSequence)return;var schema=schemas[type];if(!old){old={type:type,id:id,original:results[0],values:{},base:{},subprojects:[]};Object.keys(schema.fields).forEach(function(k){old.values[k]=results[0][schema.fields[k]]===undefined?'':results[0][schema.fields[k]];});if(!id){Object.assign(old.values,{priority:'Medium',statusField:type==='project'?'Planned':'Assigned',visibility:'RESTRICTED',durationUnit:'DAY',durationBasis:'WORKING_DAYS',enabled:true,role:'MEMBER'},defaults||{});}old.base=Object.assign({},old.values);drafts.set(key,old);}currentEditor={key:key,draft:old};renderEditor();byId('editor').showModal();if(loading)notice('');if(old.values.projectId)loadSubprojects(old.values.projectId,old);if(type==='skillAssess')api.read('skills').then(function(d){old.skills=d.items;renderEditor();});if(fromCache)refreshDetail(type,id,old);}).catch(function(e){notice(e.message,'error');});
+  Promise.all([fetch,api.read('references')]).then(function(results){if(seq!==drawerSequence)return;var schema=schemas[type];if(!old){old={type:type,id:id,original:results[0],values:{},base:{},subprojects:[],parentName:(defaults||{}).parentTaskName||''};Object.keys(schema.fields).forEach(function(k){old.values[k]=results[0][schema.fields[k]]===undefined?'':results[0][schema.fields[k]];});if(!id){var initial=Object.assign({priority:'Medium',statusField:type==='project'?'Planned':'Assigned',visibility:'RESTRICTED',durationUnit:'DAY',durationBasis:'WORKING_DAYS',enabled:true,role:'MEMBER'},defaults||{});if(type==='project'&&(!defaults||defaults.responsibilityId===undefined))initial.responsibilityId=activeResponsibility&&activeResponsibility!==UNASSIGNED?activeResponsibility:'';Object.assign(old.values,initial);}old.base=Object.assign({},old.values);drafts.set(key,old);}currentEditor={key:key,draft:old};renderEditor();byId('editor').showModal();if(loading)notice('');if(old.values.projectId)loadSubprojects(old.values.projectId,old);if(type==='skillAssess')api.read('skills').then(function(d){old.skills=d.items;renderEditor();});if(fromCache)refreshDetail(type,id,old);}).catch(function(e){notice(e.message,'error');});
 }
 /** Cached record for an instant form; the server copy is fetched separately. */
 function detail(type,id,fresh) {
@@ -614,10 +925,26 @@ function renderEditor() {
     if(key==='enabled')type='checkbox';if(key==='email')type='email';
     if(key==='projectId')options=[{id:'',name:'—'}].concat(references().projects);
     if(key==='ownerId'||key==='memberId')options=[{id:'',name:'—'}].concat(references().members);
-    if(key==='responsibilityId')options=[{id:'',name:'—'}].concat(references().responsibilities);
+    if(key==='responsibilityId'){
+      // A new project may only be filed under an active area; an edit still shows the stored one.
+      var areas=references().responsibilities.filter(function(area){return d.id||area.status!=='Retired';});
+      if(d.values[key]&&!areas.some(function(area){return area.id===d.values[key];})){
+        areas=areas.concat(references().responsibilities.filter(function(area){return area.id===d.values[key];}));
+      }
+      options=[{id:'',name:d.type==='project'&&!d.id?t('responsibilityRequired'):'—'}].concat(areas);
+    }
+    if(key==='parentTaskId'){
+      var pool=(store.tasks&&store.tasks.items)||[];
+      var candidates=pool.filter(function(task){
+        return task.id!==d.id&&task.projectId===d.values.projectId&&
+          String(task.subprojectId||'')===String(d.values.subprojectId||'')&&Number(task.depth||0)<2;
+      }).map(function(task){return{id:task.id,name:task.name};});
+      if(d.values[key]&&!candidates.some(function(item){return item.id===d.values[key];}))candidates.push({id:d.values[key],name:d.parentName||d.values[key]});
+      options=[{id:'',name:t('noSubtask')}].concat(candidates);
+    }
     if(key==='subprojectId'||key==='parentId')options=[{id:'',name:'—'}].concat((d.subprojects||[]).filter(function(s){return s.Subproject_ID!==d.id;}).map(function(s){return{id:s.Subproject_ID,name:s.Subproject_Name+' · '+statusLabel(s.Status)};}));
     if(key==='skillId')options=[{id:'',name:'—'}].concat((d.skills||[]).map(function(s){return{id:s.Skill_ID,name:s.Skill_Name};}));
-    if(key==='statusField')options=d.type==='project'?['Planned','Active','On Hold','Completed','Cancelled']:['Not Started','Assigned','In Progress','Blocked','On Hold','Done','Cancelled'];
+    if(key==='statusField')options=d.type==='project'?['Planned','Active','On Hold','Completed','Cancelled']:['Not Started','Assigned','In Progress','Blocked','On Hold','Done','Cancelled'].filter(function(value){return value!=='Done'||d.values.statusField==='Done';});
     if(key==='priority')options=['Low','Medium','High','Critical'].map(function(v){return{id:v,name:EH_I18N.priority(lang,v)};});
     if(key==='role')options=['MEMBER','VIEWER','MANAGER','ADMIN'];
     if(key==='visibility')options=[{id:'RESTRICTED',name:lang==='ja'?'非公開':'Restricted'},{id:'INTERNAL',name:lang==='ja'?'社内公開':'Internal'}];
@@ -626,11 +953,28 @@ function renderEditor() {
     var control=field(fields,key,d.values[key],options,function(v){d.values[key]=v;d.dirty=true;if(key==='projectId'){d.values.subprojectId='';d.values.parentId='';loadSubprojects(v,d);}},type);
     if((key==='plannedStart'&&d.values.durationValue)||(key==='projectId'&&d.type==='subproject'&&d.id))control.disabled=true;
     if(['name','taskName','email','projectId'].indexOf(key)>=0)control.required=true;
+    if(d.type==='project'&&!d.id&&key==='responsibilityId')control.required=true;
     if(d.type==='task'&&['ownerId','deadline'].indexOf(key)>=0)control.required=true;
   });
   // The required duration is optional: without it the planned start stays unknown, exactly as in
   // the existing manager sidebar and domain workflow.
   if(d.type==='task')fields.appendChild(el('p',t('durationHint'),'muted hint-wide'));
+  if(d.type==='task')fields.appendChild(el('p',t('completionHint'),'muted hint-wide'));
+  // ADMIN data correction is deliberately separate from the worker/manager workflow.
+  if(d.type==='task'&&d.id&&actorRole==='ADMIN'){
+    var overrideBox=el('div',undefined,'deletion-panel hint-wide');
+    overrideBox.appendChild(el('h3',t('overrideCompletion')));
+    var overrideDraft=d.override||(d.override={reason:'',confirmation:''});
+    field(overrideBox,'overrideReason',overrideDraft.reason,null,function(v){overrideDraft.reason=v;});
+    field(overrideBox,'overrideConfirmation',overrideDraft.confirmation,null,function(v){overrideDraft.confirmation=v;});
+    var overrideButton=el('button',t('overrideCompletion'));overrideButton.type='button';
+    overrideButton.addEventListener('click',function(){
+      act('taskOverrideComplete',{taskId:d.id,reason:overrideDraft.reason,confirmation:overrideDraft.confirmation,revision:d.original._revision},true)
+        .then(function(ok){if(ok)message.textContent=t('saved');});
+    });
+    overrideBox.appendChild(overrideButton);
+    fields.appendChild(overrideBox);
+  }
   var confirms=d.type==='project'?['confirmDeadlineChange','confirmResponsibilityChange','confirmRetiredResponsibility']:d.type==='subproject'?['confirmReparent']:d.type==='task'?['acknowledgeNonWorking','confirmDeadlineChange']:[];
   confirms.forEach(function(k){field(fields,k,d.values[k],null,function(v){d.values[k]=v;},'checkbox');});
   if(d.type==='task')button('plan',function(){api.read('plan',d.values,true).then(function(p){message.textContent=t('plannedStart')+': '+p.startDate+' · '+p.warnings.map(function(w){return EH_I18N.has('web.'+w.code)?t(w.code):EH_I18N.serverMessage(lang,w.code);}).join(', ');}).catch(function(e){message.textContent=e.message;});},form);

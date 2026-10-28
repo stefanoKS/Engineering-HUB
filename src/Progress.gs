@@ -5,6 +5,10 @@
  * temporary fallback weight of 1 so unestimated work still moves the number, while
  * the unknown count is reported separately and never presented as real hours.
  * Cancelled tasks are excluded; zero-hour estimates carry no weight but are counted.
+ *
+ * V1.6: a task that contains subtasks is a work container. It is excluded from the
+ * calculation because its leaf work is already counted, so a parent and its children are
+ * never counted twice.
  */
 var Progress = (function () {
   var UNKNOWN_WEIGHT = 1;
@@ -31,8 +35,10 @@ var Progress = (function () {
   function rollup(tasks) {
     var weighted = 0, weightTotal = 0, percentTotal = 0, counted = 0;
     var unknown = 0, zeroEstimate = 0;
+    var parents = typeof TaskTree !== 'undefined' ? TaskTree.containerIds(tasks) : Object.create(null);
     (tasks || []).forEach(function (task) {
       if (!task || task.Status === CANCELLED) return;
+      if (parents[String(task.Task_ID || '')]) return;
       counted++;
       var value = percent(task), itemWeight = weight(task);
       if (Estimates.known(task.Estimated_Hours)) {
@@ -71,7 +77,7 @@ var Progress = (function () {
    *
    * Only tasks are counted, never child percentages, so a parent rollup cannot double
    * count: each task belongs to exactly one node and the project rollup uses its own
-   * project grouping. Depth is bounded to two levels by Subprojects, and the visited map
+   * project grouping. Depth is bounded by Subprojects.MAX_DEPTH, and the visited map
    * keeps malformed hierarchy data from recursing forever.
    */
   function subtreeTasks(subprojectId, children, tasksBySubproject, seen) {

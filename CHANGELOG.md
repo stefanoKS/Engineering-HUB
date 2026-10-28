@@ -1,5 +1,69 @@
 # Changelog
 
+## V1.6 — 2026-10-28
+
+Responsibility-centered engineering management. Schema **7** (one additive, approval-gated migration),
+employee contract **1.5**, no execute-as change, no trigger, mail or Calendar activation, and no
+automatic deployment, migration or initialization.
+
+### Responsibilities first
+
+- The manager home opens with a responsibility section: one card per area (colour, owner, active
+  project count, open/overdue task counts, weighted progress), `すべての担当領域` and
+  `+ 担当領域を追加`. Selecting an area filters projects, tasks, KPIs and upcoming deadlines from
+  the in-memory snapshot with no additional read RPC.
+- `RESPONSIBILITIES.Color_Hex` is validated (`#RRGGBB`) and defaults from a documented palette; a
+  legacy blank value falls back to its palette position. Colour is display metadata only.
+- Projects created in the manager dashboard must name an active responsibility (server-set
+  requirement). The legacy Sheets sidebar keeps the V1.4 unassigned (未分類) path.
+
+### Hierarchy
+
+- Subprojects nest to four levels (`Subprojects.MAX_DEPTH`); a fifth level, a self parent, a
+  cross-project parent and a cycle are refused, and reparenting validates the whole subtree.
+- Tasks nest to three levels via `TASKS.Parent_Task_ID` (same project **and** subproject). A task
+  with children is a work container: progress and completion derive from leaf work and are never
+  counted twice. A task with recorded work is never silently converted into a container.
+  `Dependency_IDs` stays the separate sequencing constraint.
+
+### Completion lifecycle
+
+- A completion report no longer marks a task done. Only a manager approval of a
+  `COMPLETION_REPORT` (or an explicit ADMIN correction with a reason, the exact confirmation and
+  its own `COMPLETION_OVERRIDDEN` audit row) writes Done / 100 %.
+- `Tasks.complete`, `Tasks.update`, `Ui.updateProgress`, `Ui.assignTask` and the manager web form
+  now refuse the transition. Existing completed rows stay valid legacy records.
+
+### Deletion (documented exception)
+
+- ADMIN-only permanent removal of a mistaken, empty project/subproject/task: empty dependency
+  preflight, exact `DELETE <id>` confirmation, required reason, verified backup, script lock and an
+  immutable `RECORD_DELETED` tombstone. Archive stays the default; anything with history refuses
+  deletion. `AGENTS.md` rule 78 records the intentional exception to the earlier no-delete rules.
+
+### Member views and the shared dashboard
+
+- Member profile: current work, previous work with original/actual completion dates and acceptance,
+  and an activity list built only from existing audit/request/deadline-history rows. Attribution
+  uses owner/task IDs, never a typed requester name.
+- Snapshot contract **1.5** adds `responsibility.color`, `task.parentTaskId`, `container`,
+  `reviewState` and `completedAt`. The employee app renders the nested hierarchy and an approval
+  badge; report text is never published.
+
+### Desktop design
+
+- V1.6 tokens (surface/text/border and the documented accents), a prominent responsibility strip,
+  collapsible hierarchy, text-plus-colour status badges and a deletion panel. System fonts first
+  (Noto Sans JP / Inter fallbacks), no new dependency, desktop focus with normal resizing and zoom.
+
+### Gates
+
+- Local: `npm ci`, `npm run lint`, `npm test`, `npm run validate` and
+  `node scripts/manager-web-benchmark.js` all pass; see the twelve
+  [V1.6 checkgates](docs/checkgates/V1_6_GATE_12.md). Cached navigation 0.78–2.01 ms, local filtering
+  0.07–1.50 ms; `bootstrap` 4.40 / 37.86 / 115.34 ms and 10.5 / 57.3 / 152.7 KB for 10/100/300 projects.
+- Live Workspace verification, the DEV migration and the request round trip remain **BLOCKED /
+  NOT_RUN**; `docs/PRODUCTION_READINESS.md` stays **NOT APPROVED FOR PRODUCTION**.
 ## V1.5.1 — 2026-10-28
 
 Local-first performance release for the manager browser UI. No schema change (still **6**), no

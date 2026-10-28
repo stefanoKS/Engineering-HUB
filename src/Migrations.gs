@@ -4,7 +4,10 @@ var Migrations = (function () {
     { id: '003_management_reliability', from: 2, to: 3 },
     { id: '004_shared_dashboard', from: 3, to: 4 },
     { id: '005_task_planning_and_requests', from: 4, to: 5 },
-    { id: '006_responsibilities_and_nested_subprojects', from: 5, to: 6 }
+    { id: '006_responsibilities_and_nested_subprojects', from: 5, to: 6 },
+    // V1.6 additive extension: nested tasks, validated area colour and deletion markers.
+    // No existing column is renamed, reordered or rewritten.
+    { id: '007_responsibility_hierarchy_and_lifecycle', from: 6, to: 7 }
   ];
   function currentVersion() {
     var sheet = Database.book().getSheetByName('SCHEMA_MIGRATIONS');

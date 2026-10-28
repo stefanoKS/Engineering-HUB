@@ -120,3 +120,47 @@
 77. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_4_1_GATE_<n>.md` for this release, and keep `docs/PRODUCTION_READINESS.md` NOT APPROVED until live evidence exists.
 
 
+
+## V1.6 mandatory rules (responsibility-centered engineering management)
+
+78. **Documented, narrowly scoped exception to the earlier no-delete rules (25, 59).** `Deletion.gs` is the only
+    module allowed to remove a row, and only for a `PROJECTS`, `SUBPROJECTS` or `TASKS` record that is demonstrably a
+    mistaken, empty entry: ADMIN only, empty dependency preflight, exact typed confirmation (`DELETE <id>`), required
+    reason, verified backup in the same operation, script lock, and an immutable `RECORD_DELETED` tombstone.
+    Operational history, recorded effort, approvals, requests, notifications, dependencies, published visibility and
+    archived records always refuse deletion and fall back to archive. A removed identifier is never reused. Nothing
+    else in this repository may call a destructive Sheets API.
+79. Responsibilities stay the top organisational level and the only grouping of projects; the relationship is the
+    stable `PROJECTS.Responsibility_ID`. Never duplicate project tables per area, never rename stored IDs, and never
+    auto-assign a historical project to an area. A new project created in the manager dashboard must name an active
+    responsibility; the legacy Sheets sidebar keeps the documented unassigned (未分類) path.
+80. Subprojects nest at most four levels beneath a project (`Subprojects.MAX_DEPTH`) and tasks at most three
+    (`TaskTree.MAX_DEPTH`). Both limits are defined once. Reject self parents, cross-project parents, cross-subproject
+    task parents and cycles with a documented error, and validate the whole subtree before a reparent.
+81. A task with children is a work container, never an extra unit of work. Its progress and completion are derived
+    from leaf work and are never counted twice in a project, subproject, report or published aggregate; its stored
+    `Status`/`Progress_Percent` are not authoritative and are not silently rewritten. A task that already carries
+    recorded effort, approval or completion is never converted into a container.
+82. `Status = Done` is written only by the reviewed completion workflow: a manager decision on a `COMPLETION_REPORT`,
+    or an explicit ADMIN correction with a required reason, the exact confirmation and its own
+    `COMPLETION_OVERRIDDEN` audit evidence. Every other entrypoint (`Tasks.complete`, `Tasks.update`,
+    `Ui.updateProgress`, `Ui.assignTask`, the manager web form) refuses the transition. Existing completed rows stay
+    valid legacy records; do not invent approval events for them.
+83. `Parent_Task_ID` is organisation and `Dependency_IDs` is sequencing. Never derive one from the other, and keep
+    the existing dependency cycle rule.
+84. Filtering, sorting and history use stable IDs. Attribute a member's work through the owner ID and the task ID,
+    never through a typed requester name, and never invent an event when no record exists. An unverified identity
+    stays labelled as self-reported.
+85. Publish only the allowlisted V1.6 fields (responsibility `color`, `parentTaskId`, `container`, `reviewState`,
+    `completedAt`). Never publish a report note, a reporter name, a private description, acceptance criteria, effort
+    or capacity data. An older contract version fails closed instead of being read as the new one.
+86. Keep the local-first behaviour: one authorized snapshot, in-memory task index, in-flight deduplication,
+    stale-while-revalidate, selective invalidation and revision-checked writes. Do not restore per-click server reads,
+    and never persist private manager data in `localStorage`, `sessionStorage` or IndexedDB. The selected
+    responsibility filter stays in page memory only.
+87. A fresh workbook initializes at schema 7 and records `INITIALIZE_V7`; `007_responsibility_hierarchy_and_lifecycle`
+    exists only for an existing V6 workbook. Never use initialization to upgrade an existing database, and never run
+    schema-7 writes against a schema-6 workbook without the approved migration and its verified backup.
+88. Record PASS, FAIL, BLOCKED or NOT_RUN with evidence in `docs/checkgates/V1_6_GATE_<n>.md`, follow
+    [docs/V1_6_DEPLOYMENT_RUNBOOK.md](docs/V1_6_DEPLOYMENT_RUNBOOK.md) for any DEV work, and keep
+    `docs/PRODUCTION_READINESS.md` **NOT APPROVED FOR PRODUCTION** until recorded live Workspace evidence exists.

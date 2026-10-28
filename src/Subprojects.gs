@@ -1,15 +1,19 @@
 /**
  * Project > subproject > nested subproject > task.
  *
- * The hierarchy is bounded: at most two subproject levels beneath a project. A blank
- * Parent_Subproject_ID is a root subproject, so every pre-V1.4 row keeps its meaning.
+ * The hierarchy is bounded: at most four subproject levels beneath a project
+ * (V1.6; the pre-V1.6 limit of two is kept as a historical fact in the checkgates).
+ * A blank Parent_Subproject_ID is a root subproject, so every pre-V1.4 row keeps its
+ * meaning and existing two-level data stays valid.
  * Reparenting validates the whole affected subtree instead of silently flattening it.
  *
  * Archiving a subproject never touches its children or tasks: the eligibility rules
  * decide whether archived work still contributes to active-work calculations.
  */
 var Subprojects = (function () {
-  var MAX_LEVEL = 2;
+  var MAX_DEPTH = 4;
+  // Kept for older call sites; the supported limit is MAX_DEPTH.
+  var MAX_LEVEL = MAX_DEPTH;
 
   function fail(message) { Domain.fail(message); }
 
@@ -135,7 +139,7 @@ var Subprojects = (function () {
     else simulated.__new__ = parentId;
     var level = levelOf(id || '__new__', simulated);
     var height = id ? heightOf(id, children) : 0;
-    if (level + height > MAX_LEVEL) fail('サブプロジェクトの階層は2階層までです');
+    if (level + height > MAX_DEPTH) fail('サブプロジェクトの階層は' + MAX_DEPTH + '階層までです');
     return {level: level, height: height};
   }
 
@@ -157,7 +161,8 @@ var Subprojects = (function () {
   function confirmed(options) { return !!options && options.confirmed === true; }
 
   return {
-    MAX_LEVEL: MAX_LEVEL,
+    MAX_DEPTH: MAX_DEPTH,
+    MAX_LEVEL: MAX_DEPTH,
     levelOf: levelOf,
     heightOf: heightOf,
     descendants: descendants,

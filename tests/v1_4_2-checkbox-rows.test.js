@@ -152,7 +152,7 @@ test('initialization and migration stay additive with preformatted checkbox rows
   preformat(app, 'MEMBERS', 'Active', members.getLastRow() + 1);
   preformat(app, 'TASKS', 'Notification_Enabled', tasks.getLastRow() + 1);
 
-  assert.equal(context.Migrations.upgrade(), 6, 'a current workbook still verifies with phantom rows present');
+  assert.equal(context.Migrations.upgrade(), 7, 'a current workbook still verifies with phantom rows present');
   assert.equal(members.getLastRow(), 1000, 'no sheet row is deleted');
   assert.equal(context.Database.read('MEMBERS').length, before.members);
   assert.equal(context.Database.read('TASKS').length, before.tasks);
@@ -166,14 +166,14 @@ test('a version 5 workbook with preformatted checkbox rows upgrades additively',
   const history = app.book.getSheetByName('SCHEMA_MIGRATIONS');
   const versionColumn = history.rows[0].indexOf('New_Version');
   history.rows.forEach((row, index) => { if (index > 0) row[versionColumn] = 5; });
-  app.properties.setProperty('APPROVED_MIGRATIONS', '006_responsibilities_and_nested_subprojects');
+  app.properties.setProperty('APPROVED_MIGRATIONS', '006_responsibilities_and_nested_subprojects,007_responsibility_hierarchy_and_lifecycle');
   const members = app.book.getSheetByName('MEMBERS');
   const snapshot = members.rows.slice(0, 5).map(row => [...row]);
   preformat(app, 'MEMBERS', 'Active', 6);
   assert.equal(context.Migrations.currentVersion(), 5);
 
-  assert.equal(context.Migrations.upgrade(), 6);
-  assert.equal(app.backups.length, 1);
+  assert.equal(context.Migrations.upgrade(), 7);
+  assert.equal(app.backups.length, 2);
   snapshot.forEach((row, index) => {
     assert.deepEqual(members.rows[index], row, `MEMBERS row ${index + 1} changed during migration`);
   });

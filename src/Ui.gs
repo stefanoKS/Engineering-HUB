@@ -292,11 +292,17 @@ var Ui = (function () {
       if (!owner) throw new Error('責任者を指定してください');
       var status = payload.status === undefined || payload.status === '' ? 'Planned' : projectStatus(payload.status);
       if (status === 'Completed') throw new Error('新規プロジェクトは完了状態で作成できません');
+      // V1.6: the manager dashboard requires an explicit active responsibility. The legacy
+      // Sheets sidebar keeps the V1.4 unassigned path (blank = 未分類) unless it opts in.
+      var responsibilityId = responsibilityForNewProject(payload.responsibilityId);
+      if (payload.requireResponsibility === true && !responsibilityId) {
+        throw new Error('担当領域を選択してください（有効な担当領域が必要です）');
+      }
       var project = Projects.create({
         Project_Name: text(payload.name, 'プロジェクト名'),
         Description: payload.description || '',
         Category: payload.category || '',
-        Responsibility_ID: responsibilityForNewProject(payload.responsibilityId),
+        Responsibility_ID: responsibilityId,
         Project_Owner_ID: owner,
         Status: status,
         Priority: payload.priority || 'Medium',
@@ -488,6 +494,8 @@ var Ui = (function () {
       if (payload.name !== undefined) patch.Name = text(payload.name, '担当領域名');
       if (payload.description !== undefined) patch.Description = String(payload.description);
       if (payload.ownerId !== undefined) patch.Owner_Member_ID = String(payload.ownerId || '');
+      // A colour is optional; only a validated #RRGGBB value is stored.
+      if (payload.color !== undefined) patch.Color_Hex = String(payload.color || '');
       if (payload.responsibilityId) {
         if (!Object.keys(patch).length) throw new Error('変更する項目がありません');
         return plain(Responsibilities.update(payload.responsibilityId, patch));
@@ -709,7 +717,11 @@ var Ui = (function () {
       var patch = {Progress_Percent: progress};
       if (payload.status) patch.Status = payload.status;
       if (payload.nextAction !== undefined) patch.Next_Action = payload.nextAction;
-      if (progress === 100) patch.Status = 'Done';
+      // 100 % implies Done, so it follows the reviewed completion workflow.
+      if (progress === 100) {
+        Completion.guard({Status: 'Done', Progress_Percent: 100}, Database.find('TASKS', taskId));
+        patch.Status = 'Done';
+      }
       else if (patch.Status === 'Done') throw new Error('100%未満では完了にできません');
       var task = Tasks.update(taskId, patch);
       return plain(task);

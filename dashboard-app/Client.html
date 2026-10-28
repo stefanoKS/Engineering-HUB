@@ -775,9 +775,10 @@
     tasks.forEach(function (task) {
       var row = el('tr', {attrs: {'data-task-id': task.taskId}});
 
-      var nameCell = el('td', {className: 'cell-primary'}, [
+      var nameCell = el('td', {className: 'cell-primary' + (task.depth ? ' task-nested task-depth-' + Math.min(3, task.depth) : '')}, [
         el('span', {className: 'cell-label', text: T('dashboard.table.task')})
       ]);
+      if (task.depth) nameCell.appendChild(el('span', {className: 'tree-mark', attrs: {'aria-hidden': 'true'}, text: '↳'}));
       var nameButton = el('button', {
         className: 'task-name-button',
         attrs: {type: 'button', 'data-open-task': task.taskId,
@@ -785,8 +786,16 @@
         text: task.name
       });
       nameCell.appendChild(nameButton);
+      if (task.container) {
+        nameCell.appendChild(el('span', {className: 'container-badge', text: T('dashboard.table.container')}));
+      }
       if (task.pendingRequest) {
         nameCell.appendChild(el('span', {className: 'pending-badge', text: T('dashboard.card.pendingRequest')}));
+      }
+      if (task.reviewState === 'PENDING') {
+        nameCell.appendChild(el('span', {className: 'review-badge', text: T('dashboard.card.pendingReview')}));
+      } else if (task.reviewState === 'STALE') {
+        nameCell.appendChild(el('span', {className: 'review-badge stale', text: T('dashboard.card.staleReview')}));
       }
       row.appendChild(nameCell);
 
@@ -866,8 +875,11 @@
       [T('dashboard.drawer.taskId'), task.taskId, false],
       [T('dashboard.drawer.project'), task.projectName, false],
       [T('dashboard.drawer.subproject'), task.subprojectName || T('dashboard.drawer.noSubproject'), false],
+      [T('dashboard.drawer.parentTask'), task.parentTaskId ? T('dashboard.drawer.nestedTask') : T('common.none'), false],
       [T('dashboard.drawer.owner'), unset(task.ownerName), false],
       [T('dashboard.drawer.status'), statusText(task.status), false],
+      [T('dashboard.drawer.reviewState'), task.reviewLabel || T('common.none'), false],
+      [T('dashboard.drawer.completedAt'), unset(task.completedAt), false],
       [T('dashboard.drawer.priority'), task.priority ? priorityText(task.priority) : T('common.none'), false],
       [T('dashboard.drawer.start'), unset(task.plannedStart), false],
       [T('dashboard.drawer.deadline'), unset(task.dueDate), false],

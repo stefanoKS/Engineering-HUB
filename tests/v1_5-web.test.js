@@ -26,7 +26,7 @@ test('compact bootstrap reads each source table at most once and never returns p
  assert.ok(Object.keys(reads).every(name=>reads[name]===1),JSON.stringify(reads));
  assert.ok(r.metrics.tableReads<=9);
  assert.ok(!r.data.tasks);assert.ok(!r.data.members);assert.ok(!r.data.skills);assert.ok(!r.data.projects.items[0].description);
- assert.equal(r.data.actor.role,'ADMIN');assert.equal(a.context.Schema.version,6);assert.equal(a.context.SharedDashboardModel.CONTRACT_VERSION,'1.4');
+ assert.equal(r.data.actor.role,'ADMIN');assert.equal(a.context.Schema.version,7);assert.equal(a.context.SharedDashboardModel.CONTRACT_VERSION,'1.5');
 });
 test('large task pagination, search, project and responsibility filters remain reachable',()=>{
  const a=make();a.context.Database.insert('RESPONSIBILITIES',{Responsibility_ID:'R1',Name:'Design',Status:'Active'});a.context.Database.update('PROJECTS','P1',{Responsibility_ID:'R1'});

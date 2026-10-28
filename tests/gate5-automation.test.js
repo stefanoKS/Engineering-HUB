@@ -214,7 +214,7 @@ test('completed tasks, archived projects and invalid recipients never receive re
   const completed = live();
   fixtures.approve(completed, 'T1');
   fixtures.settings(completed, { DEADLINE_REMINDER_ENABLED: true, REMINDER_OFFSETS: [3] });
-  completed.context.updateTask('T1', { Status: 'Done', Progress_Percent: 100 });
+  fixtures.complete(completed, 'T1');
   scan(completed, '2026-12-12T03:00:00Z');
   assert.equal(completed.sentEmails.length, 0);
 
@@ -301,11 +301,11 @@ test('calendar and daily backup switches are independent and never bypass migrat
   fixtures.settings(migrationApp, { DAILY_BACKUP_ENABLED: false });
   const backupsBefore = migrationApp.backups.length;
   // A migration always takes its verified backup, regardless of the daily schedule switch.
-  migrationApp.properties.setProperty('APPROVED_MIGRATIONS', '004_shared_dashboard,005_task_planning_and_requests,006_responsibilities_and_nested_subprojects');
+  migrationApp.properties.setProperty('APPROVED_MIGRATIONS', '004_shared_dashboard,005_task_planning_and_requests,006_responsibilities_and_nested_subprojects,007_responsibility_hierarchy_and_lifecycle');
   const history = migrationApp.book.getSheetByName('SCHEMA_MIGRATIONS');
   history.rows = [history.rows[0], ['INITIALIZE_V3', new Date().toISOString(), 0, 3, 'SUCCESS', 'NEW_EMPTY_DATABASE']];
-  assert.equal(migrationApp.context.Migrations.upgrade(), 6);
-  assert.equal(migrationApp.backups.length, backupsBefore + 3);
+  assert.equal(migrationApp.context.Migrations.upgrade(), 7);
+  assert.equal(migrationApp.backups.length, backupsBefore + 4);
   assert.equal(migrationApp.context.AutomationSettings.get().DAILY_BACKUP_ENABLED, false);
 });
 

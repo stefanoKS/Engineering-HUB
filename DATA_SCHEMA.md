@@ -1,13 +1,18 @@
 # Data schema
 
-## V1.5 compatibility
+## V1.6 compatibility
 
-Schema remains **6** and employee snapshot contract remains **1.4**. V1.5 adds no tables, fields, migrations or persisted revision columns. Web edit revisions are SHA-256 digests computed from schema-known record fields. IDs, operational custom columns and formulas remain preserved. Canonical date handling changes representation at the snapshot boundary, not the contract. Use the existing reviewed migration procedures only for older databases; a schema-6 code update must not initialize or migrate data.
-
+Schema is **7** and the employee snapshot contract is **1.5**. V1.6 adds one reviewed, additive
+migration (`007_responsibility_hierarchy_and_lifecycle`) with nested tasks, a validated area colour
+and explicit deletion markers. No existing column is renamed, reordered or rewritten, every stable ID
+and custom column survives, and the migration publishes nothing and enables no automation. A
+schema-7 code update must not be run against a schema-6 workbook for writes: the added columns are
+required by the new task, colour and deletion paths, so apply the approved migration (with its
+verified backup) first. Reads of an old workbook are unaffected because every new field is blank.
 
 ## Contract and versions
 
-`src/Schema.gs` is authoritative. The current schema version is **6**.
+`src/Schema.gs` is authoritative. The current schema version is **7**.
 
 | Version | Migration | Adds |
 | --- | --- | --- |
@@ -17,10 +22,11 @@ Schema remains **6** and employee snapshot contract remains **1.4**. V1.5 adds n
 | 4 | `004_shared_dashboard` | `PROJECTS.Dashboard_Visibility`, `PROJECTS.Dashboard_Summary`, `TASKS.Public_Note` (additive; publishes nothing by itself) |
 | 5 | `005_task_planning_and_requests` | `TASKS.Planned_Duration_Value`/`_Unit`/`_Basis`/`Planned_Start_Source`, `TASK_REQUESTS`, `TASK_DEADLINE_HISTORY` |
 | 6 | `006_responsibilities_and_nested_subprojects` | `RESPONSIBILITIES` (new table), `PROJECTS.Responsibility_ID`, `SUBPROJECTS.Parent_Subproject_ID` (additive; seeds no responsibility and leaves every existing project unassigned) |
+| 7 | `007_responsibility_hierarchy_and_lifecycle` | `TASKS.Parent_Task_ID`, `TASKS.Deleted_At`, `PROJECTS.Deleted_At`, `SUBPROJECTS.Deleted_At`, `RESPONSIBILITIES.Color_Hex` (additive; nests nothing, converts nothing, colours nothing automatically and deletes nothing) |
 
 Approved migrations upgrade one version at a time, each with its own verified backup. Fresh empty workbooks
-initialize directly to version 6. `SCHEMA_MIGRATIONS` records successful versions; changing code or a header
-manually does not apply a migration.
+initialize directly to version 7 and record `INITIALIZE_V7`. `SCHEMA_MIGRATIONS` records successful versions;
+changing code or a header manually does not apply a migration.
 
 The upgrade appends missing schema elements; it does not invent assignment approvals, roles or notification
 baselines for historical rows. Blank historical safety fields must pass the normal activation/reconciliation,
@@ -39,8 +45,8 @@ The first field in each list is the stable primary key. Relationships are descri
 ```text
 Project_ID Project_Name Description Category Responsibility_ID Project_Owner_ID Status Priority
 Planned_Start Forecast_End Committed_Deadline Original_Deadline Actual_Completion
-Progress_Percent Health Next_Milestone Next_Action Last_Updated Created_At Archived_At Notification_Enabled
-Dashboard_Visibility Dashboard_Summary
+Progress_Percent Health Next_Milestone Next_Action Last_Updated Created_At Archived_At Deleted_At
+Notification_Enabled Dashboard_Visibility Dashboard_Summary
 ```
 
 Required: `Project_Name`, `Status`. `Project_Owner_ID` references `MEMBERS`; `Responsibility_ID` references
@@ -51,6 +57,8 @@ Required: `Project_Name`, `Status`. `Project_Owner_ID` references `MEMBERS`; `Re
   `Project_Owner_ID`. `Category` is a separate, free-form classification and is unchanged by V1.4.
 
 - `Original_Deadline` is captured at creation and is immutable; `Committed_Deadline` may change.
+- `Deleted_At` (V1.6) is written only by the reviewed ADMIN deletion path. Archive remains the default removal
+  and keeps every row; see [docs/checkgates/V1_6_GATE_7.md](docs/checkgates/V1_6_GATE_7.md).
 - `Progress_Percent` and `Health` are computed by refresh and may be overwritten.
 - `Last_Updated` is application-managed: domain changes to tasks/subprojects/issues/milestones touch it; a
   dashboard refresh does not.
@@ -68,7 +76,7 @@ Required: `Project_Name`, `Status`. `Project_Owner_ID` references `MEMBERS`; `Re
 ### RESPONSIBILITIES
 
 ```text
-Responsibility_ID Name Description Owner_Member_ID Status Sort_Order
+Responsibility_ID Name Description Owner_Member_ID Status Sort_Order Color_Hex
 Created_At Updated_At Retired_At
 ```
 
@@ -78,6 +86,9 @@ never reused. `Owner_Member_ID` references `MEMBERS`.
 - `Name` is unique among **active** rows only; a retired name may be reused because the retired row keeps its own ID.
 - `Sort_Order` controls the manager's display order and never affects identity.
 - `Retired_At` is set by retirement and cleared by reactivation; both are status changes, never deletions.
+- `Color_Hex` (V1.6) is an optional validated `#RRGGBB` display colour. A new area takes the next unused entry of
+  the documented palette; a blank legacy value falls back to its position in that palette when rendered. The colour
+  is display metadata only and never grants access.
 - Retirement keeps every project, task, milestone and history row. A retired responsibility stays visible in lists
   and filters and is no longer selectable for new work.
 - `Owner_Member_ID` records who is accountable for the area. It grants no data access and never limits another
@@ -89,32 +100,46 @@ never reused. `Owner_Member_ID` references `MEMBERS`.
 
 ```text
 Subproject_ID Project_ID Parent_Subproject_ID Subproject_Name Owner_ID Status Planned_Start Planned_End
-Deadline Progress_Percent Estimated_Hours Next_Action Last_Updated
+Deadline Progress_Percent Estimated_Hours Next_Action Last_Updated Deleted_At
 ```
 
 Required: `Project_ID`, `Subproject_Name`, `Status`. Project, parent and owner reference `PROJECTS`, `SUBPROJECTS`
 and `MEMBERS`. `Estimated_Hours` defaults to blank (unknown).
 
 - `Parent_Subproject_ID` blank is a root subproject, so every pre-V1.4 row keeps its meaning.
-- At most two subproject levels exist beneath a project. A parent and its child must belong to the same project,
-  a subproject cannot parent itself and circular references are refused. Reparenting validates the whole affected
-  subtree, so a move that would push a descendant to level three is rejected instead of flattened.
+- At most **four** subproject levels exist beneath a project (`Subprojects.MAX_DEPTH`, V1.6). A parent and its
+  child must belong to the same project, a subproject cannot parent itself and circular references are refused.
+  Reparenting validates the whole affected subtree, so a move that would push a descendant beyond the fourth
+  level is rejected instead of flattened. Existing two-level data is unchanged.
 - A parent subproject's progress covers its own tasks plus every descendant task exactly once. It is never an
   average of child percentages.
+- `Deleted_At` is written only by the reviewed ADMIN deletion path (V1.6). A row that carries it is excluded from
+  the published snapshot; ordinary archive/reactivate never touches it.
 
 ### TASKS
 
 ```text
-Task_ID Project_ID Subproject_ID Task_Name Description Owner_Member_ID Status
+Task_ID Project_ID Subproject_ID Parent_Task_ID Task_Name Description Owner_Member_ID Status
 Priority Planned_Start Due_Date Estimated_Hours Actual_Hours Progress_Percent
 Dependency_IDs Acceptance_Criteria Next_Action Required_Skill_ID Required_Skill_Level
 Assignment_Version Assignment_Approved_At Notification_Enabled Notification_Baseline
-Created_At Last_Updated Completed_At Public_Note
+Created_At Last_Updated Completed_At Deleted_At Public_Note
 ```
 
 Required: `Project_ID`, `Task_Name`, `Owner_Member_ID`, `Status`. References: project → `PROJECTS`, subproject →
-`SUBPROJECTS`, owner → `MEMBERS`, required skill → `SKILLS`. `Dependency_IDs` contains comma-separated task IDs;
-the domain layer rejects missing, cross-project, and cyclic dependencies.
+`SUBPROJECTS`, parent task → `TASKS`, owner → `MEMBERS`, required skill → `SKILLS`. `Dependency_IDs` contains
+comma-separated task IDs; the domain layer rejects missing, cross-project, and cyclic dependencies.
+
+- `Parent_Task_ID` (V1.6) is the organisational parent, at most **three** task levels in total
+  (`TaskTree.MAX_DEPTH`). The parent must exist, belong to the same project **and the same subproject**, must not
+  form a cycle, and must not already carry recorded work, approval or completion. `Dependency_IDs` is the separate
+  sequencing constraint and is never derived from the parent link.
+- A task with children is a **work container**. Its stored `Status`/`Progress_Percent` stop being authoritative:
+  progress and completion are derived from the leaf work, and a container is never counted as an extra unit in a
+  project, subproject or snapshot rollup. The stored columns are never rewritten by a derived value.
+- `Status = Done` is reachable only through the reviewed completion workflow (a manager decision on a
+  `COMPLETION_REPORT`, or an explicit ADMIN correction recorded as `COMPLETION_OVERRIDDEN`). Existing completed
+  rows stay valid legacy records.
 
 - `Estimated_Hours` defaults to **blank** = unknown. `0` is a known zero estimate. Unknown is never rewritten to
   zero and is reported separately in workload/progress/report output.

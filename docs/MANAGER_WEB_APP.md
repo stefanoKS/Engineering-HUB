@@ -1,6 +1,25 @@
-# Manager Web App — V1.5.1
+# Manager Web App — V1.6
 
-**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+**IMPLEMENTED — DEV MIGRATION AND WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+
+## V1.6 additions
+
+- **Responsibility section** at the top of the home screen: one card per area with colour, owner, active projects,
+  open and overdue tasks and weighted progress; `すべての担当領域`, `未分類` and `+ 担当領域を追加`.
+- **Global area filter** in page memory (`Responsibility_ID`): projects, tasks, KPIs and upcoming deadlines narrow
+  locally, with no additional `google.script.run` call. The area select in the toolbar drives the same filter.
+- **Create project** asks for the responsibility first and requires an active one; the current area is preselected.
+- **Subproject tree** collapses and expands, renders four levels and keeps every orphan visible.
+- **Nested tasks** indent by depth, show a container chip and a 承認待ち / 再報告が必要 review chip, and offer
+  `サブタスクを追加` while the three-level limit allows it.
+- **Completion** is never set from this screen: 完了 requires the employee report plus a manager approval in 申請.
+  An ADMIN can record an explicit correction with a reason; it is audited as `COMPLETION_OVERRIDDEN`.
+- **Members** view: メンバー → profile with current work, previous approved work and recorded activity.
+- **Deletion (ADMIN)**: 完全削除 shows the dependency preflight, requires a reason and `DELETE <id>`, and tells the
+  manager that the shared dashboard changes only at the next publication.
+- **Diagnostics** (`計測`) is unchanged and still shows only numeric timings and cache state.
+
+Everything below about data flow, caching, revocation and pagination is still accurate for V1.6.
 
 The application name is **設計・開発課 管理**. The manager opens a bookmarked browser URL; Google Sheets remains the private datastore. This is an additional HTML Service entrypoint in the existing container-bound manager project, not a new backend. The Sheets sidebar remains the fallback. Schema **6**, stable IDs and employee contract **1.4** are unchanged.
 

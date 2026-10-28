@@ -25,21 +25,21 @@ var Schema = (function () {
   var projectStates = ['Planned', 'Active', 'On Hold', 'Completed', 'Cancelled', 'Archived'];
   // V1.4: a responsibility is an organizational area, independent of the project category.
   // Retirement is a status change, never a deletion, so historical project links survive.
-  table('RESPONSIBILITIES', 'Responsibility_ID', 'Responsibility_ID Name Description Owner_Member_ID Status Sort_Order Created_At Updated_At Retired_At',
+  table('RESPONSIBILITIES', 'Responsibility_ID', 'Responsibility_ID Name Description Owner_Member_ID Status Sort_Order Color_Hex Created_At Updated_At Retired_At',
     { Sort_Order: 'number' }, ['Name', 'Status'], { Owner_Member_ID: 'MEMBERS' },
     { Status: ['Active', 'Retired'] });
-  table('PROJECTS', 'Project_ID', 'Project_ID Project_Name Description Category Responsibility_ID Project_Owner_ID Status Priority Planned_Start Forecast_End Committed_Deadline Original_Deadline Actual_Completion Progress_Percent Health Next_Milestone Next_Action Last_Updated Created_At Archived_At Notification_Enabled Dashboard_Visibility Dashboard_Summary',
+  table('PROJECTS', 'Project_ID', 'Project_ID Project_Name Description Category Responsibility_ID Project_Owner_ID Status Priority Planned_Start Forecast_End Committed_Deadline Original_Deadline Actual_Completion Progress_Percent Health Next_Milestone Next_Action Last_Updated Created_At Archived_At Deleted_At Notification_Enabled Dashboard_Visibility Dashboard_Summary',
     { Notification_Enabled: 'boolean' }, ['Project_Name', 'Status'],
     { Project_Owner_ID: 'MEMBERS', Responsibility_ID: 'RESPONSIBILITIES' },
     { Status: projectStates, Priority: ['Low', 'Medium', 'High', 'Critical'],
       Dashboard_Visibility: ['INTERNAL', 'RESTRICTED'] });
   // Blank Parent_Subproject_ID is a root subproject; at most one nested level is allowed.
-  table('SUBPROJECTS', 'Subproject_ID', 'Subproject_ID Project_ID Parent_Subproject_ID Subproject_Name Owner_ID Status Planned_Start Planned_End Deadline Progress_Percent Estimated_Hours Next_Action Last_Updated',
+  table('SUBPROJECTS', 'Subproject_ID', 'Subproject_ID Project_ID Parent_Subproject_ID Subproject_Name Owner_ID Status Planned_Start Planned_End Deadline Progress_Percent Estimated_Hours Next_Action Last_Updated Deleted_At',
     {}, ['Project_ID', 'Subproject_Name', 'Status'],
     { Project_ID: 'PROJECTS', Parent_Subproject_ID: 'SUBPROJECTS', Owner_ID: 'MEMBERS' }, { Status: projectStates });
-  table('TASKS', 'Task_ID', 'Task_ID Project_ID Subproject_ID Task_Name Description Owner_Member_ID Status Priority Planned_Start Due_Date Estimated_Hours Actual_Hours Progress_Percent Dependency_IDs Acceptance_Criteria Next_Action Required_Skill_ID Required_Skill_Level Assignment_Version Assignment_Approved_At Notification_Enabled Notification_Baseline Created_At Last_Updated Completed_At Public_Note Planned_Duration_Value Planned_Duration_Unit Planned_Duration_Basis Planned_Start_Source',
+  table('TASKS', 'Task_ID', 'Task_ID Project_ID Subproject_ID Parent_Task_ID Task_Name Description Owner_Member_ID Status Priority Planned_Start Due_Date Estimated_Hours Actual_Hours Progress_Percent Dependency_IDs Acceptance_Criteria Next_Action Required_Skill_ID Required_Skill_Level Assignment_Version Assignment_Approved_At Notification_Enabled Notification_Baseline Created_At Last_Updated Completed_At Deleted_At Public_Note Planned_Duration_Value Planned_Duration_Unit Planned_Duration_Basis Planned_Start_Source',
     { Assignment_Version: 'number', Notification_Enabled: 'boolean' }, ['Project_ID', 'Task_Name', 'Owner_Member_ID', 'Status'],
-    { Project_ID: 'PROJECTS', Subproject_ID: 'SUBPROJECTS', Owner_Member_ID: 'MEMBERS', Required_Skill_ID: 'SKILLS' },
+    { Project_ID: 'PROJECTS', Subproject_ID: 'SUBPROJECTS', Parent_Task_ID: 'TASKS', Owner_Member_ID: 'MEMBERS', Required_Skill_ID: 'SKILLS' },
     { Status: ['Not Started', 'Assigned', 'In Progress', 'Blocked', 'On Hold', 'Done', 'Cancelled'], Priority: ['Low', 'Medium', 'High', 'Critical'],
       Planned_Duration_Unit: ['DAY', 'WEEK'], Planned_Duration_Basis: ['WORKING_DAYS', 'CALENDAR_DAYS'],
       Planned_Start_Source: ['DERIVED', 'LEGACY', 'MANUAL'] });
@@ -111,7 +111,14 @@ var Schema = (function () {
   set('RESPONSIBILITIES', 'Sort_Order', { type: 'number', defaultValue: 0, min: 0, integer: true });
   set('RESPONSIBILITIES', 'Status', { defaultValue: 'Active' });
   set('SUBPROJECTS', 'Parent_Subproject_ID', { defaultValue: '', ref: 'SUBPROJECTS' });
-  return { version: 6, tables: tables,
+  // V1.6: nested work, a validated area colour and explicit deletion markers. A blank
+  // Parent_Task_ID is a top-level task, so every pre-V1.6 row keeps its meaning.
+  set('TASKS', 'Parent_Task_ID', { defaultValue: '', ref: 'TASKS' });
+  set('RESPONSIBILITIES', 'Color_Hex', { defaultValue: '' });
+  set('PROJECTS', 'Deleted_At', { editable: false });
+  set('SUBPROJECTS', 'Deleted_At', { editable: false });
+  set('TASKS', 'Deleted_At', { editable: false });
+  return { version: 7, tables: tables,
     generated: ['DASHBOARD', 'PROJECT_OVERVIEW', 'TEAM_VIEW', 'GANTT_OVERVIEW', 'TIMELINE_DATA',
       'WORKLOAD', 'SKILL_MATRIX', 'BACKPLAN', 'AUTOMATION_STATUS'],
     field: field };
