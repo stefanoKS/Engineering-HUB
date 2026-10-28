@@ -1,5 +1,12 @@
 ﻿# Architecture
 
+## V1.5 current manager architecture
+
+The manager has a browser-first HTML Service UI in the existing src project: doGet → ManagerWebIndex/Styles/Client → google.script.run → ManagerWeb/ManagerWebApi → existing Ui/domain services → private A. The original container-bound sidebar remains a fallback; no second backend exists. dashboard-app remains a separate employee deployment reading B and writing only its request inbox C.
+
+Request-scoped reads reuse source tables and one workbook, invalidate after mutations and reload before locked revision checks. The browser caches reads for 30 seconds in memory, requests views on demand and serializes duplicate record saves. Project/task/member lists are paginated. Heavy report generation is explicit. Requests.decide now holds one reusable script lock through claim/effect/history/finalization. Sheets writes remain nontransactional. See [full manager architecture](docs/MANAGER_WEB_APP.md).
+
+
 ## Boundaries and source of truth
 
 ```text

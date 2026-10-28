@@ -408,6 +408,10 @@ var Requests = (function () {
    * @param {string} confirmation must equal DECIDE REQUEST
    */
   function decide(requestId, action, note, confirmation) {
+    return Database.withLock(function () { return decideLocked(requestId, action, note, confirmation); });
+  }
+
+  function decideLocked(requestId, action, note, confirmation) {
     if (confirmation !== DECISION_CONFIRMATION) throw new Error('Explicit request decision confirmation required');
     var identity = Roles.requireAtLeast('MANAGER', AuditLog.actor());
     var target = text(action).toUpperCase();

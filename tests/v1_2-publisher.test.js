@@ -136,7 +136,7 @@ test('a failed publication preserves the committed snapshot and is recorded', ()
   const committed = JSON.stringify(sheetRows(snapshot, 'PUBLISHED_TASKS_A'));
 
   const target = snapshot.getSheetByName('PUBLISHED_TASKS_B');
-  target.getRange = () => ({setValues() { throw new Error('quota exceeded'); }});
+  target.getRange = () => ({setNumberFormat() { return this; }, setValues() { throw new Error('quota exceeded'); }});
   assert.throws(() => app.context.publishSharedDashboard(), /quota exceeded/);
 
   assert.equal(metaValue(snapshot, 'ACTIVE_SLOT'), 'A');

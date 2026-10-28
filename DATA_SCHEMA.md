@@ -1,5 +1,10 @@
 # Data schema
 
+## V1.5 compatibility
+
+Schema remains **6** and employee snapshot contract remains **1.4**. V1.5 adds no tables, fields, migrations or persisted revision columns. Web edit revisions are SHA-256 digests computed from schema-known record fields. IDs, operational custom columns and formulas remain preserved. Canonical date handling changes representation at the snapshot boundary, not the contract. Use the existing reviewed migration procedures only for older databases; a schema-6 code update must not initialize or migrate data.
+
+
 ## Contract and versions
 
 `src/Schema.gs` is authoritative. The current schema version is **6**.

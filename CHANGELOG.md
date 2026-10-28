@@ -1,4 +1,14 @@
 # Changelog
+
+## V1.5 — 2026-10-28
+
+- Browser manager in the existing src project: focused authorized APIs, responsive Japanese/English navigation and complete normal manager forms.
+- Execution-local read reuse, paginated tasks, draft/response ordering safety, locked revision checks and explicit report refresh.
+- Request decisions hold a single reusable script lock through effect/history; ordinary subproject edits/reparent validate together.
+- Publisher and employee reader normalize known Date fields without weakening A/B verification or snapshot hashes.
+- Schema 6 and contract 1.4 unchanged; sidebar retained. No live deployment, migration, trigger installation or mail/Calendar activation.
+- 378 local tests pass; detailed benchmark, screenshots, ten checkgates and 20-case DEV verification plan. Native 200% zoom and real Workspace checks remain unverified. NOT APPROVED FOR PRODUCTION.
+
 ## V1.4.2 — checkbox-only rows are never records (database correctness patch)
 
 No schema change (still **6**) and no dashboard contract change (still **1.4**). This is a

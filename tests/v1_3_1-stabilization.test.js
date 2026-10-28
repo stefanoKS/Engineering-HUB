@@ -476,6 +476,7 @@ test('the manager manifest keeps its existing scopes only', () => {
     'https://www.googleapis.com/auth/script.send_mail',
     'https://www.googleapis.com/auth/calendar',
     'https://www.googleapis.com/auth/script.scriptapp',
+    'https://www.googleapis.com/auth/script.container.ui', // existing sidebar scope in the baseline manifest
     'https://www.googleapis.com/auth/userinfo.email'
   ];
   (manifest.oauthScopes || []).forEach(scope => {

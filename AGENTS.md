@@ -1,5 +1,17 @@
 # Contributor safety rules
 
+## V1.5 mandatory rules
+
+- ManagerWeb is an HTML Service entrypoint in the existing src manager project; keep dashboard-app separate and retain the Sheets sidebar.
+- Schema 6 and employee contract 1.4 stay unchanged. Do not add a migration for this release.
+- Execute as the accessing user, domain restricted. MANAGER_WEB_ALLOWED_DOMAINS is mandatory. Active identity plus server Roles/Access must pass before every new manager read/write. Blank identity fails closed; never substitute the effective/deployer user.
+- Keep explicit read/write allowlists, small paginated DTOs, ephemeral per-execution/per-page caches and no private browser persistence. Check edit revisions under the existing script lock. Nested domain calls reuse that lock; never acquire another script lock inside it.
+- Keep explicit report refresh separate from ordinary web task saves. Preserve the sidebar's existing default behavior.
+- Keep canonical publication date normalization on both publisher and employee reader; never weaken slot/hash verification.
+- Run npm ci, npm run lint, npm test, npm run validate and the V1.5 mock benchmark. Update all ten V1_5_GATE documents with actual evidence; live-only criteria remain BLOCKED/NOT_RUN.
+- No automatic live deployment, initialization, migration, triggers, mail/Calendar activation. Read docs/MANAGER_WEB_APP_DEPLOYMENT.md and the 20-case DEV smoke plan before authorized deployment work.
+
+
 1. Keep development and production in separate Apps Script projects, spreadsheets, and local clasp configurations; never test against production.
 2. Keep runtime settings in Script Properties; never commit credentials, tokens, real resource IDs, `.clasp.json`, or environment-specific clasp configuration.
 3. Require `ENVIRONMENT` and `BOUND_ENVIRONMENT` to match before accessing the configured database; never silently select another workbook.

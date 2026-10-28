@@ -1,5 +1,10 @@
 # Backup and manual restore
 
+## V1.5 web-app recovery
+
+The manager web UI and sidebar share the same A. Code deployment does not back up, migrate or roll back data. Preserve the existing restricted backups and audit/history; no V1.5 migration is required. For a web UI failure, return to the Sheets sidebar and disable/reselect the web deployment as described in [manager deployment rollback](docs/MANAGER_WEB_APP_DEPLOYMENT.md). Review uncertain writes before retrying. Do not reset operational sheets or restore data automatically. A deployment-version rollback does not change editor source or spreadsheet rows.
+
+
 ## Independent state
 
 Git versions source code only. Spreadsheet rows, formulas and views, Script Properties, installable triggers, Calendar events, sent mail, Drive sharing, and Drive snapshots are separate state. A code rollback cannot undo a mail send, restore rows, or reverse a migration.

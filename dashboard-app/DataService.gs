@@ -79,6 +79,14 @@ var DashboardData = (function () {
     }
   }
 
+  // Contract 1.4 date-only fields may be materialized by Sheets as Date objects.
+  function snapshotDate(field, value) {
+    if (["committedDeadline","forecastDeadline","deadline","plannedStart","dueDate","targetDate","actualDate","lastUpdated"].indexOf(field) >= 0 && value instanceof Date) {
+      return Utilities.formatDate(value, 'Asia/Tokyo', 'yyyy-MM-dd');
+    }
+    return value;
+  }
+
   function text(value) {
     return value === null || value === undefined ? '' : String(value);
   }
@@ -163,7 +171,7 @@ var DashboardData = (function () {
       .filter(function (row) { return row.some(function (value) { return value !== ''; }); })
       .map(function (row) {
         var record = {};
-        table.fields.forEach(function (field, index) { record[field] = row[index]; });
+        table.fields.forEach(function (field, index) { record[field] = snapshotDate(field, row[index]); });
         return record;
       });
   }

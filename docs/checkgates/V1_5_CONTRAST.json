@@ -1,0 +1,58 @@
+[
+  {
+    "name": "body",
+    "foreground": "#27333e",
+    "background": "#f4f6f8",
+    "ratio": 11.9,
+    "target": 4.5,
+    "pass": true
+  },
+  {
+    "name": "secondary",
+    "foreground": "#526170",
+    "background": "#ffffff",
+    "ratio": 6.36,
+    "target": 4.5,
+    "pass": true
+  },
+  {
+    "name": "primary button",
+    "foreground": "#ffffff",
+    "background": "#365f7d",
+    "ratio": 6.8,
+    "target": 4.5,
+    "pass": true
+  },
+  {
+    "name": "error",
+    "foreground": "#a83e3a",
+    "background": "#fff5f3",
+    "ratio": 5.74,
+    "target": 4.5,
+    "pass": true
+  },
+  {
+    "name": "success",
+    "foreground": "#287348",
+    "background": "#f4f6f8",
+    "ratio": 5.33,
+    "target": 4.5,
+    "pass": true
+  },
+  {
+    "name": "control boundary",
+    "foreground": "#6a7b88",
+    "background": "#ffffff",
+    "ratio": 4.37,
+    "target": 3,
+    "pass": true
+  },
+  {
+    "name": "focus",
+    "foreground": "#365f7d",
+    "background": "#ffffff",
+    "ratio": 6.8,
+    "target": 3,
+    "pass": true
+  }
+]

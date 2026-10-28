@@ -1,6 +1,6 @@
 {
   "name": "engineering-hub",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "private": true,
   "description": "Safe Google Apps Script engineering operations workspace",
   "engines": {
@@ -12,7 +12,8 @@
     "validate": "node scripts/validate-source.js",
     "sync:i18n": "node scripts/sync-i18n.js",
     "preview:dashboard": "node scripts/dashboard-preview.js",
-    "clasp": "clasp"
+    "clasp": "clasp",
+    "preview:manager-web": "node scripts/manager-web-preview.js"
   },
   "devDependencies": {
     "@google/clasp": "3.4.1",

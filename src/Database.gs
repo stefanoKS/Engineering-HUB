@@ -1,5 +1,13 @@
 var Database = (function () {
+  // Execution-local read context only; never CacheService or shared browser storage.
+  var readContext = null;
+  function withReadContext(fn, allowWrites) {
+    var previous = readContext;
+    readContext = {tables: Object.create(null), book: null, reads: 0, dataMs: 0, allowWrites: allowWrites === true};
+    try { return fn(readContext); } finally { readContext = previous; }
+  }
   function book() {
+    if (readContext && readContext.book) return readContext.book;
     var config = Config.get(), spreadsheet = SpreadsheetApp.openById(config.spreadsheetId);
     var settings = spreadsheet.getSheetByName('SETTINGS');
     if (settings && settings.getLastRow() > 1) {
@@ -7,12 +15,32 @@ var Database = (function () {
       var marker = values.slice(1).filter(function (row) { return row[headers.indexOf('Setting_ID')] === 'DATABASE_ENVIRONMENT'; });
       if (marker.length > 1 || marker.length && marker[0][headers.indexOf('Name')] !== config.environment) throw new Error('Workbook environment mismatch');
     }
+    if (readContext) readContext.book = spreadsheet;
     return spreadsheet;
   }
+  // Optional request precondition, evaluated after acquiring the existing domain lock.
+  var mutationCheck = null;
+  function withMutationCheck(check, fn) {
+    var previous = mutationCheck;
+    mutationCheck = check;
+    try { return fn(); } finally { mutationCheck = previous; }
+  }
+  var lockHeld = false;
   function withLock(fn) {
+    // Nested domain calls reuse this execution's held script lock; never reacquire it.
+    if (lockHeld) return fn();
     var lock = LockService.getScriptLock();
     lock.waitLock(30000);
-    try { return fn(); } finally { lock.releaseLock(); }
+    lockHeld = true;
+    if (readContext) readContext.tables = Object.create(null);
+    try {
+      if (mutationCheck) {
+        var check = mutationCheck;
+        mutationCheck = null;
+        check();
+      }
+      return fn();
+    } finally { lockHeld = false; lock.releaseLock(); }
   }
   function ensureSize(sheet, rows, columns) {
     if (sheet.getMaxRows() < rows) sheet.insertRowsAfter(sheet.getMaxRows(), rows - sheet.getMaxRows());
@@ -47,9 +75,11 @@ var Database = (function () {
     });
   }
   function read(name) {
+    if (readContext && readContext.tables[name]) return readContext.tables[name];
+    var started = Date.now();
     var def = definition(name), d = data(name), boxes = checkboxColumns(name, d.headers);
     var idColumn = d.headers.indexOf(def.id);
-    return d.values.slice(1).filter(function (row, i) {
+    var result = d.values.slice(1).filter(function (row, i) {
       if (!recordData(boxes, row)) return false;
       if (idColumn < 0) throw new Error('Missing column: ' + name + '.' + def.id);
       // Never discard a filled row that lost its identity: an operator must repair it first.
@@ -60,6 +90,12 @@ var Database = (function () {
       d.headers.forEach(function (h, c) { obj[h] = row[c]; });
       return obj;
     });
+    if (readContext) {
+      readContext.tables[name] = result;
+      readContext.reads++;
+      readContext.dataMs += Date.now() - started;
+    }
+    return result;
   }
   function find(name, id) {
     var key = definition(name).id;
@@ -115,6 +151,7 @@ var Database = (function () {
     return d.values.length + 1;
   }
   function insert(name, values) {
+    if (readContext && !readContext.allowWrites) throw new Error("Writes are forbidden in a read context");
     var def = definition(name);
     var obj = {};
     def.fields.forEach(function (f) {
@@ -129,9 +166,11 @@ var Database = (function () {
     var row = freeRow(name, d);
     ensureSize(d.sheet, row, d.headers.length);
     d.sheet.getRange(row, 1, 1, d.headers.length).setValues([d.headers.map(function (h) { return cell(obj[h] === undefined ? '' : obj[h]); })]);
+    if (readContext) delete readContext.tables[name];
     return obj;
   }
   function update(name, id, patch) {
+    if (readContext && !readContext.allowWrites) throw new Error("Writes are forbidden in a read context");
     var def = definition(name);
     if (Object.prototype.hasOwnProperty.call(patch, def.id) && patch[def.id] !== id) throw new Error('Stable ID is immutable');
     var previous = find(name, id);
@@ -147,9 +186,11 @@ var Database = (function () {
     });
     // Only explicit fields are written: formulas and manually maintained cells remain untouched.
     Object.keys(patch).forEach(function (key) { d.sheet.getRange(index + 1, d.headers.indexOf(key) + 1).setValue(cell(obj[key])); });
-    return Object.assign(previous, obj);
+    if (readContext) delete readContext.tables[name];
+    return Object.assign({}, previous, obj);
   }
   function updateMany(name, changes) {
+    if (readContext && !readContext.allowWrites) throw new Error("Writes are forbidden in a read context");
     var def = definition(name), d = data(name), idColumn = d.headers.indexOf(def.id);
     var positions = new Map(), references = {}, columns = {}, seen = new Set();
     d.values.slice(1).forEach(function (row, i) {
@@ -186,9 +227,11 @@ var Database = (function () {
         start = end;
       }
     });
+    if (readContext) delete readContext.tables[name];
     return results;
   }
   function writeGenerated(name, rows) {
+    if (readContext && !readContext.allowWrites) throw new Error("Writes are forbidden in a read context");
     if (Schema.generated.indexOf(name) < 0) throw new Error('Not a generated sheet');
     var sheet = book().getSheetByName(name) || book().insertSheet(name);
     sheet.clearContents();
@@ -199,7 +242,7 @@ var Database = (function () {
     sheet.setFrozenRows(1);
     return sheet;
   }
-  return { book: book, read: read, find: find, insert: insert, update: update, validate: validate,
+  return { withMutationCheck: withMutationCheck, withReadContext: withReadContext, book: book, read: read, find: find, insert: insert, update: update, validate: validate,
     withLock: withLock, writeGenerated: writeGenerated, ensureSize: ensureSize, updateMany: updateMany,
     checkboxColumns: checkboxColumns, recordData: recordData };
 }());

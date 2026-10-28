@@ -106,7 +106,7 @@ test('new V1.3 sources contain no credentials, identifiers or employee addresses
     assert.doesNotMatch(content, /AKfycb|AIza[0-9A-Za-z_-]{10,}|1[A-Za-z0-9_-]{20,}/, file + ' contains a credential-like value');
     assert.doesNotMatch(content, /spreadsheets\/d\/[A-Za-z0-9_-]{20,}/, file + ' contains a spreadsheet URL');
   });
-  assert.equal(fs.existsSync(path.join(root, '.clasp.json')), false, '.clasp.json must not be committed');
+  assert.equal(require('./support/repository').tracked(root, '.clasp.json'), false, '.clasp.json must not be committed');
   const gitignore = read('.gitignore');
   assert.match(gitignore, /^\.clasp\.json$/m);
 });

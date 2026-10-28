@@ -1,5 +1,12 @@
 # UI/UX guidelines
 
+## V1.5 web UI
+
+ManagerWebStyles uses the existing calm palette, Japanese-friendly 15px body type, 44px controls, visible focus, skip link, labelled native controls and dialog, live status messages and reduced-motion rules. Five main navigation choices adapt to a horizontal wrapped row below 900px; forms use one column below 480px. The rail can collapse. Content is rendered with DOM/textContent only.
+
+Local browser evidence covers widths 375/768/1366/1920, Japanese and English labels, a long mixed-language task name, mobile save, keyboard focus, empty queues, loading/retry and 3,000-task search. Native browser 200% zoom did not apply through the available automation controls and remains NOT_RUN; screen-reader behavior and real HTML Service UI remain live/manual checks. See [visual evidence](checkgates/V1_5_VISUAL.md). Do not claim full WCAG certification.
+
+
 The visual language of `設計・開発課 管理` and the shared dashboard. These rules are for both
 applications; they describe what is implemented, not an aspiration.
 

@@ -157,8 +157,8 @@ test('source and repository stay free of credentials, live identifiers and stray
 
   const manifest = JSON.parse(fs.readFileSync(path.join(sourceDir, 'appsscript.json'), 'utf8'));
   assert.ok(manifest.oauthScopes.includes('https://www.googleapis.com/auth/script.send_mail'));
-  assert.equal(fs.existsSync(path.join(root, '.clasp.json')), false);
-  assert.equal(fs.existsSync(path.join(root, '.clasprc.json')), false);
+  assert.equal(require('./support/repository').tracked(root, '.clasp.json'), false);
+  assert.equal(require('./support/repository').tracked(root, '.clasprc.json'), false);
   assert.match(fs.readFileSync(path.join(root, '.gitignore'), 'utf8'), /\.clasp\.json/);
 
   const required = [

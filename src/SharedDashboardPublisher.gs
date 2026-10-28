@@ -19,7 +19,7 @@
  *   duplicates tasks.
  */
 var SharedDashboardPublisher = (function () {
-  var PUBLISHER_VERSION = '1.4.1';
+  var PUBLISHER_VERSION = '1.5.0';
   var CONTRACT_VERSION = SharedDashboardModel.CONTRACT_VERSION;
   var DESTINATION_PROPERTY = 'SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID';
   var META_SHEET = 'PUBLISHED_META';
@@ -78,6 +78,14 @@ var SharedDashboardPublisher = (function () {
     return {book: book, config: config};
   }
 
+  // Contract 1.4 date-only fields may be materialized by Sheets as Date objects.
+  function snapshotDate(field, value) {
+    if (["committedDeadline","forecastDeadline","deadline","plannedStart","dueDate","targetDate","actualDate","lastUpdated"].indexOf(field) >= 0 && value instanceof Date) {
+      return Utilities.formatDate(value, 'Asia/Tokyo', 'yyyy-MM-dd');
+    }
+    return value;
+  }
+
   function cell(value) {
     if (value === null || value === undefined) return '';
     if (typeof value === 'boolean' || typeof value === 'number') return value;
@@ -108,6 +116,11 @@ var SharedDashboardPublisher = (function () {
     var previousRows = sheet.getLastRow();
     var matrix = [header].concat(rows);
     Database.ensureSize(sheet, matrix.length + 1, header.length);
+    header.forEach(function (field, i) {
+      if (["committedDeadline","forecastDeadline","deadline","plannedStart","dueDate","targetDate","actualDate","lastUpdated"].indexOf(field) >= 0 && rows.length) {
+        sheet.getRange(2, i + 1, rows.length, 1).setNumberFormat('@');
+      }
+    });
     sheet.getRange(1, 1, matrix.length, header.length).setValues(matrix);
     var trailing = previousRows - matrix.length;
     if (trailing > 0) {
@@ -151,7 +164,7 @@ var SharedDashboardPublisher = (function () {
       throw new Error('Snapshot table headers do not match contract ' + CONTRACT_VERSION + ': ' + sheet.getName());
     }
     return values.slice(1).filter(function (row) { return row.some(function (value) { return value !== ''; }); })
-      .map(function (row) { return expected.map(function (field, i) { return row[i]; }); });
+      .map(function (row) { return expected.map(function (field, i) { return snapshotDate(field, row[i]); }); });
   }
 
   function verifySlot(book, slot, snapshot) {

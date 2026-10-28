@@ -1,5 +1,20 @@
 ﻿# Engineering-HUB
 
+## Current release — V1.5
+
+**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+
+Version **1.5.0** adds a standalone manager browser UI in the existing manager Apps Script project. Projects, two-level subprojects, tasks, responsibilities, members, skills, employee requests and controlled administration reuse the current services and private workbook. Japanese is default; English is available. The sidebar remains the fallback and the employee web app remains separate. Schema **6**, employee contract **1.4**; no migration.
+
+Local verification: **378 tests, 378 pass**, 0 failures/skips; npm ci, lint and source validation pass. Google identity, sharing, live publication/latency and native 200% zoom remain unverified. See [manager guide](docs/MANAGER_WEB_APP.md), [DEV deployment](docs/MANAGER_WEB_APP_DEPLOYMENT.md), [performance](docs/MANAGER_WEB_APP_PERFORMANCE.md), [20-case smoke plan](docs/MANAGER_WEB_APP_SMOKE_TEST.md) and [checkgates](docs/checkgates/V1_5_GATE_10.md).
+
+Preview: npm run preview:manager-web → http://127.0.0.1:4175/ (synthetic data only). The existing Workspace report of committedDeadline snapshot mismatch is fixed in local Date/hash round-trip tests; the live fix is UNVERIFIED.
+
+## Historical V1.4.1 release record
+
+The following release table is retained as historical evidence, not the current validation count.
+
+
 Engineering project management using Google Sheets as the database, Google Apps Script as the application, and GitHub as the source-code history.
 
 [日本語](README_JP.md) · [Architecture](ARCHITECTURE.md) · [Data schema](DATA_SCHEMA.md) · [Deployment](DEPLOYMENT.md) · [Backup and restore](BACKUP_RESTORE.md) · [Pre-trial checklist](docs/PRE_TRIAL_CHECKLIST.md) · [Manager workflow](docs/MANAGER_WORKFLOW.md) · [Automation settings](docs/AUTOMATION_SETTINGS.md) · [Shared dashboard](docs/dashboard/ARCHITECTURE.md) · [Dashboard data contract](docs/dashboard/DATA_CONTRACT.md) · [Workspace smoke test](docs/GOOGLE_WORKSPACE_SMOKE_TEST.md) · [Security model](docs/SECURITY_MODEL.md) · [Operations runbook](docs/OPERATIONS_RUNBOOK.md)

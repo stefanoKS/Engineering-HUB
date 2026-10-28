@@ -72,7 +72,7 @@ test('the repository keeps deployment configuration out of version control', () 
   const ignore = read('.gitignore');
   assert.match(ignore, /^\.clasp\.json$/m);
   assert.match(ignore, /^\.clasp\.\*\.json$/m);
-  assert.equal(fs.existsSync(path.join(root, '.clasp.json')), false, '.clasp.json must not be committed');
+  assert.equal(require('./support/repository').tracked(root, '.clasp.json'), false, '.clasp.json must not be committed');
   const dashboardManifest = JSON.parse(read('dashboard-app/appsscript.json'));
   assert.equal(dashboardManifest.webapp.access, 'DOMAIN');
   assert.equal(dashboardManifest.webapp.executeAs, 'USER_DEPLOYING');

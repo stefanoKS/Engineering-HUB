@@ -1,5 +1,12 @@
 # Security model
 
+## V1.5 manager web security
+
+The browser manager extends the existing internal departmental tool with no per-project, per-responsibility or per-subproject access control. Deploy USER_ACCESSING + DOMAIN. Active-session email must match MANAGER_WEB_ALLOWED_DOMAINS and an active ADMIN/MANAGER record. Browser actor claims are rejected. Authorization precedes DTO construction and is repeated for locked mutations. Sensitive role/owner/automation edits remain ADMIN-only; normal managers administer departmental work. A domain-only restriction is insufficient.
+
+Trusted managers require underlying A/service permission in this mode. Ordinary employees must not receive A access. B/C and employee deployment remain separate. Cache is execution/page local; no shared private CacheService or persisted drafts. Read DTOs exclude deployment identifiers/custom private columns; unknown actions are refused. Existing global entrypoints retain their existing Access/Roles checks; manager RPCs do not expose Database or arbitrary function dispatch. Google identity and real sharing tests remain BLOCKED pending [DEV verification](MANAGER_WEB_APP_SMOKE_TEST.md). See [identity research and deployment tradeoff](MANAGER_WEB_APP_DEPLOYMENT.md).
+
+
 This document describes what the V1.1 application actually enforces, what it does not enforce, and the residual
 risks a deployment owner must accept. It reflects the code on branch `fix/v1.1-production-hardening`.
 

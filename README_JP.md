@@ -1,5 +1,20 @@
 ﻿# Engineering-HUB
 
+## 現行リリース — V1.5
+
+**実装済み・DEV Workspace 検証待ち。本番未承認（NOT APPROVED FOR PRODUCTION）。**
+
+バージョン **1.5.0**。既存の管理用 Apps Script にブラウザ画面を追加しました。案件・2階層のサブプロジェクト・タスク・担当領域・メンバー・スキル・申請・管理設定は既存サービスと管理データを使用します。日本語が既定で英語へ切替可能です。従来の Sheets サイドバーは予備の操作画面として残り、社員用アプリは分離したままです。スキーマ **6**、公開契約 **1.4**、新規マイグレーションなし。
+
+ローカル検証は **378件成功、失敗0、スキップ0**。npm ci / lint / validate も成功。Google 実アカウントの識別・権限、公開処理、実通信性能、ブラウザ200%拡大は未確認です。[操作ガイド](docs/MANAGER_WEB_APP.md)、[DEV導入](docs/MANAGER_WEB_APP_DEPLOYMENT.md)、[性能](docs/MANAGER_WEB_APP_PERFORMANCE.md)、[20項目の実機計画](docs/MANAGER_WEB_APP_SMOKE_TEST.md)を参照してください。
+
+npm run preview:manager-web で合成データのローカル画面を開けます。既報の committedDeadline 公開不整合は Date 型の往復テストで修正を確認しましたが、実際の Workspace では再検証待ちです。
+
+## V1.4.1 の履歴
+
+以下の旧リリース表とテスト件数は履歴であり、現行版の検証結果ではありません。
+
+
 Google スプレッドシートをデータベース、Google Apps Script をアプリケーション、GitHub をソースコードの履歴管理に使用する、エンジニアリング向けのプロジェクト管理システムです。
 
 [English](README.md) · [設計](ARCHITECTURE.md) · [データ構造](DATA_SCHEMA.md) · [デプロイ](DEPLOYMENT.md) · [バックアップと復元](BACKUP_RESTORE.md) · [導入前チェックリスト](docs/PRE_TRIAL_CHECKLIST.md) · [管理者向け手順](docs/MANAGER_WORKFLOW.md) · [自動化設定](docs/AUTOMATION_SETTINGS.md) · [共有ダッシュボード](docs/dashboard/ARCHITECTURE.md) · [公開データ契約](docs/dashboard/DATA_CONTRACT.md) · [Workspace実機確認](docs/GOOGLE_WORKSPACE_SMOKE_TEST.md) · [セキュリティモデル](docs/SECURITY_MODEL.md) · [運用ランブック](docs/OPERATIONS_RUNBOOK.md)

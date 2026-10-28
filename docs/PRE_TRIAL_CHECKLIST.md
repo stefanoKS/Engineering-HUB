@@ -1,5 +1,10 @@
 ﻿# 試験運用前チェックリスト / Pre-trial checklist (V1.3.1)
 
+## V1.5 update of the existing DEVELOPMENT installation
+
+For a schema-6 existing workbook, **do not initialize or migrate**. Follow [MANAGER_WEB_APP_DEPLOYMENT.md](MANAGER_WEB_APP_DEPLOYMENT.md) to verify the manager clasp target, keep employee deployment separate, configure allowed domains and deploy as the accessing user. Then run [all 20 DEV tests](MANAGER_WEB_APP_SMOKE_TEST.md), including alternate account identity and employee refusal. Keep mail/Calendar OFF, emergency stop on and DRY_RUN true. V1.5 remains NOT APPROVED FOR PRODUCTION. The first-time/older-database procedures below apply only when separately authorized and actually needed.
+
+
 This is the **primary first-time installation guide** for Engineering-HUB **設計・開発課 管理**.
 It installs a Google Workspace **DEVELOPMENT** trial. `DEPLOYMENT.md`,
 `docs/dashboard/DEPLOYMENT.md` and `docs/REQUEST_INBOX_DEPLOYMENT.md` are the reference

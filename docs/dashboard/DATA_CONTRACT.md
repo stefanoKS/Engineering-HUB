@@ -1,5 +1,10 @@
 # Shared dashboard data contract (V1.2)
 
+## V1.5 date boundary correction (contract remains 1.4)
+
+The publisher and employee reader now normalize known snapshot Date fields (including committedDeadline and date-only lastUpdated) to yyyy-MM-dd before comparison/hash/use. The publisher also applies plain-text formatting to date columns. Slot verification and snapshot hashes remain mandatory; no fields or permissions changed. The local Date-returning Sheets mock passes publication and employee delivery. The reported live PUBLISHED_PROJECTS_B row 2 column 10 mismatch still requires DEV retesting; live status UNVERIFIED. See [manager DEV test 13](../MANAGER_WEB_APP_SMOKE_TEST.md).
+
+
 The shared dashboard never reads the private management workbook. It reads one **sanitized
 snapshot spreadsheet** whose structure is defined here. Everything in this document is
 enforced by code and by tests:

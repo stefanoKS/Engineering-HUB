@@ -1,5 +1,12 @@
 # Manager workflow
 
+## V1.5 browser workflow
+
+Open/bookmark the manager DEV /exec URL provided by the administrator. The header displays your verified actor/role and V1.5. Use Overview, Projects, Tasks, Requests and Administration. You do not need Sheets open for daily CRUD. Projects open the two-level subproject hierarchy; its task button scopes the task list. Task creation asks for duration and deadline and uses the existing backward schedule. Confirm assignment and schedule separately. Requests import explicitly, then show reasons/dates/notes and approval controls/history.
+
+Forms retain drafts during navigation/language changes and reject stale revisions. A transport failure has an uncertain outcome: reload the record/list/audit before retrying a create. Forced reload loses in-memory drafts after a browser warning. Reports/publication are explicit actions. Managers can stop automation; ADMIN handles sensitive settings and roles. The existing Sheets menu is the fallback. [Complete browser guide](MANAGER_WEB_APP.md).
+
+
 This guide describes the intended V1.1 manager workflow in the bound Google Sheets project. All screens are
 Japanese-first; the menu is **設計・開発課 管理**.
 

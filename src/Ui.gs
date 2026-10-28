@@ -447,8 +447,10 @@ var Ui = (function () {
         }
       }
       if (!Object.keys(patch).length && reparent === null) throw new Error('変更する項目がありません');
-      var row = Object.keys(patch).length ? Subprojects.update(subprojectId, patch) : before;
-      if (reparent !== null) row = Subprojects.reparent(subprojectId, reparent, {confirmed: true});
+      if (reparent !== null) patch.Parent_Subproject_ID = reparent;
+      var row = Subprojects.update(subprojectId, patch);
+      if (reparent !== null) AuditLog.write('SUBPROJECT_REPARENTED', 'SUBPROJECT', subprojectId,
+        {previousParent: before.Parent_Subproject_ID || '', newParent: reparent});
       return plain(row);
     });
   }
@@ -565,6 +567,11 @@ var Ui = (function () {
     if (payload.priority !== undefined) patch.Priority = text(payload.priority, '優先度');
     if (payload.plannedStart !== undefined) patch.Planned_Start = String(payload.plannedStart).trim();
     if (payload.deadline !== undefined) patch.Due_Date = String(payload.deadline || '').trim();
+    if (payload.actualHours !== undefined) patch.Actual_Hours = optionalNumber(payload.actualHours, '実績時間');
+    if (payload.progress !== undefined) {
+      patch.Progress_Percent = Number(payload.progress);
+      if (patch.Progress_Percent === 100) patch.Status = 'Done';
+    }
     if (payload.estimatedHours !== undefined) patch.Estimated_Hours = optionalNumber(payload.estimatedHours, '見積時間');
     if (payload.acceptanceCriteria !== undefined) patch.Acceptance_Criteria = String(payload.acceptanceCriteria);
     if (payload.nextAction !== undefined) patch.Next_Action = String(payload.nextAction);
@@ -594,7 +601,7 @@ var Ui = (function () {
    * Creates or edits a task. Deadline and required duration stay the primary schedule
    * inputs; the planned start is derived by Tasks.validate / Planning.applyTaskPlan.
    */
-  function assignTask(payload) {
+  function assignTask(payload, options) {
     return guard(function () {
       payload = payload || {};
       var current = Access.requireManager();
@@ -623,7 +630,9 @@ var Ui = (function () {
           Task_Name: text(payload.taskName, 'タスク名'),
           Description: payload.description || '',
           Owner_Member_ID: text(payload.ownerId, '担当者'),
-          Status: payload.status || 'Assigned',
+          Status: Number(payload.progress) === 100 ? 'Done' : (payload.status || 'Assigned'),
+          Progress_Percent: payload.progress === undefined || payload.progress === '' ? 0 : Number(payload.progress),
+          Actual_Hours: optionalNumber(payload.actualHours, '実績時間'),
           Priority: payload.priority || 'Medium',
           Planned_Start: payload.plannedStart || '',
           Due_Date: payload.deadline || '',
@@ -648,7 +657,7 @@ var Ui = (function () {
           plannedStartSource: task.Planned_Start_Source, notify: task.Notification_Enabled === true});
       if (payload.approve === true) Notifications.approveAssignment(task.Task_ID, current.email, 'APPROVE ASSIGNMENT');
       if (payload.confirmSchedule === true) Tasks.confirmSchedule(task.Task_ID, current.email, 'CONFIRM SCHEDULE');
-      var refreshed = Dashboard.refresh();
+      var refreshed = options && options.skipDashboard === true ? null : Dashboard.refresh();
       return {task: plain(Database.find('TASKS', task.Task_ID)), dashboard: refreshed};
     });
   }

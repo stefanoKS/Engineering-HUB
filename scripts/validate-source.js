@@ -37,7 +37,7 @@ const sources = files.map(name => {
   const source = read(managerDir, name);
   new vm.Script(source, { filename: name });
   // Only the schema-guarded generated-sheet writer may replace sheet contents.
-  const generatedWriter = /function writeGenerated\(name, rows\) \{\s*if \(Schema\.generated\.indexOf\(name\) < 0\) throw new Error\('[^']*'\);\s*var sheet = book\(\)\.getSheetByName\(name\) \|\| book\(\)\.insertSheet\(name\);\s*sheet\.clearContents\(\);/;
+  const generatedWriter = /function writeGenerated\(name, rows\) \{\s*(?:if \(readContext && !readContext\.allowWrites\) throw new Error\("Writes are forbidden in a read context"\);\s*)?if \(Schema\.generated\.indexOf\(name\) < 0\) throw new Error\('[^']*'\);\s*var sheet = book\(\)\.getSheetByName\(name\) \|\| book\(\)\.insertSheet\(name\);\s*sheet\.clearContents\(\);/;
   const checkedSource = name === 'Database.gs' ? source.replace(generatedWriter, '') : source;
   assert(!DESTRUCTIVE.test(checkedSource), `${name}: destructive APIs are prohibited in production source`);
   return source;
@@ -213,7 +213,7 @@ function usedKeys(file) {
   let match;
   while ((match = attribute.exec(content)) !== null) keys.add(match[1]);
   const literal = /(?:^|[^.\w])(?:T|t)\(\s*'([^']+)'\s*[,)]/g;
-  while ((match = literal.exec(content)) !== null) keys.add(match[1]);
+  while ((match = literal.exec(content)) !== null) keys.add((path.basename(file) === 'ManagerWebClient.html' ? 'web.' : '') + match[1]);
   return Array.from(keys);
 }
 [managerDir, dashboardDir].forEach(directory => {

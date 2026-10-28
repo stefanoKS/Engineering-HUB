@@ -1,5 +1,10 @@
 # Deployment and activation
 
+## V1.5 manager browser deployment (current)
+
+Use [MANAGER_WEB_APP_DEPLOYMENT.md](docs/MANAGER_WEB_APP_DEPLOYMENT.md) for the existing DEVELOPMENT manager project. rootDir remains src; employee rootDir remains dashboard-app in its own project. Deploy manager HTML Service as User accessing the web app, domain restricted; set mandatory MANAGER_WEB_ALLOWED_DOMAINS. Trusted ADMIN/MANAGER require underlying A permissions; employees must not receive A access. clasp push uploads source and is distinct from creating/updating a versioned web deployment. No schema migration is needed. No live deployment was performed. **NOT APPROVED FOR PRODUCTION.**
+
+
 > **First-time installation?** Follow [docs/PRE_TRIAL_CHECKLIST.md](docs/PRE_TRIAL_CHECKLIST.md)
 > step by step. It is the primary guide for a new DEVELOPMENT trial and it resolves any
 > difference from the reference chapters below. This document is the reference for each area and
