@@ -3,6 +3,7 @@
 Status: **PASS** (local targets) — live Workspace latency **NOT_RUN**
 Date: 2026-10-28
 Starting commit SHA: adde446e856f992d16aca18b116489126b9a57c7
+Implementation commit SHA: 6da346c (feat(manager-web): local-first navigation with an authorized snapshot)
 
 ## 1. Objective
 
