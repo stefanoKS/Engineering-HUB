@@ -42,8 +42,14 @@ project is never auto-assigned.
 - **Global filter.** Selecting an area filters the overview, the project list, the task list, the KPIs and the
   upcoming deadlines from the in-memory snapshot (no extra read RPC). The selection lives in page memory using the
   stable ID, so renaming or reordering an area never breaks it. `未分類` is a separate bucket for blank links.
-- **Colour.** `Color_Hex` is an optional validated `#RRGGBB` value; a new area takes the next unused entry of the
-  documented palette and a legacy blank value falls back to its palette position. Colour is display metadata only.
+- **Colour.** `Color_Hex` is an optional validated `#RRGGBB` value and stays the only stored colour value. The
+  create/edit form offers it as a visual choice: twelve muted presets (`Responsibilities.PALETTE`) as swatches, the
+  browser's native colour input for a custom value and an optional HEX field in an advanced section, with a live
+  preview card. Selection is shown by `aria-pressed` plus a check mark and works with the keyboard (arrow keys,
+  Home, End). A new area takes the next unused entry of the palette and a legacy blank value falls back to its
+  palette position. `Responsibilities.normalizeColor` validates every value again on the server, so an invalid
+  colour never reaches the sheet, and an edit that does not touch the colour sends no colour at all. Colour is
+  display metadata only; it is used by the area card, the area filter and the project/task indicators.
 - **Creation.** A project created in the manager dashboard must name an active responsibility (server-set
   requirement). The legacy Sheets sidebar keeps the V1.4 unassigned path. A retired area is never a destination for
   new work but keeps every project, task, milestone and history row and stays visible in lists and filters.

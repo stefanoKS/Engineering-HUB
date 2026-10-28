@@ -33,6 +33,17 @@ Workspace run of any kind was performed in this repository session, no workbook 
 deployed.** The measured numbers in [MANAGER_WEB_APP_PERFORMANCE.md](MANAGER_WEB_APP_PERFORMANCE.md) are mock values;
 the raw file records `liveWorkspace: NOT_RUN`.
 
+### Colour-picker follow-up (2026-10-29)
+
+The responsibility form now offers its colour visually (twelve muted swatches with a check mark and `aria-pressed`
+state, the native colour input, an optional advanced HEX field and a live preview). This is a UI correction only:
+schema **7**, employee contract **1.5**, authorization, `Color_Hex` as the stored value and
+`Responsibilities.normalizeColor` as the validator are unchanged, and no deployment, migration, trigger or data
+change was performed. Local evidence is recorded in [V1_6_2_GATE_6.md](checkgates/V1_6_2_GATE_6.md): `npm run lint`
+pass, **553 tests, 553 pass, 0 fail, 0 skipped** (543 sealed cases plus ten colour-picker cases), `npm run validate`
+green. Gates 1–5, the validation transcript and the performance artefact of the sealed delivery are left untouched;
+every live criterion stays **BLOCKED / NOT_RUN** and this release is still **NOT APPROVED FOR PRODUCTION**.
+
 Use the existing DEVELOPMENT resources described by the operator; their actual creation/sharing/deployment state was
 not inspected here. No code was uploaded with clasp, no live deployment/data/migration/trigger/email/Calendar action
 was performed. Follow [the V1.6 runbook](V1_6_DEPLOYMENT_RUNBOOK.md), [DEV installation](MANAGER_WEB_APP_DEPLOYMENT.md)

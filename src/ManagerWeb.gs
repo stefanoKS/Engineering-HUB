@@ -211,7 +211,9 @@ var ManagerWeb = (function () {
   function referenceOptions() {
     return {members: Database.read('MEMBERS').map(function (m) { return {id: m.Member_ID, name: m.Name, active: m.Active}; }),
       projects: Database.read('PROJECTS').map(function (p) { return {id: p.Project_ID, name: p.Project_Name}; }),
-      responsibilities: responsibilityOptions()};
+      responsibilities: responsibilityOptions(),
+      // The responsibility colour picker draws these swatches; the server stays authoritative.
+      colors: Responsibilities.PALETTE.slice()};
   }
   /** Area scope of a request: one responsibility, the 未分類 bucket, or everything. */
   function scopeInput(input) {
@@ -482,7 +484,12 @@ var ManagerWeb = (function () {
       case 'task': return {record: editable('TASKS', Database.find('TASKS', input.id)), confirmations: Database.read('SCHEDULE_CONFIRMATIONS').filter(function (r) { return r.Task_ID === input.id; }).map(function (r) { return record('SCHEDULE_CONFIRMATIONS', r); })};
       case 'references': return referenceOptions();
       case 'members': return page(Database.read('MEMBERS').filter(function (m) { return !input.query || (m.Name + ' ' + m.Department).toLowerCase().indexOf(String(input.query).toLowerCase()) >= 0; }).map(function (m) { return editable('MEMBERS', m); }), input);
-      case 'responsibilities': return {items: Responsibilities.all().map(function (r) { return editable('RESPONSIBILITIES', r); })};
+      case 'responsibilities': return {items: Responsibilities.all().map(function (r, position) {
+        var dto = editable('RESPONSIBILITIES', r);
+        // Same display colour as the area card, so a list and a card never disagree.
+        dto._color = Responsibilities.colorOf(r, position);
+        return dto;
+      })};
       case 'skills': return {items: Database.read('SKILLS').map(function (s) { return record('SKILLS', s); }), assessments: unwrap(Ui.skills())};
       case 'requests': return unwrap(Ui.requests({import: false, includeDecided: input.includeDecided === true}));
       case 'automation': {var automation=unwrap(Ui.automationSettings());automation.revision=settingsRevision();return automation;}

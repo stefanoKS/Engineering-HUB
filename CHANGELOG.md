@@ -59,6 +59,15 @@ stays **7** and the published employee contract stays **1.5**.
 - **Area switching.** `ManagerWeb.overview(actor, {areas:false})` omits the area selector and cards the
   browser already holds; the client asks for that shape once it has the snapshot, renders a scoped loading
   state instead of the previous area's figures, and keeps the stale-response guard.
+- **Responsibility colour picker.** The HEX-only field became a visual control: twelve muted presets as
+  swatches (`Responsibilities.PALETTE`, extended from eight to twelve entries, published through
+  `references.colors`), the native `input type="color"` for a custom value, an optional HEX field inside a
+  collapsed advanced section, and a live preview card. The selection is exposed as `aria-pressed` plus a
+  check mark and is operable with the keyboard (arrow keys, Home, End). `Color_Hex` stays the stored value,
+  `Responsibilities.normalizeColor` still refuses anything but `#RRGGBB`, a new area keeps the deterministic
+  next-palette default, and an edit that does not touch the colour sends no colour at all. Cards, the area
+  filter and project/task indicators reuse the same colour. See
+  [V1_6_2_GATE_6](docs/checkgates/V1_6_2_GATE_6.md).
 
 ## V1.6.1 — 2026-10-29
 

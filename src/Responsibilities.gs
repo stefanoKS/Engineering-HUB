@@ -14,9 +14,11 @@ var Responsibilities = (function () {
   var NAME_MAX = 60;
   var DESCRIPTION_MAX = 500;
   var TERMINAL_PROJECT = ['Completed', 'Cancelled', 'Archived'];
-  // Validated display palette (docs/UI_UX_GUIDELINES.md). A new area takes the next unused
-  // entry, so the colours stay predictable without hardcoding any particular area name.
-  var PALETTE = ['#357C9B', '#6A65A8', '#328568', '#C38A39', '#A74646', '#304E70', '#4C6B33', '#7A5C3E'];
+  // Validated display palette (docs/UI_UX_GUIDELINES.md). Twelve muted, professional colours
+  // that the manager picks from as swatches. A new area takes the next unused entry, so the
+  // colours stay predictable without hardcoding any particular area name.
+  var PALETTE = ['#357C9B', '#6A65A8', '#328568', '#C38A39', '#A74646', '#304E70',
+    '#4C6B33', '#7A5C3E', '#4F6D7A', '#8A5A7A', '#5A6675', '#9C6B4A'];
 
   function fail(message) { Domain.fail(message); }
 

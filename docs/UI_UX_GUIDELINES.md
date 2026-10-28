@@ -8,8 +8,11 @@ browser zoom. No mobile-specific layout is required.
 - **Tokens.** Background `#F4F6F8`, surfaces `#FFFFFF`, primary text `#27333E`, secondary text `#526170`, borders
   `#D7DEE5`; accents: navigation `#304E70`, product design `#357C9B`, automation `#6A65A8`, completed `#328568`,
   pending approval `#C38A39`, overdue/critical `#A74646`.
-- **Responsibility colours** come from a validated palette (`Responsibilities.PALETTE`) or a manager-entered
-  `#RRGGBB`; no area name is hardcoded and the number of areas is never assumed.
+- **Responsibility colours** come from a validated palette (`Responsibilities.PALETTE`, twelve muted presets) or a
+  manager-chosen custom colour; no area name is hardcoded and the number of areas is never assumed. The manager
+  picks a colour visually: swatches with a check mark and `aria-pressed` state, the native colour input, an optional
+  HEX field in an advanced section, arrow/Home/End keyboard support, and a live preview card. Colour is never the
+  only signal — the stored `#RRGGBB` text is always shown next to it.
 - **Typography.** Noto Sans JP / Inter when available, otherwise the system UI font. Page titles are strong, project
   names bold, subproject headings medium, descriptions normal, metadata small and muted. Status is never conveyed by
   font weight or colour alone: every state has a text label plus a chip/pill.

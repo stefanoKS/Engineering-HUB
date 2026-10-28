@@ -353,6 +353,149 @@ function field(parent, key, value, options, onChange, type) {
 }
 /** Reference choices come from the authorized snapshot; a miss falls back to the server read. */
 function references() { return store.references || {members: [], projects: [], responsibilities: []}; }
+
+/* ---------------------------------------------------------------- *
+ * Responsibility colour picker (V1.6.2)
+ *
+ * Twelve validated muted presets, the browser's native colour input for a custom value and an
+ * optional HEX field for advanced use. The stored value stays `Color_Hex` and the server
+ * validates it again, so an invalid colour can never reach the database.
+ * ---------------------------------------------------------------- */
+var COLOR_PRESETS = ['#357C9B', '#6A65A8', '#328568', '#C38A39', '#A74646', '#304E70',
+  '#4C6B33', '#7A5C3E', '#4F6D7A', '#8A5A7A', '#5A6675', '#9C6B4A'];
+var COLOR_PATTERN = /^#[0-9A-F]{6}$/;
+/** One validated #RRGGBB value, or '' — never a partially parsed colour. */
+function normalizeHex(value) {
+  var raw = String(value === undefined || value === null ? '' : value).trim().toUpperCase();
+  return COLOR_PATTERN.test(raw) ? raw : '';
+}
+/** Swatches come from the authorized snapshot; the constant keeps the form usable offline. */
+function colorPresets() {
+  var provided = references().colors;
+  var list = (Array.isArray(provided) ? provided : []).map(normalizeHex).filter(function (color) { return !!color; });
+  return list.length ? list : COLOR_PRESETS;
+}
+function areaColorOf(id) {
+  var found = areaItems().filter(function (area) { return area.id === id; })[0];
+  return found ? normalizeHex(found.color) : '';
+}
+function referenceColorOf(id) {
+  var found = (references().responsibilities || []).filter(function (area) { return area.id === id; })[0];
+  return found ? normalizeHex(found.color) : '';
+}
+/** Deterministic default for a new area: the first preset no area displays yet, like the server. */
+function defaultResponsibilityColor() {
+  var presets = colorPresets(), used = Object.create(null), areas = references().responsibilities || [];
+  areas.forEach(function (area) { var color = normalizeHex(area.color); if (color) used[color] = true; });
+  for (var i = 0; i < presets.length; i++) if (!used[presets[i]]) return presets[i];
+  return presets[areas.length % presets.length];
+}
+/**
+ * Visual colour control for one responsibility draft.
+ *
+ * Selecting a swatch, the custom picker or a valid HEX value writes the draft; opening the form
+ * never rewrites the stored colour, so an edit stays a partial patch.
+ */
+function colorPicker(parent, draft) {
+  var box = el('div', undefined, 'color-field hint-wide');
+  box.setAttribute('role', 'group');
+  box.setAttribute('aria-label', t('selectColor'));
+  box.appendChild(el('span', t('color'), 'color-legend'));
+  var swatchBox = el('div', undefined, 'color-swatches'), swatches = [];
+  colorPresets().forEach(function (preset, index) {
+    var swatch = el('button', undefined, 'color-swatch');
+    swatch.type = 'button';
+    swatch.setAttribute('data-color', preset);
+    swatch.setAttribute('style', 'background-color:' + preset);
+    swatch.setAttribute('aria-pressed', 'false');
+    swatch.setAttribute('aria-label', preset);
+    var check = el('span', '✓', 'color-check');
+    check.setAttribute('aria-hidden', 'true');
+    swatch.appendChild(check);
+    swatch.addEventListener('click', function () { applyColor(preset); });
+    swatch.addEventListener('keydown', function (event) { stepSwatch(event, index); });
+    swatchBox.appendChild(swatch);
+    swatches.push(swatch);
+  });
+  box.appendChild(swatchBox);
+  var customInput = el('input');
+  customInput.type = 'color';
+  customInput.name = 'color';
+  customInput.setAttribute('aria-label', t('customColor'));
+  var customLabel = el('label', undefined, 'color-custom');
+  customLabel.append(el('span', t('customColor')), customInput);
+  box.appendChild(customLabel);
+  var advanced = el('details', undefined, 'color-advanced');
+  advanced.appendChild(el('summary', t('advancedColor')));
+  var hexInput = el('input');
+  hexInput.type = 'text';
+  hexInput.name = 'colorHex';
+  hexInput.placeholder = '#357C9B';
+  hexInput.setAttribute('aria-invalid', 'false');
+  var error = el('span', undefined, 'color-error');
+  error.setAttribute('role', 'alert');
+  var hexLabel = el('label');
+  hexLabel.append(el('span', 'HEX'), hexInput, error);
+  advanced.appendChild(hexLabel);
+  box.appendChild(advanced);
+  var preview = el('div', undefined, 'color-preview');
+  preview.setAttribute('aria-label', t('colorPreview'));
+  var previewName = el('span', undefined, 'color-preview-name');
+  var previewMeta = el('span', undefined, 'color-preview-meta');
+  var previewDot = el('span', undefined, 'color-dot'), previewValue = el('span');
+  previewMeta.append(previewDot, previewValue);
+  preview.append(previewName, previewMeta);
+  box.appendChild(preview);
+  parent.appendChild(box);
+
+  function currentColor() {
+    return normalizeHex(draft.values.color) || (draft.id ? referenceColorOf(draft.id) : '') || defaultResponsibilityColor();
+  }
+  function refresh(source) {
+    var color = currentColor();
+    swatches.forEach(function (swatch) {
+      var selected = normalizeHex(swatch.getAttribute('data-color')) === color;
+      swatch.setAttribute('aria-pressed', selected ? 'true' : 'false');
+      swatch.className = 'color-swatch' + (selected ? ' is-selected' : '');
+    });
+    customInput.value = color.toLowerCase();
+    if (source !== 'hex') hexInput.value = color;
+    preview.setAttribute('style', 'border-left-color:' + color);
+    previewDot.setAttribute('style', 'background-color:' + color);
+    previewValue.textContent = color;
+    previewName.textContent = String(draft.values.name || '') || t('colorPreview');
+  }
+  function applyColor(raw) {
+    var next = normalizeHex(raw);
+    if (!next) {
+      error.textContent = t('invalidColor');
+      hexInput.setAttribute('aria-invalid', 'true');
+      return false;
+    }
+    error.textContent = '';
+    hexInput.setAttribute('aria-invalid', 'false');
+    draft.values.color = next;
+    draft.dirty = true;
+    refresh('color');
+    return true;
+  }
+  /** Arrow/Home/End move the selection like a radio group, so the picker is keyboard usable. */
+  function stepSwatch(event, index) {
+    var key = event && event.key;
+    if (key !== 'ArrowRight' && key !== 'ArrowLeft' && key !== 'Home' && key !== 'End') return;
+    if (event.preventDefault) event.preventDefault();
+    var next = key === 'Home' ? 0 : key === 'End' ? swatches.length - 1
+      : (index + (key === 'ArrowRight' ? 1 : -1) + swatches.length) % swatches.length;
+    var target = swatches[next];
+    applyColor(target.getAttribute('data-color'));
+    if (typeof target.focus === 'function') target.focus();
+  }
+  customInput.addEventListener('input', function () { applyColor(customInput.value); });
+  customInput.addEventListener('change', function () { applyColor(customInput.value); });
+  hexInput.addEventListener('input', function () { applyColor(hexInput.value); });
+  refresh('init');
+  return {refresh: refresh};
+}
 function filterField(bar, kind, key, value, options, apply, type) {
   return field(bar, key, value, options, function (v) { apply(v); localFilter(kind); }, type);
 }
@@ -481,7 +624,11 @@ function projectCards(data, host) {
     card.appendChild(el('h2',p.name));
     progressRow(p.progress,p.name,card);
     var meta=el('div',undefined,'meta'), relative=deadlineText(p);
-    metaItem(meta,t('responsibility'),p.responsibility);
+    // The area indicator carries the same colour as the responsibility card.
+    var areaMeta=el('div',undefined,'meta-item'), areaValue=el('span',undefined,'meta-value'), areaTone=normalizeHex(p.responsibilityColor);
+    if(areaTone){var areaDot=el('span',undefined,'color-dot');areaDot.setAttribute('style','background-color:'+areaTone);areaValue.appendChild(areaDot);}
+    areaValue.appendChild(el('span',p.responsibility===undefined||p.responsibility===''?'—':p.responsibility));
+    areaMeta.append(el('span',t('responsibility'),'meta-label'),areaValue);meta.appendChild(areaMeta);
     metaItem(meta,t('ownerId'),p.owner);
     metaItem(meta,t('statusField'),statusLabel(p.status));
     metaItem(meta,t('deadline'),p.deadline?(relative?p.deadline+' · '+relative:p.deadline):(relative||''),p.deadlineKind==='overdue'?'is-overdue':(p.deadlineKind==='today'||(p.deadlineKind==='future'&&p.daysRemaining!==null&&p.daysRemaining<=7))?'is-soon':'');
@@ -503,7 +650,7 @@ function tasks(data, host) {
     if(task.container)row.appendChild(el('span',t('containerTask'),'chip chip-container'));
     if(task.reviewState==='PENDING')row.appendChild(el('span',t('reviewPending'),'chip chip-review'));
     else if(task.reviewState==='STALE')row.appendChild(el('span',t('reviewStale'),'chip chip-review is-stale'));
-    if(!activeResponsibility&&task.responsibilityId)row.appendChild(el('span',areaNameOf(task.responsibilityId),'chip'));
+    if(!activeResponsibility&&task.responsibilityId){var chipTone=areaColorOf(task.responsibilityId),areaChip=el('span',undefined,'chip color-chip');if(chipTone){var chipDot=el('span',undefined,'chip-dot');chipDot.setAttribute('style','background-color:'+chipTone);areaChip.appendChild(chipDot);}areaChip.appendChild(el('span',areaNameOf(task.responsibilityId)));row.appendChild(areaChip);}
     row.append(el('span',task.project),el('span',task.owner),el('span',task.deadline||'—'),el('span',statusLabel(task.status)),el('span',String(task.progress||0)+'%'));
     button('edit',function(){openEditor('task',task.id);},row);
     // A subtask is only offered while the three-level limit still allows another level.
@@ -797,7 +944,7 @@ function render() {
   if(view==='overview'&&data&&data.actor) {
     actorRole=data.actor.role;byId('actor').textContent=data.actor.name+' · '+data.actor.role;
     var areaHeading=el('div',undefined,'section-title');areaHeading.appendChild(el('h2',t('navResponsibilities')));
-    if(activeResponsibility)areaHeading.appendChild(el('span',responsibilityHeading(),'chip'));
+    if(activeResponsibility){var activeChip=el('span',undefined,'chip color-chip'),activeTone=normalizeHex(activeResponsibility===UNASSIGNED?'':areaColorOf(activeResponsibility));if(activeTone){var activeDot=el('span',undefined,'chip-dot');activeDot.setAttribute('style','background-color:'+activeTone);activeChip.appendChild(activeDot);}activeChip.appendChild(el('span',responsibilityHeading()));areaHeading.appendChild(activeChip);}
     host.appendChild(areaHeading);
     responsibilityStrip(host);
     // Every number here is computed server-side for the selected scope, so filtering never
@@ -853,7 +1000,7 @@ function render() {
     var type=view==='members'?'member':view==='skills'?'skill':'responsibility';button('new',function(){openEditor(type);},top);
     if(view==='members')listFilters('members',host);
     if(view==='skills')button('skillAssess',function(){openEditor('skillAssess');},top);
-    (data.items||[]).forEach(function(r){var card=el('article',undefined,'card');card.appendChild(el('h2',r.Name||r.Skill_Name));if(type==='member'){rowValues(card,[[t('department'),r.Department],[t('role'),r.Role],[t('capacity'),r.Weekly_Capacity_Hours],[t('enabled'),r.Active]]);button('edit',function(){openEditor(type,r.Member_ID,r);},card);button('openMember',function(){navigate('member',{id:r.Member_ID});},card);}else if(type==='responsibility'){card.appendChild(el('p',r.Description));card.appendChild(el('p',statusLabel(r.Status)));if(r.Color_Hex)card.appendChild(el('span',r.Color_Hex,'chip'));button('edit',function(){openEditor(type,r.Responsibility_ID,r);},card);['up','down'].forEach(function(dir){button(dir,function(){act('responsibilityMove',{responsibilityId:r.Responsibility_ID,revision:r._revision,direction:dir});},card);});button(r.Status==='Retired'?'reactivate':'retire',function(){act(r.Status==='Retired'?'responsibilityReactivate':'responsibilityRetire',{responsibilityId:r.Responsibility_ID,revision:r._revision},true);},card);button('projects',function(){navigate('projects',{responsibilityId:r.Responsibility_ID});},card);}host.appendChild(card);});if(!data.items.length)host.appendChild(el('p',t('empty')));pagination(data,view,host);if(view==='skills'&&data.assessments){(data.assessments.matrix||[]).forEach(function(row,index){var card=el('article',undefined,'card');card.appendChild(el(index?'p':'h2',row.join(' · ')));host.appendChild(card);});}
+    (data.items||[]).forEach(function(r){var card=el('article',undefined,'card');card.appendChild(el('h2',r.Name||r.Skill_Name));if(type==='member'){rowValues(card,[[t('department'),r.Department],[t('role'),r.Role],[t('capacity'),r.Weekly_Capacity_Hours],[t('enabled'),r.Active]]);button('edit',function(){openEditor(type,r.Member_ID,r);},card);button('openMember',function(){navigate('member',{id:r.Member_ID});},card);}else if(type==='responsibility'){card.appendChild(el('p',r.Description));card.appendChild(el('p',statusLabel(r.Status)));var areaTone=normalizeHex(r._color||r.Color_Hex);if(areaTone){var colorChip=el('span',undefined,'chip color-chip'),colorDot=el('span',undefined,'chip-dot');colorDot.setAttribute('style','background-color:'+areaTone);colorChip.append(colorDot,el('span',areaTone));card.appendChild(colorChip);card.setAttribute('style','border-left:6px solid '+areaTone);}button('edit',function(){openEditor(type,r.Responsibility_ID,r);},card);['up','down'].forEach(function(dir){button(dir,function(){act('responsibilityMove',{responsibilityId:r.Responsibility_ID,revision:r._revision,direction:dir});},card);});button(r.Status==='Retired'?'reactivate':'retire',function(){act(r.Status==='Retired'?'responsibilityReactivate':'responsibilityRetire',{responsibilityId:r.Responsibility_ID,revision:r._revision},true);},card);button('projects',function(){navigate('projects',{responsibilityId:r.Responsibility_ID});},card);}host.appendChild(card);});if(!data.items.length)host.appendChild(el('p',t('empty')));pagination(data,view,host);if(view==='skills'&&data.assessments){(data.assessments.matrix||[]).forEach(function(row,index){var card=el('article',undefined,'card');card.appendChild(el(index?'p':'h2',row.join(' · ')));host.appendChild(card);});}
   } else if(view==='requests') {
     button('requestImport',function(){act('requestImport',{});},top);
     field(top,'showDecided',!!(filters.requests&&filters.requests.includeDecided),null,function(v){filters.requests={includeDecided:v};load(true);},'checkbox');
@@ -970,7 +1117,11 @@ function loadSubprojects(projectId,draft){var seq=(draft.subSequence||0)+1;draft
 function renderEditor() {
   if(!currentEditor)return;var d=currentEditor.draft,schema=schemas[d.type],host=byId('formHost');host.replaceChildren();byId('editorTitle').textContent=t(d.type)+' · '+t(d.id?'edit':'new');
   var form=el('form'), fields=el('div',undefined,'fields'), message=el('div');message.setAttribute('role','status');form.append(fields,message);if(d.type==='task'&&d.id){rowValues(form,[[t('taskApprove'),d.original.Assignment_Approved_At||'—'],[t('plannedStart'),d.original.Planned_Start||'—'],[t('scheduleState'),(d.original._confirmations||[]).filter(function(c){return c.Active;}).map(function(c){return c.Confirmed_At+' · '+c.Confirmed_By;}).join(', ')||t('notConfirmed')]]);}
-  Object.keys(schema.fields).forEach(function(key){if(key==='role'&&actorRole!=='ADMIN')return;var options=null,type='text';
+  var colorUi=null;
+  Object.keys(schema.fields).forEach(function(key){if(key==='role'&&actorRole!=='ADMIN')return;
+    // The colour of a responsibility is chosen visually, never typed by default.
+    if(d.type==='responsibility'&&key==='color'){colorUi=colorPicker(fields,d);return;}
+    var options=null,type='text';
     if(['description','summary','acceptanceCriteria','nextAction','evidence','trainingAction'].indexOf(key)>=0)type='textarea';
     if(['deadline','plannedStart','nextReviewDate'].indexOf(key)>=0)type='date';
     if(['durationValue','estimatedHours','actualHours','progress','capacity','requiredLevel','level'].indexOf(key)>=0)type='number';
@@ -1002,7 +1153,7 @@ function renderEditor() {
     if(key==='visibility')options=[{id:'RESTRICTED',name:lang==='ja'?'非公開':'Restricted'},{id:'INTERNAL',name:lang==='ja'?'社内公開':'Internal'}];
     if(key==='durationUnit')options=[{id:'DAY',name:lang==='ja'?'日':'Days'},{id:'WEEK',name:lang==='ja'?'週':'Weeks'}];
     if(key==='durationBasis')options=[{id:'WORKING_DAYS',name:lang==='ja'?'営業日':'Working days'},{id:'CALENDAR_DAYS',name:lang==='ja'?'暦日':'Calendar days'}];
-    var control=field(fields,key,d.values[key],options,function(v){d.values[key]=v;d.dirty=true;if(key==='projectId'){d.values.subprojectId='';d.values.parentId='';loadSubprojects(v,d);}},type);
+    var control=field(fields,key,d.values[key],options,function(v){d.values[key]=v;d.dirty=true;if(colorUi&&key==='name')colorUi.refresh('name');if(key==='projectId'){d.values.subprojectId='';d.values.parentId='';loadSubprojects(v,d);}},type);
     if((key==='plannedStart'&&d.values.durationValue)||(key==='projectId'&&d.type==='subproject'&&d.id))control.disabled=true;
     if(['name','taskName','email','projectId'].indexOf(key)>=0)control.required=true;
     if(d.type==='project'&&!d.id&&key==='responsibilityId')control.required=true;

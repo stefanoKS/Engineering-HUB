@@ -36,14 +36,20 @@ feature was added.
 - **Areas switch faster.** An area-scoped overview no longer recomputes and reships the area selector and cards the
   browser already holds, and the previous area's figures are replaced by a scoped loading state instead of being
   shown under the newly selected area.
+- **Area colour is chosen visually.** The responsibility form no longer asks for a HEX string: twelve muted presets
+  are clickable swatches with a check mark and `aria-pressed` state, a custom colour uses the browser's own picker,
+  the HEX field is an optional advanced control, and a preview card shows the result immediately. `Color_Hex` stays
+  the stored value, the server keeps validating it, an untouched colour is never rewritten, and a new area keeps its
+  deterministic palette default (see [V1_6_2_GATE_6.md](docs/checkgates/V1_6_2_GATE_6.md)).
 
 Schema **7** and employee contract **1.5** are unchanged; there is no new migration, and no execute-as, trigger,
 mail, Calendar or publication change.
 
 Local verification: `npm ci`, `npm run lint`, `npm test`, `npm run validate` and
-`node scripts/manager-web-benchmark.js` all pass; **543 tests, 543 pass, 0 fail, 0 skipped** and the five V1.6.2
-checkgates record local PASS results with their live criteria BLOCKED (see
-[V1_6_2_GATE_5.md](docs/checkgates/V1_6_2_GATE_5.md)). Cached navigation stays at 0.8–1.4 ms and local filtering at
+`node scripts/manager-web-benchmark.js` all pass; **553 tests, 553 pass, 0 fail, 0 skipped** (543 at the sealed
+V1.6.2 delivery plus ten colour-picker cases) and the six V1.6.2 checkgates record local PASS results with their
+live criteria BLOCKED (see [V1_6_2_GATE_5.md](docs/checkgates/V1_6_2_GATE_5.md) and
+[V1_6_2_GATE_6.md](docs/checkgates/V1_6_2_GATE_6.md)). Cached navigation stays at 0.8–1.4 ms and local filtering at
 0.1–1.4 ms; `bootstrap` costs 5.1 / 45.3 / 142.0 ms and 11.0 / 57.8 / 153.2 KB for 10/100/300 projects, and the
 area-scoped overview drops from 137.3 ms / 9.99 KB to 110.8 ms / 8.87 KB at 300 projects. A durable decision costs
 one extra journal read and two journal rows, which is why approval measures 2.7 / 12.5 / 34.1 ms instead of
