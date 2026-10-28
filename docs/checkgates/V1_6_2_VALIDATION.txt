@@ -1,0 +1,53 @@
+# V1.6.2 local validation record
+
+Date: 2026-10-28
+Branch: fix/v1.6.2-reliability
+Host: Microsoft Windows NT 10.0.22000.0; local mocks only
+
+Live Workspace verification is BLOCKED / NOT_RUN. Nothing in this record is Workspace evidence.
+
+## Environment
+
+node: v24.21.0
+npm:  11.19.0
+
+## npm ci
+exit code: 0
+
+## npm run lint
+exit code: 0
+
+## npm test
+exit code: 0
+
+tests 543
+suites 0
+pass 543
+fail 0
+cancelled 0
+skipped 0
+todo 0
+
+Baseline before this release (commit 40c3ed6): tests 500, pass 500, fail 0.
+
+Per-suite counts, measured file by file:
+  tests/v1_6_2-requests.test.js -> tests 14, pass 14, fail 0
+  tests/v1_6_2-completion.test.js -> tests 5, pass 5, fail 0
+  tests/v1_6_2-inbox.test.js -> tests 9, pass 9, fail 0
+  tests/v1_6_2-member-area.test.js -> tests 8, pass 8, fail 0
+  tests/v1_6_2-release.test.js -> tests 7, pass 7, fail 0
+
+## npm run validate
+exit code: 0
+Validated 39 manager Apps Script files, 3 dashboard files, both manifests and 812 translation keys
+
+## node scripts/manager-web-benchmark.js
+exit code: 0
+output: docs/checkgates/V1_6_2_PERFORMANCE.json (full report)
+
+## Scope of this evidence
+
+Mocked Google services only. This record does not prove OAuth consent, Workspace identity, quota
+behaviour, trigger timing, mail delivery, publication to a real snapshot spreadsheet or browser paint.
+
+IMPLEMENTED - DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.

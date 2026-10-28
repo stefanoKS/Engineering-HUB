@@ -1,5 +1,65 @@
 # Changelog
 
+## V1.6.2 — 2026-10-28
+
+Corrective reliability release after an audit of V1.6.1. Every V1.6 and V1.6.1 capability is kept; no
+schema, migration, permission, trigger, mail, Calendar, publication or feature change was added. Schema
+stays **7** and the published employee contract stays **1.5**.
+
+### Request integrity
+
+- **`alreadyApplied` was removed.** It inferred an application from the task state (`Done`/`100 %`, or a
+  `Due_Date` equal to the requested one), so an ADMIN override, a separate approval or a manual edit could
+  be recorded as an employee approval, and it also bypassed the revision check. Evidence now comes from a
+  request-specific journal in `AUDIT_LOG` — `REQUEST_DECISION_PREPARED` → `REQUEST_EFFECT_APPLIED` →
+  `REQUEST_DECIDED` — keyed by `Request_ID`, so schema 7 needs no new column or table.
+- **A changed task is stale even when the target matches.** The revision and original-deadline checks are
+  no longer skipped, and a completion report or deadline request whose end state another operation produced
+  becomes `STALE` instead of claiming it.
+- **Ambiguity is explicit.** A `PROCESSING` approval with no request-specific evidence is never
+  auto-approved and never applied twice. It stays open, one `REQUEST_RECONCILE_REQUIRED` row records why,
+  and `previewRequestDecisionReconciliation` / `reconcileRequestDecision` (`CONFIRM_APPLIED` or
+  `MARK_STALE`, confirmation `RECONCILE REQUESTS`) settle it without writing the task.
+- **A guarded retry still works.** When the recorded failure and an unchanged revision prove the mutation
+  never landed, the retry applies the effect once.
+
+### Audit reliability
+
+- **`REQUEST_DECIDED` is written once per accepted decision.** A decision whose audit write failed is
+  repaired by repeating the same decision: only the missing record and the inbox mirror are completed, the
+  reviewer, timestamp and acceptance value are kept, and the task is not written again. The former
+  expectation of two `REQUEST_DECIDED` rows for one accepted decision was replaced with this rule.
+- **The ADMIN completion override is journaled.** `COMPLETION_OVERRIDE_PREPARED` is written before the
+  mutation, `COMPLETION_OVERRIDDEN` carries the same `Operation_ID`, and `reconcileCompletionOverrides`
+  (`RECONCILE COMPLETIONS`) appends only the missing final record for a task verified `Done`/`100 %`.
+  A preparation that cannot be written aborts the correction while the task is intact.
+
+### Dates
+
+- **`Requests.day()` no longer drops a Sheets date.** It converted the value to text before testing
+  `instanceof Date`, so a real date cell became `''`. A `Date` is now resolved in Asia/Tokyo, a text
+  `yyyy-MM-dd` keeps its written day, and an impossible calendar date (`2027-02-29`) is refused instead of
+  being normalized.
+
+### Employee receipt
+
+- **`申請状態の同期確認` / `申請状態を再同期`.** A read-only preview compares the authoritative request status
+  with the mirrored `Inbox_State` and reports `一致` / `要再同期` / `受信箱に行がありません` /
+  `タスクまたはプロジェクトが一致しません`. The repair writes only `Inbox_State`, needs `RECONCILE REQUEST
+  INBOX`, is idempotent, refuses a conflicting identity, never recreates a missing row, and is ADMIN or
+  MANAGER only (`uiRequestInboxPreview`, `uiRequestInboxReconcile`, `Requests.previewInboxReconciliation`,
+  `Requests.reconcileInboxStates`).
+
+### Manager interface
+
+- **History attribution.** `ManagerWeb.memberProfile` returns `memberActions` (verified sign-in identity
+  only) separately from `taskHistory` (which may contain other actors), each entry carrying `attribution`
+  (`MEMBER` / `OTHER` / `UNVERIFIED`) and `verified`. The profile renders `本人の操作履歴` and
+  `担当業務の変更履歴` as separate sections; `activity` remains the documented alias of the task history.
+- **Area switching.** `ManagerWeb.overview(actor, {areas:false})` omits the area selector and cards the
+  browser already holds; the client asks for that shape once it has the snapshot, renders a scoped loading
+  state instead of the previous area's figures, and keeps the stale-response guard.
+
 ## V1.6.1 — 2026-10-29
 
 Corrective release after an audit of V1.6. Every V1.6 capability is kept; no schema, migration,

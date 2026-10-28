@@ -9,10 +9,10 @@ const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
 test('package, publisher, README and UI agree on the current release', () => {
-  assert.match(read('package.json'), /"version": "1\.6\.1"/);
-  assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.6\.1'/);
-  assert.match(read('README.md'), /## Current release — V1\.6\.1/);
-  assert.match(read('README_JP.md'), /## 現行リリース — V1\.6\.1/);
+  assert.match(read('package.json'), /"version": "1\.6\.2"/);
+  assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.6\.2'/);
+  assert.match(read('README.md'), /## Current release — V1\.6\.2/);
+  assert.match(read('README_JP.md'), /## 現行リリース — V1\.6\.2/);
   // The V1.5.1 result is kept as history, exactly as released.
   assert.match(read('README.md'), /406 tests, 406 pass/);
   assert.match(read('README_JP.md'), /406件すべて成功/);

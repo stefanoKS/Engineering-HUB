@@ -133,19 +133,33 @@ test('a failure while applying an approval is recorded and can be retried', () =
   assert.equal(c.Database.find('TASK_REQUESTS', requestId).Status, 'APPROVED');
 });
 
-test('a resumed decision never applies the effect twice', () => {
+/**
+ * A retry after a complete decision is a repair, not a second decision.
+ *
+ * V1.6.1 asserted two `REQUEST_DECIDED` rows for one accepted decision, which contradicts the
+ * V1.6.2 rule that an accepted decision has exactly one audit record. The retry now finishes
+ * the record it finds and never writes a duplicate, and the task keeps its original
+ * completion timestamp.
+ */
+test('a resumed decision never applies the effect twice and writes one decision record', () => {
   const instance = app();
   const c = instance.context;
   const requestId = completionReport(instance, 'T2', 'REQ-TWICE');
   assert.equal(c.Ui.decideRequest({requestId, action: 'APPROVE', note: '', confirmation: 'DECIDE REQUEST'}).ok, true);
   const completedAt = c.Database.find('TASKS', 'T2').Completed_At;
+  const decidedAt = c.Database.find('TASK_REQUESTS', requestId).Decided_At;
   // Simulate an interrupted run that had already applied the effect but not finalized.
   c.Database.update('TASK_REQUESTS', requestId, {Status: 'PROCESSING'});
   const resumed = c.Ui.decideRequest({requestId, action: 'APPROVE', note: '', confirmation: 'DECIDE REQUEST'});
   assert.equal(resumed.ok, true, resumed.error);
   assert.equal(c.Database.find('TASKS', 'T2').Completed_At, completedAt, 'the completion timestamp is unchanged');
+  const repaired = c.Database.find('TASK_REQUESTS', requestId);
+  assert.equal(repaired.Status, 'APPROVED', 'the claim is finalized');
+  assert.equal(repaired.Decided_At, decidedAt, 'the recorded decision timestamp is kept, not rewritten');
   const history = c.Database.read('AUDIT_LOG').filter(row => row.Action === 'REQUEST_DECIDED');
-  assert.equal(history.length, 2, 'one row per decision attempt, never a second effect');
+  assert.equal(history.length, 1, 'one accepted decision has exactly one audit record');
+  // The audit names the evidence that made the repair safe.
+  assert.match(String(history[0].New_Value), /"appliedEvidence":"[^"]+"/);
 });
 
 test('a failed inbox mirror is recorded instead of being swallowed', () => {

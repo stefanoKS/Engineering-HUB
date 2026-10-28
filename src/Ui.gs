@@ -1015,6 +1015,22 @@ var Ui = (function () {
     });
   }
 
+  /** Read-only preview of the employee receipt against the authoritative decision. */
+  function requestInboxPreview() {
+    return guard(function () {
+      Access.requireManager();
+      return plain(Requests.previewInboxReconciliation());
+    });
+  }
+
+  /** Repairs only the mirrored receipt state; never a request, task or decision field. */
+  function requestInboxReconcile(payload) {
+    return guard(function () {
+      Access.requireManager();
+      return plain(Requests.reconcileInboxStates((payload || {}).confirmation || ''));
+    });
+  }
+
   function refresh() {
     return guard(function () {
       Access.requireUiAccess();
@@ -1072,6 +1088,8 @@ var Ui = (function () {
     requests: requests,
     importRequests: importRequests,
     decideRequest: decideRequest,
+    requestInboxPreview: requestInboxPreview,
+    requestInboxReconcile: requestInboxReconcile,
     refresh: refresh,
     status: status
   };
@@ -1148,6 +1166,8 @@ function uiPlanPreview(payload) { return Ui.planPreview(payload); }
 function uiRequests(payload) { return Ui.requests(payload); }
 function uiImportRequests() { return Ui.importRequests(); }
 function uiDecideRequest(payload) { return Ui.decideRequest(payload); }
+function uiRequestInboxPreview() { return Ui.requestInboxPreview(); }
+function uiRequestInboxReconcile(payload) { return Ui.requestInboxReconcile(payload); }
 function uiUpdateProgress(payload) { return Ui.updateProgress(payload); }
 function uiApproveAssignment(payload) { return Ui.approveAssignment(payload); }
 function uiConfirmSchedule(payload) { return Ui.confirmSchedule(payload); }

@@ -1,5 +1,32 @@
 # Architecture
 
+## V1.6.2 corrective architecture notes
+
+V1.6.2 adds no layer, table, column, endpoint scope or migration. It repairs one integrity boundary, one
+finalization rule and two presentation rules:
+
+- **Request ownership of an effect.** `src/Requests.gs` no longer infers "already applied" from the task row.
+  `Requests.evidence(requestId)` reads the request-specific journal in `AUDIT_LOG` and is the only source of that
+  claim: `REQUEST_DECISION_PREPARED` (intent, pre-mutation revision) → `REQUEST_EFFECT_APPLIED` (the mutation
+  belongs to this request) → `REQUEST_DECIDED` (one per accepted decision). The request ID is the idempotency key,
+  which is why schema 7 needs no new column or table. `reviewRequired` keeps an unattributable attempt in
+  `PROCESSING` with one `REQUEST_RECONCILE_REQUIRED` row; `resolveDecision` settles it from
+  `previewDecisionReconciliation` without writing a task. The decision entrypoints are
+  `Requests.decide` (unchanged signature) and the new `previewRequestDecisionReconciliation` /
+  `reconcileRequestDecision`.
+- **Finalization and override audit.** `finalizeLocked` writes the decision record once and repairs a missing one.
+  `Completion.override` uses the same prepare/finalize shape with its own actions
+  (`COMPLETION_OVERRIDE_PREPARED` / `COMPLETION_OVERRIDDEN` + `Operation_ID` /
+  `COMPLETION_OVERRIDE_RECONCILED`), so `reconcileCompletionOverrides` can append only what is missing. Neither
+  path shares deletion-specific logic.
+- **Receipt reconciliation.** `Requests.previewInboxReconciliation` / `reconcileInboxStates` read Spreadsheet C and
+  write only `Inbox_State`; the sidebar exposes them as `申請状態の同期確認` / `申請状態を再同期`
+  (`Ui.requestInboxPreview` / `Ui.requestInboxReconcile`). Spreadsheet A stays private and no employee path gained a
+  write.
+- **Presentation.** `ManagerWeb.memberProfile` returns verified `memberActions` separately from `taskHistory`, and
+  `ManagerWeb.overview(actor, {areas:false})` lets the browser reuse the area snapshot it already holds; the client
+  paints a scoped loading state instead of the previous area's figures.
+
 ## V1.6.1 corrective architecture notes
 
 V1.6.1 adds no layer, table, endpoint or scope. It repairs four boundaries and one compatibility rule:

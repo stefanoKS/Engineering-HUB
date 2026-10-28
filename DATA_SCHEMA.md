@@ -1,5 +1,27 @@
 # Data schema
 
+## V1.6.2 compatibility
+
+Schema is **7** and the employee snapshot contract is **1.5**; **V1.6.2 changes neither** and adds no migration. The
+release adds no column, table or Script Property. The request, override and receipt corrections reuse existing
+records:
+
+- **Request journal.** `AUDIT_LOG` gains five actions with `Entity_Type = 'TASK_REQUEST'` and
+  `Entity_ID = <Request_ID>`: `REQUEST_DECISION_PREPARED`, `REQUEST_EFFECT_APPLIED`, `REQUEST_DECIDED`
+  (written once per accepted decision), `REQUEST_APPROVAL_FAILED` and `REQUEST_RECONCILE_REQUIRED`. `New_Value`
+  carries the JSON detail (type, task, revision, previous/next deadline, reviewer, `reconciled`). The request ID is
+  the idempotency key, which is why no new table was needed; a new column would have required an approved
+  migration, and this corrective release must not add one.
+- **Override journal.** `AUDIT_LOG` gains `COMPLETION_OVERRIDE_PREPARED`, `COMPLETION_OVERRIDDEN` (now carrying an
+  `operationId`) and `COMPLETION_OVERRIDE_RECONCILED` with `Entity_Type = 'TASK'`. The previously written
+  `COMPLETION_OVERRIDDEN` rows stay readable; only new rows carry `operationId`.
+- **`TASK_REQUESTS`** keeps its exact field list and status enum (`PENDING`, `PROCESSING`, `APPROVED`, `REJECTED`,
+  `RETURNED`, `WITHDRAWN`, `STALE`). `Decision_Note` may now also carry the manual-review explanation.
+- **`TASK_DEADLINE_HISTORY`** is unchanged; `History_ID = 'HIST-<Request_ID>'` remains the idempotency key.
+- The published contract 1.5 payload is unchanged; `PUBLISHER_VERSION` is a label and is now `1.6.2`.
+- `Requests.day()` accepts a real `Date` and is the only place that converted it; stored values keep their
+  `yyyy-MM-dd` format.
+
 ## V1.6.1 compatibility
 
 Schema is **7** and the employee snapshot contract is **1.5**; **V1.6.1 changes neither** and adds no migration.
@@ -275,7 +297,10 @@ accordingly. V1.1 actions include `SETTING_CHANGED`, `SCHEDULE_CONFIRMED`, `SCHE
 `ADMIN_BOOTSTRAPPED`, `EMAIL_LIVE_ACTIVATED`, `EMAIL_LIVE_DEACTIVATED`. V1.2 adds
 `SHARED_DASHBOARD_INITIALIZED`, `SHARED_DASHBOARD_PUBLICATION_APPROVED`,
 `SHARED_DASHBOARD_PUBLICATION_DISABLED`, `SHARED_DASHBOARD_PUBLISHED` and
-`SHARED_DASHBOARD_PUBLICATION_FAILED`.
+`SHARED_DASHBOARD_PUBLICATION_FAILED`. V1.6.2 adds the request journal (`REQUEST_DECISION_PREPARED`,
+`REQUEST_EFFECT_APPLIED`, `REQUEST_DECIDED`, `REQUEST_APPROVAL_FAILED`, `REQUEST_RECONCILE_REQUIRED`,
+`REQUEST_INBOX_RECONCILED`) and the override journal (`COMPLETION_OVERRIDE_PREPARED`, `COMPLETION_OVERRIDDEN`,
+`COMPLETION_OVERRIDE_RECONCILED`). See "V1.6.2 compatibility" above.
 
 ### SCHEMA_MIGRATIONS
 

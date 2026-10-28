@@ -1,11 +1,44 @@
-# Manager Web App performance — V1.6.1
+# Manager Web App performance — V1.6.2
 
-Measured 2026-10-29 on Windows, Node v24.21.0, mocked Google services. **Real Workspace timings: NOT_RUN.** Raw
-results: [V1_6_1_PERFORMANCE.json](checkgates/V1_6_1_PERFORMANCE.json) (V1.6.1), [V1_6_PERFORMANCE.json](checkgates/V1_6_PERFORMANCE.json)
-(V1.6), [V1_5_1_PERFORMANCE.json](checkgates/V1_5_1_PERFORMANCE.json) (V1.5.1) and
+Measured 2026-10-28 on Windows, Node v24.21.0, mocked Google services. **Real Workspace timings: NOT_RUN.** Raw
+results: [V1_6_2_PERFORMANCE.json](checkgates/V1_6_2_PERFORMANCE.json) (V1.6.2),
+[V1_6_1_PERFORMANCE.json](checkgates/V1_6_1_PERFORMANCE.json) (V1.6.1),
+[V1_6_PERFORMANCE.json](checkgates/V1_6_PERFORMANCE.json) (V1.6),
+[V1_5_1_PERFORMANCE.json](checkgates/V1_5_1_PERFORMANCE.json) (V1.5.1) and
 [V1_5_PERFORMANCE.json](checkgates/V1_5_PERFORMANCE.json) (V1.5), kept as historical evidence.
-Reproduce with `BENCHMARK_OUTPUT=V1_6_1_PERFORMANCE.json node scripts/manager-web-benchmark.js` (the script defaults
-to the V1.6 file name so a V1.6 rerun cannot overwrite this record).
+Reproduce with `BENCHMARK_OUTPUT=V1_6_2_PERFORMANCE.json node scripts/manager-web-benchmark.js`.
+
+## V1.6.2 comparison with V1.6.1
+
+| Dataset | bootstrap p50 | cached nav p50 | local filter p50 | RPC after load | area switch p50 | area switch payload |
+| --- | --- | --- | --- | --- | --- | --- |
+| 10 / 100 | 5.12 ms (5.87) | 0.75 ms (0.81) | 0.07 ms (0.08) | 2 (2) | 3.92 ms (5.13) | 2.6 KB (3.7) |
+| 100 / 1,000 | 45.27 ms (46.48) | 1.39 ms (1.42) | 0.39 ms (0.40) | 2 (2) | 35.67 ms (44.24) | 8.9 KB (10.0) |
+| 300 / 3,000 | 142.02 ms (140.35) | 1.03 ms (1.11) | 1.40 ms (2.05) | 3 (3) | 110.80 ms (137.34) | 8.9 KB (10.0) |
+
+Figures in brackets are the V1.6.1 values (bootstrap payload 11.0 / 57.8 / 153.2 KB, unchanged). "Area switch" is the
+same scoped overview with and without the area selector/cards the browser already holds from `bootstrap`
+(`overview(actor, {areas:false})`, measured as `responsibilitySwitch.before` / `.after`).
+
+### Request, reconciliation and audit-finalization paths
+
+New in this release, measured per 10 / 100 / 300 projects:
+
+| Operation | p50 | Note |
+| --- | --- | --- |
+| `requestApproval` | 2.74 / 12.45 / 34.12 ms | V1.6.1: 2.34 / 11.34 / 31.94 ms |
+| `requestReconciliation` | 4.43 / 37.13 / 111.93 ms | read-only preview over 12 ambiguous requests |
+| `auditFinalization` | 1.07 / 4.12 / 11.09 ms | repair of a missing `REQUEST_DECIDED` record |
+
+### Disclosed cost
+
+An approval now costs one extra bounded `AUDIT_LOG` read and two durable journal rows
+(`REQUEST_DECISION_PREPARED`, `REQUEST_EFFECT_APPLIED`), which is the price of being able to prove that a request —
+and only that request — was applied: the measured p50 moved from 2.34 / 11.34 / 31.94 ms to 2.74 / 12.45 / 34.12 ms.
+Cached navigation (< 100 ms) and local filtering (< 50 ms) targets are still met with a wide margin, the RPC count
+after the first load is unchanged (`2 / 2 / 3`), and no prefetch was added. Area switching improved by 19–24 % while
+the payload shrank by 30 % (10 projects) and 11 % (100/300 projects) because the duplicated area snapshot is no
+longer recomputed or reshipped. A live Workspace comparison stays **NOT_RUN**.
 
 ## V1.6.1 comparison with V1.6
 
@@ -17,7 +50,7 @@ to the V1.6 file name so a V1.6 rerun cannot overwrite this record).
 
 Figures in brackets are the V1.6 values.
 
-### Disclosed regression
+### Disclosed regression (V1.6.1 vs V1.6)
 
 The warm `bootstrap` grew by +2 % (10 projects) to +21 % (300 projects) and the payload by about 0.5 KB. The cause is
 the correctness fix itself: every displayed figure now derives from one counting rule, so `TaskScope.create()` builds

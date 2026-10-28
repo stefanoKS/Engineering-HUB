@@ -105,16 +105,57 @@ Neither writes to the task. Only status, reviewer, decision time and note are re
 
 ## 5. Idempotency and recovery
 
-* Import is keyed on the permanent request ID, so a repeated import never duplicates a
-  request.
-* A decision first marks the request `PROCESSING`, then applies the effect, then finalises
-  the status. If the execution dies in between, a retry detects that the effect is already
-  present (`Due_Date` already equals the requested date, or the task is already done) and
-  finalises without applying it twice.
-* The deadline-history row uses a deterministic ID (`HIST-<requestId>`), so a resumed
-  decision cannot duplicate history.
-* The decision is mirrored to the inbox row (`Inbox_State`) so the worker receipt shows it.
-  A failure to write the inbox never rolls back an accepted decision.
+Import is keyed on the permanent request ID, so a repeated import never duplicates a request.
+
+### V1.6.2 — a request only owns its own effect
+
+A decision is journaled in the append-only `AUDIT_LOG`, keyed by `Request_ID`, so no schema or table was
+added:
+
+| Action | Written | Meaning |
+| --- | --- | --- |
+| `REQUEST_DECISION_PREPARED` | before the task is touched | the intent, the pre-mutation revision and deadline, the reviewer |
+| `REQUEST_EFFECT_APPLIED` | after the mutation returns | proof that *this* request produced the effect |
+| `REQUEST_DECIDED` | once per accepted decision | the decision record |
+| `REQUEST_APPROVAL_FAILED` | when applying the effect throws | the attempt failed and the claim was kept |
+| `REQUEST_RECONCILE_REQUIRED` | when the outcome is ambiguous | a manager must settle it by hand |
+
+Matching values are **not** evidence. `Done`/`100 %` or a `Due_Date` equal to the requested one may have been
+produced by another completion report, an ADMIN `COMPLETION_OVERRIDDEN`, a separate approval or a manual edit. Such
+a request becomes `STALE` (`Task was completed by another operation` / `Deadline was changed by another operation`)
+instead of being recorded as an employee approval, and the revision check is never skipped because the target value
+matches.
+
+Recovery rules:
+
+* **Pending** request → revision, assignment and original deadline are checked; a changed task is `STALE`.
+* **Processing** request with `REQUEST_EFFECT_APPLIED` (or `REQUEST_DECIDED`) → the finalization is completed. The
+  task is not written again and the history row uses `HIST-<requestId>`.
+* **Processing** request with a recorded failure whose revision is unchanged → the effect provably never landed, so
+  the retry applies it once.
+* **Processing** request in any other state → never auto-approved and never applied twice. It stays `PROCESSING`
+  (an open, visible state) with one `REQUEST_RECONCILE_REQUIRED` row. An ADMIN/MANAGER settles it with
+  `previewRequestDecisionReconciliation()` (read-only) and then
+  `reconcileRequestDecision(requestId, 'CONFIRM_APPLIED' | 'MARK_STALE', note, 'RECONCILE REQUESTS')`. Confirming
+  requires the task to genuinely hold the requested end state; the confirmation is recorded as
+  `REQUEST_EFFECT_APPLIED` with `reconciled: true` and the task is never written. `MARK_STALE` closes the request
+  without approving it.
+* **Terminal** request (`APPROVED`/`REJECTED`/`RETURNED`/`WITHDRAWN`) → a retry reports the existing state, or
+  completes a missing `REQUEST_DECIDED` record when the audit write failed. It never applies the effect again.
+
+The decision is mirrored to the inbox row (`Inbox_State`) so the worker receipt shows it. A failure to write the
+inbox never rolls back an accepted decision; open **申請一覧** and use `申請状態の同期確認` / `申請状態を再同期` to
+compare and repair the receipt (see [REQUEST_INBOX_DEPLOYMENT.md](REQUEST_INBOX_DEPLOYMENT.md) §6).
+
+**Limitation:** Google Sheets cannot write the task row, the request row and the audit row atomically. The
+implementation narrows the window and makes an ambiguous result visible and reviewable; it does not promise
+exactly-once delivery for an interrupted execution.
+
+### Dates
+
+`Requests.day()` accepts a real `Date` (resolved in Asia/Tokyo, so a date cell is never shifted), a `yyyy-MM-dd`
+text value (kept as written) and an ISO timestamp (its written day). Empty, `null`, `undefined`, an invalid `Date`
+and an impossible calendar date such as `2027-02-29` normalize to "no date" instead of becoming a wrong one.
 
 ## 6. Notifications
 

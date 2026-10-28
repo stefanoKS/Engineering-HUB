@@ -1,5 +1,34 @@
 # Manager workflow
 
+## V1.6.2 corrections to the daily workflow
+
+These replace the V1.6/V1.6.1 steps they name; every other step is unchanged.
+
+1. **A request is approved, not inherited.** A task that is already 完了/100% or already holds the requested deadline
+   does not mean the request in front of you was applied. If another operation produced that state (an ADMIN
+   correction, another approval, a manual edit), approving the request now shows it as 再確認 instead of recording
+   it as an employee approval. Check the task history before deciding.
+2. **What to do with 再確認.** Either reject/return it, or let the employee submit a fresh report. A request whose
+   task changed after submission can never overwrite the newer deadline or assignee, even when the value looks
+   right.
+3. **When a decision says「手動確認が必要です」.** The execution was interrupted and no record ties the change to that
+   request, so nothing was approved automatically and nothing was applied twice. Run
+   `previewRequestDecisionReconciliation()` (read-only) to see the request, the task and whether the task really
+   holds the requested state, then `reconcileRequestDecision(requestId, 'CONFIRM_APPLIED', note,
+   'RECONCILE REQUESTS')` when it does, or `'MARK_STALE'` when it does not. Confirming never changes the task.
+4. **When a decision says「監査記録の確定に失敗しました」.** The decision was stored but its audit record was not.
+   Approve the same request once more; only the missing record and the receipt are written, and the completion
+   timestamp is kept.
+5. **When an ADMIN correction says「reconcileCompletionOverrides で確定してください」.** The task is already 完了 but
+   the override record is missing. Run `reconcileCompletionOverrides('RECONCILE COMPLETIONS')`; it appends one record
+   for a task verified 完了/100% and never touches the task.
+6. **When an employee says the status is wrong.** Open 申請一覧 and press 申請状態の同期確認. The list shows 一致 /
+   要再同期 / 受信箱に行がありません / タスクまたはプロジェクトが一致しません. Press 申請状態を再同期 to rewrite only the
+   displayed status. A missing row or a mismatch is reported, not created or overwritten — investigate it.
+7. **Read a member's profile correctly.** 本人の操作履歴 contains only actions performed by that member's verified
+   account; 担当業務の変更履歴 also contains manager edits and reassignments by other people. A record whose
+   contributor could not be verified says so.
+
 ## V1.6.1 corrections to the daily workflow
 
 These replace the V1.6 steps they name; every other step is unchanged.

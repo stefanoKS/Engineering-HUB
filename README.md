@@ -1,47 +1,66 @@
 # Engineering-HUB
 
-## Current release — V1.6.1
+## Current release — V1.6.2
 
-**IMPLEMENTED — DEV MIGRATION AND WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 
-Version **1.6.1** is a corrective release: it keeps every V1.6 capability and fixes the correctness, integrity and
-compatibility defects an audit of that delivery found. No schema, migration, deployment or permission was added.
+Version **1.6.2** is a corrective reliability release: it keeps every V1.6 and V1.6.1 capability and fixes the
+request, audit and date defects an audit of that delivery found. No schema, migration, deployment, permission or
+feature was added.
 
-- **One counting rule.** The responsibility cards and the overview KPIs counted container tasks while every
-  progress rollup counted leaf work only. Every manager figure now comes from `TaskScope`: a container is
-  organisation, and only open leaf work in active work is counted as open or overdue. Completed work is reported
-  separately and is never mixed into a workload figure.
-- **Scope before paging.** Selecting an area used to filter an already-paged 20-row list and an already-cut
-  top-five list in the browser. The scope now goes to the server, which filters, counts and pages for that scope, so
-  the totals, the deadline window and the upcoming list all describe what is visible.
-- **Completion integrity.** A completion report for a container task is refused on import and refused again before
-  the request is claimed, so it can never be left in `PROCESSING`. A failure while applying an approval is recorded
-  (`REQUEST_APPROVAL_FAILED`) and retryable instead of silent, and a failed inbox mirror is recorded too.
-- **Deletion integrity.** A removal writes a durable intent (`RECORD_DELETE_PREPARED`) *before* the row disappears
-  and reports success only after the tombstone (`RECORD_DELETED`) exists. `reconcileDeletions` finishes an
-  interrupted removal without ever deleting anything. Cascading removal was removed, and the delete control is only
-  rendered for ADMIN.
-- **History that survives reassignment.** A member profile reads the append-only ownership evidence as well as the
-  current owner, so reassigned work stays in the history of the member who did it, with the current owner shown
-  instead of a rewritten past. Reassignments write an explicit `TASK_REASSIGNED` record.
-- **Compatibility and deployment.** The employee reader accepts contracts **1.4 and 1.5**, each through its own
-  exact header row. The published `completedAt` is normalized and stored as text like every other contract date, and
-  the deployment runbook names the real entry points in the order that keeps users unaffected.
+- **A request only owns its own effect.** `alreadyApplied` inferred a prior application from the task state
+  (`Done`/`100 %`, or a `Due_Date` that happened to match), so an ADMIN correction, a separate approval or a manual
+  edit could be recorded as an employee approval. Evidence now comes from a request-specific journal
+  (`REQUEST_DECISION_PREPARED` → `REQUEST_EFFECT_APPLIED` → `REQUEST_DECIDED`) keyed by `Request_ID`, and task
+  state is never used as proof. A changed revision is no longer bypassed because the target value matches.
+- **Ambiguity stays ambiguous.** A `PROCESSING` request with no request-specific evidence is never auto-approved
+  and never applied twice. It keeps its open state, one `REQUEST_RECONCILE_REQUIRED` row explains why, and a manager
+  settles it from a read-only preview (`previewRequestDecisionReconciliation`) with an explicit
+  `reconcileRequestDecision` (`CONFIRM_APPLIED` or `MARK_STALE`). That repair never writes the task.
+- **Decisions are audited exactly once.** `REQUEST_DECIDED` is written once per accepted decision. A decision whose
+  audit write failed is repaired by repeating the same decision, which finishes only the missing record; a terminal
+  request is never decided again.
+- **The ADMIN completion override is journaled.** `COMPLETION_OVERRIDE_PREPARED` is written before the mutation and
+  `COMPLETION_OVERRIDDEN` carries the same `Operation_ID`; an interrupted correction is reported instead of being
+  shown as a success, and `reconcileCompletionOverrides` appends exactly the missing record, once.
+- **Dates no longer disappear.** `Requests.day()` converted its input to text before testing `instanceof Date`, so a
+  real Sheets date cell became an empty string. Real `Date` objects are now resolved in Asia/Tokyo, textual values
+  keep their written `yyyy-MM-dd`, and an impossible calendar date is refused rather than normalized.
+- **Receipts can be reconciled.** `申請状態の同期確認` shows, per request, whether the employee receipt matches the
+  manager decision (`一致` / `要再同期` / `受信箱に行がありません` / `タスクまたはプロジェクトが一致しません`), and
+  `申請状態を再同期` repairs only the mirrored `Inbox_State`. Missing or conflicting rows are reported, never
+  recreated or overwritten, and request content is never rewritten or exposed.
+- **History is attributed honestly.** A member profile separates `本人の操作履歴` (Member actions — verified sign-in
+  identity only) from `担当業務の変更履歴` (Task history, which may contain other actors), and labels an unverified
+  contributor instead of attributing it to the member.
+- **Areas switch faster.** An area-scoped overview no longer recomputes and reships the area selector and cards the
+  browser already holds, and the previous area's figures are replaced by a scoped loading state instead of being
+  shown under the newly selected area.
 
 Schema **7** and employee contract **1.5** are unchanged; there is no new migration, and no execute-as, trigger,
 mail, Calendar or publication change.
 
 Local verification: `npm ci`, `npm run lint`, `npm test`, `npm run validate` and
-`node scripts/manager-web-benchmark.js` all pass; **500 tests, 500 pass, 0 fail, 0 skipped** and the six V1.6.1
+`node scripts/manager-web-benchmark.js` all pass; **543 tests, 543 pass, 0 fail, 0 skipped** and the five V1.6.2
 checkgates record local PASS results with their live criteria BLOCKED (see
-[V1_6_1_GATE_6.md](docs/checkgates/V1_6_1_GATE_6.md)). Cached navigation stays at 0.8–1.4 ms and local filtering at
-0.1–2.1 ms; `bootstrap` costs 5.9 / 46.5 / 140.4 ms and 11.0 / 57.8 / 153.2 KB for 10/100/300 projects. Every figure
-is now derived from the same rule, which is why the warm bootstrap is +2 to +21 % versus V1.6 while navigation and
-filtering are unchanged. Real Workspace latency, the DEV migration, the request round trip and production rendering
+[V1_6_2_GATE_5.md](docs/checkgates/V1_6_2_GATE_5.md)). Cached navigation stays at 0.8–1.4 ms and local filtering at
+0.1–1.4 ms; `bootstrap` costs 5.1 / 45.3 / 142.0 ms and 11.0 / 57.8 / 153.2 KB for 10/100/300 projects, and the
+area-scoped overview drops from 137.3 ms / 9.99 KB to 110.8 ms / 8.87 KB at 300 projects. A durable decision costs
+one extra journal read and two journal rows, which is why approval measures 2.7 / 12.5 / 34.1 ms instead of
+2.3 / 11.3 / 31.9 ms. Real Workspace latency, the DEV migration, the request round trip and production rendering
 remain **NOT_RUN**.
 
 Preview: npm run preview:manager-web → http://127.0.0.1:4175/ (synthetic data only). The 計測 / Diagnostics button
 in the header shows the same timings without Chrome DevTools.
+
+## Historical V1.6.1 release record
+
+Version **1.6.1** fixed the correctness, integrity and compatibility defects an audit of V1.6 found: one counting
+rule for every manager figure, scope resolved before paging, completion and deletion integrity, history that
+survives reassignment, and contracts **1.4 and 1.5** read through their own header rows. Its local result was
+**500 tests, 500 pass**; the six V1.6.1 checkgates and
+[V1_6_1_PERFORMANCE.json](docs/checkgates/V1_6_1_PERFORMANCE.json) keep that release's local PASS results and
+BLOCKED live criteria.
 
 ## Historical V1.6 release record
 

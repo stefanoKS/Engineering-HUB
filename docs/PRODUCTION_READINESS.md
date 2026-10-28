@@ -1,43 +1,60 @@
 # Production readiness
 
-## Current assessment — V1.6.1 (2026-10-29)
+## Current assessment — V1.6.2 (2026-10-28)
 
-**IMPLEMENTED — DEV MIGRATION AND WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 
-Version 1.6.1; schema **7** (unchanged, no new migration); employee contract **1.5** (the viewer additionally reads
-**1.4**). Starting SHA: `ea3fbc9` (the V1.6 delivery on `main`). The V1.6.1 evidence is recorded in
-[V1_6_1_GATE_6.md](checkgates/V1_6_1_GATE_6.md) and [V1_6_1_VALIDATION.txt](checkgates/V1_6_1_VALIDATION.txt).
+Version 1.6.2; schema **7** (unchanged, no new migration); employee contract **1.5** (the viewer additionally reads
+**1.4**). Starting SHA: `40c3ed6` (the V1.6.1 delivery on `main`). The V1.6.2 evidence is recorded in
+[V1_6_2_GATE_5.md](checkgates/V1_6_2_GATE_5.md) and [V1_6_2_VALIDATION.txt](checkgates/V1_6_2_VALIDATION.txt).
 
 | Field | Value |
 | --- | --- |
-| Version | 1.6.1 |
+| Version | 1.6.2 |
 | Schema version | 7 (no migration added by this release) |
 | Employee contract | 1.5 published; 1.4 and 1.5 readable |
-| Local tests | **500 tests, 500 pass, 0 fail, 0 skipped** (`npm test`); `npm run lint` and `npm run validate` green |
+| Local tests | **543 tests, 543 pass, 0 fail, 0 skipped** (`npm test`); `npm run lint` and `npm run validate` green |
 | Google Workspace verification | **UNVERIFIED** — nothing in this repository has been run against a real Workspace |
 
-V1.6.1 keeps every V1.6 capability and fixes what an audit of that delivery found: one counting rule for every
-manager figure (`TaskScope`), a scope resolved on the server before paging and before the top-five cut, a container
-completion report refused before it can strand a request, a durable deletion intent with a reconciliation entry
-point, member history that survives reassignment, and an employee reader that accepts contracts 1.4 and 1.5. Schema,
-authorization, revisions, audit, publication safety, the sidebar and the employee app are otherwise unchanged.
+V1.6.2 keeps every V1.6/V1.6.1 capability and fixes what an audit of that delivery found: a request can only claim an
+effect that is recorded against its own `Request_ID`, an ambiguous approval stays reviewable instead of being
+auto-approved, `REQUEST_DECIDED` is written once per accepted decision and can be repaired, the ADMIN completion
+override is journaled, a real Sheets `Date` cell is no longer dropped, the employee receipt can be previewed and
+repaired, member history separates verified member actions from task history, and an area switch no longer recomputes
+the whole area snapshot. Schema, authorization, revisions, the counting rules, publication safety, the employee app
+and the two-project isolation are otherwise unchanged.
 
-All six V1.6.1 checkgates record local PASS results and the release stays **BLOCKED** for live verification. Required
-remaining work: the DEV migration of a real workbook with its verified backup and preservation checks; the real
-ADMIN/MANAGER/denied-account identity matrix; A sharing isolation; the complete DEV CRUD/request/publication/audit
-workflow including the employee→manager completion round trip, the container refusal and the deletion-recovery
-rehearsal; a live rollback rehearsal; the actual 200 % browser zoom and assistive-technology checks; and real
-Workspace latency plus long-session memory measurement. **No live Workspace run of any kind was performed in this
-repository session, no workbook was migrated and nothing was deployed.** The measured numbers in
-[MANAGER_WEB_APP_PERFORMANCE.md](MANAGER_WEB_APP_PERFORMANCE.md) are mock values; the raw file records
-`liveWorkspace: NOT_RUN`.
+All five V1.6.2 checkgates record local PASS results and the release stays **BLOCKED** for live verification. Required
+remaining work: the real ADMIN/MANAGER/denied-account identity matrix; a real Sheets date cell through the inbox
+round trip; an induced inbox-mirror failure followed by `申請状態の同期確認` / `申請状態を再同期`; an induced
+`REQUEST_DECIDED` write failure followed by the documented repair; an interrupted approval rehearsal through an Apps
+Script timeout; a live rollback rehearsal; real Workspace latency and long-session memory measurement. **No live
+Workspace run of any kind was performed in this repository session, no workbook was migrated and nothing was
+deployed.** The measured numbers in [MANAGER_WEB_APP_PERFORMANCE.md](MANAGER_WEB_APP_PERFORMANCE.md) are mock values;
+the raw file records `liveWorkspace: NOT_RUN`.
 
 Use the existing DEVELOPMENT resources described by the operator; their actual creation/sharing/deployment state was
 not inspected here. No code was uploaded with clasp, no live deployment/data/migration/trigger/email/Calendar action
 was performed. Follow [the V1.6 runbook](V1_6_DEPLOYMENT_RUNBOOK.md), [DEV installation](MANAGER_WEB_APP_DEPLOYMENT.md)
 and [the smoke plan](MANAGER_WEB_APP_SMOKE_TEST.md). No production activation without reviewed evidence.
 
+## Historical V1.6.1 assessment (2026-10-29)
+
+**IMPLEMENTED — DEV MIGRATION AND WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+
+Version 1.6.1; schema **7** (unchanged, no new migration); employee contract **1.5** (the viewer additionally read
+**1.4**). Starting SHA: `ea3fbc9`. Its evidence stays in
+[V1_6_1_GATE_6.md](checkgates/V1_6_1_GATE_6.md) and [V1_6_1_VALIDATION.txt](checkgates/V1_6_1_VALIDATION.txt);
+local result at that release: **500 tests, 500 pass, 0 fail, 0 skipped**. It added one counting rule for every
+manager figure (`TaskScope`), scope resolved on the server before paging and before the top-five cut, a container
+completion report refused before it could strand a request, a durable deletion intent with a reconciliation entry
+point, member history that survives reassignment, and an employee reader accepting contracts 1.4 and 1.5. Its live
+criteria remain **BLOCKED**.
+
 ## Historical V1.6 assessment (2026-10-28)
+
+Schema 7 (`007_responsibility_hierarchy_and_lifecycle`), contract 1.5; local result **462 tests, 462 pass**. Its
+twelve checkgates keep that release's local results and BLOCKED live criteria.
 
 ## Historical V1.5.1 assessment
 
@@ -68,6 +85,13 @@ Use the existing DEVELOPMENT resources described by the operator; their actual c
 
 The following sections are retained historical evidence; environment statuses and counts were not reverified for V1.5.
 
+| Field | Value |
+| --- | --- |
+| Version | 1.4.1 |
+| Schema version | 6 |
+| Employee contract | 1.4 |
+| Local tests | 328 tests, 328 pass, 0 fail, 0 skipped |
+| Google Workspace verification | UNVERIFIED at that release |
 
 **Release status: NOT APPROVED FOR PRODUCTION**
 
@@ -104,9 +128,11 @@ No real Google Workspace resource was created, changed or inspected while prepar
 ```text
 npm ci            -> lockfile install, 0 vulnerabilities
 npm run lint      -> pass
-npm test          -> 328 tests, 328 pass, 0 fail, 0 skipped
-                     (V1.4.1 adds 18 stabilization tests; the 310 V1.4 tests still run)
-npm run validate  -> 33 Apps Script files, 3 dashboard files, both manifests and 532 translation keys validated
+npm test          -> 543 tests, 543 pass, 0 fail, 0 skipped
+                     (V1.6.2 adds 36 request/override/inbox/history cases plus the release gate;
+                      every earlier test still runs; two unsafe V1.6.1 expectations were
+                      replaced, with the rationale recorded in the test files)
+npm run validate  -> 39 Apps Script files, 3 dashboard files, both manifests and 812 translation keys validated
 npm run preview:dashboard -> static preview written (browser-only, not Workspace evidence)
 ```
 
@@ -142,6 +168,13 @@ quota behaviour, trigger timing, or mail delivery.
 | V1.4.1-4 | UI, accessibility and task scale | PASS (local) / Sheets-unverified | [V1_4_1_GATE_4.md](checkgates/V1_4_1_GATE_4.md) |
 | V1.4.1-5 | Dashboard contract, requests and reliability | PASS (local) / LIVE UNVERIFIED | [V1_4_1_GATE_5.md](checkgates/V1_4_1_GATE_5.md) |
 | V1.4.1-6 | Documentation, installation and release assessment | PASS (files updated) / Workspace UNVERIFIED | [V1_4_1_GATE_6.md](checkgates/V1_4_1_GATE_6.md) |
+| V1.6-1 … V1.6-12 | Responsibilities, hierarchy, completion, deletion, member history | PASS (local) | `checkgates/V1_6_GATE_1..12.md` |
+| V1.6.1-1 … V1.6.1-6 | Counting, completion workflow, deletion, history, compatibility, release | PASS (local) | `checkgates/V1_6_1_GATE_1..6.md` |
+| V1.6.2-1 | Request-specific approval integrity | PASS (local) / LIVE UNVERIFIED | [V1_6_2_GATE_1.md](checkgates/V1_6_2_GATE_1.md) |
+| V1.6.2-2 | Date handling and audit reliability | PASS (local) / LIVE UNVERIFIED | [V1_6_2_GATE_2.md](checkgates/V1_6_2_GATE_2.md) |
+| V1.6.2-3 | Employee inbox status reconciliation | PASS (local) / LIVE UNVERIFIED | [V1_6_2_GATE_3.md](checkgates/V1_6_2_GATE_3.md) |
+| V1.6.2-4 | Member history and responsibility UX | PASS (local) / browser-unverified | [V1_6_2_GATE_4.md](checkgates/V1_6_2_GATE_4.md) |
+| V1.6.2-5 | Security, performance and final regression | PASS (local) / LIVE UNVERIFIED | [V1_6_2_GATE_5.md](checkgates/V1_6_2_GATE_5.md) |
 
 ## 5. Security gate status
 

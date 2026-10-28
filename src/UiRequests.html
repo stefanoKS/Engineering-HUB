@@ -127,6 +127,16 @@
     <div id="history" class="hint" data-i18n="manager.loading">読み込み中...</div>
   </fieldset>
 
+  <fieldset>
+    <legend data-i18n="manager.requests.syncLegend">申請状態の同期確認</legend>
+    <div class="hint" data-i18n="manager.requests.syncHint">作業者に表示される申請状態が、管理者の確定した判断と一致しているか確認できます。再同期は申請状態の表示だけを更新し、申請内容・タスク・判断は変更しません。</div>
+    <div class="row">
+      <button id="inboxPreview" type="button" data-i18n="manager.requests.syncPreview">申請状態の同期確認</button>
+      <button id="inboxReconcile" type="button" class="secondary" data-i18n="manager.requests.syncApply">申請状態を再同期</button>
+    </div>
+    <div id="inboxState" class="hint"></div>
+  </fieldset>
+
   <div id="status"></div>
 
   <script>
@@ -317,6 +327,52 @@
       });
     });
     byId('refresh').addEventListener('click', load);
+
+    /* V1.6.2: receipt reconciliation. The preview is read-only; the repair only rewrites the
+       mirrored Inbox_State and says so, including rows it refused to touch. */
+    function inboxStateLabel(state) {
+      var key = 'manager.requests.inboxState.' + state;
+      return EH_I18N.has(key) ? T(key) : String(state);
+    }
+    function renderInboxState(data) {
+      var host = byId('inboxState');
+      EH.clear(host);
+      host.className = 'hint';
+      if (!data || data.available !== true) {
+        EH.append(host, 'div', T('manager.requests.syncUnavailable', {message: EHLang.serverMessage((data && data.error) || T('common.unknown'))}), 'error');
+        return;
+      }
+      var counts = data.counts || {};
+      EH.append(host, 'div', T('manager.requests.syncSummary', {
+        synced: counts.synced || 0, needsSync: counts.needsSync || 0,
+        missing: counts.missing || 0, mismatch: counts.mismatch || 0
+      }));
+      if (data.truncated) EH.append(host, 'div', T('manager.requests.syncTruncated'), 'error');
+      var mismatched = (data.items || []).filter(function (item) { return item.state !== 'ALREADY_SYNCED'; });
+      if (!mismatched.length) {
+        EH.append(host, 'div', T('manager.requests.syncAllMatch'));
+        return;
+      }
+      mismatched.forEach(function (item) {
+        EH.append(host, 'div', item.requestId + ' · ' + item.taskId + ' · ' +
+          T('manager.requests.status') + ' ' + item.managerStatus + ' / ' +
+          T('manager.requests.syncInbox') + ' ' + (item.inboxState || T('common.none')) +
+          ' · ' + inboxStateLabel(item.state), 'history-row');
+      });
+    }
+    byId('inboxPreview').addEventListener('click', function () {
+      call('uiRequestInboxPreview', undefined, renderInboxState);
+    });
+    byId('inboxReconcile').addEventListener('click', function () {
+      if (!EH.confirmAction(T('manager.requests.syncConfirm'))) return;
+      call('uiRequestInboxReconcile', {confirmation: 'RECONCILE REQUEST INBOX'}, function (result) {
+        setStatus('ok', T('manager.requests.syncRepaired', {
+          updated: result.updated, synced: result.alreadySynced,
+          missing: result.missing, mismatch: result.mismatch, failed: (result.failed || []).length
+        }));
+        call('uiRequestInboxPreview', undefined, renderInboxState);
+      });
+    });
     byId('requestFilter').addEventListener('change', function () {
       state.includeDecided = byId('requestFilter').value === 'all';
       load();

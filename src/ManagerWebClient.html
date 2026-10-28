@@ -197,6 +197,13 @@ function viewFilters(name) {
     if (activeResponsibility === UNASSIGNED) values.unassigned = true;
     else values.responsibilityId = activeResponsibility;
   }
+  // V1.6.2: the area selector and the area cards come from the bootstrap snapshot. An area
+  // scoped overview no longer recomputes and reships them, so switching area does not pay for
+  // the whole workbook.
+  if (name === 'overview') {
+    delete values.areas;
+    if (store.at.bootstrap) values.areas = false;
+  }
   return values;
 }
 function localDataset(kind) {
@@ -577,7 +584,7 @@ function load(fresh, message) {
   notice(t('loading'));
   if (requested === 'overview') {
     // The area-scoped overview is a scoped server payload; the unscoped one is the snapshot.
-    if (activeResponsibility) { fetchView('overview', fresh === true, true); return; }
+    if (activeResponsibility) { renderAreaLoading(); fetchView('overview', fresh === true, true); return; }
     bootstrapFetch(true); return;
   }
   if (requested === 'tasks') syncTaskIndex(true);
@@ -603,6 +610,24 @@ function fetchView(name, fresh, first) {
     if (first) clearNotice();
     render(); recordRender(name, start);
   }).catch(function (error) { if (seq === sequence) handleError(error); });
+}
+/**
+ * Paints the selected area immediately while its authoritative overview is fetched.
+ *
+ * No KPI is shown: an area figure must never be approximated from the previous area's data or
+ * from an incomplete index. The selector and the navigation stay usable meanwhile.
+ */
+function renderAreaLoading() {
+  var host = byId('content'); host.replaceChildren(); resultsHost = null;
+  title('overview', host);
+  var heading = el('div', undefined, 'section-title');
+  heading.appendChild(el('h2', t('navResponsibilities')));
+  heading.appendChild(el('span', responsibilityHeading(), 'chip'));
+  host.appendChild(heading);
+  responsibilityStrip(host);
+  var status = el('p', t('areaLoading', {name: responsibilityHeading()}), 'muted');
+  status.setAttribute('role', 'status');
+  host.appendChild(status);
 }
 function revalidateView(name) {
   if (revoked) return;
@@ -671,15 +696,26 @@ function memberProfileView(data, host) {
     host.appendChild(card);
   });
   if(!(data.previous||[]).length)host.appendChild(el('p',t('empty')));
-  host.appendChild(el('div',undefined,'section-title')).appendChild(el('h2',t('activityHistory')));
-  // Every entry is an existing append-only record; nothing is reconstructed or invented.
-  if(!(data.activity||[]).length)host.appendChild(el('p',t('noHistory')));
-  (data.activity||[]).forEach(function(entry){
-    var item=el('article',undefined,'card');
-    rowValues(item,[[t('task'),entry.taskId],[t('statusField'),entry.action],
-      [t('member'),entry.actor||t('unknown')],[t('at'),String(entry.at||'').replace('T',' ').slice(0,19)]]);
-    host.appendChild(item);
-  });
+  // V1.6.2: the member's own actions and the task's change history are different things.
+  // Only a verified sign-in identity is presented as an action by this member.
+  function attributionText(entry){
+    if(!entry.verified)return t(entry.attribution==='UNVERIFIED'?'attributionUnverified':'attributionOther');
+    return t('attributionMember');
+  }
+  function historySection(key, rows, emptyKey){
+    host.appendChild(el('div',undefined,'section-title')).appendChild(el('h2',t(key)));
+    if(!rows.length){host.appendChild(el('p',t(emptyKey),'muted'));return;}
+    // Every entry is an existing append-only record; nothing is reconstructed or invented.
+    rows.forEach(function(entry){
+      var item=el('article',undefined,'card');
+      rowValues(item,[[t('task'),entry.taskId],[t('statusField'),entry.action],
+        [t('member'),entry.actor||t('unknown')],[t('attribution'),attributionText(entry)],
+        [t('at'),String(entry.at||'').replace('T',' ').slice(0,19)]]);
+      host.appendChild(item);
+    });
+  }
+  historySection('memberActions',data.memberActions||[],'noMemberActions');
+  historySection('taskHistory',data.taskHistory||data.activity||[],'noHistory');
   if(data.ownership&&data.ownership.limitation)host.appendChild(el('p',t('historyLimitation'),'muted'));
 }
 

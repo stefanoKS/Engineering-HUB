@@ -252,7 +252,7 @@ var ManagerWeb = (function () {
         status: view.status, progress: view.progress, responsibilityId: (projectIndex[t.Project_ID] || {}).Responsibility_ID || ''};
     });
     var member = Database.find('MEMBERS', actor.memberId);
-    return {version: '1.6.1', actor: {name: member.Name, role: actor.role},
+    return {    version: '1.6.2', actor: {name: member.Name, role: actor.role},
       kpis: {active: active.length, risk: active.filter(function (p) { return ['RED','YELLOW','UNKNOWN'].indexOf(p.health) >= 0; }).length,
         soon: window.length, overdue: counts.overdueWork},
       upcoming: {items: upcoming, total: window.length},
@@ -268,8 +268,14 @@ var ManagerWeb = (function () {
     var scope = scopeInput(input), projects = scoped(projectList(), scope);
     var core = overviewCore(actor, projects, scope);
     core.projects = page(projects, {limit: input.limit || 20, offset: input.offset});
-    core.responsibilities = responsibilityOptions();
-    core.responsibilityCards = responsibilitySummaries();
+    // V1.6.2: the area selector and the area cards are snapshot data that the client already
+    // holds (bootstrap). Recomputing every area rollup for each area switch made the first
+    // visit pay for the whole workbook and reshipped a large identical payload, so a caller
+    // that already has the snapshot asks for the scoped overview only.
+    if (input.areas !== false) {
+      core.responsibilities = responsibilityOptions();
+      core.responsibilityCards = responsibilitySummaries();
+    }
     return core;
   }
   /** All-or-nothing dataset: an oversized set carries no rows at all, never a silent prefix. */
@@ -352,6 +358,15 @@ var ManagerWeb = (function () {
       } catch (error) { return {}; }
     }
     var activity = [], evidenceRows = 0;
+    // V1.6.2: only a verified sign-in identity may be presented as this member's own action.
+    // `AUDIT_LOG.Actor` is the server-verified account; a blank actor is unverified, and any
+    // other actor is somebody else's task history, not this member's activity.
+    var memberEmail = String(member.Email || '').trim().toLowerCase();
+    function attribution(actorEmail) {
+      var actor = String(actorEmail || '').trim().toLowerCase();
+      if (!actor) return 'UNVERIFIED';
+      return memberEmail && actor === memberEmail ? 'MEMBER' : 'OTHER';
+    }
     Database.read('AUDIT_LOG').forEach(function (row) {
       // Domain saves record the table name ('TASKS'); explicit actions use 'TASK'.
       if (['TASK', 'TASKS'].indexOf(String(row.Entity_Type)) < 0) return;
@@ -371,8 +386,10 @@ var ManagerWeb = (function () {
         ownership[taskId].since = String(row.Timestamp || '');
       }
       if (!mine && !ownership[taskId]) return;
+      var kind = attribution(row.Actor);
       activity.push({at: String(row.Timestamp || ''), action: String(row.Action || ''),
-        taskId: taskId, actor: String(row.Actor || ''), source: 'AUDIT_LOG'});
+        taskId: taskId, actor: String(row.Actor || ''), source: 'AUDIT_LOG',
+        attribution: kind, verified: kind === 'MEMBER'});
     });
     var accepted = Object.create(null);
     Database.read('TASK_REQUESTS').forEach(function (request) {
@@ -382,8 +399,10 @@ var ManagerWeb = (function () {
     });
     Database.read('TASK_DEADLINE_HISTORY').forEach(function (row) {
       if (!ownership[String(row.Task_ID)]) return;
+      var kind = attribution(row.Changed_By);
       activity.push({at: String(row.Changed_At || ''), action: 'DEADLINE_CHANGED',
-        taskId: String(row.Task_ID), actor: String(row.Changed_By || ''), source: 'TASK_DEADLINE_HISTORY'});
+        taskId: String(row.Task_ID), actor: String(row.Changed_By || ''),
+        source: 'TASK_DEADLINE_HISTORY', attribution: kind, verified: kind === 'MEMBER'});
     });
 
     var current = [], previous = [];
@@ -420,10 +439,17 @@ var ManagerWeb = (function () {
     var auditRows = Database.read('AUDIT_LOG').length;
     var unverified = previous.filter(function (task) { return task.formerAssignment && !task.ownershipSince; }).length;
     var limitation = unverified ? 'OWNERSHIP_UNVERIFIED' : (!auditRows && previous.length ? 'AUDIT_LOG_EMPTY' : '');
+    // Only `memberActions` is presented as this member's own activity. `taskHistory` may
+    // contain events by managers or other people that touched the member's work.
+    var memberActions = activity.filter(function (entry) { return entry.attribution === 'MEMBER'; });
     return {
       member: {id: member.Member_ID, name: member.Name, department: member.Department,
         position: member.Position, role: Roles.normalize(member.Role), active: member.Active === true},
-      current: current, previous: previous, activity: activity.slice(0, 50),
+      current: current, previous: previous,
+      memberActions: memberActions.slice(0, 50), memberActionsTotal: memberActions.length,
+      taskHistory: activity.slice(0, 50), taskHistoryTotal: activity.length,
+      // `activity` stays the documented alias of the full task history for existing callers.
+      activity: activity.slice(0, 50),
       activityTotal: activity.length,
       ownership: {current: current.length, previous: previous.length, historicalOnly: evidenceRows,
         unverifiedPrevious: unverified, limitation: limitation, evidence: 'AUDIT_LOG'}

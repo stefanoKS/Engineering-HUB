@@ -3,6 +3,11 @@
 Status: **NOT EXECUTED** — this document is a procedure only. Nothing was deployed, migrated, initialized,
 triggered or published from this repository session. Live Workspace verification remains **BLOCKED**.
 
+**V1.6.2 note:** this release adds no migration and no new Script Property, so steps 1–6 are unchanged and the
+migration in step 2 applies only to a workbook still at schema 6. The new verification steps are 7.5–7.8 (request
+attribution, ambiguity reconciliation, receipt reconciliation, date handling) and 8.7–8.8 (override and decision
+audit recovery). Rollback is unchanged: redeploy the previous version; no journal or column has to be undone.
+
 Read [MANAGER_WEB_APP_DEPLOYMENT.md](MANAGER_WEB_APP_DEPLOYMENT.md),
 [REQUEST_INBOX_DEPLOYMENT.md](REQUEST_INBOX_DEPLOYMENT.md) and
 [dashboard/DEPLOYMENT.md](dashboard/DEPLOYMENT.md) first. Keep development and production in separate Apps
@@ -87,19 +92,40 @@ Recovery: if a step fails, stop. Do not edit headers by hand. Restore from the v
 1. From the employee app, submit a deadline change and a completion report.
 2. As MANAGER open 申請一覧: both are imported once, with the inbox request ID as the permanent ID.
 3. Approve the deadline change once; a second approval must be refused. Confirm `TASK_DEADLINE_HISTORY` and
-   `AUDIT_LOG` rows.
+   `AUDIT_LOG` rows (`REQUEST_DECISION_PREPARED`, `REQUEST_EFFECT_APPLIED`, `REQUEST_DECIDED` — exactly one of each
+   per accepted decision).
 4. Return and reject a completion: the task must not become Done.
+5. **V1.6.2 attribution check.** Submit a completion report, then have an ADMIN mark the same task Done with
+   `OVERRIDE COMPLETION`, then approve the older report. It must become 再確認 (STALE) and must not write
+   `Accepted_Completion_At` or a `REQUEST_DECIDED` approval.
+6. **V1.6.2 ambiguity check.** In a DEV copy, set a request to `PROCESSING` with no journal rows and change the task
+   to the requested state. Approving must refuse with 「手動確認が必要です」, keep `PROCESSING` and write one
+   `REQUEST_RECONCILE_REQUIRED`. Then run `previewRequestDecisionReconciliation()` and
+   `reconcileRequestDecision(<id>, 'CONFIRM_APPLIED', <note>, 'RECONCILE REQUESTS')`: the request becomes APPROVED
+   with one `REQUEST_EFFECT_APPLIED` (`reconciled: true`) and the task is not written.
+7. **V1.6.2 receipt check.** After a decision, set the inbox `Inbox_State` back to `RECEIVED`. 申請状態の同期確認
+   must show 要再同期; 申請状態を再同期 (with `RECONCILE REQUEST INBOX`) must set it to the manager status, and a
+   second run must update nothing.
+8. **V1.6.2 date check.** Confirm a real date cell in the inbox `Current_Due_Date` column imports as the same
+   calendar day (JST), not as blank.
 
 ## 8. Completion approval testing
 
 1. Confirm the employee report leaves the task In Progress / Assigned and shows 承認待ち.
 2. Approve it: the task becomes Done / 100 % with `Completed_At`, and the pending state clears.
 3. Confirm `Tasks.complete`, the progress field, the sidebar and the manager web form all refuse Done.
-4. As ADMIN, record one `COMPLETION_OVERRIDDEN` correction with a reason and confirm the separate audit row.
+4. As ADMIN, record one `COMPLETION_OVERRIDDEN` correction with a reason and confirm `COMPLETION_OVERRIDE_PREPARED`
+   precedes it and that both carry the same `operationId`.
 5. A container task (a task with subtasks) offers no completion report in the employee app, the inbox import
    refuses one, and an approval attempt is refused **before** the request is claimed: the request stays
    PENDING/STALE, never PROCESSING. Record the observed message.
 6. Confirm a deadline change on a container task is still accepted and applied once.
+7. **V1.6.2 override recovery.** In a DEV copy, let the final `COMPLETION_OVERRIDDEN` write fail (quota or a thrown
+   test wrapper). The task is Done and the error names `reconcileCompletionOverrides`. Run
+   `reconcileCompletionOverrides('RECONCILE COMPLETIONS')` and confirm exactly one final record, then run it again
+   and confirm nothing is appended.
+8. **V1.6.2 audit repair.** Let the `REQUEST_DECIDED` write fail during an approval, then approve the same request
+   again. Confirm one `REQUEST_DECIDED` row, an unchanged `Completed_At` and no repeated task write.
 
 ## 9. Role verification
 

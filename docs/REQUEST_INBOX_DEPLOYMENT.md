@@ -106,6 +106,10 @@ Because the dashboard can now write one row per submission, confirm:
 | Close submissions temporarily | set `REQUEST_SUBMISSION_ENABLED=false` (or delete the property) in the dashboard project |
 | Re-open submissions | set `REQUEST_SUBMISSION_ENABLED=true` in the dashboard project |
 | Inspect a worker's receipt | `requestSubmissionStatus('<request id>')` in the dashboard project |
+| Preview receipt mismatches | manager sidebar **申請一覧** → **申請状態の同期確認** (`previewRequestInboxReconciliation()`) |
+| Repair receipt mismatches | **申請状態を再同期** with `RECONCILE REQUEST INBOX` (`reconcileRequestInbox(confirmation)`) |
+| Review an ambiguous decision | `previewRequestDecisionReconciliation()` then `reconcileRequestDecision(requestId, resolution, note, 'RECONCILE REQUESTS')` |
+| Finalize an interrupted override | `previewCompletionOverrideReconciliation()` then `reconcileCompletionOverrides('RECONCILE COMPLETIONS')` (ADMIN) |
 
 The import is serialized with the script lock and keyed by the inbox `Request_ID`, so two
 managers opening the queue at the same moment cannot create a duplicate request row. When the
@@ -114,6 +118,23 @@ already imported; it never claims the import succeeded.
 
 The inbox is append-only from the dashboard side. The manager application only writes the
 `Inbox_State` cell to mirror a decision; it never deletes or rewrites request content.
+
+### Receipt reconciliation (V1.6.2)
+
+**申請状態の同期確認** is read-only and lists, per mirrored request, `一致` / `要再同期` /
+`受信箱に行がありません` / `タスクまたはプロジェクトが一致しません`. **申請状態を再同期** rewrites only the
+mirrored `Inbox_State`:
+
+* It requires ADMIN or MANAGER plus the exact confirmation `RECONCILE REQUEST INBOX`.
+* It matches rows by the stable `Request_ID` and refuses a row whose `Task_ID` or `Project_ID` disagrees
+  (`IDENTITY_MISMATCH`); such a row is never overwritten.
+* A request that is missing from the inbox is reported (`MISSING_INBOX_ROW`) and is **never** recreated.
+* A row that already matches is not written, so running it twice changes nothing the second time.
+* Request content (requester, reason, explanation, completion note) and every task/decision field stay
+  untouched, and `REQUEST_SUBMISSION_ENABLED` is neither read nor changed — reconciliation works while
+  submissions are closed.
+* One `REQUEST_INBOX_RECONCILED` summary row records each attempt, including `failed` items.
+* An unavailable inbox raises a clear error and leaves the authoritative manager decision intact.
 
 ## 7. Limitations
 

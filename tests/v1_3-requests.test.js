@@ -216,17 +216,47 @@ test('a request submitted before a newer change becomes STALE and cannot overwri
   assert.equal(manager.context.Database.find('TASK_REQUESTS', submitted.data.requestId).Status, 'STALE');
 });
 
-test('an interrupted decision is finalised without applying the change twice', () => {
+/**
+ * An interruption that left no request-specific record is ambiguous, not "already applied".
+ *
+ * V1.6.1 treated a matching deadline as proof that this request had been applied, which is
+ * exactly the false attribution V1.6.2 removes: any other operation can produce the same
+ * deadline. The request now stays PROCESSING until a manager settles it explicitly, and the
+ * reconciliation records the effect without writing the task a second time.
+ */
+test('an interrupted decision without request-specific evidence needs explicit reconciliation', () => {
   const { manager, viewer } = scenario();
   const submitted = submitDeadline(viewer.context, { requestedDate: '2026-12-22' });
   importAll(manager);
-  // Simulate a crash after the task update but before the request status write.
+  // Simulate a crash after the task update but before any request-specific journal row.
   manager.context.Database.update('TASK_REQUESTS', submitted.data.requestId, { Status: 'PROCESSING' });
   manager.context.Tasks.update('T1', { Due_Date: '2026-12-22' });
-  const result = manager.context.Requests.decide(submitted.data.requestId, 'APPROVE', '', 'DECIDE REQUEST');
-  assert.equal(result.status, 'APPROVED');
+
+  assert.throws(() => manager.context.Requests.decide(submitted.data.requestId, 'APPROVE', '', 'DECIDE REQUEST'),
+    /二重反映/);
+  const stored = manager.context.Database.find('TASK_REQUESTS', submitted.data.requestId);
+  assert.equal(stored.Status, 'PROCESSING', 'the request stays reviewable instead of being auto-approved');
+  assert.equal(manager.context.Database.read('TASK_DEADLINE_HISTORY').length, 0,
+    'nothing is attributed to the request before a human confirms it');
+  assert.equal(manager.context.Database.read('AUDIT_LOG')
+    .filter(row => row.Action === 'REQUEST_RECONCILE_REQUIRED').length, 1, 'the ambiguity is recorded once');
+
+  // The manager settles it from the read-only preview.
+  const preview = manager.context.Requests.previewDecisionReconciliation();
+  const item = preview.items.filter(entry => entry.requestId === submitted.data.requestId)[0];
+  assert.equal(item.state, 'REVIEW_REQUIRED');
+  assert.equal(item.safeToConfirm, true, 'the task really holds the requested deadline');
+  const resolved = manager.context.Requests.resolveDecision(
+    submitted.data.requestId, 'CONFIRM_APPLIED', '確認しました', 'RECONCILE REQUESTS');
+  assert.equal(resolved.status, 'APPROVED');
+  assert.equal(manager.context.Database.find('TASKS', 'T1').Due_Date, '2026-12-22');
+  const history = manager.context.Database.read('TASK_DEADLINE_HISTORY');
+  assert.equal(history.length, 1, 'the history row is attributed to the request exactly once');
+  assert.equal(history[0].Previous_Due_Date, '2026-12-15');
+  // A second resolution never applies or records the effect again.
+  assert.throws(() => manager.context.Requests.resolveDecision(
+    submitted.data.requestId, 'CONFIRM_APPLIED', '', 'RECONCILE REQUESTS'), /already decided/);
   assert.equal(manager.context.Database.read('TASK_DEADLINE_HISTORY').length, 1);
-  assert.equal(manager.context.Database.read('TASK_DEADLINE_HISTORY')[0].Previous_Due_Date, '2026-12-15');
 });
 
 test('a completion report only completes the task after manager approval', () => {
