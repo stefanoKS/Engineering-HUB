@@ -82,10 +82,13 @@ function include(name) {
 /** Serves the single-page dashboard. Never throws: the page reports configuration errors. */
 function doGet() {
   var output = HtmlService.createTemplateFromFile('Index').evaluate();
+
   output.setTitle(DashboardApp.TITLE);
-  output.addMetaTag('viewport', 'width=device-width, initial-scale=1');
-  output.addMetaTag('description', '社内共有の案件進捗ダッシュボード（読み取り専用）');
-  output.addMetaTag('robots', 'noindex, nofollow');
+  output.addMetaTag(
+    'viewport',
+    'width=device-width, initial-scale=1'
+  );
+
   return output;
 }
 
