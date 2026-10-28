@@ -101,4 +101,36 @@ records only.
 38. **Desktop rendering.** At 1366×768, 1920×1080 and 150 % zoom confirm the responsibility cards, filter bar,
     tree and deletion panel are usable with no clipped actions, and that status is readable without colour alone.
 
-Until these are recorded, gates 1, 2, 4–10 remain **BLOCKED** for live verification.
+## V1.6.1 additional smoke cases (DEV, NOT_RUN)
+
+Record each with date, account, dataset, deployment version, execution ID and observed result. Use synthetic
+records only.
+
+39. **Scoped figures.** Create 25 projects in one area and 2 in another. Select the large area: the header KPI row,
+    the project list **and** the upcoming list must describe that area, and the project total must be 25 while 20
+    cards are rendered. Select the small area and confirm the numbers switch to 2 with no stale row.
+40. **Upcoming scope.** Give the small area no near deadlines. Expect 近日締切 to be empty with a total of 0 while the
+    large area still lists its own items.
+41. **Container counting.** Add a parent task with two children to an area. Expect 未完了タスク to increase by 2 (not
+    3), 作業項目 to be the leaf count, and 集計タスク to show 1.
+42. **Conversion guard.** Give a task an approved assignment (or a confirmed schedule), then try to add a subtask
+    under it. Expect the refusal message. Repeat with a task that has no history and expect success.
+43. **Reparent invalidation.** Move an approved task under another task. Expect `Assignment_Version` to increase, the
+    approval to clear, and the task to show 承認待ちが解除 in the audit log.
+44. **Container completion refusal.** Open a container task in the employee app: no 完了報告 action, the reason is
+    shown. Craft an inbox row naming the container, import it, and expect the row to be refused, the queue unchanged
+    and `REQUEST_CONTAINER_REFUSED` recorded.
+45. **Approval recovery.** Interrupt an approval (close the tab or drop the network), then reload 申請. Expect the
+    request to still be decidable with a retry note and a `REQUEST_APPROVAL_FAILED` audit row, and one further
+    approval to apply the effect exactly once.
+46. **Deletion ordering.** Delete an empty mistaken task as ADMIN. In `AUDIT_LOG`, `RECORD_DELETE_PREPARED` must be
+    earlier than `RECORD_DELETED`. Expect no cascade option anywhere and no delete control for MANAGER.
+47. **Deletion recovery.** In a DEV copy, remove the `RECORD_DELETED` row and run 削除記録の確定（管理者）with
+    `RECONCILE DELETIONS`. Expect exactly one appended record, `DELETION_RECONCILED`, and no data change.
+48. **Member history after reassignment.** Reassign an approved completion to another member. Expect it to stay in
+    the original member's 過去の作業 with 以前の担当 and the current owner, and to appear in the new owner's 現在の作業.
+49. **Dual contract.** Publish contract 1.5, then redeploy the employee app and confirm the snapshot is still
+    readable with `contractVersion 1.5`. Point a V1.5 employee deployment at it and record
+    `SNAPSHOT_CONTRACT_UNSUPPORTED`.
+
+Until these are recorded, the six V1.6.1 gates remain **BLOCKED** for live verification.

@@ -1,5 +1,28 @@
 # Architecture
 
+## V1.6.1 corrective architecture notes
+
+V1.6.1 adds no layer, table, endpoint or scope. It repairs four boundaries and one compatibility rule:
+
+- **Counting policy.** `src/TaskScope.gs` is the only place that decides what a manager number means
+  (`create`, `summarise`, `summariseBy`, `upcoming`). `ManagerWeb.responsibilitySummaries` and
+  `ManagerWeb.overviewCore` both read from it, so an area card, an overview KPI and a progress rollup
+  cannot disagree. Containers are organisation; open/overdue are open leaf work in active work;
+  completed work is reported separately.
+- **Scope before paging.** `ManagerWeb.overview(actor, input)` (and `bootstrap`) accept
+  `responsibilityId` / `unassigned`, filter the project list first, and derive the KPIs, the seven-day
+  window and the top-five upcoming list from that scope. The browser asks for a scoped overview
+  instead of filtering a 20-row page in memory (`viewFilters` now includes `overview`).
+- **Durable removal.** `Deletion` writes `RECORD_DELETE_PREPARED` before the row disappears and
+  reports success only after `RECORD_DELETED`. `Deletion.reconcile` (entry point
+  `reconcileDeletions('RECONCILE DELETIONS')`, API action `deletionReconcile`) appends a missing record
+  for a row that is verifiably gone and never deletes. Cascading removal is gone.
+- **Historical ownership.** `ManagerWeb.memberProfile` combines the current owner column with the
+  append-only audit evidence, and `Tasks.update` writes `TASK_REASSIGNED` on an owner change.
+- **Contract compatibility.** `dashboard-app/DataService` holds one exact field list per published
+  contract (1.4, 1.5) and validates the snapshot header against the list named by
+  `PUBLISHED_META.CONTRACT_VERSION`; unknown or mixed snapshots still fail closed.
+
 ## V1.6 current manager architecture
 
 V1.6 keeps the V1.5.1 browser-first manager UI (`doGet` → ManagerWebIndex/Styles/Client → `google.script.run` →

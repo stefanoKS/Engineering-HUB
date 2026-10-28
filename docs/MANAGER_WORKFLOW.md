@@ -1,5 +1,32 @@
 # Manager workflow
 
+## V1.6.1 corrections to the daily workflow
+
+These replace the V1.6 steps they name; every other step is unchanged.
+
+1. **Choose the area** (new behaviour). Selecting an area now resolves the scope on the server: the KPI row, the
+   project list and the upcoming list all describe that area, and the totals are the area totals rather than the
+   totals of the visible page. `未分類` is a real bucket, not "everything without a colour".
+2. **Read the counts correctly.** A card shows 案件 / 未完了タスク / 期限超過 / 作業項目 and, when the area contains
+   containers, 集計タスク. 未完了 and 期限超過 count open work items (never a container, never a done item, never a
+   task under an archived branch). Completed work is reported separately.
+3. **Structure the work** (stricter guard). A task with an approved assignment, a confirmed schedule, a request, a
+   deadline history or recorded effort cannot become a container any more. Create a new parent task or a
+   subproject instead. Moving a task under another task invalidates its assignment approval.
+4. **Report and approve** (new refusal). A container task cannot be completed from a report: the employee form
+   offers no completion action for it, the inbox import refuses the row, and an approval attempt is refused before
+   the request is claimed, so the request stays 承認待ち instead of disappearing into 処理中. A deadline change on a
+   container is still valid. If applying an approval fails, the request keeps the retry note and the audit row
+   `REQUEST_APPROVAL_FAILED`; approve it again to finish it once.
+5. **Review by member** (new). A member's profile keeps the work they did after a reassignment: the previous-work
+   list shows the former assignment together with the current owner, and the reassignment itself is recorded
+   (`TASK_REASSIGNED`). When no audit evidence exists the profile says the history is incomplete instead of
+   guessing.
+6. **Remove a mistake** (new). A record with dependants cannot be removed at all — there is no cascading delete.
+   Clear the children one by one if they are also mistakes, or archive the parent. The panel shows a durable
+   record before and after the removal; if the second record could not be written the manager is told to run the
+   ADMIN recovery (`削除記録の確定`) in 自動化設定, which appends the missing record and never deletes anything.
+
 ## V1.6 workflow
 
 1. **Choose the area.** The manager home opens with the responsibility section. Selecting 製品設計 filters every

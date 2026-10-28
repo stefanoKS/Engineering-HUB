@@ -1,6 +1,6 @@
-# Shared dashboard data contract (V1.6)
+# Shared dashboard data contract (V1.6 / V1.6.1)
 
-## Contract 1.5 (V1.6)
+## Contract 1.5 (V1.6) — readable by V1.6.1
 
 V1.6 adds the nested-task hierarchy, the responsibility colour and the completion review state.
 `CONTRACT_VERSION` is now **1.5**; the publisher and the employee reader were updated together, the
@@ -21,12 +21,29 @@ Behavioural rules:
 - `reviewState` is `''`, `PENDING` or `STALE`. The completion note, the reporter and the decision
   text are never published; `pendingRequest` remains a boolean.
 - `completedAt` is a date-only value (the approved completion date), never a timestamp with a zone.
+  V1.6.1 derives it from the same field list as every other contract date and writes both the value
+  and the cell format from that one list, so a spreadsheet locale cannot render it as a serial number.
 - Rows carrying a deletion marker are excluded. A hard-deleted record simply no longer exists in the
   next publication; the previously committed snapshot stays readable until that publication.
 
 Rollout: deploy the manager publisher and the employee app together. An employee app still on
 contract 1.4 refuses a 1.5 snapshot with `SNAPSHOT_CONTRACT_UNSUPPORTED`, which is the documented,
 fail-closed behaviour. `PUBLISHED_META.CONTRACT_VERSION` is the switch.
+
+## V1.6.1 dual-contract reader
+
+`dashboard-app/DataService` keeps one exact field list per contract version (`CONTRACTS` =
+`{'1.4': …, '1.5': …}`), picks the list from `PUBLISHED_META.CONTRACT_VERSION`, and validates the
+header row of every sheet against that list before reading a single value. Consequences:
+
+- A snapshot published by V1.5 (contract 1.4) stays readable after the employee app is updated. The
+  missing fields are simply absent: `container` is `false`, `parentTaskId` and `completedAt` are `''`,
+  and there is no responsibility colour. That is correct, because contract 1.4 had no nested tasks.
+- An unknown version (`1.3`) or a mixed snapshot (a 1.4 header carrying a 1.5 column) still fails
+  closed with `SNAPSHOT_CONTRACT_UNSUPPORTED`; nothing is guessed and no partial data is served.
+- `DashboardData.requestTarget` returns `container` and `contract`, so the request service refuses a
+  container completion report with `REQUEST_CONTAINER_TASK` and the employee form never offers it.
+- The reader never writes, never reads the management workbook, and keeps the same allowlisted DTOs.
 
 ## V1.5 date boundary correction
 

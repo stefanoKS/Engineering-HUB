@@ -1,13 +1,30 @@
-# Manager Web App — V1.6
+# Manager Web App — V1.6.1
 
 **IMPLEMENTED — DEV MIGRATION AND WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+
+## V1.6.1 corrections
+
+- **Area selection is server-resolved.** Choosing an area sends `{responsibilityId}` (or `{unassigned: true}`) to
+  `overview` and renders the returned scope: the KPI row, the project page and the upcoming list are computed for
+  that scope before paging. The browser no longer filters a 20-row page or a five-row cut. The unscoped overview and
+  the local filtering of the project/task *lists* behave exactly as in V1.6.
+- **Area cards distinguish work from containers.** Each card shows 案件 / 未完了タスク / 期限超過 / 作業項目 and,
+  when present, 集計タスク, described by `responsibilityCards.policy`.
+- **Deletion panel** no longer offers a cascade. It explains that dependants must be cleared one by one or the parent
+  archived, keeps the ADMIN-only control (nothing is rendered for MANAGER), and the new
+  `削除記録の確定（管理者）` block in 自動化設定 runs the recovery with the typed `RECONCILE DELETIONS`.
+- **Member profile** shows a former assignment together with its current owner and states the history limitation
+  when no audit evidence exists.
+- **Container tasks** show 集計タスク and explain that completion comes from their subtasks; the screen never offers
+  a direct Done.
+- **Diagnostics** (`計測`) is unchanged and still shows only numeric timings and cache state.
 
 ## V1.6 additions
 
 - **Responsibility section** at the top of the home screen: one card per area with colour, owner, active projects,
   open and overdue tasks and weighted progress; `すべての担当領域`, `未分類` and `+ 担当領域を追加`.
 - **Global area filter** in page memory (`Responsibility_ID`): projects, tasks, KPIs and upcoming deadlines narrow
-  locally, with no additional `google.script.run` call. The area select in the toolbar drives the same filter.
+  to that area. The area select in the toolbar drives the same filter.
 - **Create project** asks for the responsibility first and requires an active one; the current area is preselected.
 - **Subproject tree** collapses and expands, renders four levels and keeps every orphan visible.
 - **Nested tasks** indent by depth, show a container chip and a 承認待ち / 再報告が必要 review chip, and offer
@@ -17,9 +34,8 @@
 - **Members** view: メンバー → profile with current work, previous approved work and recorded activity.
 - **Deletion (ADMIN)**: 完全削除 shows the dependency preflight, requires a reason and `DELETE <id>`, and tells the
   manager that the shared dashboard changes only at the next publication.
-- **Diagnostics** (`計測`) is unchanged and still shows only numeric timings and cache state.
 
-Everything below about data flow, caching, revocation and pagination is still accurate for V1.6.
+Everything below about data flow, caching, revocation and pagination is still accurate for V1.6.1.
 
 The application name is **設計・開発課 管理**. The manager opens a bookmarked browser URL; Google Sheets remains the private datastore. This is an additional HTML Service entrypoint in the existing container-bound manager project, not a new backend. The Sheets sidebar remains the fallback. Schema **6**, stable IDs and employee contract **1.4** are unchanged.
 

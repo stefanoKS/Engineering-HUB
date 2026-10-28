@@ -1,5 +1,21 @@
 # Data schema
 
+## V1.6.1 compatibility
+
+Schema is **7** and the employee snapshot contract is **1.5**; **V1.6.1 changes neither** and adds no migration.
+The corrective release touches only derivation and validation rules:
+
+- The counting policy (`src/TaskScope.gs`) is read-only: no column is added, written or re-interpreted.
+- `Parent_Task_ID` is now a material assignment field, so reparenting a task bumps `Assignment_Version` and clears
+  `Assignment_Approved_At`. The stored hierarchy columns are unchanged.
+- A task with recorded history (assignment approval, schedule confirmation, request, deadline history or effort)
+  can no longer become a container. Existing containers are untouched.
+- A permanent removal writes `RECORD_DELETE_PREPARED` and `RECORD_DELETED` into the existing `AUDIT_LOG`
+  (`Entity_Type`, `Entity_ID`, `Action`, `New_Value`); no new table and no new column. `Deleted_At` keeps its V1.6
+  meaning.
+- `TASK_REASSIGNED` is another `AUDIT_LOG` action, so ownership history needs no parallel table.
+- The employee snapshot keeps contract 1.5 and every published field; only the reader now also accepts 1.4.
+
 ## V1.6 compatibility
 
 Schema is **7** and the employee snapshot contract is **1.5**. V1.6 adds one reviewed, additive

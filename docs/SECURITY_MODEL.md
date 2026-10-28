@@ -1,5 +1,28 @@
 # Security model
 
+## V1.6.1 review of the corrective release
+
+No permission model, role matrix, scope, property or manifest changed. The release reviewed the paths it touched:
+
+- **Deletion.** Still `Access.requireAdmin()` at the service layer and `{admin: true, confirm: true}` in the API
+  allowlist, plus the typed `DELETE <id>` confirmation, a verified backup and the script lock. V1.6.1 adds a durable
+  intent record before the removal and a tombstone before success is reported, so an interrupted removal can no
+  longer produce an unrecorded row. The recovery entry point (`reconcileDeletions`, API `deletionReconcile`) is
+  ADMIN-only, requires the fixed `RECONCILE DELETIONS` text and **can only append an audit row**; it has no delete
+  capability, and a test asserts that a row that still exists is left untouched. Cascading removal — the only path
+  that could remove more than one authorised record per confirmation — was removed.
+- **Completion.** A container task can never be completed directly. The refusal is server-side on inbox import and
+  again before the request is claimed, so a crafted inbox row cannot strand a request or force a container write.
+- **Ownership history.** Attribution uses the immutable `Member_ID` and the audit actor. A self-reported requester
+  name is never used, and the profile never returns a private field. The member view remains manager-only.
+- **Employee app.** Still read-only, deployer-executed, allowlisted DTOs. `requestTarget` now also returns the
+  container flag so the request service refuses a report a manager could never approve; nothing else is exposed.
+- **Stored text.** Every new label is an i18n key; all stored values are rendered with `textContent`. `npm run
+  validate` reports no `innerHTML`/`document.write` and no dashboard access to `MailApp`/`DriveApp`/`ScriptApp`.
+
+Residual risks are unchanged: Google Sheets sharing means a manager with editor access to workbook A can read every
+sheet, identity depends on the deployment ACL, and no live Workspace verification of any of the above was performed.
+
 ## V1.5 manager web security
 
 The browser manager extends the existing internal departmental tool with no per-project, per-responsibility or per-subproject access control. Deploy USER_ACCESSING + DOMAIN. Active-session email must match MANAGER_WEB_ALLOWED_DOMAINS and an active ADMIN/MANAGER record. Browser actor claims are rejected. Authorization precedes DTO construction and is repeated for locked mutations. Sensitive role/owner/automation edits remain ADMIN-only; normal managers administer departmental work. A domain-only restriction is insufficient.

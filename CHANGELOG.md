@@ -1,5 +1,74 @@
 # Changelog
 
+## V1.6.1 — 2026-10-29
+
+Corrective release after an audit of V1.6. Every V1.6 capability is kept; no schema, migration,
+permission, trigger, mail, Calendar or publication change was added. Schema stays **7**, the published
+employee contract stays **1.5** (the reader additionally accepts **1.4**).
+
+### Correctness
+
+- **One counting rule (`src/TaskScope.gs`).** Responsibility cards and overview KPIs counted container
+  tasks while every rollup counted leaf work only. Containers are organisation; open/overdue counts are
+  open leaf work in active work; completed work is reported separately (`web.areaWorkItems`, policy
+  labels published with the DTO).
+- **Scope before paging.** `ManagerWeb.overview(actor, input)` and `bootstrap(actor, input)` accept
+  `responsibilityId` / `unassigned`, filter the project list before `page()`, derive the KPIs, the
+  seven-day window and the top-five `upcoming` list from that scope, and return `counts` + `scope`. The
+  browser no longer re-filters a 20-row page or a five-row cut.
+- **Conversion guard.** `TaskTree.hasRecordedWork` also considers an assignment approval, a schedule
+  confirmation, a recorded request and deadline/work history, so a task with history can no longer be
+  turned into a container. `Parent_Task_ID` joins `Tasks.assignmentFields`, so reparenting bumps
+  `Assignment_Version` and clears a stale approval.
+
+### Completion workflow
+
+- A `COMPLETION_REPORT` for a container task is refused on inbox import (`CONTAINER_TASK`), counted in
+  the import result (`containerRejected`, audit `REQUEST_CONTAINER_REFUSED`) and refused before the
+  request is claimed, so it can never be left in `PROCESSING`.
+- A failure while applying an approval is recorded (`REQUEST_APPROVAL_FAILED`), the claim stays
+  `PROCESSING` on purpose, and the manager is told to retry; the retry resumes through
+  `alreadyApplied` without a second effect.
+- A failed inbox mirror is recorded (`INBOX_MIRROR_FAILED`) instead of only logged.
+- The employee request service refuses a container completion report (`REQUEST_CONTAINER_TASK`) and the
+  dashboard hides the action with the reason.
+
+### Deletion and audit
+
+- `Deletion.remove` writes `RECORD_DELETE_PREPARED` (full row, reason, actor, backup) **before** the row
+  is removed and reports success only after `RECORD_DELETED` exists; a tombstone failure raises an
+  explicit reconciliation error.
+- `Deletion.reconcile` / `reconcileDeletions('RECONCILE DELETIONS')` finalizes an interrupted removal,
+  appends only the missing record for a row that is verifiably gone, and never deletes anything.
+  `ADMIN` plus the exact confirmation, exposed as the `deletionReconcile` API action.
+- A prepared identifier is reserved (`isDeletedId`), and nested tasks, schedule confirmations, requests
+  and deadline history now block a removal.
+- Cascading removal was removed (server + panel); the project delete control is rendered for `ADMIN`
+  only.
+
+### Member history
+
+- `ManagerWeb.memberProfile` reads ownership from the append-only audit evidence as well as the current
+  owner, so reassigned work stays in the history of the member who did it; former assignments show the
+  current owner and a limitation is stated when no audit evidence exists.
+- `Tasks.update` writes `TASK_REASSIGNED` with both owners on an owner change.
+
+### Compatibility and deployment
+
+- `dashboard-app/DataService` reads contracts **1.4 and 1.5**, each through its own exact header row;
+  unknown and mixed contracts still fail closed. `requestTarget` exposes `container` and `contract`.
+- The publisher uses one `DATE_FIELDS` list for normalization and for the text column format, so
+  `completedAt` is published as `yyyy-MM-dd` text.
+- `docs/V1_6_DEPLOYMENT_RUNBOOK.md` names `createDatabaseBackup()`, pushes the head code before the
+  migration runs, keeps the deployment untouched during it, documents the dual-contract behaviour and
+  adds the deletion-recovery step.
+
+### Evidence
+
+- Six checkgates `docs/checkgates/V1_6_1_GATE_1..6.md`, `V1_6_1_VALIDATION.txt`,
+  `V1_6_1_PERFORMANCE.json`; 500 tests. Live Workspace criteria remain **BLOCKED / NOT_RUN** and
+  `docs/PRODUCTION_READINESS.md` stays **NOT APPROVED FOR PRODUCTION**.
+
 ## V1.6 — 2026-10-28
 
 Responsibility-centered engineering management. Schema **7** (one additive, approval-gated migration),

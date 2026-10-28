@@ -1,9 +1,41 @@
-# Manager Web App performance — V1.6
+# Manager Web App performance — V1.6.1
 
-Measured 2026-10-28 on Windows, Node v24.21.0, mocked Google services. **Real Workspace timings: NOT_RUN.** Raw
-results: [V1_6_PERFORMANCE.json](checkgates/V1_6_PERFORMANCE.json) (V1.6), [V1_5_1_PERFORMANCE.json](checkgates/V1_5_1_PERFORMANCE.json)
-(V1.5.1) and [V1_5_PERFORMANCE.json](checkgates/V1_5_PERFORMANCE.json) (V1.5), kept as historical evidence.
-Reproduce with `node scripts/manager-web-benchmark.js` (writes `V1_6_PERFORMANCE.json`).
+Measured 2026-10-29 on Windows, Node v24.21.0, mocked Google services. **Real Workspace timings: NOT_RUN.** Raw
+results: [V1_6_1_PERFORMANCE.json](checkgates/V1_6_1_PERFORMANCE.json) (V1.6.1), [V1_6_PERFORMANCE.json](checkgates/V1_6_PERFORMANCE.json)
+(V1.6), [V1_5_1_PERFORMANCE.json](checkgates/V1_5_1_PERFORMANCE.json) (V1.5.1) and
+[V1_5_PERFORMANCE.json](checkgates/V1_5_PERFORMANCE.json) (V1.5), kept as historical evidence.
+Reproduce with `BENCHMARK_OUTPUT=V1_6_1_PERFORMANCE.json node scripts/manager-web-benchmark.js` (the script defaults
+to the V1.6 file name so a V1.6 rerun cannot overwrite this record).
+
+## V1.6.1 comparison with V1.6
+
+| Dataset | bootstrap p50 | bootstrap payload | taskIndex p50 | taskIndex payload | cached nav p50 | local filter p50 | RPC after load |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 10 / 100 | 5.87 ms (4.43) | 11.0 KB (10.5) | 1.96 ms (2.29) | 16.5 KB (16.5) | 0.81 ms (0.77) | 0.08 ms (0.07) | 2 (2) |
+| 100 / 1,000 | 46.48 ms (43.40) | 57.8 KB (57.3) | 19.20 ms (17.37) | 166.8 KB (166.8) | 1.42 ms (1.45) | 0.40 ms (0.39) | 2 (2) |
+| 300 / 3,000 | 140.35 ms (115.55) | 153.2 KB (152.7) | 47.37 ms (49.07) | 509.8 KB (509.8) | 1.11 ms (1.13) | 2.05 ms (2.19) | 3 (3) |
+
+Figures in brackets are the V1.6 values.
+
+### Disclosed regression
+
+The warm `bootstrap` grew by +2 % (10 projects) to +21 % (300 projects) and the payload by about 0.5 KB. The cause is
+the correctness fix itself: every displayed figure now derives from one counting rule, so `TaskScope.create()` builds
+a hierarchy index and one eligibility pass over the leaf work on each read (24.8 ms p50 at 3,000 tasks measured in
+isolation), and each responsibility card rolls up leaf work only.
+
+The first implementation was worse and was replaced before this record was written: it recomputed the active and
+leaf lists once per area and tested area membership with `Array#indexOf` inside the filter (quadratic in the task
+count). The shipped code counts every group in one pass (`TaskScope.summariseBy`) and rolls up a leaf-only list, so
+the remaining cost is the index build, not the grouping.
+
+Cached navigation (< 100 ms) and local filtering (< 50 ms) targets are met with a wide margin and are unaffected by
+the release. The RPC count after the first load is unchanged (`2 / 2 / 3`). A live Workspace comparison stays
+**NOT_RUN**; the extra index build is local CPU and Sheets I/O dominates a real call, but that is not measured here.
+
+## Historical V1.6 measurements
+
+Measured 2026-10-28. Raw results: [V1_6_PERFORMANCE.json](checkgates/V1_6_PERFORMANCE.json).
 
 ## V1.6 comparison with V1.5.1
 

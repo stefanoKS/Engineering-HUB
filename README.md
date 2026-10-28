@@ -1,32 +1,56 @@
 # Engineering-HUB
 
-## Current release — V1.6
+## Current release — V1.6.1
 
 **IMPLEMENTED — DEV MIGRATION AND WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 
-Version **1.6.0** makes responsibilities the top organisational level of the manager dashboard and finishes the
-work hierarchy. Responsibilities (担当領域) are editable data, each with a colour, owner, project count, open and
-overdue task counts and progress; selecting one filters projects, tasks, KPIs and deadlines from the in-memory
-snapshot without another Apps Script call. Projects created in the dashboard must name an active responsibility;
-existing projects stay untouched and show 未分類. Subprojects nest to four levels and tasks to three, where a task
-with children is a work container whose progress comes from leaf work only and is never counted twice. An employee
-completion report no longer marks a task done: a manager approval (or an explicit ADMIN correction with a reason
-and its own audit record) is the only path to Done / 100 %. A narrow, ADMIN-only deletion of genuinely mistaken
-empty records was added with a dependency preflight, a typed confirmation, a verified backup and an immutable
-tombstone; archive remains the default and everything with history refuses deletion. Schema **7**
-(`007_responsibility_hierarchy_and_lifecycle`, additive, approval + verified backup required), employee contract
-**1.5**, no execute-as change, no trigger, mail or Calendar activation.
+Version **1.6.1** is a corrective release: it keeps every V1.6 capability and fixes the correctness, integrity and
+compatibility defects an audit of that delivery found. No schema, migration, deployment or permission was added.
+
+- **One counting rule.** The responsibility cards and the overview KPIs counted container tasks while every
+  progress rollup counted leaf work only. Every manager figure now comes from `TaskScope`: a container is
+  organisation, and only open leaf work in active work is counted as open or overdue. Completed work is reported
+  separately and is never mixed into a workload figure.
+- **Scope before paging.** Selecting an area used to filter an already-paged 20-row list and an already-cut
+  top-five list in the browser. The scope now goes to the server, which filters, counts and pages for that scope, so
+  the totals, the deadline window and the upcoming list all describe what is visible.
+- **Completion integrity.** A completion report for a container task is refused on import and refused again before
+  the request is claimed, so it can never be left in `PROCESSING`. A failure while applying an approval is recorded
+  (`REQUEST_APPROVAL_FAILED`) and retryable instead of silent, and a failed inbox mirror is recorded too.
+- **Deletion integrity.** A removal writes a durable intent (`RECORD_DELETE_PREPARED`) *before* the row disappears
+  and reports success only after the tombstone (`RECORD_DELETED`) exists. `reconcileDeletions` finishes an
+  interrupted removal without ever deleting anything. Cascading removal was removed, and the delete control is only
+  rendered for ADMIN.
+- **History that survives reassignment.** A member profile reads the append-only ownership evidence as well as the
+  current owner, so reassigned work stays in the history of the member who did it, with the current owner shown
+  instead of a rewritten past. Reassignments write an explicit `TASK_REASSIGNED` record.
+- **Compatibility and deployment.** The employee reader accepts contracts **1.4 and 1.5**, each through its own
+  exact header row. The published `completedAt` is normalized and stored as text like every other contract date, and
+  the deployment runbook names the real entry points in the order that keeps users unaffected.
+
+Schema **7** and employee contract **1.5** are unchanged; there is no new migration, and no execute-as, trigger,
+mail, Calendar or publication change.
 
 Local verification: `npm ci`, `npm run lint`, `npm test`, `npm run validate` and
-`node scripts/manager-web-benchmark.js` all pass; **462 tests, 462 pass, 0 fail, 0 skipped** and the twelve V1.6
+`node scripts/manager-web-benchmark.js` all pass; **500 tests, 500 pass, 0 fail, 0 skipped** and the six V1.6.1
 checkgates record local PASS results with their live criteria BLOCKED (see
-[V1_6_GATE_12.md](docs/checkgates/V1_6_GATE_12.md)). Cached navigation stays at 0.77–1.45 ms and local filtering
-at 0.07–2.19 ms; `bootstrap` costs 4.43 / 43.40 / 115.55 ms and 10.5 / 57.3 / 152.7 KB for 10/100/300 projects,
-which is +2 to +7 % latency and +15 to +17 % payload versus V1.5.1 for the area cards and new task fields. Real
-Workspace latency, the DEV migration, the request round trip and production rendering remain **NOT_RUN**.
+[V1_6_1_GATE_6.md](docs/checkgates/V1_6_1_GATE_6.md)). Cached navigation stays at 0.8–1.4 ms and local filtering at
+0.1–2.1 ms; `bootstrap` costs 5.9 / 46.5 / 140.4 ms and 11.0 / 57.8 / 153.2 KB for 10/100/300 projects. Every figure
+is now derived from the same rule, which is why the warm bootstrap is +2 to +21 % versus V1.6 while navigation and
+filtering are unchanged. Real Workspace latency, the DEV migration, the request round trip and production rendering
+remain **NOT_RUN**.
 
 Preview: npm run preview:manager-web → http://127.0.0.1:4175/ (synthetic data only). The 計測 / Diagnostics button
 in the header shows the same timings without Chrome DevTools.
+
+## Historical V1.6 release record
+
+V1.6 made responsibilities the top organisational level of the manager dashboard and finished the work hierarchy:
+area cards with colour, owner and progress, four subproject levels, three task levels with work containers, a
+reviewed completion workflow, the first narrow ADMIN-only deletion, member history and contract 1.5. Schema **7**
+(`007_responsibility_hierarchy_and_lifecycle`). Its local result was **462 tests, 462 pass**; the twelve V1.6
+checkgates keep that release's local PASS results and BLOCKED live criteria, and measurements stay in
+[V1_6_PERFORMANCE.json](docs/checkgates/V1_6_PERFORMANCE.json) as historical evidence.
 
 ## Historical V1.5.1 release record
 

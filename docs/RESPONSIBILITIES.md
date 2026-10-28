@@ -1,5 +1,36 @@
 # Responsibilities (担当領域), subprojects and nested tasks
 
+## V1.6.1 counting and scope correction
+
+V1.6 published two answers to the same question. The area card and the overview KPIs counted raw task rows (a
+parent together with its children), while every progress rollup counted leaf work only. V1.6.1 introduces one policy
+(`src/TaskScope.gs`) and every manager figure uses it:
+
+| Label | Meaning |
+| --- | --- |
+| Work item (作業項目) | A task without children. Only work items are units of work. |
+| Container (集計タスク) | A task with children. It organises work and is never counted as extra work. |
+| Active work | A work item that is open, in a working project and under a working subproject chain. |
+| Open task (未完了タスク) | Active work that is neither Done nor Cancelled. |
+| Overdue (期限超過) | Open work whose due date is before today. |
+| Completed work | Work items marked Done, reported for history only and never mixed into a workload figure. |
+| Cancelled | Excluded from every workload figure. |
+
+The labels are distinct on purpose and the area card shows the work-item and container counts next to the open and
+overdue figures; `responsibilityCards.policy` publishes the meaning with the numbers so a translated label can never
+silently change it.
+
+**Scope before paging.** Selecting an area sends the scope to the server (`overview` with `responsibilityId` or
+`unassigned`), which filters the projects, derives the KPIs, the seven-day window and the top-five upcoming list, and
+only then pages. The previous behaviour (filtering an already paged 20-row project list and an already cut top-five
+list in the browser) could show an empty list for an area that had work, or a total that described the page rather
+than the scope. Cached navigation and local filtering for the *unscoped* pages are unchanged.
+
+**Conversion guard.** A task that already carries an assignment approval, a confirmed schedule, a recorded request,
+deadline/work history or recorded effort can no longer become a container; the manager creates a new parent task or
+a subproject instead. Reparenting a task counts as a material assignment change: `Assignment_Version` increases and a
+stale approval is cleared.
+
 ## V1.6 responsibility-centered model
 
 Responsibilities are the top organisational level and the only grouping of projects. The relationship is the

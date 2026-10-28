@@ -164,3 +164,31 @@
 88. Record PASS, FAIL, BLOCKED or NOT_RUN with evidence in `docs/checkgates/V1_6_GATE_<n>.md`, follow
     [docs/V1_6_DEPLOYMENT_RUNBOOK.md](docs/V1_6_DEPLOYMENT_RUNBOOK.md) for any DEV work, and keep
     `docs/PRODUCTION_READINESS.md` **NOT APPROVED FOR PRODUCTION** until recorded live Workspace evidence exists.
+
+## V1.6.1 mandatory rules (corrective stabilization)
+
+89. One counting rule for every manager figure: `TaskScope` decides what a number means. A container task is
+    organisation only; open and overdue counts are open leaf work in active work; completed and cancelled work are
+    reported separately and never mixed into a workload figure. Never count a raw task row in a card or a KPI, and
+    never introduce a second definition of "open" or "overdue".
+90. Resolve a scope on the server, before paging and before any top-N cut. Never filter an already paged list, an
+    already cut list or an already aggregated figure in the browser, and always report the scope total next to the
+    visible page.
+91. A container task can never be completed directly. Refuse a container completion report on inbox import, refuse
+    it again **before** the request is claimed, and never leave a request in `PROCESSING` without a recorded reason.
+    A phase-1 failure records `REQUEST_APPROVAL_FAILED` and stays retryable; never auto-retry an ambiguous delivery.
+92. A permanent removal writes a durable intent (`RECORD_DELETE_PREPARED`) before the row disappears and reports
+    success only after `RECORD_DELETED` exists. `reconcileDeletions` may append a missing record for a row that is
+    verifiably gone and must never delete anything. Offer no cascading removal, and render the delete control for
+    `ADMIN` only.
+93. Ownership history is append-only. A member's work stays in that member's history after a reassignment, a former
+    assignment shows the current owner, an owner change writes `TASK_REASSIGNED`, and the absence of audit evidence is
+    stated as a limitation instead of being filled in.
+94. Keep the published contracts readable across an application update: the employee reader accepts contract 1.4 and
+    1.5, each validated against its own exact header row, and an unknown or mixed contract still fails closed. Every
+    contract date field is normalized and written into a text-formatted column through the one field list.
+95. Keep the deployment order honest: push the head code, verify the backup, run the migration, verify preservation,
+    then create a new deployment version. Name only entry points that exist (`createDatabaseBackup`,
+    `upgradeExistingDatabase`, `reconcileDeletions`), and never claim a live result a local run cannot produce.
+96. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_6_1_GATE_<n>.md`, keep the V1.6 gate records
+    unchanged, and keep `docs/PRODUCTION_READINESS.md` **NOT APPROVED FOR PRODUCTION**.

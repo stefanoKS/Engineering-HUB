@@ -1,0 +1,50 @@
+V1.6.1 local validation record
+================================
+
+Release: 1.6.1 (corrective release after the V1.6 audit)
+Branch: fix/v1.6.1-stabilization
+Date: 2026-10-28 22:00:50
+Environment: Windows; Node v24.21.0; npm 11.19.0
+Scope: local mock execution only. Live Workspace verification is BLOCKED / NOT_RUN.
+
+1. npm ci
+exit code: 0
+added 364 packages, and audited 365 packages in 15s
+
+123 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+
+2. npm run lint
+exit code: 0 (eslint . with no findings)
+
+> engineering-hub@1.6.1 lint
+> eslint .
+
+
+3. npm run validate
+exit code: 0
+> engineering-hub@1.6.1 validate
+> node scripts/validate-source.js
+
+Validated 39 manager Apps Script files, 3 dashboard files, both manifests and 789 translation keys
+
+4. npm test (tests/*.test.js, 50 files)
+exit code: 0
+笨・recipient validation and cancelled parents suppress delivery (116.1205ms)
+笨・approval cannot bypass owner validation and requires explicit confirmation (33.2366ms)
+笨・unmigrated workbooks fail closed and need the documented legacy opt-in (104.6125ms)
+笨・calendar and daily backup switches are independent and never bypass migration backups (210.3ms)
+笨・unreadable, unpublished, mismatched and unsafe snapshots fail closed (154.5277ms)
+笨・controlled enums and deadline wording are localized, unknown values pass through (0.903ms)
+笨・deactivated manager and unconfigured domain fail closed (64.7518ms)
+邃ｹ tests 500
+邃ｹ pass 500
+邃ｹ fail 0
+邃ｹ cancelled 0
+邃ｹ skipped 0
+
+5. BENCHMARK_OUTPUT=V1_6_1_PERFORMANCE.json node scripts/manager-web-benchmark.js
+exit code: 0; liveWorkspace = NOT_RUN; result in docs/checkgates/V1_6_1_PERFORMANCE.json
+

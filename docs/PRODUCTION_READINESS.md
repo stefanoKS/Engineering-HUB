@@ -1,41 +1,43 @@
 # Production readiness
 
-## Current assessment — V1.6 (2026-10-28)
+## Current assessment — V1.6.1 (2026-10-29)
 
 **IMPLEMENTED — DEV MIGRATION AND WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 
-Version 1.6.0; schema **7** (`007_responsibility_hierarchy_and_lifecycle`); employee contract **1.5**. Starting SHA:
-`c769cb5006b13130e1358df3cbad436068a3c3f8`. The delivery SHA `34a2bf1` is recorded in
-[V1_6_GATE_12.md](checkgates/V1_6_GATE_12.md).
+Version 1.6.1; schema **7** (unchanged, no new migration); employee contract **1.5** (the viewer additionally reads
+**1.4**). Starting SHA: `ea3fbc9` (the V1.6 delivery on `main`). The V1.6.1 evidence is recorded in
+[V1_6_1_GATE_6.md](checkgates/V1_6_1_GATE_6.md) and [V1_6_1_VALIDATION.txt](checkgates/V1_6_1_VALIDATION.txt).
 
 | Field | Value |
 | --- | --- |
-| Version | 1.6.0 |
-| Schema version | 7 |
-| Employee contract | 1.5 |
-| Local tests | **462 tests, 462 pass, 0 fail, 0 skipped** (`npm test`); `npm run lint` and `npm run validate` green |
+| Version | 1.6.1 |
+| Schema version | 7 (no migration added by this release) |
+| Employee contract | 1.5 published; 1.4 and 1.5 readable |
+| Local tests | **500 tests, 500 pass, 0 fail, 0 skipped** (`npm test`); `npm run lint` and `npm run validate` green |
 | Google Workspace verification | **UNVERIFIED** — nothing in this repository has been run against a real Workspace |
 
-V1.6 makes responsibilities the top organisational level (colour, owner, counts, weighted progress, a global filter
-that stays local), nests subprojects to four levels and tasks to three (a container is never counted as extra work),
-routes every completion through a manager approval (with a separately audited ADMIN correction), adds a narrow
-ADMIN-only deletion of mistaken empty records, adds member current/previous/activity views, and publishes contract
-1.5. Schema, authorization, revisions, audit, publication safety, the sidebar and the employee app are otherwise
-unchanged.
+V1.6.1 keeps every V1.6 capability and fixes what an audit of that delivery found: one counting rule for every
+manager figure (`TaskScope`), a scope resolved on the server before paging and before the top-five cut, a container
+completion report refused before it can strand a request, a durable deletion intent with a reconciliation entry
+point, member history that survives reassignment, and an employee reader that accepts contracts 1.4 and 1.5. Schema,
+authorization, revisions, audit, publication safety, the sidebar and the employee app are otherwise unchanged.
 
-All twelve V1.6 checkgates record local PASS results and the release stays **BLOCKED** for live verification. Required
+All six V1.6.1 checkgates record local PASS results and the release stays **BLOCKED** for live verification. Required
 remaining work: the DEV migration of a real workbook with its verified backup and preservation checks; the real
 ADMIN/MANAGER/denied-account identity matrix; A sharing isolation; the complete DEV CRUD/request/publication/audit
-workflow including the employee→manager completion round trip and the request inbox; a live rollback rehearsal; the
-actual 200 % browser zoom and assistive-technology checks; and real Workspace latency plus long-session memory
-measurement. **No live Workspace run of any kind was performed in this repository session, no workbook was migrated
-and nothing was deployed.** The measured numbers in [MANAGER_WEB_APP_PERFORMANCE.md](MANAGER_WEB_APP_PERFORMANCE.md)
-are mock values; the raw file records `liveWorkspace: NOT_RUN`.
+workflow including the employee→manager completion round trip, the container refusal and the deletion-recovery
+rehearsal; a live rollback rehearsal; the actual 200 % browser zoom and assistive-technology checks; and real
+Workspace latency plus long-session memory measurement. **No live Workspace run of any kind was performed in this
+repository session, no workbook was migrated and nothing was deployed.** The measured numbers in
+[MANAGER_WEB_APP_PERFORMANCE.md](MANAGER_WEB_APP_PERFORMANCE.md) are mock values; the raw file records
+`liveWorkspace: NOT_RUN`.
 
 Use the existing DEVELOPMENT resources described by the operator; their actual creation/sharing/deployment state was
 not inspected here. No code was uploaded with clasp, no live deployment/data/migration/trigger/email/Calendar action
 was performed. Follow [the V1.6 runbook](V1_6_DEPLOYMENT_RUNBOOK.md), [DEV installation](MANAGER_WEB_APP_DEPLOYMENT.md)
 and [the smoke plan](MANAGER_WEB_APP_SMOKE_TEST.md). No production activation without reviewed evidence.
+
+## Historical V1.6 assessment (2026-10-28)
 
 ## Historical V1.5.1 assessment
 

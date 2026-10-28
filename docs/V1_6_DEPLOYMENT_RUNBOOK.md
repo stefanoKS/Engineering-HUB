@@ -18,42 +18,54 @@ Script projects, spreadsheets and clasp configurations.
 - DEV `.clasp.json` targets the DEV manager project; `.clasp.dashboard-dev.json` targets the DEV employee
   project. Neither may be production.
 
-## 1. DEV backup and schema migration
+**Order matters.** Apps Script serves the *deployed* version while the *head* version holds the pushed code. The
+migration below is part of the new code, so the new code is pushed to the head **before** the migration runs, and
+the deployment is only replaced after the migration was verified. Doing it the other way round either runs a
+migration that does not exist yet or exposes the new code to users before its schema exists.
 
-1. Record the current `SCHEMA_MIGRATIONS` version (expect 6) and the DEV deployment version.
-2. Run `createBackup()` (or rely on the migration's own verified backup) and confirm the file exists in the
-   restricted folder. A failed backup **stops** the migration.
-3. Run `upgradeExistingDatabase()` once, as an ADMIN, with `007_responsibility_hierarchy_and_lifecycle` approved.
-4. Confirm `SCHEMA_MIGRATIONS` shows one new `SUCCESS` row and the version is 7.
-5. Confirm `TASKS`, `PROJECTS`, `SUBPROJECTS` and `RESPONSIBILITIES` gained only the documented new columns, the
+## 1. Manager code push (head only, deployment unchanged)
+
+1. `git fetch` and confirm the delivery commit; `git status` clean apart from intended files.
+2. Record the current `SCHEMA_MIGRATIONS` version (expect 6) and the live DEV deployment version.
+3. `npx clasp status`, then `npx clasp push` into the **DEV** manager project. Do **not** create a deployment
+   version yet: the running deployment still serves the previous code.
+4. Confirm `src/appsscript.json` still has `webapp.access = DOMAIN`, `executeAs = USER_ACCESSING` and no new scope.
+
+## 2. DEV backup and schema migration
+
+1. From the editor (head version), run `createDatabaseBackup()` as an ADMIN. It writes a *verified* private copy
+   in `BACKUP_FOLDER_ID` and a `BACKUP_LOG` row; a failed backup **stops** the migration. Record the reference.
+2. Run `upgradeExistingDatabase()` once. It takes its own verified backup as well.
+3. Confirm `SCHEMA_MIGRATIONS` shows one new `SUCCESS` row and the version is 7.
+4. Confirm `TASKS`, `PROJECTS`, `SUBPROJECTS` and `RESPONSIBILITIES` gained only the documented new columns, the
    row counts are unchanged and spot-checked cells plus manual columns/formulas are intact.
-6. Re-run `upgradeExistingDatabase()`: it must be a no-op with no extra backup.
-7. Open `SCHEMA_MIGRATIONS`/`AUTOMATION_SETTINGS`: nothing was published, no trigger installed, mail still OFF.
+5. Re-run `upgradeExistingDatabase()`: it must be a no-op with no extra backup.
+6. Open `SCHEMA_MIGRATIONS`/`AUTOMATION_SETTINGS`: nothing was published, no trigger installed, mail still OFF.
 
 Recovery: if a step fails, stop. Do not edit headers by hand. Restore from the verified backup file recorded in
 `SCHEMA_MIGRATIONS`/`BACKUP_LOG` and reopen the failed step; see [BACKUP_RESTORE.md](../BACKUP_RESTORE.md).
 
-## 2. Manager code upload
-
-1. `git fetch` and confirm the delivery commit; `git status` clean apart from intended files.
-2. `npx clasp status`, then `npx clasp push` into the **DEV** manager project.
-3. Create a **new** deployment version; never edit the existing deployment in place.
-4. Confirm `src/appsscript.json` still has `webapp.access = DOMAIN`, `executeAs = USER_ACCESSING` and no new scope.
-
 ## 3. Manager web-app deployment
 
-1. Keep `MANAGER_WEB_ALLOWED_DOMAINS` set for the DEV domain before opening the URL.
-2. Open as ADMIN: the responsibility section appears above the KPIs and the twelve new labels render in Japanese.
-3. Switch to English and confirm the same screen keeps its selected responsibility, project and filters.
-4. Open as MANAGER: everything except member/skill administration is usable.
-5. Open as an employee account outside the allowlist: `MANAGER_ACCESS_DENIED`, no data.
+1. Create a **new** deployment version from the verified head code; never edit the existing deployment in place.
+2. Keep `MANAGER_WEB_ALLOWED_DOMAINS` set for the DEV domain before opening the URL.
+3. Open as ADMIN: the responsibility section appears above the KPIs and the twelve new labels render in Japanese.
+4. Switch to English and confirm the same screen keeps its selected responsibility, project and filters.
+5. Select one area and confirm the KPI, project and upcoming figures change together (the scope is resolved
+   server-side before paging; a container task never adds to the open or overdue count).
+6. Open as MANAGER: everything except member/skill administration is usable. The permanent-delete control is only
+   rendered for ADMIN.
+7. Open as an employee account outside the allowlist: `MANAGER_ACCESS_DENIED`, no data.
 
 ## 4. Employee contract compatibility
 
 1. The manager publisher writes `CONTRACT_VERSION = 1.5`.
-2. An employee app still deployed at 1.4 must show `SNAPSHOT_CONTRACT_UNSUPPORTED` (fail closed) — never partial
-   data. Record the observed message.
-3. Deploy the matching employee app (step 5) and confirm the message disappears.
+2. The employee app in this release reads contracts **1.4 and 1.5**, each through its own exact header row, so a
+   snapshot published before the manager upgrade stays readable.
+3. An employee app still deployed at V1.5 (`CONTRACT_VERSION = 1.4` expected) shows
+   `SNAPSHOT_CONTRACT_UNSUPPORTED` against a 1.5 snapshot — fail closed, never partial data. Record the observed
+   message, then deploy the matching employee app (step 5).
+4. Confirm an unknown or mixed contract (`1.3`, or a 1.4 header with a 1.5 column) still fails closed.
 
 ## 5. Employee dashboard upload/deployment
 
@@ -84,6 +96,10 @@ Recovery: if a step fails, stop. Do not edit headers by hand. Restore from the v
 2. Approve it: the task becomes Done / 100 % with `Completed_At`, and the pending state clears.
 3. Confirm `Tasks.complete`, the progress field, the sidebar and the manager web form all refuse Done.
 4. As ADMIN, record one `COMPLETION_OVERRIDDEN` correction with a reason and confirm the separate audit row.
+5. A container task (a task with subtasks) offers no completion report in the employee app, the inbox import
+   refuses one, and an approval attempt is refused **before** the request is claimed: the request stays
+   PENDING/STALE, never PROCESSING. Record the observed message.
+6. Confirm a deadline change on a container task is still accepted and applied once.
 
 ## 9. Role verification
 
@@ -92,7 +108,18 @@ Recovery: if a step fails, stop. Do not edit headers by hand. Restore from the v
 2. A MEMBER cannot reach the manager web app; a VIEWER cannot write anything.
 3. A browser-supplied `role`, `actor`, `owner` or `confirmed` value changes nothing.
 
-## 10. Rollback and recovery
+## 10. Deletion recovery verification
+
+1. As ADMIN, preflight a mistakenly created task: the dependencies are listed and, when none exist, the action is
+   available. Confirm `RECORD_DELETE_PREPARED` is written before the row disappears and `RECORD_DELETED` after it.
+2. Confirm a project with children cannot be removed at all (no cascade is offered) and that the documented
+   alternative is archiving.
+3. Simulate an interrupted removal in a DEV copy only: prepare the intent, stop before the tombstone, then run
+   `reconcileDeletions('RECONCILE DELETIONS')`. Confirm it appends the missing record for a row that is gone and
+   leaves a row that still exists untouched. Record the observed result.
+4. Confirm the removed identifier cannot be reused.
+
+## 11. Rollback and recovery
 
 1. **Code**: redeploy the previous Apps Script deployment version. Schema 7 columns stay in place and are ignored
    by the previous code where blank; do not drop columns.

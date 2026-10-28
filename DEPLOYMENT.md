@@ -1,6 +1,30 @@
 # Deployment and activation
 
-## V1.6 release deployment (current)
+## V1.6.1 corrective release (current)
+
+V1.6.1 adds **no** migration, schema change, scope, Script Property or manifest change. Schema stays **7** and the
+published contract stays **1.5** (the employee reader additionally understands **1.4**). Follow
+[docs/V1_6_DEPLOYMENT_RUNBOOK.md](docs/V1_6_DEPLOYMENT_RUNBOOK.md) in DEV in this order: push the head code (the
+running deployment is untouched) → verified backup with `createDatabaseBackup()` → `upgradeExistingDatabase()` (a
+no-op on an existing schema-7 workbook) → preservation checks → new manager web deployment → employee contract
+compatibility check → employee upload/deployment → publication verification → worker request, container refusal and
+completion approval tests → role matrix → deletion-recovery rehearsal → rollback rehearsal.
+
+`rootDir` stays `src` for the manager project and `dashboard-app` for the employee project;
+`MANAGER_WEB_ALLOWED_DOMAINS` remains mandatory; the manager web app still runs as *User accessing the web app*,
+domain restricted; the employee app still runs as the deployer. Nothing is migrated, deployed, initialized,
+triggered or published automatically. **NOT APPROVED FOR PRODUCTION.**
+
+Compatibility: the employee reader accepts contracts 1.4 and 1.5 through separate exact header lists, so a snapshot
+published before the manager upgrade stays readable. An older employee deployment (expecting only 1.4) refuses a 1.5
+snapshot with `SNAPSHOT_CONTRACT_UNSUPPORTED`, which stays the documented fail-closed behaviour.
+
+Rollback: redeploy the previous Apps Script version (schema-7 columns stay in place and are ignored while blank) or
+restore the pre-migration backup into a new spreadsheet with the documented procedure. Never clear or re-initialize
+an existing workbook. An interrupted permanent removal is finished with `reconcileDeletions('RECONCILE DELETIONS')`,
+which appends the missing record and never deletes.
+
+## V1.6 release deployment (historical)
 
 V1.6 adds one additive migration (`007_responsibility_hierarchy_and_lifecycle`, schema 6 → 7) and employee contract
 1.5. Follow [docs/V1_6_DEPLOYMENT_RUNBOOK.md](docs/V1_6_DEPLOYMENT_RUNBOOK.md) in DEV in this order: verified backup
