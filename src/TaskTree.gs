@@ -100,13 +100,45 @@ var TaskTree = (function () {
     return false;
   }
 
-  /** Recorded work makes a task unsuitable as a container without an explicit decision. */
-  function hasRecordedWork(task) {
+  /**
+   * Recorded work makes a task unsuitable as a container without an explicit decision.
+   *
+   * V1.6.1: the stored columns alone were not enough. A task could carry an assignment
+   * approval, a confirmed schedule, a decided request or a deadline history row and still be
+   * silently turned into a container, which would bury that history behind derived values.
+   * The check now also looks at the append-only records for the task. Purely organisational
+   * activity (the row was created or edited) is deliberately not treated as recorded work.
+   */
+  var HISTORY_ACTIONS = ['ASSIGNMENT_APPROVED', 'COMPLETION_APPROVED', 'COMPLETION_OVERRIDDEN',
+    'SCHEDULE_CONFIRMED', 'SCHEDULE_CONFIRMATION_INVALIDATED', 'TASK_MOVED'];
+
+  function historyFor(taskId) {
+    if (typeof Database === 'undefined') return null;
+    var id = text(taskId);
+    var guarded = ['TASK_REQUESTS', 'SCHEDULE_CONFIRMATIONS', 'TASK_DEADLINE_HISTORY'];
+    for (var i = 0; i < guarded.length; i++) {
+      var hit = (Database.read(guarded[i]) || []).some(function (row) {
+        return String(row.Task_ID) === id;
+      });
+      if (hit) return guarded[i];
+    }
+    var audited = (Database.read('AUDIT_LOG') || []).some(function (row) {
+      return ['TASK', 'TASKS'].indexOf(String(row.Entity_Type)) >= 0 &&
+        String(row.Entity_ID) === id && HISTORY_ACTIONS.indexOf(String(row.Action)) >= 0;
+    });
+    return audited ? 'AUDIT_LOG' : '';
+  }
+
+  /** The recorded-work test, with an optional injected `historyFor` for tests. */
+  function hasRecordedWork(task, history) {
     if (!task) return false;
     if (Number(task.Actual_Hours) > 0) return true;
     if (Number(task.Progress_Percent) > 0) return true;
     if (text(task.Completed_At)) return true;
-    return text(task.Status) === DONE;
+    if (text(task.Status) === DONE) return true;
+    if (text(task.Assignment_Approved_At)) return true;
+    var lookup = history || historyFor;
+    return !!lookup(task.Task_ID);
   }
 
   function assertConvertible(task) {
@@ -236,6 +268,7 @@ var TaskTree = (function () {
     levelOf: levelOf,
     heightOf: heightOf,
     hasRecordedWork: hasRecordedWork,
+    historyFor: historyFor,
     validate: validate,
     leaves: leaves,
     descendantLeaves: descendantLeaves,

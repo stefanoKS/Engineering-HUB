@@ -193,7 +193,7 @@ function viewFilters(name) {
   var values = Object.assign({}, filters[name] || {});
   delete values.responsibilityId;
   delete values.unassigned;
-  if ((name === 'projects' || name === 'tasks') && activeResponsibility) {
+  if ((name === 'projects' || name === 'tasks' || name === 'overview') && activeResponsibility) {
     if (activeResponsibility === UNASSIGNED) values.unassigned = true;
     else values.responsibilityId = activeResponsibility;
   }
@@ -250,7 +250,12 @@ function localPage(kind, dataset, input) {
 /** Data for a view without any server call: the snapshot, a cached payload or nothing. */
 function peekView(name) {
   if (revoked) return null;
-  if (name === 'overview') return store.overview;
+  if (name === 'overview') {
+    // An area-scoped overview is a server payload: the KPI, deadline and upcoming values must
+    // be computed before paging and before the top-five cut, so the browser never re-filters.
+    if (!activeResponsibility) return store.overview;
+    return api.peek('overview', viewFilters('overview'));
+  }
   if (name === 'projects' || name === 'tasks') {
     var cached = api.peek(name, viewFilters(name));
     if (cached) return cached;
@@ -421,12 +426,16 @@ function areaCard(area) {
   node.appendChild(el('span', area.name, 'area-name'));
   if (!area.aggregate) {
     var meta = el('span', undefined, 'area-meta');
-    [[t('areaProjects'), area.projects], [t('areaOpenTasks'), area.openTasks], [t('areaOverdue'), area.overdueTasks]]
-      .forEach(function (pair, position) {
-        var item = el('span', undefined, 'area-metric' + (position === 2 && area.overdueTasks > 0 ? ' area-overdue' : ''));
-        item.append(el('span', pair[0] + ': '), el('strong', pair[1] === undefined || pair[1] === null ? '—' : String(pair[1])));
-        meta.appendChild(item);
-      });
+    // Labels are distinct on purpose: a container is organisation, its leaf work is the unit
+    // of work, and only open leaf work in active work is counted as open or overdue.
+    var metrics = [[t('areaProjects'), area.projects, false], [t('areaOpenTasks'), area.openTasks, false],
+      [t('areaOverdue'), area.overdueTasks, area.overdueTasks > 0], [t('areaWorkItems'), area.workItems, false]];
+    if (area.containers) metrics.push([t('containerTask'), area.containers, false]);
+    metrics.forEach(function (metric) {
+      var item = el('span', undefined, 'area-metric' + (metric[2] ? ' area-overdue' : ''));
+      item.append(el('span', metric[0] + ': '), el('strong', metric[1] === undefined || metric[1] === null ? '—' : String(metric[1])));
+      meta.appendChild(item);
+    });
     node.appendChild(meta);
     if (typeof area.progress === 'number') {
       var bar = el('span', undefined, 'area-progress'), fill = el('span');
@@ -455,32 +464,6 @@ function responsibilityStrip(host) {
   add.addEventListener('click', function () { openEditor('responsibility', null, null, {}); });
   strip.appendChild(add);
   host.appendChild(strip);
-}
-function localToday() {
-  var now = new Date();
-  return now.getFullYear() + '-' + ('0' + (now.getMonth() + 1)).slice(-2) + '-' + ('0' + now.getDate()).slice(-2);
-}
-/** KPIs for the active area, computed from the in-memory snapshot where it is complete. */
-function filteredKpis(data) {
-  if (!activeResponsibility) return data.kpis;
-  var projects = ((store.projects && store.projects.items) || []).filter(inActiveArea);
-  var active = projects.filter(function (p) { return ['Archived', 'Cancelled', 'Completed'].indexOf(p.status) < 0; });
-  var result = {active: active.length,
-    risk: active.filter(function (p) { return ['RED', 'YELLOW', 'UNKNOWN'].indexOf(p.health) >= 0; }).length,
-    soon: null, overdue: null};
-  if (indexedTasks()) {
-    var today = localToday(), weekLater = new Date(); weekLater.setDate(weekLater.getDate() + 7);
-    var end = weekLater.getFullYear() + '-' + ('0' + (weekLater.getMonth() + 1)).slice(-2) + '-' + ('0' + weekLater.getDate()).slice(-2);
-    result.soon = 0; result.overdue = 0;
-    store.tasks.items.filter(inActiveArea).forEach(function (task) {
-      if (['Done', 'Cancelled'].indexOf(task.status) >= 0) return;
-      var due = task.deadline || '';
-      if (!due) return;
-      if (due < today) result.overdue++;
-      else if (due <= end) result.soon++;
-    });
-  }
-  return result;
 }
 function kpiValue(value) { return value === null || value === undefined ? '—' : String(value); }
 function projectCards(data, host) {
@@ -592,7 +575,11 @@ function load(fresh, message) {
     return;
   }
   notice(t('loading'));
-  if (requested === 'overview') { bootstrapFetch(true); return; }
+  if (requested === 'overview') {
+    // The area-scoped overview is a scoped server payload; the unscoped one is the snapshot.
+    if (activeResponsibility) { fetchView('overview', fresh === true, true); return; }
+    bootstrapFetch(true); return;
+  }
   if (requested === 'tasks') syncTaskIndex(true);
   fetchView(requested, fresh === true, true);
 }
@@ -619,6 +606,7 @@ function fetchView(name, fresh, first) {
 }
 function revalidateView(name) {
   if (revoked) return;
+  if (name === 'overview' && activeResponsibility) { fetchView('overview', true); return; }
   if (name === 'projects' || name === 'tasks') {
     var servedByServer = !!api.peek(name, viewFilters(name));
     var local = name === 'projects' ? localDataset(name).complete : indexedTasks();
@@ -667,15 +655,19 @@ function memberProfileView(data, host) {
   var member=data.member||{};
   host.appendChild(el('h2',member.name||''));
   rowValues(host,[[t('department'),member.department],[t('position'),member.position],[t('role'),member.role],[t('enabled'),member.active?'✓':'—']]);
+  if(data.ownership)rowValues(host,[[t('currentWork'),data.ownership.current],[t('previousWork'),data.ownership.previous]]);
   host.appendChild(el('div',undefined,'section-title')).appendChild(el('h2',t('currentWork')));
   tasks({items:data.current||[],total:(data.current||[]).length},host);
   host.appendChild(el('div',undefined,'section-title')).appendChild(el('h2',t('previousWork')));
   (data.previous||[]).forEach(function(task){
     var card=el('article',undefined,'card');
     card.appendChild(el('strong',task.name));
-    rowValues(card,[[t('project'),task.project],[t('completedAt'),task.completedAt||'—'],
+    rowValues(card,[[t('project'),task.project],[t('statusField'),statusLabel(task.status)],
+      [t('completedAt'),task.completedAt||'—'],
       [t('acceptedCompletion'),task.acceptedAt?String(task.acceptedAt).replace('T',' ').slice(0,16):t('notConfirmed')],
       [t('reviewState'),task.acceptance||'—'],[t('deadline'),task.deadline||'—']]);
+    // A former assignment keeps the current owner visible instead of rewriting history.
+    if(task.formerAssignment)rowValues(card,[[t('formerAssignment'),'✓'],[t('currentOwner'),task.currentOwner||task.currentOwnerId||t('unknown')]]);
     host.appendChild(card);
   });
   if(!(data.previous||[]).length)host.appendChild(el('p',t('empty')));
@@ -688,6 +680,7 @@ function memberProfileView(data, host) {
       [t('member'),entry.actor||t('unknown')],[t('at'),String(entry.at||'').replace('T',' ').slice(0,19)]]);
     host.appendChild(item);
   });
+  if(data.ownership&&data.ownership.limitation)host.appendChild(el('p',t('historyLimitation'),'muted'));
 }
 
 /* ---------------------------------------------------------------- *
@@ -710,10 +703,14 @@ function loadRevision(table,id){
 /**
  * Dependency preflight, then an explicit confirmation. Nothing is deleted before the server
  * has reported an empty dependency list and verified the backup.
+ *
+ * V1.6.1: there is no cascading removal. A parent record with dependants must be cleared
+ * child by child (or archived), so the cascade option was removed from the panel and the
+ * server refuses it outright.
  */
 function deletionPanel(container,table,id,name,revision){
   if(container.querySelector&&container.querySelector('.deletion-panel'))return;
-  var draftKey='delete:'+table+':'+id,draft=drafts.get(draftKey)||{reason:'',confirmation:'',cascade:false,revision:revision||''};
+  var draftKey='delete:'+table+':'+id,draft=drafts.get(draftKey)||{reason:'',confirmation:'',revision:revision||''};
   drafts.set(draftKey,draft);
   var panel=el('section',undefined,'deletion-panel');
   panel.appendChild(el('h3',t('deleteRecord')+': '+name));
@@ -723,13 +720,12 @@ function deletionPanel(container,table,id,name,revision){
   var execute=el('button',t('deleteRecord'),'primary');execute.type='button';execute.disabled=true;
   field(panel,'deleteReason',draft.reason,null,function(v){draft.reason=v;});
   field(panel,'deleteConfirmation',draft.confirmation,null,function(v){draft.confirmation=v;});
-  field(panel,'cascade',draft.cascade,null,function(v){draft.cascade=v;},'checkbox');
   var actions=el('div',undefined,'toolbar');
   actions.appendChild(execute);
   button('close',function(){panel.remove();},actions);
   panel.appendChild(actions);
   execute.addEventListener('click',function(){
-    api.write(deletionAction(table),Object.assign({confirmed:true,reason:draft.reason,confirmation:draft.confirmation,cascade:draft.cascade}, (function(){var p={};p[deletionKey(table)]=id;p.revision=draft.revision;return p;}())))
+    api.write(deletionAction(table),Object.assign({confirmed:true,reason:draft.reason,confirmation:draft.confirmation}, (function(){var p={};p[deletionKey(table)]=id;p.revision=draft.revision;return p;}())))
       .then(function(result){drafts.delete(draftKey);panel.remove();success(t('deleted')+' · '+t('needsPublication'));settle(deletionAction(table),{projectId:table==='PROJECTS'?id:undefined,taskId:table==='TASKS'?id:undefined},result);})
       .catch(function(error){notice(error.message,'error');});
   });
@@ -747,6 +743,7 @@ function deletionPanel(container,table,id,name,revision){
         list.appendChild(el('li',deleteCodeLabel(item.code)+(item.table?' · '+item.table:'')+(item.count?' · '+item.count:'')));
       });
       summary.appendChild(list);
+      if((state.blocking||[]).some(function(item){return item.code==='REFERENCE';}))summary.appendChild(el('p',t('deleteResolveChildren'),'muted'));
       return;
     }
     execute.disabled=!rev;
@@ -767,14 +764,14 @@ function render() {
     if(activeResponsibility)areaHeading.appendChild(el('span',responsibilityHeading(),'chip'));
     host.appendChild(areaHeading);
     responsibilityStrip(host);
-    var kpis=filteredKpis(data),kpiBox=el('div',undefined,'kpis');['active','risk','soon','overdue'].forEach(function(k){var box=el('article',t(k),'kpi');box.appendChild(el('strong',kpiValue(kpis[k])));kpiBox.appendChild(box);});host.appendChild(kpiBox);
+    // Every number here is computed server-side for the selected scope, so filtering never
+    // happens after a page or a top-five cut. The area cards repeat the same policy.
+    var kpis=data.kpis||{},kpiBox=el('div',undefined,'kpis');['active','risk','soon','overdue'].forEach(function(k){var box=el('article',t(k),'kpi');box.appendChild(el('strong',kpiValue(kpis[k])));kpiBox.appendChild(box);});host.appendChild(kpiBox);
     host.appendChild(el('p',t('refresh')+': '+clockText(Date.parse(data.refreshedAt)||Date.now()),'muted'));
     var projectHeading=el('div',undefined,'section-title');projectHeading.appendChild(el('h2',t('projects')));host.appendChild(projectHeading);
-    var overviewProjects=data.projects||{items:[],total:0};
-    projectCards(activeResponsibility?{items:(overviewProjects.items||[]).filter(inActiveArea),total:(overviewProjects.items||[]).filter(inActiveArea).length}:overviewProjects,host);
-    host.appendChild(el('h2',t('upcoming')));
-    var upcomingItems=((data.upcoming&&data.upcoming.items)||[]).filter(function(item){return !activeResponsibility||inActiveArea(item);});
-    tasks({items:upcomingItems,total:upcomingItems.length},host);
+    projectCards(data.projects||{items:[],total:0},host);
+    host.appendChild(el('h2',t('upcoming')+' ('+(data.upcoming&&data.upcoming.total!==undefined?data.upcoming.total:0)+')'));
+    tasks(data.upcoming||{items:[],total:0},host);
     button('requests',function(){navigate('requests');},host);host.appendChild(el('span',' '+t('pending')+': '+data.pending));
   } else if(view==='projects') {button('new',function(){openEditor('project');},top);listFilters('projects',host);resultsHost=el('div');host.appendChild(resultsHost);renderList();
   } else if(view==='tasks') {button('new',function(){openEditor('task',null,null,{projectId:(filters.tasks||{}).projectId||'',subprojectId:(filters.tasks||{}).subprojectId||''});},top);listFilters('tasks',host);resultsHost=el('div');host.appendChild(resultsHost);renderList();
@@ -791,7 +788,7 @@ function render() {
     button('subproject',function(){openEditor('subproject',null,null,{projectId:p.Project_ID});},top);
     button('tasks',function(){navigate('tasks',{projectId:p.Project_ID});},top);
     host.appendChild(el('p',p.Description));host.appendChild(el('p',t('progress')+': '+(data.progress.calculated?data.progress.percent:'—')));host.appendChild(el('h2',t('hierarchy')));
-    button('deleteRecord',function(){openDeletionFor('PROJECTS',p.Project_ID,p.Project_Name,p._revision,host);},top);
+    if(actorRole==='ADMIN')button('deleteRecord',function(){openDeletionFor('PROJECTS',p.Project_ID,p.Project_Name,p._revision,host);},top);
     // Bounded, collapsible tree: four subproject levels, parents before children, and any
     // orphan (unknown parent) still rendered so nothing silently disappears.
     var childrenOfSub=Object.create(null);(data.subprojects||[]).forEach(function(s){var pid=s.Parent_Subproject_ID||'';(childrenOfSub[pid]=childrenOfSub[pid]||[]).push(s);});
@@ -841,6 +838,25 @@ function renderAutomation(data,host) {
     var control=field(box,k,Array.isArray(value)?value.join(','):value,k==='EMAIL_MODE'?['OFF','PREVIEW','LIVE']:null,function(v){draft.values[k]=v;draft.dirty=true;},type);control.disabled=actorRole!=='ADMIN';});
   if(actorRole==='ADMIN') {field(form,'confirmation',draft.confirmation||'',null,function(v){draft.confirmation=v;});var save=el('button',t('settingsSave'));save.type='submit';form.appendChild(save);form.addEventListener('submit',function(e){e.preventDefault();if(!window.confirm(t('confirm')))return;var changes={};keys.forEach(function(k){if(JSON.stringify(draft.values[k])!==JSON.stringify(draft.base[k]))changes[k]=draft.values[k];});save.disabled=true;api.write('automationSave',{changes:changes,confirmation:draft.confirmation||'',confirmed:true,revision:draft.revision}).then(function(result){drafts.delete('automation');settle('automationSave',{},result);success(t('saved'));}).catch(function(e){notice(e.message,'error');}).finally(function(){save.disabled=false;});});}
   host.appendChild(form);
+  // V1.6.1: the recovery entry point for a deletion that stopped between the row removal and
+  // its record. It only appends a missing record; it never removes anything.
+  if(actorRole==='ADMIN'){
+    var maintenance=el('section',undefined,'deletion-panel');
+    maintenance.appendChild(el('h3',t('deletionReconcile')));
+    maintenance.appendChild(el('p',t('deletionReconcileHint'),'muted'));
+    var confirmDraft=drafts.get('reconcile')||{confirmation:''};drafts.set('reconcile',confirmDraft);
+    field(maintenance,'deletionReconcileConfirmation',confirmDraft.confirmation,null,function(v){confirmDraft.confirmation=v;});
+    var reconcileButton=el('button',t('deletionReconcile'));reconcileButton.type='button';
+    reconcileButton.addEventListener('click',function(){
+      if(!window.confirm(t('confirm')))return;
+      reconcileButton.disabled=true;
+      api.write('deletionReconcile',{confirmed:true,confirmation:confirmDraft.confirmation}).then(function(result){
+        success(t('deletionReconcileDone',{confirmed:(result&&result.confirmed||[]).length,present:(result&&result.rowPresent||[]).length}));
+      }).catch(function(error){notice(error.message,'error');}).finally(function(){reconcileButton.disabled=false;});
+    });
+    maintenance.appendChild(reconcileButton);
+    host.appendChild(maintenance);
+  }
 }
 
 function structured(value,host) { if(value && typeof value==='object'){var dl=el('dl');Object.keys(value).forEach(function(k){dl.appendChild(el('dt',EH_I18N.has('web.'+k)?t(k):k));var dd=el('dd');structured(value[k],dd);dl.appendChild(dd);});host.appendChild(dl);}else host.appendChild(el('span',value===null?'—':String(value))); }

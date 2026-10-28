@@ -11,7 +11,7 @@
  * task row to the browser.
  */
 var DashboardData = (function () {
-  var CONTRACT_VERSION = '1.5';
+  var DEFAULT_CONTRACT = '1.5';
   var META_SHEET = 'PUBLISHED_META';
   var CACHE_TTL_SECONDS = 300;
   var CACHE_MAX_CHARS = 90000;
@@ -37,6 +37,29 @@ var DashboardData = (function () {
     milestones: {sheet: 'PUBLISHED_MILESTONES', fields: ['milestoneId', 'projectId', 'subprojectId', 'name',
       'targetDate', 'actualDate', 'status']}
   };
+
+  /**
+   * Every published contract this reader understands.
+   *
+   * Contract 1.5 added the task tree, the review state and the completion date, and the
+   * responsibility colour. Contract 1.4 stays readable so a snapshot published by the
+   * previous manager release is not blanked out by an application update. Each version is
+   * validated against its own exact header row, so an unknown, mixed or hand-edited snapshot
+   * still fails closed instead of being guessed at.
+   */
+  var CONTRACTS = {
+    '1.4': {
+      responsibilities: {sheet: 'PUBLISHED_RESPONSIBILITIES',
+        fields: ['responsibilityId', 'name', 'sortOrder', 'retired']},
+      projects: TABLES.projects,
+      subprojects: TABLES.subprojects,
+      tasks: {sheet: 'PUBLISHED_TASKS', fields: ['taskId', 'projectId', 'subprojectId', 'name', 'ownerName',
+        'status', 'priority', 'plannedStart', 'dueDate', 'progress', 'publicNote', 'revision', 'pendingRequest']},
+      milestones: TABLES.milestones
+    },
+    '1.5': TABLES
+  };
+  var SUPPORTED_CONTRACTS = ['1.4', '1.5'];
 
   var LABELS = {
     status: {
@@ -150,10 +173,12 @@ var DashboardData = (function () {
     });
     var active = text(meta.ACTIVE_SLOT);
     if (!active) throw new Error('SNAPSHOT_NOT_PUBLISHED');
-    if (text(meta.CONTRACT_VERSION) !== CONTRACT_VERSION) throw new Error('SNAPSHOT_CONTRACT_UNSUPPORTED');
-    var snapshot = {book: book, meta: meta, slot: active, tables: {}};
-    Object.keys(TABLES).forEach(function (key) {
-      snapshot.tables[key] = readTable(book, active, TABLES[key]);
+    var contract = text(meta.CONTRACT_VERSION);
+    if (SUPPORTED_CONTRACTS.indexOf(contract) < 0) throw new Error('SNAPSHOT_CONTRACT_UNSUPPORTED');
+    var tables = CONTRACTS[contract];
+    var snapshot = {book: book, meta: meta, slot: active, contract: contract, tables: {}};
+    Object.keys(tables).forEach(function (key) {
+      snapshot.tables[key] = readTable(book, active, tables[key]);
     });
     return snapshot;
   }
@@ -183,7 +208,7 @@ var DashboardData = (function () {
     var ageHours = published && !isNaN(published.getTime())
       ? Math.max(0, Math.floor((Date.now() - published.getTime()) / 3600000)) : null;
     return {
-      contractVersion: text(snapshot.meta.CONTRACT_VERSION),
+      contractVersion: text(snapshot.contract),
       snapshotVersion: Number(snapshot.meta.SNAPSHOT_VERSION || 0),
       publishedAt: publishedAt,
       publishedAtLabel: formatJst(publishedAt),
@@ -599,12 +624,18 @@ var DashboardData = (function () {
       projectId: text(record.projectId),
       dueDate: text(record.dueDate),
       revision: text(record.revision),
-      snapshotVersion: text(snapshot.meta.SNAPSHOT_VERSION)
+      snapshotVersion: text(snapshot.meta.SNAPSHOT_VERSION),
+      // Contract 1.5 publishes the container flag; a 1.4 snapshot has no nested tasks, so an
+      // absent field means "ordinary work item" and never blocks the form.
+      container: bool(record.container),
+      contract: text(snapshot.contract)
     };
   }
 
   return {
-    CONTRACT_VERSION: CONTRACT_VERSION,
+    CONTRACT_VERSION: DEFAULT_CONTRACT,
+    CONTRACTS: CONTRACTS,
+    SUPPORTED_CONTRACTS: SUPPORTED_CONTRACTS,
     TABLES: TABLES,
     LABELS: LABELS,
     MAX_PROJECT_TASKS: MAX_PROJECT_TASKS,

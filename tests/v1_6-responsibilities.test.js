@@ -124,7 +124,7 @@ test('existing projects without a responsibility stay editable and display 未�
   assert.equal(app.context.Database.find('PROJECTS', 'P2').Responsibility_ID, '');
 });
 
-test('the browser filters projects and tasks by the selected responsibility without an RPC', async () => {
+test('the browser asks the server for the selected responsibility scope before paging', async () => {
   const app = fixture(10);
   const h = clientOf(app);
   await flush();
@@ -132,12 +132,16 @@ test('the browser filters projects and tasks by the selected responsibility with
   assert.equal(before >= 1, true, 'the first paint reads the authorized snapshot');
   assert.match(h.document.getElementById('content').textContent, /製品設計/);
 
-  // Select the first area card. The list narrows locally: no additional server call.
+  // V1.6.1: an area-scoped overview is a server payload. Filtering a 20-row page or a
+  // top-five list in the browser would show the wrong totals, so the scope goes to the server.
   const card = h.nodes('content').filter(node => node.tagName === 'BUTTON' && /^製品設計/.test(node.textContent))[0];
   assert.ok(card, 'the area card is an interactive button');
   card.dispatchEvent('click', {});
   await flush();
-  assert.equal(h.calls.length, before, 'selecting an area never calls the server');
+  assert.equal(h.calls.length > before, true, 'the scope is resolved server-side');
+  const scoped = h.calls.slice(before).filter(call => call && call.operation === 'overview');
+  assert.equal(scoped.length, 1, 'exactly one scoped overview read');
+  assert.equal(scoped[0].payload.responsibilityId, 'R1');
   const state = h.window.ManagerWebClient.store;
   assert.equal(state.responsibilityCards.items.length, 2, 'both areas stay in the snapshot');
   assert.equal(state.projects.items.filter(project => project.responsibilityId === 'R1').length > 0, true);

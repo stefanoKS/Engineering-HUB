@@ -150,12 +150,17 @@ var ManagerWeb = (function () {
 
   /**
    * Responsibility cards for the manager home: name, colour, owner, active projects, open and
-   * overdue tasks and a weighted progress value. Everything is computed from the same rows the
-   * overview uses, so every area is measured with one rule.
+   * overdue work items and a weighted progress value.
+   *
+   * V1.6.1: every number comes from `TaskScope`, the one counting policy, so a container task
+   * is never an extra unit of work and an area card can never disagree with the progress
+   * rollup or the overview KPIs. `openTasks` and `overdueTasks` mean *open work items in
+   * active work*; `completedWork` is reported separately as history.
    */
   function responsibilitySummaries() {
     var today = Domain.today();
     var members = index('MEMBERS');
+    var scope = TaskScope.create();
     var areas = Object.create(null);
     Responsibilities.all().forEach(function (row, position) {
       areas[row.Responsibility_ID] = {
@@ -163,11 +168,11 @@ var ManagerWeb = (function () {
         color: Responsibilities.colorOf(row, position),
         ownerId: row.Owner_Member_ID || '',
         owner: (members[row.Owner_Member_ID] || {}).Name || '',
-        totalProjects: 0, projects: 0, openTasks: 0, overdueTasks: 0, tasks: []
+        totalProjects: 0, projects: 0
       };
     });
     var unassigned = {id: '', name: '', status: 'Active', color: '', ownerId: '', owner: '',
-      totalProjects: 0, projects: 0, openTasks: 0, overdueTasks: 0, tasks: []};
+      totalProjects: 0, projects: 0};
     var areaOf = Object.create(null);
     Database.read('PROJECTS').forEach(function (project) {
       var areaId = String(project.Responsibility_ID || '');
@@ -176,24 +181,31 @@ var ManagerWeb = (function () {
       bucket.totalProjects++;
       if (['Archived', 'Cancelled', 'Completed'].indexOf(project.Status) < 0) bucket.projects++;
     });
+    var tasksOfArea = Object.create(null);
+    function bucketTasks(areaId) {
+      var key = String(areaId || '');
+      if (!tasksOfArea[key]) tasksOfArea[key] = {rows: []};
+      return tasksOfArea[key];
+    }
+    var grouped = scope.summariseBy(function (task) { return areaOf[task.Project_ID] || ''; }, today);
     Database.read('TASKS').forEach(function (task) {
-      var areaId = areaOf[task.Project_ID] || '';
-      var bucket = areaId && areas[areaId] ? areas[areaId] : unassigned;
-      bucket.tasks.push(task);
-      if (['Done', 'Cancelled'].indexOf(task.Status) >= 0) return;
-      bucket.openTasks++;
-      var due = Domain.date(task.Due_Date);
-      if (due && due < today) bucket.overdueTasks++;
+      bucketTasks(areaOf[task.Project_ID] || '').rows.push(task);
     });
     function finish(bucket) {
-      var rolled = Progress.rollup(bucket.tasks);
+      var rows = bucketTasks(bucket.id);
+      var counts = grouped[String(bucket.id || '')] || scope.summarise(function () { return false; }, today);
+      // Only leaf work carries weight, so the container index is not rebuilt per area.
+      var rolled = Progress.rollup(rows.rows.filter(function (task) { return !scope.isContainer(task); }));
       return {id: bucket.id, name: bucket.name, status: bucket.status, color: bucket.color,
         ownerId: bucket.ownerId, owner: bucket.owner, totalProjects: bucket.totalProjects,
-        projects: bucket.projects, openTasks: bucket.openTasks, overdueTasks: bucket.overdueTasks,
+        projects: bucket.projects, openTasks: counts.openWork, overdueTasks: counts.overdueWork,
+        workItems: counts.workItems, containers: counts.containers, completedWork: counts.completedWork,
         progress: rolled.calculated ? rolled.percent : '', progressCalculated: rolled.calculated};
     }
     var items = Responsibilities.all().map(function (row) { return finish(areas[row.Responsibility_ID]); });
-    return {items: items, unassigned: finish(unassigned)};
+    return {items: items, unassigned: finish(unassigned),
+      policy: {openTasks: 'OPEN_WORK_ITEMS_IN_ACTIVE_WORK', overdueTasks: 'OVERDUE_WORK_ITEMS_IN_ACTIVE_WORK',
+        completedWork: 'DONE_WORK_ITEMS_HISTORY', containers: 'ORGANISATION_ONLY'}};
   }
   /** Reference choices for the create/edit forms; identifiers and names only. */
   function referenceOptions() {
@@ -201,24 +213,61 @@ var ManagerWeb = (function () {
       projects: Database.read('PROJECTS').map(function (p) { return {id: p.Project_ID, name: p.Project_Name}; }),
       responsibilities: responsibilityOptions()};
   }
-  /** KPI, upcoming and pending values shared by the overview page and the bootstrap payload. */
-  function overviewCore(actor, projects) {
+  /** Area scope of a request: one responsibility, the 未分類 bucket, or everything. */
+  function scopeInput(input) {
+    var scope = {responsibilityId: '', unassigned: false};
+    if (input && input.unassigned === true) scope.unassigned = true;
+    else if (input && input.responsibilityId) scope.responsibilityId = String(input.responsibilityId);
+    return scope;
+  }
+  function scoped(rows, scope) {
+    if (!scope.responsibilityId && !scope.unassigned) return rows;
+    return rows.filter(function (project) {
+      var id = String(project.responsibilityId || '');
+      return scope.unassigned ? !id : id === scope.responsibilityId;
+    });
+  }
+  /**
+   * KPI, upcoming and pending values shared by the overview page and the bootstrap payload.
+   *
+   * V1.6.1: `projects` is the already-scoped project list, so the KPIs, the deadline window and
+   * the upcoming list describe the visible scope only. Filtering happens before paging and
+   * before the top-five cut, never after it. All task figures use the `TaskScope` policy:
+   * containers are organisation, only open work items in active work are counted.
+   */
+  function overviewCore(actor, projects, scope) {
     var active = projects.filter(function (p) { return ['Archived','Cancelled','Completed'].indexOf(p.status) < 0; });
     var today = Domain.today(), end = new Date(today + 'T00:00:00Z'); end.setUTCDate(end.getUTCDate() + 7);
-    var tasks = Tasks.list({activeOnly: true}), soon = 0, overdue = 0, upcoming = [];
-    var endDate = end.toISOString().slice(0,10), projectIndex = index('PROJECTS'), memberIndex = index('MEMBERS');
-    var taskTree = TaskTree.buildIndex(Database.read('TASKS'));
-    tasks.forEach(function (t) { var due = Domain.date(t.Due_Date); if (due && due < today) overdue++;         if (due >= today && due <= endDate) { var view = TaskTree.viewIn(t, taskTree); soon++; upcoming.push({id:t.Task_ID,name:t.Task_Name,project:(projectIndex[t.Project_ID]||{}).Project_Name||'',owner:(memberIndex[t.Owner_Member_ID]||{}).Name||'',deadline:due,status:view.status,progress:view.progress,responsibilityId:(projectIndex[t.Project_ID]||{}).Responsibility_ID||''}); } });
+    var endDate = end.toISOString().slice(0,10);
+    var only = Object.create(null);
+    projects.forEach(function (p) { only[String(p.id)] = true; });
+    function mine(task) { return !!only[String(task.Project_ID)]; }
+    var taskScope = TaskScope.create(), counts = taskScope.summarise(mine, today);
+    var projectIndex = index('PROJECTS'), memberIndex = index('MEMBERS');
+    var window = taskScope.upcoming(today, endDate, mine);
+    var upcoming = window.slice(0, 5).map(function (t) {
+      var view = TaskTree.viewIn(t, taskScope.tree);
+      return {id: t.Task_ID, name: t.Task_Name, project: (projectIndex[t.Project_ID] || {}).Project_Name || '',
+        owner: (memberIndex[t.Owner_Member_ID] || {}).Name || '', deadline: Domain.date(t.Due_Date),
+        status: view.status, progress: view.progress, responsibilityId: (projectIndex[t.Project_ID] || {}).Responsibility_ID || ''};
+    });
     var member = Database.find('MEMBERS', actor.memberId);
-    return {version: '1.6', actor: {name: member.Name, role: actor.role},
-      kpis: {active: active.length, risk: active.filter(function (p) { return ['RED','YELLOW','UNKNOWN'].indexOf(p.health) >= 0; }).length, soon: soon, overdue: overdue},
-      upcoming: {items: upcoming.sort(function(a,b){return a.deadline.localeCompare(b.deadline)||a.id.localeCompare(b.id);}).slice(0,5),total:soon},
+    return {version: '1.6.1', actor: {name: member.Name, role: actor.role},
+      kpis: {active: active.length, risk: active.filter(function (p) { return ['RED','YELLOW','UNKNOWN'].indexOf(p.health) >= 0; }).length,
+        soon: window.length, overdue: counts.overdueWork},
+      upcoming: {items: upcoming, total: window.length},
+      counts: {projects: projects.length, workItems: counts.workItems, containers: counts.containers,
+        openWork: counts.openWork, overdueWork: counts.overdueWork, completedWork: counts.completedWork,
+        cancelledWork: counts.cancelledWork},
+      scope: {responsibilityId: scope.responsibilityId, unassigned: scope.unassigned},
       pending: Database.read('TASK_REQUESTS').filter(function (r) { return r.Status === 'PENDING'; }).length,
       refreshedAt: new Date().toISOString()};
   }
-  function overview(actor) {
-    var projects = projectList(), core = overviewCore(actor, projects);
-    core.projects = page(projects, {limit: 20});
+  function overview(actor, input) {
+    input = input || {};
+    var scope = scopeInput(input), projects = scoped(projectList(), scope);
+    var core = overviewCore(actor, projects, scope);
+    core.projects = page(projects, {limit: input.limit || 20, offset: input.offset});
     core.responsibilities = responsibilityOptions();
     core.responsibilityCards = responsibilitySummaries();
     return core;
@@ -252,12 +301,14 @@ var ManagerWeb = (function () {
    * the browser keeps the paginated server operations instead of implying that a partial list
    * covers every record.
    */
-  function bootstrap(actor) {
-    var projects = projectList(), core = overviewCore(actor, projects);
+  function bootstrap(actor, input) {
+    input = input || {};
+    var scope = scopeInput(input), projects = projectList(), visible = scoped(projects, scope);
+    var core = overviewCore(actor, visible, scope);
     var all = Tasks.list({});
     return {contract: '1.6', version: core.version, actor: core.actor, refreshedAt: core.refreshedAt,
-      kpis: core.kpis, upcoming: core.upcoming, pending: core.pending,
-      overviewProjects: page(projects, {limit: 20}),
+      kpis: core.kpis, upcoming: core.upcoming, counts: core.counts, scope: core.scope, pending: core.pending,
+      overviewProjects: page(visible, {limit: 20}),
       responsibilities: responsibilityOptions(), responsibilityCards: responsibilitySummaries(),
       references: referenceOptions(),
       projects: dataset(projects, PROJECT_INDEX_LIMIT),
@@ -269,59 +320,119 @@ var ManagerWeb = (function () {
    * Attribution uses the immutable owner ID and the task ID only. A typed requester name is
    * never used to claim that somebody worked on a task, and no event is invented: the list is
    * exactly what the append-only audit, request and deadline-history records contain.
+   *
+   * V1.6.1: ownership is historical. Selecting tasks by the *current* `Owner_Member_ID` made
+   * reassigned work vanish from the member who did it. The profile now also reads the
+   * append-only ownership evidence (`AUDIT_LOG` keeps the whole row before and after every
+   * save) and reports former assignments with the current owner, so a manager can see who did
+   * what without rewriting history.
    */
   function memberProfile(input) {
     var members = index('MEMBERS'), projects = index('PROJECTS');
     var member = Database.find('MEMBERS', String(input.id || ''));
     if (!member) throw new Error('NOT_FOUND');
     var allTasks = Database.read('TASKS');
+    var byId = Object.create(null);
+    allTasks.forEach(function (task) { byId[task.Task_ID] = task; });
     var treeIndex = TaskTree.buildIndex(allTasks);
     var reviewStates = Requests.pendingCompletionStates();
-    var owned = allTasks.filter(function (task) { return task.Owner_Member_ID === member.Member_ID; });
-    var summaries = owned.map(function (task) { return taskSummary(task, projects, members, treeIndex, reviewStates); });
+
+    // ownership[taskId] = {current, evidence: bool, since}
+    var ownership = Object.create(null);
+    allTasks.forEach(function (task) {
+      if (String(task.Owner_Member_ID || '') !== String(member.Member_ID)) return;
+      ownership[task.Task_ID] = {current: true, evidence: true, since: ''};
+    });
+    function parse(value) {
+      if (value === '' || value === undefined || value === null) return {};
+      if (typeof value === 'object') return value;
+      try {
+        var parsed = JSON.parse(String(value));
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch (error) { return {}; }
+    }
+    var activity = [], evidenceRows = 0;
+    Database.read('AUDIT_LOG').forEach(function (row) {
+      // Domain saves record the table name ('TASKS'); explicit actions use 'TASK'.
+      if (['TASK', 'TASKS'].indexOf(String(row.Entity_Type)) < 0) return;
+      var taskId = String(row.Entity_ID || '');
+      var before = parse(row.Previous_Value), after = parse(row.New_Value);
+      var was = String(before.Owner_Member_ID === undefined ? '' : before.Owner_Member_ID);
+      var is = String(after.Owner_Member_ID === undefined ? '' : after.Owner_Member_ID);
+      if (String(row.Action) === 'TASK_REASSIGNED') {
+        was = was || String(after.previousOwner || '');
+        is = is || String(after.newOwner || '');
+      }
+      var mine = was === member.Member_ID || is === member.Member_ID;
+      if (mine && !ownership[taskId]) {
+        ownership[taskId] = {current: false, evidence: true, since: String(row.Timestamp || '')};
+        evidenceRows++;
+      } else if (mine && ownership[taskId] && !ownership[taskId].since) {
+        ownership[taskId].since = String(row.Timestamp || '');
+      }
+      if (!mine && !ownership[taskId]) return;
+      activity.push({at: String(row.Timestamp || ''), action: String(row.Action || ''),
+        taskId: taskId, actor: String(row.Actor || ''), source: 'AUDIT_LOG'});
+    });
     var accepted = Object.create(null);
     Database.read('TASK_REQUESTS').forEach(function (request) {
       if (String(request.Request_Type) !== 'COMPLETION_REPORT') return;
       if (String(request.Status) !== 'APPROVED') return;
       accepted[String(request.Task_ID)] = request.Decided_At || request.Submitted_At || '';
     });
-    function withCompletion(summary) {
-      var task = allTasks.filter(function (row) { return row.Task_ID === summary.id; })[0] || {};
-      return Object.assign({}, summary, {
-        completedAt: task.Completed_At ? String(task.Completed_At).slice(0, 10) : '',
-        acceptedAt: accepted[String(summary.id)] ? String(accepted[String(summary.id)]) : '',
-        acceptance: accepted[String(summary.id)] ? 'APPROVED' : (task.Completed_At ? 'LEGACY' : '')
-      });
-    }
-    var current = summaries.filter(function (summary) { return ['Done', 'Cancelled'].indexOf(summary.status) < 0; });
-    var previous = summaries.filter(function (summary) { return summary.status === 'Done'; }).map(withCompletion);
-    var taskIds = Object.create(null);
-    owned.forEach(function (task) { taskIds[String(task.Task_ID)] = true; });
-    var activity = [];
-    Database.read('AUDIT_LOG').forEach(function (row) {
-      // Domain saves record the table name ('TASKS'); explicit actions use 'TASK'.
-      if (['TASK', 'TASKS'].indexOf(String(row.Entity_Type)) < 0) return;
-      if (!taskIds[String(row.Entity_ID)]) return;
-      activity.push({at: String(row.Timestamp || ''), action: String(row.Action || ''),
-        taskId: String(row.Entity_ID), actor: String(row.Actor || ''), source: 'AUDIT_LOG'});
-    });
     Database.read('TASK_DEADLINE_HISTORY').forEach(function (row) {
-      if (!taskIds[String(row.Task_ID)]) return;
+      if (!ownership[String(row.Task_ID)]) return;
       activity.push({at: String(row.Changed_At || ''), action: 'DEADLINE_CHANGED',
         taskId: String(row.Task_ID), actor: String(row.Changed_By || ''), source: 'TASK_DEADLINE_HISTORY'});
     });
+
+    var current = [], previous = [];
+    Object.keys(ownership).forEach(function (taskId) {
+      var task = byId[taskId];
+      if (!task) return;
+      var summary = taskSummary(task, projects, members, treeIndex, reviewStates);
+      var former = String(task.Owner_Member_ID || '') !== String(member.Member_ID);
+      var owner = members[task.Owner_Member_ID] || {};
+      summary.completedAt = task.Completed_At ? String(task.Completed_At).slice(0, 10) : '';
+      summary.acceptedAt = accepted[taskId] ? String(accepted[taskId]) : '';
+      summary.acceptance = accepted[taskId] ? 'APPROVED' : (task.Completed_At ? 'LEGACY' : '');
+      summary.ownershipSince = ownership[taskId].since;
+      if (!former && ['Done', 'Cancelled'].indexOf(summary.status) < 0) { current.push(summary); return; }
+      summary.formerAssignment = former;
+      summary.currentOwnerId = String(task.Owner_Member_ID || '');
+      summary.currentOwner = owner.Name || '';
+      previous.push(summary);
+    });
+    // Compact summaries carry `id` (not `Task_ID`), so the list ordering is expressed here.
+    current.sort(function (a, b) {
+      return String(a.deadline || '9999').localeCompare(String(b.deadline || '9999')) ||
+        String(a.id).localeCompare(String(b.id));
+    });
+    previous.sort(function (a, b) {
+      return String(b.completedAt || '').localeCompare(String(a.completedAt || '')) ||
+        String(a.deadline || '9999').localeCompare(String(b.deadline || '9999')) ||
+        String(a.id).localeCompare(String(b.id));
+    });
     activity.sort(function (a, b) { return b.at.localeCompare(a.at); });
+    // Honest limitation: the history above is exactly what the append-only records contain. When
+    // no audit row exists at all, former work cannot be attributed and the profile says so
+    // instead of inventing an owner.
+    var auditRows = Database.read('AUDIT_LOG').length;
+    var unverified = previous.filter(function (task) { return task.formerAssignment && !task.ownershipSince; }).length;
+    var limitation = unverified ? 'OWNERSHIP_UNVERIFIED' : (!auditRows && previous.length ? 'AUDIT_LOG_EMPTY' : '');
     return {
       member: {id: member.Member_ID, name: member.Name, department: member.Department,
         position: member.Position, role: Roles.normalize(member.Role), active: member.Active === true},
       current: current, previous: previous, activity: activity.slice(0, 50),
-      activityTotal: activity.length
+      activityTotal: activity.length,
+      ownership: {current: current.length, previous: previous.length, historicalOnly: evidenceRows,
+        unverifiedPrevious: unverified, limitation: limitation, evidence: 'AUDIT_LOG'}
     };
   }
   function read(operation, input, actor) {
     input = input || {};
     switch (operation) {
-      case 'overview': return overview(actor);
+      case 'overview': return overview(actor, input);
       case 'member': return memberProfile(input);
       case 'deletion': Access.requireAdmin(); return Deletion.preflight(String(input.table || ''), String(input.id || ''));
       case 'projects': {
@@ -331,7 +442,7 @@ var ManagerWeb = (function () {
         return paged;
       }
       case 'tasks': return taskList(input);
-      case 'bootstrap': return bootstrap(actor);
+      case 'bootstrap': return bootstrap(actor, input);
       case 'taskIndex': return taskIndex(index('PROJECTS'), index('MEMBERS'));
       case 'project': {
         var p = Database.find('PROJECTS', input.id);
@@ -352,7 +463,7 @@ var ManagerWeb = (function () {
       case 'publication': return unwrap(Ui.publicationStatus());
       case 'status': {
         var status = unwrap(Ui.status());
-        return {version: '1.6', schema: Schema.version, environment: status.health.environment,
+        return {version: '1.6.1', schema: Schema.version, environment: status.health.environment,
           valid: status.valid, errorCount: status.errorCount, rowCounts: status.rowCounts,
           emailMode: status.health.emailMode, emergencyStop: status.health.emergencyStop,
           calendarEnabled: status.health.calendarEnabled, dryRun: status.health.dryRun};

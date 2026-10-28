@@ -1004,8 +1004,13 @@
       text: T('request.action.completion')
     });
     actions.appendChild(deadlineButton);
+    // A container task is completed by its children; the server refuses such a report, so the
+    // button is not offered at all and the reason is stated instead.
+    var containerTask = task.container === true;
+    if (containerTask) completionButton.disabled = true;
     actions.appendChild(completionButton);
     section.appendChild(actions);
+    if (containerTask) section.appendChild(el('p', {className: 'request-hint', text: T('request.container')}));
 
     var area = el('div');
     section.appendChild(area);

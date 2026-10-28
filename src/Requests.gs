@@ -96,14 +96,22 @@ var Requests = (function () {
   function validationError(message) { return {skipped: true, reason: message}; }
 
   /** Converts one inbox row into a validated TASK_REQUESTS row (or a rejection reason). */
-  function normalize(row) {
+  function normalize(row, containerIds) {
     var id = clip(row.Request_ID, 80);
     var type = text(row.Request_Type).toUpperCase();
     var taskId = clip(row.Task_ID, 80);
     if (!id) return validationError('MISSING_REQUEST_ID');
     if (type !== 'DEADLINE_CHANGE' && type !== 'COMPLETION_REPORT') return validationError('INVALID_TYPE');
     if (!taskId) return validationError('MISSING_TASK');
-    if (!Database.find('TASKS', taskId)) return validationError('UNKNOWN_TASK');
+    var task = Database.find('TASKS', taskId);
+    if (!task) return validationError('UNKNOWN_TASK');
+    // V1.6.1: a container task is completed by its children, so a completion report for it
+    // can never be approved. It is refused on import instead of being accepted and then
+    // failing at decision time.
+    if (type === 'COMPLETION_REPORT') {
+      var containers = containerIds || TaskTree.containerIds(Database.read('TASKS'));
+      if (TaskTree.isContainer(taskId, containers)) return validationError('CONTAINER_TASK');
+    }
     var current = day(row.Current_Due_Date);
     var requested = day(row.Requested_Due_Date);
     if (type === 'DEADLINE_CHANGE') {
@@ -154,13 +162,18 @@ var Requests = (function () {
     // the same inbox row. The inbox request ID is the permanent request ID.
     var result = Database.withLock(function () {
       var existing = Object.create(null);
+      var containers = TaskTree.containerIds(Database.read('TASKS'));
       Database.read('TASK_REQUESTS').forEach(function (request) { existing[text(request.Inbox_Request_ID)] = true; });
-      var imported = 0, skipped = 0, rejected = 0, created = [];
+      var imported = 0, skipped = 0, rejected = 0, containerRejected = 0, created = [];
       rows.forEach(function (row) {
         var id = clip(row.Request_ID, 80);
         if (!id || existing[id]) { skipped++; return; }
-        var normalized = normalize(row);
-        if (normalized.skipped) { rejected++; return; }
+        var normalized = normalize(row, containers);
+        if (normalized.skipped) {
+          rejected++;
+          if (normalized.reason === 'CONTAINER_TASK') containerRejected++;
+          return;
+        }
         try {
           Database.insert('TASK_REQUESTS', normalized.row);
         } catch (error) {
@@ -176,10 +189,16 @@ var Requests = (function () {
       });
       if (imported) {
         AuditLog.write('REQUEST_IMPORTED', 'TASK_REQUESTS', String(imported),
-          {imported: imported, skipped: skipped, rejected: rejected, actor: identity.email});
+          {imported: imported, skipped: skipped, rejected: rejected, containerRejected: containerRejected, actor: identity.email});
         AutomationSettings.setStatus('LAST_REQUEST_IMPORT_AT', Domain.now());
       }
-      return {imported: imported, skipped: skipped, rejected: rejected, created: created};
+      // A refused container report stays in the inbox; recording it keeps the refusal visible
+      // without pretending the row was imported or silently accepting it.
+      if (containerRejected) {
+        AuditLog.write('REQUEST_CONTAINER_REFUSED', 'TASK_REQUESTS', String(containerRejected),
+          {count: containerRejected, actor: identity.email});
+      }
+      return {imported: imported, skipped: skipped, rejected: rejected, containerRejected: containerRejected, created: created};
     });
     result.created.forEach(function (request) {
       try {
@@ -189,7 +208,8 @@ var Requests = (function () {
         console.warn('Request notification failed: ' + error.message);
       }
     });
-    return {configured: true, imported: result.imported, skipped: result.skipped, rejected: result.rejected};
+    return {configured: true, imported: result.imported, skipped: result.skipped,
+      rejected: result.rejected, containerRejected: result.containerRejected};
   }
 
   function memberNames() {
@@ -339,8 +359,17 @@ var Requests = (function () {
         sheet.getRange(row + 1, column).setValue(String(status));
         return true;
       }
+      return false;
     } catch (error) {
       console.warn('Request inbox state update failed: ' + error.message);
+      // An unconfigured inbox is a normal state; a configured inbox that cannot be updated is
+      // not, so the failed mirror is recorded and stays visible to the manager.
+      if (inboxConfigured()) {
+        try {
+          AuditLog.write('INBOX_MIRROR_FAILED', 'TASK_REQUEST', text(requestId),
+            {status: String(status), reason: String(error && error.message || error)});
+        } catch (ignored) { /* the decision itself stays authoritative */ }
+      }
     }
     return false;
   }
@@ -450,6 +479,13 @@ var Requests = (function () {
 
     var task = Database.find('TASKS', request.Task_ID);
     if (!task) return markStale(request, 'Task no longer exists');
+    // V1.6.1: a container task derives completion from its children, so a completion approval
+    // can never apply to it. The refusal happens *before* the request is claimed, so the row
+    // keeps its decidable state instead of being left in PROCESSING.
+    if (text(request.Request_Type) === 'COMPLETION_REPORT' &&
+        TaskTree.isContainer(task.Task_ID, TaskTree.containerIds(Database.read('TASKS')))) {
+      throw new Error('親タスクは子タスクの完了状況から完了します。子タスクの完了申請を承認してください');
+    }
 
     if (status === 'APPROVED') {
       var currentRevision = SharedDashboardModel.revision(task);
@@ -470,8 +506,23 @@ var Requests = (function () {
 
     var before = null, after = null;
     if (status === 'APPROVED') {
-      before = Database.find('TASKS', request.Task_ID);
-      after = applyApproval(request, identity);
+      try {
+        before = Database.find('TASKS', request.Task_ID);
+        after = applyApproval(request, identity);
+      } catch (error) {
+        // The claim stays PROCESSING on purpose: the effect may or may not have been written,
+        // so an automatic retry would be unsafe. The failure is recorded durably and the
+        // manager is told to retry, which resumes through `alreadyApplied` above.
+        var reason = clip(String(error && error.message || error), 400);
+        try {
+          Database.update('TASK_REQUESTS', request.Request_ID, {Decision_Note: clip('再試行が必要です: ' + reason, 500)});
+        } catch (ignored) { /* the audit row below is the durable evidence */ }
+        try {
+          AuditLog.write('REQUEST_APPROVAL_FAILED', 'TASK_REQUEST', request.Request_ID,
+            {reason: reason, type: text(request.Request_Type), task: request.Task_ID, reviewer: identity.email});
+        } catch (ignored) { /* never mask the original failure */ }
+        throw new Error('申請の反映に失敗しました。申請は PROCESSING のまま保持されています。再試行してください: ' + reason);
+      }
       if (!after) return {requestId: request.Request_ID, status: 'STALE'};
       if (text(request.Request_Type) === 'DEADLINE_CHANGE') recordHistory(request, before, after, identity);
     }
@@ -513,6 +564,7 @@ var Requests = (function () {
     inboxConfigured: inboxConfigured,
     importInbox: importInbox,
     initializeInbox: initializeInbox,
+    normalize: normalize,
     updateInboxState: updateInboxState,
     queue: queue,
     history: history,

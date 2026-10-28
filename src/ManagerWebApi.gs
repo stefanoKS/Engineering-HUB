@@ -26,7 +26,9 @@ var ManagerWebApi = (function () {
     taskOverrideComplete: {admin: true, confirm: true, table: 'TASKS', key: 'taskId'},
     projectDelete: {admin: true, confirm: true, table: 'PROJECTS', key: 'projectId'},
     subprojectDelete: {admin: true, confirm: true, table: 'SUBPROJECTS', key: 'subprojectId'},
-    taskDelete: {admin: true, confirm: true, table: 'TASKS', key: 'taskId'}
+    taskDelete: {admin: true, confirm: true, table: 'TASKS', key: 'taskId'},
+    // V1.6.1: finishes an interrupted deletion; appends a missing record only, never deletes.
+    deletionReconcile: {admin: true, confirm: true}
   };
   function write(action, input) {
     if (!Object.prototype.hasOwnProperty.call(actions, action)) throw new Error('Unknown manager write action');
@@ -68,9 +70,10 @@ var ManagerWebApi = (function () {
     return Database.withMutationCheck(check, function () {
       // V1.6 additions run through their own reviewed domain service, never a browser flag.
       if (action === 'taskOverrideComplete') return Completion.override(p.taskId, p.reason, p.confirmation);
-      if (action === 'projectDelete') return Deletion.remove('PROJECTS', p.projectId, {reason: p.reason, confirmation: p.confirmation, cascade: p.cascade === true});
-      if (action === 'subprojectDelete') return Deletion.remove('SUBPROJECTS', p.subprojectId, {reason: p.reason, confirmation: p.confirmation, cascade: p.cascade === true});
-      if (action === 'taskDelete') return Deletion.remove('TASKS', p.taskId, {reason: p.reason, confirmation: p.confirmation, cascade: p.cascade === true});
+      if (action === 'projectDelete') return Deletion.remove('PROJECTS', p.projectId, {reason: p.reason, confirmation: p.confirmation});
+      if (action === 'subprojectDelete') return Deletion.remove('SUBPROJECTS', p.subprojectId, {reason: p.reason, confirmation: p.confirmation});
+      if (action === 'taskDelete') return Deletion.remove('TASKS', p.taskId, {reason: p.reason, confirmation: p.confirmation});
+      if (action === 'deletionReconcile') return Deletion.reconcile(p.confirmation);
       if (action === 'projectArchive') return Projects.archive(p.projectId);
       if (action === 'emergencyStop') return ManagerWeb.unwrap(Ui.saveAutomationSettings({changes: {EMERGENCY_STOP: true, EMAIL_MODE: 'OFF'}}));
       // A project created from the manager dashboard must name an active responsibility.

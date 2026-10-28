@@ -73,7 +73,7 @@ test('only an administrator may delete', () => {
   assert.throws(() => viewer.context.preflightRecordDeletion('TASKS', 'T-NEW'), /ADMIN|Insufficient/);
 });
 
-test('a project with children is refused, and a fully empty mistaken project can cascade', () => {
+test('cascading removal is not offered: a parent record is cleared child by child', () => {
   const instance = app();
   // P1 holds subprojects and tasks: hard deletion is refused, archive is the documented alternative.
   assert.throws(() => instance.context.deleteRecord('PROJECTS', 'P1', {
@@ -89,11 +89,22 @@ test('a project with children is refused, and a fully empty mistaken project can
     Task_Name: '誤り', Owner_Member_ID: 'M-ENG', Status: 'Assigned'});
   const summary = instance.context.preflightRecordDeletion('PROJECTS', mistaken.Project_ID);
   assert.equal(summary.deletable, false, 'children block a plain delete');
-  const result = instance.context.deleteRecord('PROJECTS', mistaken.Project_ID, {
+
+  // V1.6.1: a cascade request is refused outright; nothing is removed by asking for one.
+  assert.throws(() => instance.context.deleteRecord('PROJECTS', mistaken.Project_ID, {
     reason: '誤って作成', confirmation: 'DELETE ' + mistaken.Project_ID, cascade: true
+  }), /一括削除/);
+  assert.ok(instance.context.Database.find('PROJECTS', mistaken.Project_ID), 'the project is untouched');
+
+  // Every record is removed on its own, deepest first, and each one keeps its own preflight.
+  instance.context.deleteRecord('TASKS', 'T-M1', {reason: '誤って作成', confirmation: 'DELETE T-M1'});
+  instance.context.deleteRecord('SUBPROJECTS', 'S-M1', {reason: '誤って作成', confirmation: 'DELETE S-M1'});
+  const result = instance.context.deleteRecord('PROJECTS', mistaken.Project_ID, {
+    reason: '誤って作成', confirmation: 'DELETE ' + mistaken.Project_ID
   });
   assert.equal(result.deleted, true);
-  assert.equal(result.removed, 3, 'the project, its subproject and its task');
+  assert.equal(result.finalized, true);
+  assert.equal(result.removed, 1);
   assert.equal(instance.context.Database.find('PROJECTS', mistaken.Project_ID), null);
   assert.equal(instance.context.Database.find('SUBPROJECTS', 'S-M1'), null);
   assert.equal(instance.context.Database.find('TASKS', 'T-M1'), null);

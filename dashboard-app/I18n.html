@@ -1,6 +1,6 @@
 <!-- Generated from shared/i18n.js by scripts/sync-i18n.js. Do not edit directly. -->
 <script>
-﻿/**
+/**
  * Canonical translation dictionary for 設計・開発課 管理.
  *
  * This file is the single source of truth. `npm run sync:i18n` copies it to
@@ -203,6 +203,7 @@ var EH_I18N = (function () {
 
       'request.action.deadline': '納期変更を申請',
       'request.action.completion': '完了報告',
+      'request.container': 'このタスクは子タスクの完了状況から完了します。子タスクから報告してください。',
       'request.form.project': '対象プロジェクト',
       'request.form.task': '対象タスク',
       'request.form.currentDeadline': '現在の期限',
@@ -245,6 +246,7 @@ var EH_I18N = (function () {
 
       'request.error.REQUEST_DISABLED': '現在、申請の受付は停止しています。管理者に連絡してください。',
       'request.error.REQUEST_UNKNOWN_TASK': '対象のタスクは公開されていません。一覧から選び直してください。',
+      'request.error.REQUEST_CONTAINER_TASK': 'このタスクは子タスクから完了します。子タスクから報告してください。',
       'request.error.REQUEST_INVALID_DATE': '希望期限は YYYY-MM-DD 形式の正しい日付で入力してください。',
       'request.error.REQUEST_DATE_UNCHANGED': '現在の期限と異なる日付を指定してください。',
       'request.error.REQUEST_REASON_INVALID': '変更理由を選択してください。',
@@ -775,6 +777,7 @@ var EH_I18N = (function () {
 
       'request.action.deadline': 'Request deadline change',
       'request.action.completion': 'Report completion',
+      'request.container': 'This task completes from its subtasks. Report completion from a subtask instead.',
       'request.form.project': 'Project',
       'request.form.task': 'Task',
       'request.form.currentDeadline': 'Current deadline',
@@ -817,6 +820,7 @@ var EH_I18N = (function () {
 
       'request.error.REQUEST_DISABLED': 'Requests are currently closed. Contact a manager.',
       'request.error.REQUEST_UNKNOWN_TASK': 'That task is not published. Select it again from the list.',
+      'request.error.REQUEST_CONTAINER_TASK': 'This task completes from its subtasks. Report completion from a subtask instead.',
       'request.error.REQUEST_INVALID_DATE': 'Enter a valid date in YYYY-MM-DD form.',
       'request.error.REQUEST_DATE_UNCHANGED': 'Choose a date different from the current deadline.',
       'request.error.REQUEST_REASON_INVALID': 'Select a reason.',
@@ -1794,11 +1798,19 @@ Object.assign(EH_I18N.DICTIONARY.ja, {
   "web.deleteCode.ARCHIVED_RECORD": "アーカイブ済み",
   "web.deleteCode.PUBLISHED_VISIBILITY": "社内公開中",
   "web.deleteCode.ALREADY_DELETED": "削除済み",
+  "web.deleteResolveChildren": "依存する子の記録を先に削除するか、アーカイブしてください（一括削除はできません）",
+  "web.deletionReconcile": "削除記録の確定（管理者）",
+  "web.deletionReconcileHint": "中断した削除の記録を確定します。行が残っている記録は変更しません。",
+  "web.deletionReconcileConfirmation": "確認入力（RECONCILE DELETIONS）",
+  "web.deletionReconcileDone": "確定しました: {confirmed} 件 / 行が残存: {present} 件",
+  "web.formerAssignment": "以前の担当",
+  "web.currentOwner": "現在の担当",
+  "web.historyLimitation": "履歴は記録済みの監査データに基づきます。監査記録のない作業は表示されません。",
+  "web.areaWorkItems": "作業項目",
   "web.deleted": "削除しました",
   "web.completionHint": "完了は作業者の報告と管理者の承認で確定します",
   "web.noSubtask": "サブタスクなし",
   "web.topLevel": "最上位のみ",
-  "web.cascade": "下位レコードも削除する",
   "web.at": "日時",
   "web.unknown": "不明"
 });
@@ -1859,11 +1871,19 @@ Object.assign(EH_I18N.DICTIONARY.en, {
   "web.deleteCode.ARCHIVED_RECORD": "Archived record",
   "web.deleteCode.PUBLISHED_VISIBILITY": "Published internally",
   "web.deleteCode.ALREADY_DELETED": "Already deleted",
+  "web.deleteResolveChildren": "Delete the dependent records first, or archive instead (cascading removal is not available)",
+  "web.deletionReconcile": "Finalize deletion records (admin)",
+  "web.deletionReconcileHint": "Finalizes interrupted removals. A record whose row still exists is left unchanged.",
+  "web.deletionReconcileConfirmation": "Type RECONCILE DELETIONS to confirm",
+  "web.deletionReconcileDone": "Finalized {confirmed} record(s); row still present: {present}",
+  "web.formerAssignment": "Former assignment",
+  "web.currentOwner": "Current owner",
+  "web.historyLimitation": "History is based on recorded audit evidence; work without such a record is not shown.",
+  "web.areaWorkItems": "Work items",
   "web.deleted": "Deleted",
   "web.completionHint": "Completion is confirmed by the worker's report and manager approval",
   "web.noSubtask": "No subtasks",
   "web.topLevel": "Top level only",
-  "web.cascade": "Delete dependent records too",
   "web.at": "When",
   "web.unknown": "Unknown"
 });

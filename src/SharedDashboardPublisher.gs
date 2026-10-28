@@ -19,7 +19,7 @@
  *   duplicates tasks.
  */
 var SharedDashboardPublisher = (function () {
-  var PUBLISHER_VERSION = '1.6';
+  var PUBLISHER_VERSION = '1.6.1';
   var CONTRACT_VERSION = SharedDashboardModel.CONTRACT_VERSION;
   var DESTINATION_PROPERTY = 'SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID';
   var META_SHEET = 'PUBLISHED_META';
@@ -78,9 +78,14 @@ var SharedDashboardPublisher = (function () {
     return {book: book, config: config};
   }
 
-  // Contract date-only fields may be materialized by Sheets as Date objects.
+  // Contract date-only fields may be materialized by Sheets as Date objects. One list serves
+  // both the outgoing normalization and the text column format, so a published date string can
+  // never be rendered as a serial number by a spreadsheet locale.
+  var DATE_FIELDS = ['committedDeadline', 'forecastDeadline', 'deadline', 'plannedStart', 'dueDate',
+    'targetDate', 'actualDate', 'lastUpdated', 'completedAt'];
+
   function snapshotDate(field, value) {
-    if (["committedDeadline","forecastDeadline","deadline","plannedStart","dueDate","targetDate","actualDate","lastUpdated","completedAt"].indexOf(field) >= 0 && value instanceof Date) {
+    if (DATE_FIELDS.indexOf(field) >= 0 && value instanceof Date) {
       return Utilities.formatDate(value, 'Asia/Tokyo', 'yyyy-MM-dd');
     }
     return value;
@@ -117,7 +122,7 @@ var SharedDashboardPublisher = (function () {
     var matrix = [header].concat(rows);
     Database.ensureSize(sheet, matrix.length + 1, header.length);
     header.forEach(function (field, i) {
-      if (["committedDeadline","forecastDeadline","deadline","plannedStart","dueDate","targetDate","actualDate","lastUpdated"].indexOf(field) >= 0 && rows.length) {
+      if (DATE_FIELDS.indexOf(field) >= 0 && rows.length) {
         sheet.getRange(2, i + 1, rows.length, 1).setNumberFormat('@');
       }
     });
@@ -555,6 +560,7 @@ var SharedDashboardPublisher = (function () {
     META_SHEET: META_SHEET,
     META_KEYS: META_KEYS,
     TABLES: TABLES,
+    DATE_FIELDS: DATE_FIELDS,
     publish: publish,
     preview: preview,
     status: status,

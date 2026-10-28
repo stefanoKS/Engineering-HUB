@@ -13,10 +13,10 @@ const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
 test('package, publisher, README and the manager page agree on V1.6', () => {
-  assert.match(read('package.json'), /"version": "1\.6\.0"/);
-  assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.6'/);
-  assert.match(read('README.md'), /## Current release — V1\.6/);
-  assert.match(read('README_JP.md'), /## 現行リリース — V1\.6/);
+  assert.match(read('package.json'), /"version": "1\.6\.1"/);
+  assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.6\.1'/);
+  assert.match(read('README.md'), /## Current release — V1\.6\.1/);
+  assert.match(read('README_JP.md'), /## 現行リリース — V1\.6\.1/);
   assert.match(read('src/ManagerWebIndex.html'), /V1\.6/);
   assert.match(read('CHANGELOG.md'), /## V1\.6/);
 });

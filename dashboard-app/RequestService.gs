@@ -36,6 +36,7 @@ var DashboardRequests = (function () {
   var MESSAGES = {
     REQUEST_DISABLED: '現在、申請の受付は停止しています。',
     REQUEST_UNKNOWN_TASK: '対象のタスクは公開されていません。',
+    REQUEST_CONTAINER_TASK: 'このタスクは子タスクの完了状況から完了します。子タスクから報告してください。',
     REQUEST_INVALID_DATE: '希望期限が正しくありません。',
     REQUEST_DATE_UNCHANGED: '現在の期限と異なる日付を指定してください。',
     REQUEST_REASON_INVALID: '変更理由を選択してください。',
@@ -196,6 +197,9 @@ var DashboardRequests = (function () {
       var target = DashboardData.requestTarget(taskId);
       if (!target) fail('REQUEST_UNKNOWN_TASK');
       if (text(payload.projectId) && text(payload.projectId) !== target.projectId) fail('REQUEST_UNKNOWN_TASK');
+      // V1.6.1: a container task is completed by its children. Refusing here means the inbox
+      // never receives a report that a manager could not approve.
+      if (type === 'COMPLETION_REPORT' && target.container) fail('REQUEST_CONTAINER_TASK');
 
       var clientToken = clip(payload.clientToken, 64);
       if (rateLimited(clientToken || 'anonymous')) fail('REQUEST_RATE_LIMITED');

@@ -1,6 +1,6 @@
 var Tasks = (function () {
   // Material assignment details: changing any of these invalidates stale approval.
-  var assignmentFields = ['Owner_Member_ID', 'Project_ID', 'Subproject_ID', 'Planned_Start', 'Due_Date',
+  var assignmentFields = ['Owner_Member_ID', 'Project_ID', 'Subproject_ID', 'Parent_Task_ID', 'Planned_Start', 'Due_Date',
     'Estimated_Hours', 'Task_Name', 'Dependency_IDs', 'Priority', 'Acceptance_Criteria',
     'Required_Skill_ID', 'Required_Skill_Level'];
   // Progress updates must not revoke approval; date/effort changes must revoke schedule confirmation.
@@ -157,6 +157,15 @@ var Tasks = (function () {
     return Domain.save('TASKS', id, Object.assign({Last_Updated: Domain.now()}, patch), validate, null, function (row, before) {
       if (before && before.Project_ID !== row.Project_ID) Projects.touch(before.Project_ID);
       Projects.touch(row.Project_ID);
+      // V1.6.1: ownership is history. An explicit reassignment event keeps the previous and
+      // the new owner attributable even after later edits, without a parallel history table.
+      if (before && String(before.Owner_Member_ID || '') !== String(row.Owner_Member_ID || '')) {
+        AuditLog.write('TASK_REASSIGNED', 'TASK', row.Task_ID, {
+          previousOwner: String(before.Owner_Member_ID || ''),
+          newOwner: String(row.Owner_Member_ID || ''),
+          project: String(row.Project_ID || '')
+        });
+      }
     });
   }
 

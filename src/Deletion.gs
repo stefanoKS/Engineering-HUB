@@ -8,17 +8,23 @@
  *
  * The default stays non-destructive: archive. Permanent deletion requires
  * - ADMIN authorization,
- * - an empty dependency preflight (or a cascade whose every descendant passes the same
- *   checks on its own),
+ * - an empty dependency preflight,
  * - the exact typed confirmation `DELETE <id>`,
  * - a reason,
  * - a verified backup created in this operation,
  * - the script lock, and
  * - an immutable tombstone (`AUDIT_LOG` → `RECORD_DELETED`).
  *
- * Creation-only audit rows may remain as evidence that the identifier once existed.
- * Google Sheets has no multi-row transaction, so the row is removed first and the
- * tombstone written afterwards; a tombstone failure is reported, never hidden.
+ * V1.6.1 durable intent: Google Sheets has no transaction, so a removal can be interrupted
+ * between the row deletion and the tombstone. The operation now writes
+ * `RECORD_DELETE_PREPARED` (with the full row, reason, actor and backup) *before* the row is
+ * removed, and reports success only after the tombstone was written. An identifier that was
+ * prepared for removal is reserved even when no tombstone exists yet, and
+ * `reconcile()` can finalize an interrupted removal - it only ever appends the missing
+ * tombstone for a row that is verifiably gone, and never deletes anything itself.
+ *
+ * Cascading removal is not offered: a mistaken parent record with dependants must be cleared
+ * child by child, so every removal is justified on its own. Archive the project instead.
  */
 var Deletion = (function () {
   var TABLES = {
@@ -28,6 +34,9 @@ var Deletion = (function () {
   };
   var CREATION_ACTIONS = ['CREATE', 'UI_PROJECT_CREATED', 'INITIALIZE'];
   var MAX_REASON = 240;
+  var INTENT_ACTION = 'RECORD_DELETE_PREPARED';
+  var TOMBSTONE_ACTION = 'RECORD_DELETED';
+  var RECONCILE_CONFIRMATION = 'RECONCILE DELETIONS';
 
   function text(value) { return String(value === undefined || value === null ? '' : value).trim(); }
 
@@ -48,6 +57,14 @@ var Deletion = (function () {
     });
     // Notification history carries a Task_ID without a declared reference.
     if (table === 'TASKS') refs.push({table: 'NOTIFICATION_LOG', field: 'Task_ID'});
+    // V1.6.1: nested work, confirmations, requests and deadline history all point at a task
+    // without a declared schema reference. Removing a task that still owns one of them would
+    // orphan an operational record, so they block the removal exactly like a declared one.
+    if (table === 'TASKS') {
+      refs.push({table: 'SCHEDULE_CONFIRMATIONS', field: 'Task_ID'});
+      refs.push({table: 'TASK_REQUESTS', field: 'Task_ID'});
+      refs.push({table: 'TASK_DEADLINE_HISTORY', field: 'Task_ID'});
+    }
     return refs;
   }
 
@@ -109,18 +126,18 @@ var Deletion = (function () {
     };
   }
 
-  /** Blocking entries that still matter when `removing` (a set of IDs) is deleted together. */
-  function blockingOutside(blocking, removing) {
-    return (blocking || []).filter(function (item) {
-      if (item.code !== 'REFERENCE' || !item.ids) return true;
-      return item.ids.some(function (id) { return !removing[String(id)]; });
-    });
-  }
-
-  /** Immutable tombstone lookup: an identifier that was removed may never be reused. */
+  /**
+   * Reserved identifier lookup.
+   *
+   * V1.6.1: a *prepared* removal reserves the identifier too. An interrupted removal must
+   * never let the same ID come back as a different record, whether or not the tombstone was
+   * written yet.
+   */
   function isDeletedId(table, id) {
     return Database.read('AUDIT_LOG').some(function (row) {
-      return text(row.Action) === 'RECORD_DELETED' && text(row.Entity_Type) === table && text(row.Entity_ID) === text(id);
+      var action = text(row.Action);
+      if (action !== TOMBSTONE_ACTION && action !== INTENT_ACTION) return false;
+      return text(row.Entity_Type) === table && text(row.Entity_ID) === text(id);
     });
   }
 
@@ -128,6 +145,85 @@ var Deletion = (function () {
     if (!id) return true;
     if (isDeletedId(table, id)) fail('削除済みのIDは再利用できません: ' + id);
     return true;
+  }
+
+  function snapshotOf(table, record) {
+    var snapshot = {};
+    Schema.tables[table].fields.forEach(function (field) {
+      var value = record[field.name];
+      snapshot[field.name] = value === undefined || value === null ? '' : value;
+    });
+    return snapshot;
+  }
+
+  function detail(row) {
+    try {
+      var parsed = JSON.parse(text(row.New_Value) || '{}');
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (error) {
+      return {};
+    }
+  }
+
+  /**
+   * Removals that were prepared but never confirmed by a tombstone.
+   *
+   * This is a read-only report. It is the recovery entry point for an execution that stopped
+   * between the row deletion and the tombstone write.
+   */
+  function pendingOperations() {
+    var prepared = Object.create(null), order = [];
+    Database.read('AUDIT_LOG').forEach(function (row) {
+      var action = text(row.Action), key = text(row.Entity_Type) + '\u0000' + text(row.Entity_ID);
+      if (action === INTENT_ACTION) {
+        if (!prepared[key]) { prepared[key] = {table: text(row.Entity_Type), id: text(row.Entity_ID), at: '', actor: '', reason: '', backup: ''}; }
+        if (order.indexOf(key) < 0) order.push(key);
+        var info = detail(row);
+        prepared[key].at = String(row.Timestamp || '');
+        prepared[key].actor = text(row.Actor);
+        prepared[key].reason = text(info.reason);
+        prepared[key].backup = text(info.backup);
+      } else if (action === TOMBSTONE_ACTION) {
+        delete prepared[key];
+      }
+    });
+    return order.filter(function (key) { return prepared[key]; }).map(function (key) { return prepared[key]; });
+  }
+
+  /**
+   * Finalizes an interrupted removal.
+   *
+   * Only the missing tombstone is appended, and only for an identifier whose row is verified
+   * to be gone. A row that still exists is reported back and left untouched: this function
+   * never deletes data.
+   */
+  function reconcile(confirmation) {
+    var admin = Access.requireAdmin();
+    if (text(confirmation) !== RECONCILE_CONFIRMATION) {
+      throw new Error('削除記録の確定には「' + RECONCILE_CONFIRMATION + '」の入力が必要です');
+    }
+    return Database.withLock(function () {
+      var pending = pendingOperations(), confirmed = [], present = [], failed = [];
+      pending.forEach(function (item) {
+        if (!TABLES[item.table]) { failed.push({table: item.table, id: item.id, reason: 'UNKNOWN_TABLE'}); return; }
+        if (Database.find(item.table, item.id)) { present.push({table: item.table, id: item.id}); return; }
+        try {
+          AuditLog.write(TOMBSTONE_ACTION, item.table, item.id, {
+            reason: item.reason || 'reconciled', actor: admin.email, backup: item.backup,
+            reconciled: true, preparedAt: item.at
+          });
+          confirmed.push({table: item.table, id: item.id});
+        } catch (error) {
+          failed.push({table: item.table, id: item.id, reason: String(error && error.message || error)});
+        }
+      });
+      if (confirmed.length || present.length || failed.length) {
+        AuditLog.write('DELETION_RECONCILED', 'AUDIT_LOG', '', {
+          actor: admin.email, confirmed: confirmed.length, present: present.length, failed: failed.length
+        });
+      }
+      return {confirmed: confirmed, rowPresent: present, failed: failed, pending: pending.length};
+    });
   }
 
   /** Physical row removal. The ID column must still match so a shifted sheet is never hit. */
@@ -148,46 +244,16 @@ var Deletion = (function () {
     return true;
   }
 
-  /** Descendants in deepest-first order, so a cascade never orphans a child. */
-  function descendants(table, id) {
-    if (table === 'PROJECTS') {
-      var parents = Subprojects.parentMap();
-      var taskIndex = TaskTree.buildIndex(Database.read('TASKS'));
-      var subprojects = Database.read('SUBPROJECTS').filter(function (row) { return text(row.Project_ID) === text(id); })
-        .map(function (row) { return {table: 'SUBPROJECTS', id: row.Subproject_ID, depth: Subprojects.levelOf(row.Subproject_ID, parents)}; })
-        .sort(function (a, b) { return b.depth - a.depth; });
-      var tasks = Database.read('TASKS').filter(function (row) { return text(row.Project_ID) === text(id); })
-        .map(function (row) { return {table: 'TASKS', id: row.Task_ID, depth: TaskTree.levelOf(row.Task_ID, taskIndex)}; })
-        .sort(function (a, b) { return b.depth - a.depth; });
-      return subprojects.concat(tasks);
-    }
-    if (table === 'SUBPROJECTS') {
-      var map = Subprojects.parentMap();
-      var nested = Subprojects.descendants(id).map(function (childId) {
-        return {table: 'SUBPROJECTS', id: childId, depth: Subprojects.levelOf(childId, map)};
-      }).sort(function (a, b) { return b.depth - a.depth; });
-      var owned = Database.read('TASKS').filter(function (row) { return text(row.Subproject_ID) === text(id); })
-        .map(function (row) { return {table: 'TASKS', id: row.Task_ID, depth: 99}; });
-      return nested.concat(owned);
-    }
-    var index = TaskTree.buildIndex(Database.read('TASKS'));
-    function collect(taskId) {
-      var out = [];
-      (index.children[text(taskId)] || []).forEach(function (childId) {
-        out = out.concat(collect(childId));
-        out.push({table: 'TASKS', id: childId, depth: TaskTree.levelOf(childId, index)});
-      });
-      return out;
-    }
-    return collect(id).sort(function (a, b) { return b.depth - a.depth; });
-  }
-
   /**
    * Removes one record permanently.
    *
+   * Order matters: preflight → backup → durable intent → row removal → tombstone. Success is
+   * reported only when the tombstone exists; a tombstone failure raises an explicit
+   * reconciliation error instead of returning a success that never happened.
+   *
    * @param {string} table PROJECTS / SUBPROJECTS / TASKS
    * @param {string} id stable identifier
-   * @param {object} options {reason, confirmation, cascade}
+   * @param {object} options {reason, confirmation}
    */
   function remove(table, id, options) {
     options = options || {};
@@ -196,51 +262,39 @@ var Deletion = (function () {
     var reason = text(options.reason).slice(0, MAX_REASON);
     if (!reason) fail('削除には理由が必要です');
     if (text(options.confirmation) !== 'DELETE ' + text(id)) fail('削除には「DELETE ' + text(id) + '」の入力が必要です');
+    if (options.cascade === true) {
+      fail('依存関係のある記録は一括削除できません。子の記録を個別に削除してから実行するか、アーカイブしてください');
+    }
     return Database.withLock(function () {
       var summary = preflight(table, id);
-      var queue = descendants(table, id);
-      var removing = Object.create(null);
-      removing[text(id)] = true;
-      queue.forEach(function (child) { removing[text(child.id)] = true; });
       if (!summary.deletable) {
-        if (options.cascade !== true) {
-          fail('安全に削除できません。依存関係を解消するかアーカイブしてください: ' +
-            summary.blocking.map(function (item) { return item.code; }).join(', '));
-        }
-        // Cascading only removes references between records that all disappear together; any
-        // remaining history on the root or on a descendant still refuses the whole operation.
-        var rootBlocking = blockingOutside(summary.blocking, removing);
-        if (rootBlocking.length) {
-          fail('安全に削除できません。依存関係を解消するかアーカイブしてください: ' +
-            rootBlocking.map(function (item) { return item.code; }).join(', '));
-        }
-        queue.forEach(function (child) {
-          var childSummary = preflight(child.table, child.id);
-          var childBlocking = blockingOutside(childSummary.blocking, removing);
-          if (childBlocking.length) {
-            fail('子孫レコードに履歴があるため削除できません: ' + child.table + ' ' + child.id + ' (' +
-              childBlocking.map(function (item) { return item.code; }).join(', ') + ')');
-          }
-        });
+        fail('安全に削除できません。依存関係を解消するかアーカイブしてください: ' +
+          summary.blocking.map(function (item) { return item.code; }).join(', '));
       }
+      var record = Database.find(table, id);
       var reference = Backup.create();
-      queue.concat([{table: table, id: text(id), depth: 0}]).forEach(function (item) {
-        var record = Database.find(item.table, item.id);
-        var snapshot = {};
-        Schema.tables[item.table].fields.forEach(function (field) {
-          var value = record[field.name];
-          snapshot[field.name] = value === undefined || value === null ? '' : value;
+      var snapshot = snapshotOf(table, record);
+      // The intent is written *before* the destructive step. If it cannot be recorded, the
+      // removal is aborted while the data is still intact.
+      try {
+        AuditLog.write(INTENT_ACTION, table, text(id), {
+          reason: reason, actor: admin.email, backup: reference, record: snapshot
         });
-        removeRow(item.table, item.id);
-        try {
-          AuditLog.write('RECORD_DELETED', item.table, item.id, {
-            reason: reason, actor: admin.email, backup: reference, record: snapshot
-          });
-        } catch (error) {
-          console.error('Tombstone write failed for ' + item.table + ' ' + item.id + ': ' + error.message);
-        }
-      });
-      return {deleted: true, table: table, id: text(id), removed: queue.length + 1, backup: reference,
+      } catch (error) {
+        fail('削除の準備記録を書き込めないため中止しました（データは変更されていません）: ' + String(error && error.message || error));
+      }
+      removeRow(table, id);
+      try {
+        AuditLog.write(TOMBSTONE_ACTION, table, text(id), {
+          reason: reason, actor: admin.email, backup: reference, record: snapshot
+        });
+      } catch (error) {
+        // The row is gone; the identifier is already reserved by the intent row. The manager
+        // must finish the record with the reconciliation entry point, never a retry here.
+        throw new Error('レコードは削除されましたが、削除記録の確定に失敗しました。reconcileDeletions で確定してください: ' +
+          String(error && error.message || error));
+      }
+      return {deleted: true, finalized: true, table: table, id: text(id), removed: 1, backup: reference,
         // The committed employee snapshot must be republished by a manager before it shows
         // the removal; publication is never triggered from a deletion.
         needsPublication: true};
@@ -249,8 +303,13 @@ var Deletion = (function () {
 
   return {
     TABLES: TABLES,
+    INTENT_ACTION: INTENT_ACTION,
+    TOMBSTONE_ACTION: TOMBSTONE_ACTION,
+    RECONCILE_CONFIRMATION: RECONCILE_CONFIRMATION,
     preflight: preflight,
     remove: remove,
+    reconcile: reconcile,
+    pendingOperations: pendingOperations,
     isDeletedId: isDeletedId,
     assertFreshId: assertFreshId
   };
@@ -262,4 +321,8 @@ function preflightRecordDeletion(table, id) {
 function deleteRecord(table, id, options) {
   Access.requireAdmin();
   return Deletion.remove(table, id, options);
+}
+function reconcileDeletions(confirmation) {
+  Access.requireAdmin();
+  return Deletion.reconcile(confirmation);
 }
