@@ -1,14 +1,27 @@
 <script>
 (function () {
 'use strict';
-var lang = EH_I18N.read(), view = 'overview', sequence = 0, drawerSequence = 0, generation = 0;
-var cache = new Map(), drafts = new Map(), pending = new Set(), queue = [], running = 0, references = null;
+var lang = EH_I18N.read(), view = 'overview', sequence = 0, drawerSequence = 0;
+/**
+ * In-memory manager snapshot. It lives only in this browser page: nothing private is written to
+ * localStorage/IndexedDB and no server-side cache exists. The snapshot stays usable for the whole
+ * session and is revalidated in the background once it is older than FRESH_MS, invalidated by an
+ * explicit refresh or a write, or dropped when the server stops authorizing this user.
+ */
+var FRESH_MS = 30000, PAGE = 50, PREFETCH_TASKS = 1000;
+var cache = new Map(), inflight = new Map(), tokens = Object.create(null);
+var drafts = new Map(), pending = new Set(), queue = [], running = 0;
+var store = {actor: null, references: null, responsibilities: [], projects: null, tasks: null, overview: null, at: {}};
+var stats = {rpc: 0, hits: 0, stale: 0, writes: 0};
 var filters = {}, currentData = null, currentEditor = null, actorRole = '', metrics = [];
+var resultsHost = null, syncError = '', refreshing = false, revoked = false;
 var byId = function (id) { return document.getElementById(id); };
 function t(key, vars) { return EH_I18N.t(lang, 'web.' + key, vars); }
 function el(tag, text, className) { var node = document.createElement(tag); if (text !== undefined) node.textContent = String(text); if (className) node.className = className; return node; }
 function button(key, fn, parent) { var b = el('button', t(key)); b.type = 'button'; b.addEventListener('click', fn); if (parent) parent.appendChild(b); return b; }
 function notice(text, kind) { byId('notice').textContent = text; byId('notice').className = kind || ''; }
+function success(text) { notice(text, 'success'); }
+function clearNotice() { notice(''); }
 function pump() { while (running < 2 && queue.length) { running++; queue.shift()(); } }
 function rpc(write, operation, payload) {
   var started = performance.now();
@@ -16,8 +29,8 @@ function rpc(write, operation, payload) {
     queue.push(function () {
       function done(result, error) {
         running--; pump();
-        metrics.push({operation: operation, roundTripMs: performance.now() - started, server: result && result.metrics || null});
-        if (metrics.length > 100) metrics.shift();
+        metrics.push({operation: operation, kind: write ? 'write' : 'read', roundTripMs: performance.now() - started, server: result && result.metrics || null});
+        if (metrics.length > 300) metrics.shift();
         if (error || !result || result.ok !== true) reject(new Error(error && (write ? t('unknownSave')+' '+error.message : error.message) || result && result.error || 'Request failed'));
         else resolve(result.data);
       }
@@ -26,28 +39,233 @@ function rpc(write, operation, payload) {
     }); pump();
   });
 }
+function keyOf(operation, payload) { return operation + JSON.stringify(payload || {}); }
+/** Identical in-flight reads share one RPC; a newer dispatch or invalidation supersedes it. */
+function request(key, operation, payload) {
+  var active = inflight.get(key);
+  if (active) return active;
+  var token = (tokens[key] = (tokens[key] || 0) + 1);
+  stats.rpc++;
+  var promise = rpc(false, operation, payload).then(function (data) {
+    if (tokens[key] !== token) { stats.stale++; return null; }
+    cache.set(key, {at: Date.now(), data: data});
+    return data;
+  }).finally(function () { if (inflight.get(key) === promise) inflight.delete(key); });
+  inflight.set(key, promise);
+  return promise;
+}
+function invalidatePrefixes(prefixes) {
+  Array.from(cache.keys()).forEach(function (key) {
+    if (!prefixes.some(function (prefix) { return key.indexOf(prefix) === 0; })) return;
+    tokens[key] = (tokens[key] || 0) + 1;
+    cache.delete(key);
+    inflight.delete(key);
+  });
+}
 var api = {
+  peek: function (operation, payload) { var found = cache.get(keyOf(operation, payload)); return found ? found.data : null; },
   read: function (operation, payload, fresh) {
-    var key = operation + JSON.stringify(payload || {}), found = cache.get(key), epoch = generation;
-    if (!fresh && found && Date.now() - found.at < 30000) return Promise.resolve(found.data);
-    return rpc(false, operation, payload).then(function (data) { if (epoch === generation) cache.set(key, {at: Date.now(), data: data}); return data; });
+    var key = keyOf(operation, payload), found = cache.get(key);
+    if (!fresh && found) { stats.hits++; return Promise.resolve(found.data); }
+    return request(key, operation, payload);
   },
   write: function (operation, payload) {
     var key = payload.taskId || payload.projectId || payload.subprojectId || payload.memberId || payload.responsibilityId || payload.requestId || operation;
     if (pending.has(key)) return Promise.reject(new Error(t('saving')));
-    pending.add(key);
-    return rpc(true, operation, payload).then(function (data) { generation++; cache.clear(); references = null; return data; }).finally(function () { pending.delete(key); });
+    pending.add(key); stats.writes++;
+    return rpc(true, operation, payload).then(function (data) {
+      // Only the entries that can contain the changed record or a derived aggregate are dropped;
+      // unrelated cached views stay usable.
+      invalidatePrefixes(afterWritePrefixes(operation));
+      return data;
+    }).finally(function () { pending.delete(key); });
+  },
+  clear: function () {
+    var keys = new Set(Array.from(cache.keys()).concat(Array.from(inflight.keys())));
+    keys.forEach(function (key) { tokens[key] = (tokens[key] || 0) + 1; });
+    cache.clear(); inflight.clear();
+    store.overview = null; store.projects = null; store.tasks = null;
+    store.references = null; store.responsibilities = []; store.at = {};
   }
 };
-window.ManagerWebClient = {api: api, metrics: metrics, drafts: drafts};
+window.ManagerWebClient = {api: api, metrics: metrics, drafts: drafts, store: store, stats: stats};
 function rowValues(parent, pairs) { var dl = el('dl'); pairs.forEach(function (pair) { dl.append(el('dt', pair[0]), el('dd', pair[1] === '' || pair[1] === undefined ? '—' : pair[1])); }); parent.appendChild(dl); }
 function statusLabel(value) { return EH_I18N.status(lang, value || ''); }
 function title(key, parent) { parent.appendChild(el('h1', t(key))); }
-function navigate(next, options) { view = next; if (options) filters[next] = options; load(false); }
+function navigate(next, options) { view = next; if (options) filters[next] = options; clearNotice(); load(false); }
+
+/* ---------------------------------------------------------------- *
+ * Local snapshot: apply, query, invalidate
+ * ---------------------------------------------------------------- */
+/** Cache prefixes that may hold the changed record or a derived aggregate. */
+function afterWritePrefixes(operation) {
+  if (/^(project|subproject)/.test(operation)) return ['bootstrap', 'references', 'project'];
+  if (/^task/.test(operation)) return ['bootstrap', 'task'];
+  if (/^request/.test(operation)) return ['bootstrap', 'requests'];
+  if (/^member/.test(operation)) return ['bootstrap', 'references', 'members'];
+  if (/^responsibility/.test(operation)) return ['bootstrap', 'references', 'responsibilities'];
+  if (/^skill/.test(operation)) return ['skills'];
+  if (/^automation/.test(operation) || operation === 'emergencyStop') return ['automation', 'status'];
+  if (operation === 'publication') return ['publication'];
+  if (operation === 'reportRefresh') return ['status'];
+  return ['bootstrap'];
+}
+function hydrateTasks(data) {
+  if (!data || data.items || !data.rows) return data;
+  var columns = data.columns || [];
+  var items = data.rows.map(function (row) {
+    var item = {};
+    columns.forEach(function (column, index) { item[column] = row[index]; });
+    return item;
+  });
+  return {items: items, total: data.total, complete: data.complete === true, limit: data.limit};
+}
+/** Applies one authorized bootstrap response to the local snapshot. */
+function applyBootstrap(data) {
+  var at = Date.now();
+  if (!data || !data.projects || !data.tasks) return;
+  store.actor = data.actor || store.actor;
+  if (data.actor) { actorRole = data.actor.role; byId('actor').textContent = data.actor.name + ' · ' + data.actor.role; }
+  store.references = data.references || null;
+  store.responsibilities = data.responsibilities || [];
+  store.projects = data.projects;
+  // Task rows arrive separately (taskIndex) so the first paint never waits for them. A loaded
+  // index survives a revalidation while its record count is unchanged, keeping navigation
+  // instant; a changed count drops the rows and the index is fetched again.
+  var previous = store.tasks;
+  var sameCount = !!previous && previous.total === data.tasks.total;
+  store.tasks = {items: previous && previous.loaded && sameCount ? previous.items : [], total: data.tasks.total,
+    limit: data.tasks.limit, complete: data.tasks.total <= data.tasks.limit,
+    loaded: !!(previous && previous.loaded && sameCount)};
+  store.overview = {version: data.version, actor: data.actor, kpis: data.kpis, projects: data.overviewProjects || data.projects,
+    responsibilities: data.responsibilities, upcoming: data.upcoming, pending: data.pending, refreshedAt: data.refreshedAt};
+  store.at.bootstrap = at;
+  cache.set(keyOf('bootstrap', {}), {at: at, data: data});
+  if (store.references) cache.set(keyOf('references', {}), {at: at, data: store.references});
+  syncTaskIndex(false);
+}
+/** Loads or refreshes the compact task index; a large index loads only when the view opens. */
+function syncTaskIndex(force) {
+  if (revoked || !store.tasks || !store.tasks.complete) return;
+  if (!force && !store.tasks.loaded && store.tasks.total > PREFETCH_TASKS) return;
+  // Each dataset has its own freshness window, so a revalidation does not re-download an index
+  // that was refreshed moments ago.
+  if (!force && store.tasks.loaded && store.at.tasks && Date.now() - store.at.tasks < FRESH_MS) return;
+  var hadRows = store.tasks.loaded;
+  api.read('taskIndex', {}, hadRows).then(function (data) {
+    var index = hydrateTasks(data);
+    if (!index || index.total !== store.tasks.total || !index.complete) return;
+    store.tasks = {items: index.items, total: index.total, complete: true, limit: index.limit, loaded: true};
+    store.at.tasks = Date.now();
+    if ((view === 'tasks' || view === 'diagnostics') && canRepaint()) { currentData = peekView(view); render(); }
+    else renderSync();
+  }).catch(function () { /* the paginated server path stays available */ });
+}
+function indexedTasks() {
+  return !!(store.tasks && store.tasks.loaded && store.tasks.complete === true);
+}
+function localDataset(kind) {
+  var source = kind === 'projects' ? store.projects : (kind === 'tasks' ? store.tasks : null);
+  return source || {items: [], total: 0, complete: false};
+}
+function taskOrder(input) {
+  var priorities = {Critical: 0, High: 1, Medium: 2, Low: 3};
+  return function (a, b) {
+    var order = input && input.sort === 'priority'
+      ? (priorities[a.priority] || 0) - (priorities[b.priority] || 0)
+      : String(a.deadline || '9999').localeCompare(String(b.deadline || '9999'));
+    return order || String(a.id).localeCompare(String(b.id));
+  };
+}
+/** Mirrors the server filters for a fully loaded dataset (description text stays server-side). */
+function matchesTask(task, input, query) {
+  if (input.projectId && task.projectId !== input.projectId) return false;
+  if (input.subprojectId !== undefined && String(task.subprojectId || '') !== String(input.subprojectId || '')) return false;
+  if (input.ownerId && task.ownerId !== input.ownerId) return false;
+  if (input.status && task.status !== input.status) return false;
+  if (input.responsibilityId && String(task.responsibilityId || '') !== String(input.responsibilityId)) return false;
+  if (input.deadlineBefore && (!task.deadline || task.deadline > input.deadlineBefore)) return false;
+  if (input.deadlineAfter && (!task.deadline || task.deadline < input.deadlineAfter)) return false;
+  if (query && [task.id, task.name, task.project, task.owner, task.subprojectId].join(' ').toLowerCase().indexOf(query) < 0) return false;
+  return true;
+}
+function matchesProject(project, input, query) {
+  if (input.responsibilityId && String(project.responsibilityId || '') !== String(input.responsibilityId)) return false;
+  if (input.ownerId && project.ownerId !== input.ownerId) return false;
+  if (input.status && project.status !== input.status) return false;
+  if (input.deadlineBefore && (!project.deadline || project.deadline > input.deadlineBefore)) return false;
+  if (input.deadlineAfter && (!project.deadline || project.deadline < input.deadlineAfter)) return false;
+  if (query && [project.id, project.name, project.owner, project.responsibility].join(' ').toLowerCase().indexOf(query) < 0) return false;
+  return true;
+}
+function localPage(kind, dataset, input) {
+  var query = String(input.query || '').toLowerCase();
+  var offset = Math.max(0, Math.floor(Number(input.offset) || 0));
+  var limit = Math.min(100, Math.max(1, Math.floor(Number(input.limit) || PAGE)));
+  var rows = dataset.items.filter(function (item) { return kind === 'tasks' ? matchesTask(item, input, query) : matchesProject(item, input, query); });
+  if (kind === 'tasks') rows.sort(taskOrder(input));
+  return {items: rows.slice(offset, offset + limit), total: rows.length, offset: offset, limit: limit, local: true};
+}
+/** Data for a view without any server call: the snapshot, a cached payload or nothing. */
+function peekView(name) {
+  if (revoked) return null;
+  if (name === 'overview') return store.overview;
+  if (name === 'projects' || name === 'tasks') {
+    var cached = api.peek(name, filters[name] || {});
+    if (cached) return cached;
+    var dataset = localDataset(name);
+    if (dataset.complete && (name === 'projects' || indexedTasks())) return localPage(name, dataset, filters[name] || {});
+    return null;
+  }
+  return api.peek(name, filters[name] || {});
+}
+function staleView(name) {
+  var at = Math.max(store.at.bootstrap || 0, store.at[name] || 0);
+  return !at || Date.now() - at > FRESH_MS;
+}
+function clockText(at) { var d = new Date(at); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2); }
+function syncText() {
+  var at = Math.max(store.at.bootstrap || 0, store.at[view] || 0), parts = [];
+  if (at) parts.push(t('lastUpdated') + ': ' + clockText(at));
+  if (refreshing) parts.push(t('refreshing'));
+  return parts.join(' · ');
+}
+function renderSync() { var node = byId('sync'); if (node) node.textContent = syncText(); }
+function canRepaint() {
+  if (currentEditor) return false;
+  var active = document.activeElement;
+  return !(active && /^(INPUT|SELECT|TEXTAREA)$/.test(String(active.tagName || '')));
+}
+function recordRender(name, start) {
+  metrics.push({operation: 'render:' + name, kind: 'view', renderMs: performance.now() - start, totalMs: performance.now() - start});
+}
+/** Repaints only the result list, so typing in a filter never loses focus. */
+function localFilter(kind) {
+  var data = peekView(kind || view);
+  if (!data || !data.local) return;
+  currentData = data;
+  renderList();
+}
+function setOffset(kind, offset) {
+  var values = filters[kind] || (filters[kind] = {});
+  values.offset = Math.max(0, offset);
+  var data = peekView(kind);
+  if (!data) { load(false); return; }
+  currentData = data; renderList();
+}
+function submitFilters(kind) {
+  var values = filters[kind] || {};
+  var complete = kind === 'tasks' ? indexedTasks() : localDataset(kind).complete;
+  // Without a free-text query the snapshot already covers every record, so the result stays local.
+  if (complete && !String(values.query || '').trim()) { currentData = peekView(kind); render(); return; }
+  notice(t('searching'));
+  fetchView(kind, true);
+}
 function renderNav() {
   var nav = byId('nav'); nav.replaceChildren();
   ['overview','projects','tasks','requests','admin'].forEach(function (name) { var b = button(name, function () { navigate(name); }, nav); if (view === name || (view === 'project' && name === 'projects')) b.setAttribute('aria-current', 'page'); });
   byId('navToggle').setAttribute('aria-label', t('navigation'));
+  if (byId('diagnostics')) byId('diagnostics').textContent = t('diagnostics');
   document.documentElement.lang = lang;
 }
 function field(parent, key, value, options, onChange, type) {
@@ -60,27 +278,33 @@ function field(parent, key, value, options, onChange, type) {
   if (!options && type !== 'checkbox') control.addEventListener('input', function () { onChange(control.value); });
   label.append(caption, control); parent.appendChild(label); return control;
 }
+/** Reference choices come from the authorized snapshot; a miss falls back to the server read. */
+function references() { return store.references || {members: [], projects: [], responsibilities: []}; }
+function filterField(bar, kind, key, value, options, apply, type) {
+  return field(bar, key, value, options, function (v) { apply(v); localFilter(kind); }, type);
+}
 function listFilters(kind, host) {
   var values = filters[kind] || (filters[kind] = {}), bar = el('form', undefined, 'toolbar');
-  field(bar, 'search', values.query || '', null, function (v) { values.query = v; values.offset = 0; });
+  filterField(bar, kind, 'search', values.query || '', null, function (v) { values.query = v; values.offset = 0; });
   if (kind === 'tasks') {
     if(values.subprojectId){bar.appendChild(el('p',t('subproject')+': '+(values.subprojectName||values.subprojectId)));button('all',function(){delete values.subprojectId;delete values.subprojectName;values.offset=0;load(false);},bar);}
-    field(bar, 'projectId', values.projectId || '', [{id:'',name:t('all')}].concat(references && references.projects || []), function (v) { values.projectId=v;delete values.subprojectId;delete values.subprojectName;values.offset=0; });
-    field(bar, 'ownerId', values.ownerId || '', [{id:'',name:t('all')}].concat(references && references.members || []), function (v) { values.ownerId=v; values.offset=0; });
-    field(bar, 'statusField', values.status || '', ['','Not Started','Assigned','In Progress','Blocked','On Hold','Done','Cancelled'], function (v) {values.status=v; values.offset=0;});
-    field(bar, 'deadlineBefore', values.deadlineBefore || '', null, function(v){values.deadlineBefore=v;values.offset=0;}, 'date');
-    field(bar, 'deadlineAfter', values.deadlineAfter || '', null, function(v){values.deadlineAfter=v;values.offset=0;}, 'date');
-    field(bar, 'sort', values.sort || 'deadline', [{id:'deadline',name:t('deadline')},{id:'priority',name:t('priority')}], function(v){values.sort=v;values.offset=0;});
+    filterField(bar, kind, 'projectId', values.projectId || '', [{id:'',name:t('all')}].concat(references().projects), function (v) { values.projectId=v;delete values.subprojectId;delete values.subprojectName;values.offset=0; });
+    filterField(bar, kind, 'ownerId', values.ownerId || '', [{id:'',name:t('all')}].concat(references().members), function (v) { values.ownerId=v; values.offset=0; });
+    filterField(bar, kind, 'statusField', values.status || '', ['','Not Started','Assigned','In Progress','Blocked','On Hold','Done','Cancelled'], function (v) {values.status=v; values.offset=0;});
+    filterField(bar, kind, 'deadlineBefore', values.deadlineBefore || '', null, function(v){values.deadlineBefore=v;values.offset=0;}, 'date');
+    filterField(bar, kind, 'deadlineAfter', values.deadlineAfter || '', null, function(v){values.deadlineAfter=v;values.offset=0;}, 'date');
+    filterField(bar, kind, 'sort', values.sort || 'deadline', [{id:'deadline',name:t('deadline')},{id:'priority',name:t('priority')}], function(v){values.sort=v;values.offset=0;});
   }
-  if (kind === 'tasks' || kind === 'projects') field(bar, 'responsibilityId', values.responsibilityId || '', [{id:'',name:t('all')}].concat(references && references.responsibilities || []), function(v){values.responsibilityId=v;values.offset=0;});
+  if (kind === 'tasks' || kind === 'projects') filterField(bar, kind, 'responsibilityId', values.responsibilityId || '', [{id:'',name:t('all')}].concat(references().responsibilities), function(v){values.responsibilityId=v;values.offset=0;});
   var submit = el('button', t('search')); submit.type='submit'; bar.appendChild(submit);
-  bar.addEventListener('submit', function(e){e.preventDefault();load(false);}); host.appendChild(bar);
+  bar.appendChild(el('span', t(localDataset(kind).complete ? 'localHint' : 'serverHint'), 'muted hint-wide'));
+  bar.addEventListener('submit', function(e){e.preventDefault();submitFilters(kind);}); host.appendChild(bar);
 }
 function pagination(data, kind, parent) {
   if (data.total === undefined) return;
   var bar=el('div',undefined,'toolbar'); bar.appendChild(el('span', String(Math.min(data.total,(data.offset||0)+1))+'–'+Math.min(data.total,(data.offset||0)+data.items.length)+' / '+data.total));
-  var prev=button('previous',function(){filters[kind].offset=Math.max(0,(data.offset||0)-data.limit);load(false);},bar);prev.disabled=!data.offset;
-  var next=button('next',function(){filters[kind].offset=(data.offset||0)+data.limit;load(false);},bar);next.disabled=(data.offset||0)+data.items.length>=data.total;parent.appendChild(bar);
+  var prev=button('previous',function(){setOffset(kind,Math.max(0,(data.offset||0)-data.limit));},bar);prev.disabled=!data.offset;
+  var next=button('next',function(){setOffset(kind,(data.offset||0)+data.limit);},bar);next.disabled=(data.offset||0)+data.items.length>=data.total;parent.appendChild(bar);
 }
 function metaItem(parent, label, value, valueClass) { var item = el('div', undefined, 'meta-item'); item.append(el('span', label, 'meta-label'), el('span', value === '' || value === undefined ? '—' : value, 'meta-value' + (valueClass ? ' ' + valueClass : ''))); parent.appendChild(item); }
 function healthClass(value) { return value === 'RED' ? 'pill-red' : value === 'YELLOW' ? 'pill-amber' : value === 'GREEN' ? 'pill-green' : 'pill-gray'; }
@@ -122,23 +346,159 @@ function tasks(data, host) {
   if(!data.items.length)host.appendChild(el('p',t('empty')));
   data.items.forEach(function(task){var card=el('article',undefined,'card');var row=el('div',undefined,'row');row.append(el('strong',task.name),el('span',task.project),el('span',task.owner),el('span',task.deadline||'—'),el('span',statusLabel(task.status)),el('span',String(task.progress||0)+'%'));button('edit',function(){openEditor('task',task.id);},row);card.appendChild(row);host.appendChild(card);});
 }
-function load(fresh, successMessage) {
-  var seq=++sequence, start=performance.now(), requested=view; renderNav(); notice(t('loading'));
-  var p=filters[view]||{}, promise;
-  if(view==='admin') {currentData={};render();notice('');return;}
-  promise = (view==='tasks'||view==='projects' ? api.read('references',{},fresh).then(function(r){references=r;}) : Promise.resolve()).then(function(){return api.read(requested,p,fresh);});
-  promise.then(function(data){if(requested==='overview'&&data.actor){actorRole=data.actor.role;byId('actor').textContent=data.actor.name+' · '+data.actor.role;}if(seq!==sequence)return;currentData=data;var renderStart=performance.now();render();notice(successMessage||'',successMessage?'success':'');metrics.push({operation:'render:'+requested,renderMs:performance.now()-renderStart,totalMs:performance.now()-start});}).catch(function(error){if(seq!==sequence)return;notice(error.message,'error');byId('content').replaceChildren();button('retry',function(){load(true);},byId('content'));});
+/** Projects/tasks results only: filters keep their DOM and their focus. */
+function renderList() {
+  if (!resultsHost) return;
+  resultsHost.replaceChildren();
+  var data = currentData;
+  if (view === 'projects') { projectCards(data, resultsHost); pagination(data, 'projects', resultsHost); }
+  else if (view === 'tasks') { tasks(data, resultsHost); pagination(data, 'tasks', resultsHost); }
+}
+/** DEV diagnostics: numeric timings and cache state only, never record content. */
+function renderDiagnostics(host) {
+  host.appendChild(el('p', t('diagnosticsHint'), 'muted'));
+  var summary = el('dl');
+  rowValues(summary, [[t('projects'), store.projects ? String(store.projects.total) : '—'],
+    [t('tasks'), store.tasks ? String(store.tasks.total) : '—'],
+    [t('rpcCount'), String(stats.rpc)], [t('cacheHits'), String(stats.hits)],
+    [t('staleResponses'), String(stats.stale)], [t('pendingWrites'), String(pending.size)]]);
+  host.appendChild(summary);
+  var operations = Object.create(null);
+  metrics.forEach(function (entry) {
+    var key = entry.operation, bucket = operations[key] || (operations[key] = {operation: key, count: 0, rpc: [], render: [], server: []});
+    bucket.count++;
+    if (typeof entry.roundTripMs === 'number') bucket.rpc.push(entry.roundTripMs);
+    if (typeof entry.renderMs === 'number') bucket.render.push(entry.renderMs);
+    if (entry.server && typeof entry.server.executionMs === 'number') bucket.server.push(entry.server.executionMs);
+  });
+  var table = el('table', undefined, 'metrics');
+  var head = el('tr'); ['operation', 'count', 'p50', 'p95', 'serverMs', 'tableReads'].forEach(function (key) { head.appendChild(el('th', t(key))); });
+  table.appendChild(head);
+  Object.keys(operations).sort().forEach(function (key) {
+    var bucket = operations[key], row = el('tr');
+    var samples = bucket.rpc.length ? bucket.rpc : bucket.render;
+    row.appendChild(el('td', bucket.operation));
+    row.appendChild(el('td', String(bucket.count)));
+    row.appendChild(el('td', percentile(samples, 0.5)));
+    row.appendChild(el('td', percentile(samples, 0.95)));
+    row.appendChild(el('td', percentile(bucket.server, 0.5)));
+    var reads = metrics.filter(function (entry) { return entry.operation === key && entry.server && typeof entry.server.tableReads === 'number'; });
+    row.appendChild(el('td', reads.length ? String(reads[reads.length - 1].server.tableReads) : '—'));
+    table.appendChild(row);
+  });
+  host.appendChild(table);
+  var tools = el('div', undefined, 'toolbar');
+  button('clearCache', function () { api.clear(); currentData = null; success(t('cacheCleared')); bootstrapFetch(); }, tools);
+  host.appendChild(tools);
+}
+function percentile(values, fraction) {
+  if (!values.length) return '—';
+  var sorted = values.slice().sort(function (a, b) { return a - b; });
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))].toFixed(1) + ' ms';
+}
+
+/**
+ * Renders the current view. Cached data is painted synchronously, so ordinary navigation never
+ * waits for google.script.run; only a view without any local data asks the server and shows a
+ * loading state. Stale data is revalidated in the background afterwards.
+ */
+function load(fresh, message) {
+  var requested = view, start = performance.now();
+  renderNav();
+  // A revoked identity never renders or requests private data again.
+  if (revoked) { byId('content').replaceChildren(); notice(t('accessDenied'), 'error'); return; }
+  if (requested === 'admin' || requested === 'diagnostics') { currentData = {}; syncError = ''; render(); return; }
+  if (message) success(message);
+  var cached = peekView(requested);
+  if (cached) {
+    currentData = cached; syncError = ''; render(); recordRender(requested, start);
+    if (fresh || staleView(requested)) revalidateView(requested);
+    return;
+  }
+  notice(t('loading'));
+  if (requested === 'overview') { bootstrapFetch(true); return; }
+  if (requested === 'tasks') syncTaskIndex(true);
+  fetchView(requested, fresh === true, true);
+}
+/** Authorized snapshot read; the same in-flight request is shared by every caller. */
+function bootstrapFetch(first) {
+  if (revoked) return;
+  refreshing = true; renderSync();
+  api.read('bootstrap', {}, true).then(function (data) {
+    refreshing = false;
+    if (!data) { renderSync(); return; }
+    applyBootstrap(data);
+    if (first) clearNotice();
+    repaintIfAllowed();
+  }).catch(function (error) { refreshing = false; handleError(error); });
+}
+function fetchView(name, fresh, first) {
+  var seq = ++sequence, start = performance.now();
+  api.read(name, filters[name] || {}, fresh === true).then(function (data) {
+    if (!data || seq !== sequence) return;
+    currentData = data; syncError = ''; store.at[name] = Date.now();
+    if (first) clearNotice();
+    render(); recordRender(name, start);
+  }).catch(function (error) { if (seq === sequence) handleError(error); });
+}
+function revalidateView(name) {
+  if (revoked) return;
+  if (name === 'projects' || name === 'tasks') {
+    var servedByServer = !!api.peek(name, filters[name] || {});
+    var local = name === 'projects' ? localDataset(name).complete : indexedTasks();
+    if (servedByServer || !local) { fetchView(name, true); return; }
+  }
+  if (name === 'overview' || name === 'projects' || name === 'tasks') { bootstrapFetch(); return; }
+  fetchView(name, true);
+}
+function revalidateCurrent() {
+  if (revoked || view === 'admin' || view === 'diagnostics') return;
+  if (staleView(view)) revalidateView(view);
+}
+function repaintIfAllowed() {
+  if (!canRepaint()) { renderSync(); return; }
+  if (view === 'diagnostics') { render(); return; }
+  var data = peekView(view);
+  if (!data) { renderSync(); return; }
+  currentData = data; syncError = ''; render();
+}
+function handleError(error) {
+  if (/MANAGER_ACCESS_DENIED|Insufficient role|Access denied|権限/.test(String(error.message || ''))) { revoke(); return; }
+  syncError = error.message;
+  notice(error.message, 'error');
+  if (!currentData) { byId('content').replaceChildren(); button('retry', function () { load(true); }, byId('content')); return; }
+  render();
+}
+/** A revoked or unverifiable identity drops every private cached view and the unsent drafts. */
+function revoke() {
+  revoked = true;
+  api.clear();
+  store.actor = null; store.references = null; store.responsibilities = [];
+  store.projects = null; store.tasks = null; store.overview = null; store.at = {};
+  drafts.clear(); pending.clear();
+  currentData = null; currentEditor = null; syncError = ''; refreshing = false;
+  try { if (byId('editor').open) byId('editor').close(); } catch (ignored) { /* no open dialog */ }
+  byId('content').replaceChildren();
+  byId('actor').textContent = '';
+  notice(t('accessDenied'), 'error');
 }
 function render() {
-  var host=byId('content');host.replaceChildren();var data=currentData;title(view,host);
+  var host=byId('content');host.replaceChildren();var data=currentData;resultsHost=null;title(view,host);
   var top=el('div',undefined,'toolbar');button('refresh',function(){load(true);},top);host.appendChild(top);
-  if(view==='overview') {
+  var sync=el('p',syncText(),'muted');sync.id='sync';host.appendChild(sync);
+  if(syncError){var banner=el('div',undefined,'error');banner.appendChild(el('p',syncError));button('retry',function(){load(true);},banner);host.appendChild(banner);}
+  if(view==='overview'&&data&&data.actor) {
     actorRole=data.actor.role;byId('actor').textContent=data.actor.name+' · '+data.actor.role;
     var kpis=el('div',undefined,'kpis');['active','risk','soon','overdue'].forEach(function(k){var box=el('article',t(k),'kpi');box.appendChild(el('strong',data.kpis[k]));kpis.appendChild(box);});host.appendChild(kpis);
-    host.appendChild(el('p',t('refresh')+': '+data.refreshedAt,'muted'));projectCards(data.projects,host);
+    host.appendChild(el('p',t('refresh')+': '+clockText(Date.parse(data.refreshedAt)||Date.now()),'muted'));projectCards(data.projects,host);
     host.appendChild(el('h2',t('upcoming')));tasks(data.upcoming,host);button('requests',function(){navigate('requests');},host);host.appendChild(el('span',' '+t('pending')+': '+data.pending));
-  } else if(view==='projects') {button('new',function(){openEditor('project');},top);listFilters('projects',host);projectCards(data,host);pagination(data,'projects',host);
-  } else if(view==='tasks') {button('new',function(){openEditor('task',null,null,{projectId:(filters.tasks||{}).projectId||'',subprojectId:(filters.tasks||{}).subprojectId||''});},top);listFilters('tasks',host);tasks(data,host);pagination(data,'tasks',host);
+  } else if(view==='projects') {button('new',function(){openEditor('project');},top);listFilters('projects',host);resultsHost=el('div');host.appendChild(resultsHost);renderList();
+  } else if(view==='tasks') {button('new',function(){openEditor('task',null,null,{projectId:(filters.tasks||{}).projectId||'',subprojectId:(filters.tasks||{}).subprojectId||''});},top);listFilters('tasks',host);resultsHost=el('div');host.appendChild(resultsHost);renderList();
+  } else if(view==='diagnostics') {renderDiagnostics(host);
+  } else if(view==='admin') {
+    var choices=el('div',undefined,'toolbar');['members','responsibilities','skills','automation','publication','status'].forEach(function(k){button(k,function(){navigate(k);},choices);});host.appendChild(choices);button('reportRefresh',function(){act('reportRefresh',{},true);},host);
+  } else if(!data) {
+    host.appendChild(el('p',t('loading'),'muted'));
   } else if(view==='project') {
     var p=data.record;host.appendChild(el('h2',p.Project_Name));button('edit',function(){openEditor('project',p.Project_ID,p);},top);
     button('archive',function(){act('projectArchive',{projectId:p.Project_ID,revision:p._revision},true);},top);
@@ -146,8 +506,6 @@ function render() {
     button('tasks',function(){navigate('tasks',{projectId:p.Project_ID});},top);
     host.appendChild(el('p',p.Description));host.appendChild(el('p',t('progress')+': '+(data.progress.calculated?data.progress.percent:'—')));host.appendChild(el('h2',t('hierarchy')));
     data.subprojects.filter(function(s){return !s.Parent_Subproject_ID;}).reduce(function(all,root){return all.concat([root],data.subprojects.filter(function(s){return s.Parent_Subproject_ID===root.Subproject_ID;}));},[]).forEach(function(s){var card=el('article',undefined,'card tree'+(s.Parent_Subproject_ID?' child':''));card.appendChild(el('h3',s.Subproject_Name+' · '+statusLabel(s.Status)));card.appendChild(el('p',t('progress')+': '+(s._progress&&s._progress.calculated?s._progress.percent:'—')));button('edit',function(){openEditor('subproject',s.Subproject_ID,s);},card);button('tasks',function(){navigate('tasks',{projectId:p.Project_ID,subprojectId:s.Subproject_ID,subprojectName:s.Subproject_Name});},card);if(!s.Parent_Subproject_ID)button('new',function(){openEditor('subproject',null,null,{projectId:p.Project_ID,parentId:s.Subproject_ID});},card);button(s.Status==='Archived'?'reactivate':'archive',function(){act(s.Status==='Archived'?'subprojectReactivate':'subprojectArchive',{subprojectId:s.Subproject_ID,revision:s._revision},true);},card);host.appendChild(card);});
-  } else if(view==='admin') {
-    var choices=el('div',undefined,'toolbar');['members','responsibilities','skills','automation','publication','status'].forEach(function(k){button(k,function(){navigate(k);},choices);});host.appendChild(choices);button('reportRefresh',function(){act('reportRefresh',{},true);},host);
   } else if(view==='members'||view==='responsibilities'||view==='skills') {
     var type=view==='members'?'member':view==='skills'?'skill':'responsibility';button('new',function(){openEditor(type);},top);
     if(view==='members')listFilters('members',host);
@@ -171,14 +529,55 @@ function renderAutomation(data,host) {
   var keys=["EMAIL_MODE","EMERGENCY_STOP","ASSIGNMENT_EMAIL_ENABLED","REASSIGNMENT_EMAIL_ENABLED","DEADLINE_CHANGE_EMAIL_ENABLED","DEADLINE_REMINDER_ENABLED","OVERDUE_REMINDER_ENABLED","WEEKLY_MANAGER_REPORT_ENABLED","DEADLINE_REQUEST_EMAIL_ENABLED","COMPLETION_REPORT_EMAIL_ENABLED","PENDING_REQUEST_REMINDER_ENABLED","REMINDER_OFFSETS","REMINDER_CATCHUP_DAYS","OVERDUE_FREQUENCY_DAYS","WEEKDAY_ONLY_SENDING","EXECUTION_WINDOW_START","EXECUTION_WINDOW_END","MANAGEMENT_REPORT_RECIPIENTS","WEEKLY_REPORT_DAY","WEEKLY_REPORT_TIME","CALENDAR_SYNC_ENABLED","DAILY_BACKUP_ENABLED","AUTO_DASHBOARD_REFRESH_ENABLED","AUTO_WORKLOAD_REFRESH_ENABLED","PROJECT_STALE_ALERT_ENABLED","PROJECT_STALE_DAYS"];
   keys.forEach(function(k){var value=draft.values[k],type=typeof value==='boolean'?'checkbox':typeof value==='number'?'number':'text';
     var control=field(box,k,Array.isArray(value)?value.join(','):value,k==='EMAIL_MODE'?['OFF','PREVIEW','LIVE']:null,function(v){draft.values[k]=v;draft.dirty=true;},type);control.disabled=actorRole!=='ADMIN';});
-  if(actorRole==='ADMIN') {field(form,'confirmation',draft.confirmation||'',null,function(v){draft.confirmation=v;});var save=el('button',t('settingsSave'));save.type='submit';form.appendChild(save);form.addEventListener('submit',function(e){e.preventDefault();if(!window.confirm(t('confirm')))return;var changes={};keys.forEach(function(k){if(JSON.stringify(draft.values[k])!==JSON.stringify(draft.base[k]))changes[k]=draft.values[k];});save.disabled=true;api.write('automationSave',{changes:changes,confirmation:draft.confirmation||'',confirmed:true,revision:draft.revision}).then(function(){drafts.delete('automation');load(true,t('saved'));}).catch(function(e){notice(e.message,'error');}).finally(function(){save.disabled=false;});});}
+  if(actorRole==='ADMIN') {field(form,'confirmation',draft.confirmation||'',null,function(v){draft.confirmation=v;});var save=el('button',t('settingsSave'));save.type='submit';form.appendChild(save);form.addEventListener('submit',function(e){e.preventDefault();if(!window.confirm(t('confirm')))return;var changes={};keys.forEach(function(k){if(JSON.stringify(draft.values[k])!==JSON.stringify(draft.base[k]))changes[k]=draft.values[k];});save.disabled=true;api.write('automationSave',{changes:changes,confirmation:draft.confirmation||'',confirmed:true,revision:draft.revision}).then(function(result){drafts.delete('automation');settle('automationSave',{},result);success(t('saved'));}).catch(function(e){notice(e.message,'error');}).finally(function(){save.disabled=false;});});}
   host.appendChild(form);
 }
 
 function structured(value,host) { if(value && typeof value==='object'){var dl=el('dl');Object.keys(value).forEach(function(k){dl.appendChild(el('dt',EH_I18N.has('web.'+k)?t(k):k));var dd=el('dd');structured(value[k],dd);dl.appendChild(dd);});host.appendChild(dl);}else host.appendChild(el('span',value===null?'—':String(value))); }
+/**
+ * Records a confirmed write: the snapshot is patched where it can be, the current view is
+ * repainted from local data and only the affected aggregates are revalidated. No page reload and
+ * no loss of unrelated cached views; "Saved" is shown only after the server confirmed the write.
+ */
+function settle(action, payload, result) {
+  patchSummary(action, payload, result);
+  repaintIfAllowed();
+  revalidateView(view === 'admin' || view === 'diagnostics' ? 'overview' : view);
+}
+/** Local yyyy-MM-dd text for a value that may be a Sheet date serialized as an instant. */
+function dayText(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value.slice(0, 10);
+  var date = new Date(value);
+  if (isNaN(date.getTime())) return '';
+  return date.getFullYear() + '-' + ('0' + (date.getMonth() + 1)).slice(-2) + '-' + ('0' + date.getDate()).slice(-2);
+}
+/** Applies the authoritative write result to the local summaries without inventing values. */
+function patchSummary(action, payload, result) {
+  if (!result) return;
+  var row = result.task || (result.Project_ID ? result : null);
+  if (row && row.Task_ID && indexedTasks()) {
+    var projects = Object.create(null);
+    ((store.projects && store.projects.items) || []).forEach(function (p) { projects[p.id] = p; });
+    var project = projects[row.Project_ID] || {};
+    var owner = {};
+    ((store.references && store.references.members) || []).forEach(function (m) { if (m.id === row.Owner_Member_ID) owner = m; });
+    var summary = {id: row.Task_ID, name: row.Task_Name, projectId: row.Project_ID, project: project.name || '',
+      subprojectId: row.Subproject_ID || '', ownerId: row.Owner_Member_ID || '', owner: owner.name || '',
+      responsibilityId: project.responsibilityId || '', deadline: dayText(row.Due_Date), status: row.Status,
+      progress: row.Progress_Percent, priority: row.Priority};
+    var known = store.tasks.items.some(function (item) { return item.id === summary.id; });
+    store.tasks.items = known ? store.tasks.items.map(function (item) { return item.id === summary.id ? summary : item; })
+      : store.tasks.items.concat([summary]);
+    if (!known) store.tasks.total = store.tasks.items.length;
+  }
+  if (payload.taskId) invalidatePrefixes(['task' + JSON.stringify({id: payload.taskId})]);
+  if (payload.projectId) invalidatePrefixes(['project' + JSON.stringify({id: payload.projectId})]);
+  if (payload.subprojectId) invalidatePrefixes(['project']);
+}
 function act(action,payload,confirm) {
   if(confirm && !window.confirm(t('confirm')))return Promise.resolve(false);payload.confirmed=!!confirm;notice(t('saving'));
-  return api.write(action,payload).then(function(result){load(true,result&&result.status==='STALE'?t('requestStale'):t('saved'));return !(result&&result.status==='STALE');}).catch(function(e){notice(e.message,'error');return false;});
+  return api.write(action,payload).then(function(result){var stale=!!(result&&result.status==='STALE');settle(action,payload,result);success(stale?t('requestStale'):t('saved'));return !stale;}).catch(function(e){notice(e.message,'error');return false;});
 }
 // One create/edit form per record type. Field mapping sends partial patches only.
 var schemas={
@@ -191,9 +590,18 @@ var schemas={
  skillAssess:{create:'skillAssess',fields:{memberId:'Member_ID',skillId:'Skill_ID',level:'Current_Level',evidence:'Evidence',trainingAction:'Training_Action',nextReviewDate:'Next_Review_Date'}}
 };
 function openEditor(type,id,record,defaults) {
-  var seq=++drawerSequence, key=type+':'+(id||'new'), old=drafts.get(key);notice(t('loading'));
-  var fetch=record?Promise.resolve(record):id?api.read(type,{id:id},true).then(function(d){var r=d.record;r._confirmations=d.confirmations||[];return r;}):Promise.resolve({});
-  Promise.all([fetch,api.read('references')]).then(function(results){if(seq!==drawerSequence)return;references=results[1];var schema=schemas[type];if(!old){old={type:type,id:id,original:results[0],values:{},base:{},subprojects:[]};Object.keys(schema.fields).forEach(function(k){old.values[k]=results[0][schema.fields[k]]===undefined?'':results[0][schema.fields[k]];});if(!id){Object.assign(old.values,{priority:'Medium',statusField:type==='project'?'Planned':'Assigned',visibility:'RESTRICTED',durationUnit:'DAY',durationBasis:'WORKING_DAYS',enabled:true,role:'MEMBER'},defaults||{});}old.base=Object.assign({},old.values);drafts.set(key,old);}currentEditor={key:key,draft:old};renderEditor();byId('editor').showModal();notice('');if(old.values.projectId)loadSubprojects(old.values.projectId,old);if(type==='skillAssess')api.read('skills').then(function(d){old.skills=d.items;renderEditor();});}).catch(function(e){notice(e.message,'error');});
+  var seq=++drawerSequence, key=type+':'+(id||'new'), old=drafts.get(key), fromCache=!record&&!!id&&!!api.peek(type,{id:id}), loading=!(record||fromCache);
+  if(loading)notice(t('loading'));
+  var fetch=record?Promise.resolve(record):id?detail(type,id,false):Promise.resolve({});
+  Promise.all([fetch,api.read('references')]).then(function(results){if(seq!==drawerSequence)return;var schema=schemas[type];if(!old){old={type:type,id:id,original:results[0],values:{},base:{},subprojects:[]};Object.keys(schema.fields).forEach(function(k){old.values[k]=results[0][schema.fields[k]]===undefined?'':results[0][schema.fields[k]];});if(!id){Object.assign(old.values,{priority:'Medium',statusField:type==='project'?'Planned':'Assigned',visibility:'RESTRICTED',durationUnit:'DAY',durationBasis:'WORKING_DAYS',enabled:true,role:'MEMBER'},defaults||{});}old.base=Object.assign({},old.values);drafts.set(key,old);}currentEditor={key:key,draft:old};renderEditor();byId('editor').showModal();if(loading)notice('');if(old.values.projectId)loadSubprojects(old.values.projectId,old);if(type==='skillAssess')api.read('skills').then(function(d){old.skills=d.items;renderEditor();});if(fromCache)refreshDetail(type,id,old);}).catch(function(e){notice(e.message,'error');});
+}
+/** Cached record for an instant form; the server copy is fetched separately. */
+function detail(type,id,fresh) {
+  return api.read(type,{id:id},fresh===true).then(function(d){var r=d.record;r._confirmations=d.confirmations||[];return r;});
+}
+/** A cached form refreshes in the background; an untouched draft adopts the newer revision. */
+function refreshDetail(type,id,draft) {
+  detail(type,id,true).then(function(record){if(currentEditor&&currentEditor.draft===draft&&!draft.dirty){draft.original=record;Object.keys(schemas[type].fields).forEach(function(k){draft.values[k]=record[schemas[type].fields[k]]===undefined?'':record[schemas[type].fields[k]];});draft.base=Object.assign({},draft.values);renderEditor();}}).catch(function(){ /* the save path still checks the revision */ });
 }
 function loadSubprojects(projectId,draft){var seq=(draft.subSequence||0)+1;draft.subSequence=seq;api.read('project',{id:projectId}).then(function(d){if(draft.subSequence!==seq)return;draft.subprojects=d.subprojects;if(currentEditor&&currentEditor.draft===draft)renderEditor();}).catch(function(e){notice(e.message,'error');});}
 function renderEditor() {
@@ -204,9 +612,9 @@ function renderEditor() {
     if(['deadline','plannedStart','nextReviewDate'].indexOf(key)>=0)type='date';
     if(['durationValue','estimatedHours','actualHours','progress','capacity','requiredLevel','level'].indexOf(key)>=0)type='number';
     if(key==='enabled')type='checkbox';if(key==='email')type='email';
-    if(key==='projectId')options=[{id:'',name:'—'}].concat(references.projects);
-    if(key==='ownerId'||key==='memberId')options=[{id:'',name:'—'}].concat(references.members);
-    if(key==='responsibilityId')options=[{id:'',name:'—'}].concat(references.responsibilities);
+    if(key==='projectId')options=[{id:'',name:'—'}].concat(references().projects);
+    if(key==='ownerId'||key==='memberId')options=[{id:'',name:'—'}].concat(references().members);
+    if(key==='responsibilityId')options=[{id:'',name:'—'}].concat(references().responsibilities);
     if(key==='subprojectId'||key==='parentId')options=[{id:'',name:'—'}].concat((d.subprojects||[]).filter(function(s){return s.Subproject_ID!==d.id;}).map(function(s){return{id:s.Subproject_ID,name:s.Subproject_Name+' · '+statusLabel(s.Status)};}));
     if(key==='skillId')options=[{id:'',name:'—'}].concat((d.skills||[]).map(function(s){return{id:s.Skill_ID,name:s.Skill_Name};}));
     if(key==='statusField')options=d.type==='project'?['Planned','Active','On Hold','Completed','Cancelled']:['Not Started','Assigned','In Progress','Blocked','On Hold','Done','Cancelled'];
@@ -234,12 +642,15 @@ function renderEditor() {
   if(d.type==='task'&&d.id)['taskApprove','taskConfirm'].forEach(function(a){button(a,function(){act(a,{taskId:d.id,revision:d.original._revision},true).then(function(ok){if(ok)api.read('task',{id:d.id},true).then(function(r){d.original=r.record;d.original._confirmations=r.confirmations;renderEditor();});});},actions);});
   form.appendChild(actions);form.addEventListener('submit',function(e){e.preventDefault();if(d.saving)return;var savedKey=currentEditor.key;var payload={};Object.keys(schema.fields).forEach(function(k){if(k==='role'&&actorRole!=='ADMIN')return;if(d.id&&String(d.values[k])===String(d.base[k]))return;var target=k==='statusField'?'status':k==='enabled'?'active':k;payload[target]=d.values[k];});confirms.forEach(function(k){payload[k]=d.values[k]===true;});if(d.id){payload[schema.key]=d.id;payload.revision=d.original._revision;}if(d.type==='task'){payload.deadline=d.values.deadline;payload.durationValue=d.values.durationValue;payload.durationUnit=d.values.durationUnit;payload.durationBasis=d.values.durationBasis;}
     d.saving=true;save.disabled=true;message.textContent=t('saving');
-    api.write(d.id?schema.save:schema.create,payload).then(function(){drafts.delete(savedKey);if(currentEditor&&currentEditor.draft===d){currentEditor=null;byId('editor').close();}load(true,t('saved'));}).catch(function(error){message.textContent=error.message;message.className='error';}).finally(function(){d.saving=false;save.disabled=false;});
+    api.write(d.id?schema.save:schema.create,payload).then(function(result){drafts.delete(savedKey);if(currentEditor&&currentEditor.draft===d){currentEditor=null;byId('editor').close();}settle(d.id?schema.save:schema.create,payload,result);success(t('saved'));}).catch(function(error){message.textContent=error.message;message.className='error';}).finally(function(){d.saving=false;save.disabled=false;});
   });host.appendChild(form);
 }
-function switchLanguage(){lang=EH_I18N.write(lang==='ja'?'en':'ja');renderNav();if(currentData)render();if(currentEditor)renderEditor();}
+function switchLanguage(){lang=EH_I18N.write(lang==='ja'?'en':'ja');renderNav();render();if(currentEditor)renderEditor();}
 byId('language').addEventListener('click',switchLanguage);
 byId('navToggle').addEventListener('click',function(){var hidden=document.body.classList.toggle('collapsed');byId('navToggle').setAttribute('aria-expanded',String(!hidden));});
+if(byId('diagnostics'))byId('diagnostics').addEventListener('click',function(){navigate('diagnostics');});
+window.addEventListener('focus',revalidateCurrent);
+if(typeof document.addEventListener==='function')document.addEventListener('visibilitychange',function(){if(document.hidden!==true)revalidateCurrent();});
 window.addEventListener('beforeunload',function(e){if(pending.size||Array.from(drafts.values()).some(function(d){return d.dirty||d.note;})){e.preventDefault();e.returnValue='';}});
 metrics.push({operation:'shell',renderMs:performance.now()});load(false);
 }());

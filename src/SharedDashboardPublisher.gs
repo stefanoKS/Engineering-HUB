@@ -19,7 +19,7 @@
  *   duplicates tasks.
  */
 var SharedDashboardPublisher = (function () {
-  var PUBLISHER_VERSION = '1.5.0';
+  var PUBLISHER_VERSION = '1.5.1';
   var CONTRACT_VERSION = SharedDashboardModel.CONTRACT_VERSION;
   var DESTINATION_PROPERTY = 'SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID';
   var META_SHEET = 'PUBLISHED_META';

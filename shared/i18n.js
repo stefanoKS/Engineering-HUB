@@ -1672,3 +1672,50 @@ Object.assign(EH_I18N.DICTIONARY.en,{
   "web.unknownSave": "Connection interrupted. Reload and check the saved result before retrying.",
   "web.requestStale": "The request is stale. Review the current task."
 });
+
+// V1.5.1 local-first navigation labels.
+Object.assign(EH_I18N.DICTIONARY.ja,{
+  "web.searching": "検索中…",
+  "web.lastUpdated": "最終更新",
+  "web.refreshing": "更新中…",
+  "web.localHint": "入力中は名称・ID・案件・担当者で即時に絞り込みます。検索を押すと説明・完了条件も含めて全件を検索します。",
+  "web.serverHint": "件数が多いため、サーバー側で全件を検索しページ単位で表示します。",
+  "web.diagnostics": "計測",
+  "web.diagnosticsHint": "開発用の計測表示です。記録の内容や個人情報は表示しません。",
+  "web.clearCache": "ローカルデータを破棄",
+  "web.cacheCleared": "ローカルデータを破棄しました",
+  "web.accessDenied": "権限を確認できないため、表示中のデータと未保存の下書きを破棄しました。",
+  "web.rpcCount": "通信回数",
+  "web.cacheHits": "ローカル再利用",
+  "web.staleResponses": "破棄した古い応答",
+  "web.operation": "操作",
+  "web.count": "回数",
+  "web.p50": "p50",
+  "web.p95": "p95",
+  "web.serverMs": "サーバー処理(ms)",
+  "web.tableReads": "シート読み取り",
+  "web.pendingWrites": "未完了の保存"
+});
+Object.assign(EH_I18N.DICTIONARY.en,{
+  "web.searching": "Searching…",
+  "web.lastUpdated": "Last updated",
+  "web.refreshing": "Refreshing…",
+  "web.localHint": "Typing narrows by name, ID, project and owner instantly. Search covers every field, including description and acceptance criteria.",
+  "web.serverHint": "This dataset is large, so every record is searched on the server and shown page by page.",
+  "web.diagnostics": "Diagnostics",
+  "web.diagnosticsHint": "Development measurement view. No record content or personal data is shown.",
+  "web.clearCache": "Clear local data",
+  "web.cacheCleared": "Local data cleared",
+  "web.accessDenied": "Access could not be verified, so the displayed data and unsaved drafts were cleared.",
+  "web.rpcCount": "RPC calls",
+  "web.cacheHits": "Local reuse",
+  "web.staleResponses": "Discarded stale responses",
+  "web.operation": "Operation",
+  "web.count": "Calls",
+  "web.p50": "p50",
+  "web.p95": "p95",
+  "web.serverMs": "Server ms",
+  "web.tableReads": "Sheet reads",
+  "web.pendingWrites": "Pending writes"
+});
+

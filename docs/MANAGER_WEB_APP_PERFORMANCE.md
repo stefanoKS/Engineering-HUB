@@ -1,8 +1,55 @@
-# Manager Web App performance — V1.5
+# Manager Web App performance — V1.5.1 local-first navigation
 
-Measured 2026-10-28 on Windows, Node v24.21.0, mocked Google services. **Real Workspace timings: NOT_RUN.** Raw results: [V1_5_PERFORMANCE.json](checkgates/V1_5_PERFORMANCE.json). Reproduce with node scripts/manager-web-benchmark.js. Small/medium/large contain 10/100/300 projects, 100/1,000/3,000 tasks, two subprojects per project, active/retired responsibilities, four members, archived records and pending deadline/completion requests.
+Measured 2026-10-28 on Windows, Node v24.21.0, mocked Google services. **Real Workspace timings: NOT_RUN.** Raw results: [V1_5_1_PERFORMANCE.json](checkgates/V1_5_1_PERFORMANCE.json) (V1.5.1) and [V1_5_PERFORMANCE.json](checkgates/V1_5_PERFORMANCE.json) (V1.5, kept as historical evidence). Reproduce with `node scripts/manager-web-benchmark.js`.
 
-This document records the **review-correction** measurement: the project list and overview no longer return the stored `PROJECTS.Progress_Percent` / `PROJECTS.Health` columns and instead derive progress, health, task counts and the neutral deadline state from current rows (`Dashboard.projectMetrics`). Every table is still read at most once per request; the derived values add the MILESTONES, ISSUES and AUTOMATION_SETTINGS reads that health classification needs. Task saves are unchanged and still skip the report refresh, so a save costs what it did before while the next read shows fresh values.
+## V1.5.1: what changed and what it measured
+
+The V1.5 page asked the server for every view: opening 案件 cost two sequential RPCs (`references`, then `projects`) and タスク cost another, each one a full Apps Script execution with its own Sheets reads. The 30-second browser cache then forced a reload of everything after any write.
+
+V1.5.1 adds one authorized snapshot for ordinary navigation:
+
+| Operation | Table reads | Payload (10/100) | Payload (100/1000) | Payload (300/3000) | p50 ms (10/100/300) |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `bootstrap` (overview + reference choices + every project summary + task count) | 9 | 8,515 B | 48,663 B | 130,867 B | 4.01 / 35.25 / 113.22 |
+| `taskIndex` (compact columnar task summaries) | 3 | 15,052 B | 152,716 B | 467,516 B | 1.75 / 15.52 / 47.99 |
+| `overview` (unchanged, for comparison) | 9 | 3,967 B | 7,483 B | 7,487 B | 4.28 / 38.15 / 104.38 |
+
+`bootstrap` costs about the same server time as the previous `overview` because both read the same nine tables inside one read context; it simply returns the project summaries and the reference choices that used to arrive in separate calls. `taskIndex` is only requested when its size is known to be within the bound, and above 1,000 tasks it is fetched when タスク is first opened rather than at startup. Timings vary by a few milliseconds between runs on the same machine; the committed JSON is one complete run and is the authoritative record.
+
+Navigation measured through the real client in the same harness (`entry.ui` in the raw JSON), with the previous release's client run on identical fixtures for comparison:
+
+| Projects/tasks | Previous client: overview→projects→tasks | Previous nav p50 (projects / tasks) | V1.5.1 cached navigation p50 | V1.5.1 local filter p50 | V1.5.1 cached project open |
+| --- | --- | --- | ---: | ---: | ---: |
+| 10/100 | 4 read RPCs | 4.30 / 2.58 ms | **0.57 ms** (0 RPCs) | **0.06 ms** | **0.08 ms** |
+| 100/1000 | 4 read RPCs | 25.94 / 12.08 ms | **1.45 ms** (0 RPCs) | **0.36 ms** | **0.06 ms** |
+| 300/3000 | 4 read RPCs | 26.75 / 35.97 ms | **0.92 ms** (0 RPCs) | **1.80 ms** | **0.07 ms** |
+
+First load and the first project open do pay for the snapshot:
+
+| Projects/tasks | Previous first load (1 RPC) | V1.5.1 first load (2–3 RPCs) | First (uncached) project open | Navigation while a request is in flight |
+| --- | ---: | ---: | ---: | ---: |
+| 10/100 | 9.05 ms | 35.94 ms | 1.45 ms | 0.60 ms p50 |
+| 100/1000 | 39.09 ms | 68.03 ms | 4.14 ms | 1.31 ms p50 |
+| 300/3000 | 105.32 ms | 104.32 ms | 13.76 ms | 0.02 ms p50 |
+
+These are Node/vm figures from the mocked harness, not browser paints or Workspace timings. The first-load difference is the project snapshot plus the background task index; at 300 projects it is within 2 % of the previous first load because the same nine tables dominate. Browser paint time, real RPC latency and real Sheets read time remain **NOT_RUN**. A live DEV measurement must record the actual account, dataset, timestamp, execution ID and deployment version.
+
+## How the snapshot stays correct
+
+- The snapshot is authorized on every call: `ManagerWeb.authorize()` re-checks `Session.getActiveUser()`, the allowed domains and `Access.requireManager()` before `bootstrap`/`taskIndex` run. Members and viewers cannot reach the manager web app at all.
+- Datasets are all-or-nothing. Above `TASK_INDEX_LIMIT = 3000` tasks or `PROJECT_INDEX_LIMIT = 1000` projects the response reports `complete: false` and carries no rows, so the browser keeps the paginated `tasks`/`projects` operations. A partial list is never presented as complete.
+- The task index contains only the allowlisted summary columns (id, names, project/subproject/owner/responsibility ids, deadline, status, progress, priority). Descriptions, acceptance criteria, estimates, notes and request text never reach the browser outside the single-record detail form.
+- Local filtering mirrors the server filters (project, subproject, owner, status, responsibility, deadline range, sort. The free-text field only matches the fields the index holds; pressing 検索 still runs the server search over description and acceptance criteria, so a description-only match can never be silently missed.
+- Every dataset has a 30-second freshness window. Cached data paints immediately, a background `bootstrap` (and, when it is itself stale, `taskIndex`) revalidates it, and the toolbar shows 最終更新 / 更新中…. Tab focus and `visibilitychange` revalidate a stale view.
+- A write patches the affected summary rows, drops only the affected detail and aggregate entries, keeps unrelated cached views, and revalidates the affected dataset. "Saved" is only shown after the server confirmed the write. A refused write keeps the draft and the stored revision check remains authoritative.
+- A response whose dispatch was superseded by a newer request, or by an invalidation (`api.clear`, a write, a revoked session), is discarded instead of repopulating the cache. `MANAGER_ACCESS_DENIED`/`Insufficient role` clears every cached view and unsent draft and blocks further requests.
+- Nothing private is persisted: no localStorage/IndexedDB record cache and no server-side cache. The language preference remains the only browser-stored value.
+
+## V1.5 measurements (historical)
+
+Measured 2026-10-28 on Windows, Node v24.21.0, mocked Google services. **Real Workspace timings: NOT_RUN.** Raw results: [V1_5_PERFORMANCE.json](checkgates/V1_5_PERFORMANCE.json). Small/medium/large contain 10/100/300 projects, 100/1,000/3,000 tasks, two subprojects per project, active/retired responsibilities, four members, archived records and pending deadline/completion requests.
+
+This section records the **V1.5 review-correction** measurement: the project list and overview no longer return the stored `PROJECTS.Progress_Percent` / `PROJECTS.Health` columns and instead derive progress, health, task counts and the neutral deadline state from current rows (`Dashboard.projectMetrics`). Every table is still read at most once per request; the derived values add the MILESTONES, ISSUES and AUTOMATION_SETTINGS reads that health classification needs. Task saves are unchanged and still skip the report refresh, so a save costs what it did before while the next read shows fresh values.
 
 ## Method and actual values
 
@@ -58,11 +105,21 @@ Every manager RPC returns numeric executionMs, dataMs, tableReads and applicatio
 
 window.ManagerWebClient.metrics is an in-memory, numeric operation/timing list. RPC roundTripMs includes client queue time and the full call. View entries contain renderMs and totalMs. The shell entry is the navigation-relative performance.now timestamp at shell initialization, not a paint measurement. No emails, record bodies, descriptions or credentials are logged in these metrics. Do not export arbitrary page state as performance evidence.
 
-Overview, project list/detail, task search/detail/create/update, request approval, manual publication and manual report refresh use the same instrumentation. First authorized response is the first overview RPC; initial page paint should be measured with the browser Performance panel during DEV testing. Browser render/RPC p50/p95 and pure calculation timings remain NOT_RUN; local DOM tests verify ordering and loading behavior, not browser timing targets.
+The 計測 / Diagnostics view (header button, every manager screen) shows the same numbers without DevTools: RPC count, local reuse, discarded stale responses, pending writes, dataset sizes and a per-operation table (calls, p50/p95 of the round trip or render, last server execution time and table reads). It also offers ローカルデータを破棄 / Clear local data. The measured window is the current page session only; nothing is uploaded or persisted.
+
+Overview, project list/detail, task search/detail/create/update, request approval, manual publication and manual report refresh use the same instrumentation. First authorized response is the first bootstrap RPC; initial page paint should be measured with the browser Performance panel during DEV testing. Browser render/RPC p50/p95 and pure calculation timings remain NOT_RUN; local DOM tests verify ordering and loading behavior, not browser timing targets.
 
 ## Cache and remaining bottlenecks
 
-Read tables/workbook are reused only within an Apps Script execution. Writes invalidate affected tables and lock acquisition discards stale reads before revision checks. Browser reads cache for 30 seconds; writes invalidate the cache; no private persistent/shared server cache exists. Heavy reports run only when explicitly requested. Task saves do not invoke Dashboard.refresh.
+Read tables/workbook are reused only within an Apps Script execution. Writes invalidate affected tables and lock acquisition discards stale reads before revision checks. The browser keeps an authorized in-memory snapshot for the session (see above) with a 30-second freshness window per dataset; `api.clear()` (diagnostics view) drops it explicitly; no private persistent/shared server cache exists. Heavy reports run only when explicitly requested. Task saves do not invoke Dashboard.refresh.
+
+Remaining bottlenecks, measured rather than hidden:
+
+- `bootstrap` returns every project summary, so its payload grows with the project count (131 KB at 300 projects). Above 1,000 projects the dataset is reported incomplete and the projects view returns to server paging.
+- `taskIndex` grows with the task count (468 KB at 3,000 tasks) and is therefore fetched in the background (≤1,000 tasks) or when タスク opens. A very large dataset pays that payload once per session/staleness window.
+- Local free-text filtering covers the summary fields only; description/acceptance-criteria matches need the explicit server search.
+- The server still scans the TASKS table in memory after one batch read; Google Sheets is not an indexed database. The `tasks` operation now reads three tables instead of four because an unfiltered task read no longer loads projects and subprojects for the ancestor-aware active-work rule.
+- Very large request/history queues and member directories still use plain server paging.
 
 Project progress, health, task counts and deadline wording are derived on every project read (`Dashboard.projectMetrics`) instead of being taken from the stored `PROJECTS` columns, which only `Dashboard.refresh`/`Progress.refresh` rewrite. That keeps the overview and cards correct after a task save without a report refresh. The cost is one read each of MILESTONES, ISSUES and AUTOMATION_SETTINGS per request plus one `Health.classify` call per returned project; the paginated project list limits that to the visible page. Do not reintroduce a second stored copy of these values, and do not call `Dashboard.refresh` from a task save to fix staleness.
 

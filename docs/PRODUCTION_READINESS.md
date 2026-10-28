@@ -1,16 +1,30 @@
 # Production readiness
 
-## Current assessment — V1.5 (2026-10-28)
+## Current assessment — V1.5.1 (2026-10-28)
+
+**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+
+Version 1.5.1; schema 6; employee contract 1.4. Starting SHA: adde446e856f992d16aca18b116489126b9a57c7. The delivery SHA is recorded in [V1_5_1_GATE_10.md](checkgates/V1_5_1_GATE_10.md).
+
+Actual local results: 406 tests, 406 pass, 0 fail, 0 skipped; npm ci/lint/validate exit 0; validator covers 35 manager files, 3 employee files and 709 translation keys; the mock benchmark ran. The old 328-test figures below are historical V1.4.1 results and do not describe current evidence.
+
+V1.5.1 changes only how the manager page obtains and refreshes data: one authorized snapshot (`bootstrap`) plus a compact task index, an in-memory store with stale-while-revalidate, local filtering with an authoritative server search, selective invalidation after writes, and revocation handling. Schema, contract, authorization, revisions, audit, publication, the sidebar and the employee app are unchanged. The measured speed figures in [MANAGER_WEB_APP_PERFORMANCE.md](MANAGER_WEB_APP_PERFORMANCE.md) are mock values; **no live Workspace latency was measured** and none is claimed.
+
+All ten V1.5.1 checkgates record local PASS results and the release stays **BLOCKED** for live verification. Required remaining work: real ADMIN/MANAGER and denied-account identity matrix; A sharing isolation; complete DEV CRUD/request/publication/audit workflow; concurrent-manager/quota recovery; original sidebar; real latency/service attribution; the seven local-first smoke cases (21–27) that can only confirm the perceived-speed improvement in DEV; actual 200 % browser zoom and assistive technology. In particular the prior committedDeadline snapshot mismatch is locally fixed but its live retest remains UNVERIFIED.
+
+Use the existing DEVELOPMENT resources described by the operator; their actual creation/sharing/deployment state was not inspected here. No code was uploaded with clasp, no live deployment/data/migration/trigger/email/Calendar action was performed. Follow [DEV installation](MANAGER_WEB_APP_DEPLOYMENT.md) and [the smoke plan](MANAGER_WEB_APP_SMOKE_TEST.md). No production activation without reviewed evidence.
+
+## Historical V1.5 assessment
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 
 Version 1.5.0; schema 6; employee contract 1.4. Starting SHA: 5c1143edef3f8ba74ce92219a59ea58723847941. Final source/evidence SHA is recorded in [V1_5_GATE_10.md](checkgates/V1_5_GATE_10.md).
 
-Actual local results: 387 tests, 387 pass, 0 fail, 0 skipped; npm ci/lint/validate exit 0; validator covers 35 manager files, 3 employee files and 689 translation keys. The old 328-test figures below are historical V1.4.1 results and do not describe current evidence.
+Actual local results: 387 tests, 387 pass, 0 fail, 0 skipped; npm ci/lint/validate exit 0; validator covers 35 manager files, 3 employee files and 689 translation keys.
 
 After the review correction described in [V1_5_GATE_10.md](checkgates/V1_5_GATE_10.md) §14 the browser derives project progress/health from current rows, a deadline-only task keeps an unknown planned start and the project cards expose an accessible progress bar. Those are local results only; nothing about the live Workspace assessment changed.
 
-All ten V1.5 checkgates are **BLOCKED** because their complete acceptance criteria include unexecuted real Workspace or accessibility/timing verification. Local subcriteria and corrections are recorded individually; no confirmed local regression failure remains. Required remaining work: real ADMIN/MANAGER and denied-account identity matrix; A sharing isolation; complete DEV CRUD/request/publication/audit workflow; concurrent-manager/quota recovery; original sidebar; real latency/service attribution; actual 200% browser zoom and assistive technology. In particular the prior committedDeadline snapshot mismatch is locally fixed but its live retest remains UNVERIFIED.
+All ten V1.5 checkgates are **BLOCKED** because their complete acceptance criteria include unexecuted real Workspace or accessibility/timing verification.
 
 Use the existing DEVELOPMENT resources described by the operator; their actual creation/sharing/deployment state was not inspected here. No code was uploaded with clasp, no live deployment/data/migration/trigger/email/Calendar action was performed. Follow [DEV installation](MANAGER_WEB_APP_DEPLOYMENT.md) and [20 live tests](MANAGER_WEB_APP_SMOKE_TEST.md). No production activation without reviewed evidence.
 

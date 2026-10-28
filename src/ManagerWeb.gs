@@ -8,6 +8,9 @@ function doGet() {
 }
 
 var ManagerWeb = (function () {
+  // Bounds of the one-shot navigation snapshot. Above them the browser keeps the paginated,
+  // server-side search path instead of receiving a truncated list.
+  var TASK_INDEX_LIMIT = 3000, PROJECT_INDEX_LIMIT = 1000;
   function authorize() {
     var email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
     var domains = String(PropertiesService.getScriptProperties().getProperty('MANAGER_WEB_ALLOWED_DOMAINS') || '')
@@ -73,6 +76,7 @@ var ManagerWeb = (function () {
       var state = deadlineState(deadline, p.Status);
       return {id: p.Project_ID, name: p.Project_Name, responsibilityId: p.Responsibility_ID || '',
         responsibility: responsibilities[p.Responsibility_ID] ? responsibilities[p.Responsibility_ID].Name : '',
+        ownerId: p.Project_Owner_ID || '',
         owner: members[p.Project_Owner_ID] ? members[p.Project_Owner_ID].Name : '', status: p.Status,
         deadline: deadline, deadlineKind: state.kind, daysRemaining: state.days,
         progress: typeof m.progress === 'number' ? m.progress : '', health: m.health || 'UNKNOWN',
@@ -91,6 +95,27 @@ var ManagerWeb = (function () {
     if (days === 0) return {kind: 'today', days: 0};
     return {kind: days < 0 ? 'overdue' : 'future', days: days};
   }
+  /** Compact, allowlisted task summary. Descriptions, criteria, notes and hours stay out. */
+  function taskSummary(task, projects, members) {
+    var project = projects[task.Project_ID] || {};
+    return {id: task.Task_ID, name: task.Task_Name, projectId: task.Project_ID,
+      project: project.Project_Name || '', subprojectId: task.Subproject_ID || '',
+      ownerId: task.Owner_Member_ID || '',
+      owner: (members[task.Owner_Member_ID] || {}).Name || '',
+      responsibilityId: project.Responsibility_ID || '',
+      deadline: Domain.date(task.Due_Date), status: task.Status,
+      progress: task.Progress_Percent, priority: task.Priority};
+  }
+  /** One ordering definition so a locally sorted browser list matches the server page. */
+  function taskOrder(input) {
+    var priorities = {Critical: 0, High: 1, Medium: 2, Low: 3};
+    return function (a, b) {
+      var order = input && input.sort === 'priority'
+        ? (priorities[a.Priority] || 0) - (priorities[b.Priority] || 0)
+        : (Domain.date(a.Due_Date) || '9999').localeCompare(Domain.date(b.Due_Date) || '9999');
+      return order || a.Task_ID.localeCompare(b.Task_ID);
+    };
+  }
   function taskList(input) {
     var projects = index('PROJECTS'), members = index('MEMBERS');
     var rows = Tasks.list(input).filter(function (t) {
@@ -99,31 +124,76 @@ var ManagerWeb = (function () {
       if (input.deadlineAfter && (!t.Due_Date || Domain.date(t.Due_Date) < input.deadlineAfter)) return false;
       return true;
     });
-    var priorities = {Critical: 0, High: 1, Medium: 2, Low: 3};
-    rows.sort(function (a, b) {
-      return (input.sort === 'priority' ? (priorities[a.Priority] || 0) - (priorities[b.Priority] || 0) :
-        (Domain.date(a.Due_Date) || '9999').localeCompare(Domain.date(b.Due_Date) || '9999')) || a.Task_ID.localeCompare(b.Task_ID);
-    });
+    rows.sort(taskOrder(input));
     var result = page(rows, input);
-    result.items = result.items.map(function (t) { return {id: t.Task_ID, name: t.Task_Name,
-      projectId: t.Project_ID, project: (projects[t.Project_ID] || {}).Project_Name || '', subprojectId: t.Subproject_ID || '',
-      owner: (members[t.Owner_Member_ID] || {}).Name || '', deadline: Domain.date(t.Due_Date),
-      status: t.Status, progress: t.Progress_Percent, priority: t.Priority}; });
+    result.items = result.items.map(function (t) { return taskSummary(t, projects, members); });
     return result;
   }
-  function overview(actor) {
-    var projects = projectList(), active = projects.filter(function (p) { return ['Archived','Cancelled','Completed'].indexOf(p.status) < 0; });
+  function responsibilityOptions() {
+    return Responsibilities.all().map(function (r) { return {id: r.Responsibility_ID, name: r.Name, status: r.Status}; });
+  }
+  /** Reference choices for the create/edit forms; identifiers and names only. */
+  function referenceOptions() {
+    return {members: Database.read('MEMBERS').map(function (m) { return {id: m.Member_ID, name: m.Name, active: m.Active}; }),
+      projects: Database.read('PROJECTS').map(function (p) { return {id: p.Project_ID, name: p.Project_Name}; }),
+      responsibilities: responsibilityOptions()};
+  }
+  /** KPI, upcoming and pending values shared by the overview page and the bootstrap payload. */
+  function overviewCore(actor, projects) {
+    var active = projects.filter(function (p) { return ['Archived','Cancelled','Completed'].indexOf(p.status) < 0; });
     var today = Domain.today(), end = new Date(today + 'T00:00:00Z'); end.setUTCDate(end.getUTCDate() + 7);
     var tasks = Tasks.list({activeOnly: true}), soon = 0, overdue = 0, upcoming = [];
     var endDate = end.toISOString().slice(0,10), projectIndex = index('PROJECTS'), memberIndex = index('MEMBERS');
     tasks.forEach(function (t) { var due = Domain.date(t.Due_Date); if (due && due < today) overdue++; if (due >= today && due <= endDate) { soon++; upcoming.push({id:t.Task_ID,name:t.Task_Name,project:(projectIndex[t.Project_ID]||{}).Project_Name||'',owner:(memberIndex[t.Owner_Member_ID]||{}).Name||'',deadline:due,status:t.Status,progress:t.Progress_Percent}); } });
     var member = Database.find('MEMBERS', actor.memberId);
-    return {version: '1.5.0', actor: {name: member.Name, role: actor.role},
+    return {version: '1.5.1', actor: {name: member.Name, role: actor.role},
       kpis: {active: active.length, risk: active.filter(function (p) { return ['RED','YELLOW','UNKNOWN'].indexOf(p.health) >= 0; }).length, soon: soon, overdue: overdue},
-      projects: page(projects, {limit: 20}), responsibilities: Responsibilities.all().map(function (r) { return {id: r.Responsibility_ID, name: r.Name, status: r.Status}; }),
       upcoming: {items: upcoming.sort(function(a,b){return a.deadline.localeCompare(b.deadline)||a.id.localeCompare(b.id);}).slice(0,5),total:soon},
       pending: Database.read('TASK_REQUESTS').filter(function (r) { return r.Status === 'PENDING'; }).length,
       refreshedAt: new Date().toISOString()};
+  }
+  function overview(actor) {
+    var projects = projectList(), core = overviewCore(actor, projects);
+    core.projects = page(projects, {limit: 20});
+    core.responsibilities = responsibilityOptions();
+    return core;
+  }
+  /** All-or-nothing dataset: an oversized set carries no rows at all, never a silent prefix. */
+  function dataset(rows, limit) {
+    var complete = rows.length <= limit;
+    return {items: complete ? rows : [], total: rows.length, complete: complete, limit: limit};
+  }
+  // Compact task index: one header row plus value rows, so a few thousand summaries do not
+  // repeat every field name. The browser rebuilds the objects and never sees a private field.
+  var TASK_COLUMNS = ['id', 'name', 'projectId', 'project', 'subprojectId', 'ownerId', 'owner',
+    'responsibilityId', 'deadline', 'status', 'progress', 'priority'];
+  function taskIndex(projects, members) {
+    var all = Tasks.list({}), complete = all.length <= TASK_INDEX_LIMIT;
+    var rows = complete ? all.sort(taskOrder({})).map(function (t) {
+      var summary = taskSummary(t, projects, members);
+      return TASK_COLUMNS.map(function (column) { return summary[column]; });
+    }) : [];
+    return {columns: TASK_COLUMNS, rows: rows, total: all.length, complete: complete, limit: TASK_INDEX_LIMIT};
+  }
+  /**
+   * One authorized read for ordinary navigation: overview values, reference choices, every
+   * project summary and the size of the task index. The browser answers list, search, filter
+   * and detail navigation from this in-memory snapshot and revalidates in the background;
+   * Google Sheets remains the only authoritative store.
+   *
+   * A dataset that exceeds its bound reports complete:false and carries no truncated rows, so
+   * the browser keeps the paginated server operations instead of implying that a partial list
+   * covers every record.
+   */
+  function bootstrap(actor) {
+    var projects = projectList(), core = overviewCore(actor, projects);
+    var all = Tasks.list({});
+    return {contract: '1.5.1', version: core.version, actor: core.actor, refreshedAt: core.refreshedAt,
+      kpis: core.kpis, upcoming: core.upcoming, pending: core.pending,
+      overviewProjects: page(projects, {limit: 20}),
+      responsibilities: responsibilityOptions(), references: referenceOptions(),
+      projects: dataset(projects, PROJECT_INDEX_LIMIT),
+      tasks: {total: all.length, complete: all.length <= TASK_INDEX_LIMIT, limit: TASK_INDEX_LIMIT}};
   }
   function read(operation, input, actor) {
     input = input || {};
@@ -136,6 +206,8 @@ var ManagerWeb = (function () {
         return paged;
       }
       case 'tasks': return taskList(input);
+      case 'bootstrap': return bootstrap(actor);
+      case 'taskIndex': return taskIndex(index('PROJECTS'), index('MEMBERS'));
       case 'project': {
         var p = Database.find('PROJECTS', input.id);
         var subs = Database.read('SUBPROJECTS').filter(function (s) { return s.Project_ID === input.id; });
@@ -146,9 +218,7 @@ var ManagerWeb = (function () {
             dto._progress = Progress.rollup(Progress.subtreeTasks(s.Subproject_ID, children, grouped)); return dto; })};
       }
       case 'task': return {record: editable('TASKS', Database.find('TASKS', input.id)), confirmations: Database.read('SCHEDULE_CONFIRMATIONS').filter(function (r) { return r.Task_ID === input.id; }).map(function (r) { return record('SCHEDULE_CONFIRMATIONS', r); })};
-      case 'references': return {members: Database.read('MEMBERS').map(function (m) { return {id: m.Member_ID, name: m.Name, active: m.Active}; }),
-        projects: Database.read('PROJECTS').map(function (p) { return {id: p.Project_ID, name: p.Project_Name}; }),
-        responsibilities: Responsibilities.all().map(function (r) { return {id: r.Responsibility_ID, name: r.Name, status: r.Status}; })};
+      case 'references': return referenceOptions();
       case 'members': return page(Database.read('MEMBERS').filter(function (m) { return !input.query || (m.Name + ' ' + m.Department).toLowerCase().indexOf(String(input.query).toLowerCase()) >= 0; }).map(function (m) { return editable('MEMBERS', m); }), input);
       case 'responsibilities': return {items: Responsibilities.all().map(function (r) { return editable('RESPONSIBILITIES', r); })};
       case 'skills': return {items: Database.read('SKILLS').map(function (s) { return record('SKILLS', s); }), assessments: unwrap(Ui.skills())};
@@ -157,7 +227,7 @@ var ManagerWeb = (function () {
       case 'publication': return unwrap(Ui.publicationStatus());
       case 'status': {
         var status = unwrap(Ui.status());
-        return {version: '1.5.0', schema: Schema.version, environment: status.health.environment,
+        return {version: '1.5.1', schema: Schema.version, environment: status.health.environment,
           valid: status.valid, errorCount: status.errorCount, rowCounts: status.rowCounts,
           emailMode: status.health.emailMode, emergencyStop: status.health.emergencyStop,
           calendarEnabled: status.health.calendarEnabled, dryRun: status.health.dryRun};

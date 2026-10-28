@@ -1,0 +1,963 @@
+COMMAND: npm ci
+EXIT: 0
+
+npm.cmd : npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+発生場所 行:2 文字:81
++ ... ct System.Text.UTF8Encoding($false); $ci = (& npm.cmd ci 2>&1 | Out-S ...
++                                                 ~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn deprec...ception instead:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+npm warn deprecated glob@10.5.0: Old versions of glob are not supported, and contain widely publicized security vulnera
+bilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at ex
+orbitant rates) by contacting i@izs.me
+
+added 364 packages, and audited 365 packages in 16s
+
+123 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+
+COMMAND: npm run lint
+EXIT: 0
+
+
+> engineering-hub@1.5.1 lint
+> eslint .
+
+
+COMMAND: npm test
+EXIT: 0
+
+
+> engineering-hub@1.5.1 test
+> node --test tests/*.test.js
+
+✔ unbound environments fail closed; activation needs verified actor and exact confirmation (66.5719ms)
+✔ activation baselines historical tasks silently and requires explicit later approval (24.5726ms)
+✔ first observation and direct owner/deadline changes revoke approval without sending (23.6924ms)
+✔ dry runs never send or consume future live dedupe keys (20.6053ms)
+✔ pending is persisted before sending and ambiguous delivery is never retried (25.9531ms)
+✔ 7-day and 2-day reminders have distinct persistent stages (37.6411ms)
+✔ recipient validation and cancelled parents suppress delivery (121.8668ms)
+✔ weekly management summaries are deduped and count toward the shared run limit (28.8535ms)
+✔ calendar is disabled by default; opt-in maintains owned IDs and marks cancellation (17.8872ms)
+✔ calendar refuses to modify a foreign stored event or create replacement for missing ID (19.827ms)
+✔ authorized trigger installation is explicit, idempotent, and preserves unrelated handlers (19.4063ms)
+✔ audit actor stays blank when identity is unavailable (39.0033ms)
+✔ health and validation report the explicitly bound book and broken direct-sheet references (17.2494ms)
+✔ management entrypoint refreshes generated views without mail or triggers (26.7348ms)
+✔ Japanese task messages include details and safely escape rich HTML (21.3418ms)
+Database backup failed: Backup folder must not allow public/domain link sharing
+Database backup failed: Backup contents could not be verified
+✔ initialization requires explicit designation and confirmation, creates no external automation (37.1672ms)
+✔ initializer refuses any existing content or formula, including production (23.0874ms)
+✔ configuration refuses missing or inconsistent environment bindings (12.3407ms)
+✔ workbook environment marker prevents development from accessing production records (20.6366ms)
+✔ approved upgrade preserves project, task ownership, skill records and existing cell positions (111.6806ms)
+✔ repeating an applied migration changes no cells and creates no further backup (82.9238ms)
+✔ missing tables and missing columns are appended without replacing manual columns (113.105ms)
+✔ migration refuses unapproved changes without a backup or schema writes (23.4728ms)
+✔ publicly shared backup folder prevents migration and preserves schema (35.4458ms)
+✔ backup verification failure stops before adding schema (33.5933ms)
+✔ invalid or duplicate stable IDs stop migration before schema changes (28.4193ms)
+✔ header-based updates retain IDs after sorting and preserve unknown formulas (35.0777ms)
+✔ values, references, progress, date validity and skill levels are validated (24.1687ms)
+✔ only generated worksheets can be cleared by refresh (29.3339ms)
+✔ formula-like input is escaped and application load has no Workspace side effects (24.3554ms)
+✔ batch updates validate all changes before writing and preserve unmodified cells (46.8832ms)
+✔ projects retain original commitments; generated updates never rewrite operational data (69.5665ms)
+✔ cross-project references, inactive owners, invalid dates and progress are rejected (29.0611ms)
+✔ task dependencies are explicit, same-project and acyclic (22.9853ms)
+✔ assignment changes increment version and revoke explicit notification approval (36.637ms)
+✔ member skill upserts are unique and matrix includes unassessed cells (19.757ms)
+✔ reverse schedule validates DAG and skips Japanese holidays and weekends without changing commitments (32.6621ms)
+✔ unknown reverse durations remain DRAFT with no invented dates (23.3596ms)
+✔ workload distributes remaining estimates across current working days, with holiday capacity (32.1258ms)
+✔ issues and milestones enforce project and subproject consistency (27.2567ms)
+✔ operational updates preserve custom columns and existing date-valued cells (48.6036ms)
+✔ role grants require ADMIN and cannot be self-elevated through any payload (158.9607ms)
+✔ the last active administrator cannot be demoted or deactivated (36.1971ms)
+✔ invalid role text is rejected instead of silently downgraded (34.9636ms)
+✔ members may update only their own tasks while managers cover the whole department (150.1738ms)
+✔ member-scoped data hides other assessments, roles and unrelated projects (71.0144ms)
+✔ stored spreadsheet text is rendered as text, never as markup (82.9255ms)
+✔ no sidebar template builds markup from data (4.9124ms)
+✔ the shared renderer keeps hostile strings inert (2.0652ms)
+✔ first administrator bootstrap is allowlisted, one-time and audited (155.5974ms)
+✔ bootstrap refuses an operational workbook (88.6002ms)
+✔ clearing the emergency stop is a LIVE transition: managers cannot restart, admins can (113.7609ms)
+✔ LIVE activation requires confirmation and every preflight condition (168.5664ms)
+✔ saved settings win over conflicting legacy Script Properties (102.7873ms)
+✔ restarting LIVE after a stop does not replay notifications (55.4324ms)
+✔ weekly report schedule follows the configured day, time and enabled state (80.6872ms)
+✔ a disabled weekly report sends nothing even while its handler still exists (78.8122ms)
+✔ trigger installation still needs an explicit, account-matched confirmation (28.9827ms)
+✔ health returns a numeric stale age and keeps thresholds separate (90.6796ms)
+✔ dashboard attention categories stay independent (58.2964ms)
+✔ a realistic programme keeps progress, workload and attention honest (57.9081ms)
+✔ upgrade preserves skill records, notification history, custom columns and formulas (76.7061ms)
+✔ unknown effort stays unknown and is never rewritten to zero (70.8798ms)
+✔ deadline-only assignment is approvable and schedule confirmation is a separate gate (110.5687ms)
+✔ progress updates keep approval; material assignment changes revoke it (35.4601ms)
+✔ approval cannot bypass owner validation and requires explicit confirmation (31.1654ms)
+✔ archived projects keep their records but stop contributing to active work (35.827ms)
+✔ project freshness follows application changes but not dashboard refreshes (51.8711ms)
+✔ stable IDs survive view refreshes and sorting (49.4548ms)
+✔ effort-weighted progress reproduces the documented example and falls back to weight 1 (101.3229ms)
+✔ project rollup counts direct and subproject tasks exactly once (33.3766ms)
+✔ project health is deterministic and never green without schedule information (63.5159ms)
+✔ reverse planning keeps each project plan and honors Japanese holidays (55.6347ms)
+✔ dashboard refresh never clears operational sheets or user columns (58.6786ms)
+✔ dashboard derives portfolio and attention metrics from operational tables (116.4828ms)
+✔ Gantt fallback shows hierarchy, milestones, forecast dates and unscheduled tasks (45.7033ms)
+✔ workload separates planned from actual work and flags overcapacity (64.5948ms)
+✔ generated views remain the only replaceable sheets (57.9377ms)
+✔ management surfaces reject unverified or under-privileged callers (157.7121ms)
+✔ manager can create a project, subproject and deadline-only assignment through the UI adapter (70.6969ms)
+✔ UI progress updates and validation keep task invariants (41.3957ms)
+✔ skill gaps are advisory and assessment metadata is retained (92.3978ms)
+✔ member deactivation is blocked while open work still needs reassignment (54.7829ms)
+✔ bound menu and sidebar use the packaged HTML templates (36.521ms)
+✔ automation settings persist in the workbook and are audited (113.1048ms)
+✔ settings reject malformed values, unknown keys and status writes (43.3342ms)
+✔ unmigrated workbooks fail closed and need the documented legacy opt-in (105.7606ms)
+✔ OFF mode suppresses every outgoing message even with all features enabled (40.1227ms)
+✔ PREVIEW evaluates eligibility without sending or consuming live dedupe keys (54.0023ms)
+✔ LIVE requires administrator role, explicit confirmation, emergency stop off and a passing preflight (172.5442ms)
+✔ individual feature toggles work independently with the shared run cap (48.629ms)
+✔ per-project and per-task switches take precedence over feature toggles (101.0872ms)
+✔ configurable reminder offsets send one stage per run and catch up safely (109.1146ms)
+✔ weekday-only sending and the JST execution window suppress reminders (116.6116ms)
+✔ completed tasks, archived projects and invalid recipients never receive reminders (192.0441ms)
+✔ switching a feature off and on again never replays history (107.3715ms)
+✔ weekly management report is separate, deduplicated and requires valid recipients (205.8543ms)
+✔ calendar and daily backup switches are independent and never bypass migration backups (203.0031ms)
+✔ ambiguous delivery is recorded and never retried automatically (78.2747ms)
+✔ trigger installation stays idempotent and reports duplicates (59.2813ms)
+✔ automation status is exposed without leaking script properties or identifiers (53.542ms)
+V1.1 scale timings (mock, not Workspace): {"dashboardRefresh":2229,"analysis":983,"workload":698,"progressRollup":44,"notificationScan":160}
+✔ version 3 upgrade preserves every pre-existing operational cell and cannot skip its backup (157.3369ms)
+✔ management views remain usable at the V1.1 target scale (local mock benchmark only) (4178.9728ms)
+✔ source and repository stay free of credentials, live identifiers and stray send paths (85.8472ms)
+✔ default configuration stays conservative for a fresh workbook (11.4141ms)
+✔ the publisher and the viewer agree on the published contract (66.4391ms)
+✔ the portfolio lists only approved projects and never returns task rows (110.4142ms)
+✔ search matches project names, project ids and approved task names only (76.9761ms)
+✔ project detail groups tasks by subproject and keeps direct tasks under 全体タスク (55.7678ms)
+✔ deadline wording follows the Asia/Tokyo calendar (45.0741ms)
+✔ project detail responses stay bounded and report truncation (81.0875ms)
+✔ stale snapshots are reported, never hidden (80.1542ms)
+✔ viewer access is limited by configuration and never leaks the viewer address (109.1176ms)
+✔ unreadable, unpublished, mismatched and unsafe snapshots fail closed (204.2375ms)
+✔ the viewer exposes no write path and caches only the bounded portfolio (53.5467ms)
+✔ the real client script renders cards, detail groups and the task drawer without markup injection (194.666ms)
+✔ the client shows a stale-data warning and a friendly error state (92.721ms)
+V1.2 viewer timings (mock, not Workspace): {"portfolioMs":37,"projectDetailMs":46,"portfolioChars":41773,"publishedTasks":4000}
+✔ an empty portfolio shows an intentional empty state (52.6772ms)
+✔ the target scale stays bounded for the viewer (local mock measurement, not Workspace) (980.9212ms)
+✔ schema version 6 adds responsibilities, nested subprojects and the V1.2/V1.3 fields (29.222ms)
+✔ only INTERNAL projects are published; blank and unknown visibility stay private (54.8298ms)
+✔ public DTOs use the explicit allowlist and never carry private source fields (16.6784ms)
+✔ task text falls back to empty rather than substituting a private field (16.3771ms)
+✔ cross-project task and milestone references are withheld, unknown subprojects are reported (18.6996ms)
+✔ project aggregates describe only the published tasks (16.5437ms)
+✔ a restricted sibling project cannot influence a published project rollup (19.8371ms)
+✔ health is recomputed and terminal projects remain published but flagged (21.3525ms)
+✔ content hash is deterministic and changes only when the public payload changes (18.6393ms)
+✔ snapshot initialization needs administrator rights, an exact confirmation and an empty workbook (87.5175ms)
+✔ the master workbook can never be used as the publication destination (63.7327ms)
+✔ publication writes only allowlisted fields, excludes restricted projects and leaves the source untouched (83.6337ms)
+✔ publication alternates A/B slots, increments the version and keeps the previous snapshot readable (45.2239ms)
+✔ repeating a publication never duplicates tasks (51.252ms)
+✔ a failed publication preserves the committed snapshot and is recorded (52.1643ms)
+✔ publication OFF suppresses scheduled publishing but never blocks a manual run (105.9753ms)
+✔ enabling publication requires ADMIN, the exact confirmation and an initialized destination (40.4625ms)
+✔ publication status and preview never expose the destination spreadsheet id (45.556ms)
+✔ publication settings stay independent of the mail mode and from the snapshot contract (54.6983ms)
+✔ a workbook that looks like the master is refused even when used as the destination (40.2843ms)
+✔ the manager sidebar exposes publication controls only through validated domain functions (63.6629ms)
+✔ publication requires a manager or administrator session (45.404ms)
+✔ V1.2 dashboard documentation and check gates exist (11.1668ms)
+✔ operating documentation describes the shared dashboard (6.3349ms)
+✔ production readiness stays unapproved and marks dashboard behaviour unverified (0.5503ms)
+✔ the repository keeps deployment configuration out of version control (161.0799ms)
+✔ the dashboard project only appends validated requests and has no other write surface (5.7604ms)
+✔ source validation passes for both applications (425.9715ms)
+✔ new V1.2 sources contain no real identifiers, credentials or employee e-mail addresses (3.9942ms)
+✔ the preview tooling documents that it is not Workspace evidence (0.7574ms)
+✔ request notification switches default to OFF and obey the master mode (70.0573ms)
+✔ nothing is sent before notifications are activated (75.1209ms)
+✔ OFF mode never sends a request notification (33.6605ms)
+✔ PREVIEW records a preview and never sends real mail (35.6379ms)
+✔ LIVE sends once and the ledger deduplicates a repeated notification (44.9204ms)
+✔ the deadline and completion switches are independent (46.2124ms)
+✔ the emergency stop blocks every request notification (33.3079ms)
+✔ a decision notification obeys the same gate (45.7565ms)
+✔ the pending-request reminder is bounded and switchable (109.9057ms)
+✔ request notifications are refused without an approved recipient (56.7817ms)
+✔ the default interface language is Japanese (1.5287ms)
+✔ the official application name is identical in every language (0.216ms)
+✔ both languages define exactly the same non-empty keys (2.4549ms)
+✔ English can be selected and every visible label changes (0.2647ms)
+✔ controlled enums and deadline wording are localized, unknown values pass through (0.5522ms)
+✔ the generated copies match the canonical dictionary (6.7312ms)
+✔ stored spreadsheet text is never translated (2.867ms)
+✔ request reasons are stored canonically while the label is localized (10.3333ms)
+✔ switching language keeps the current project, task and filter state (173.2821ms)
+✔ every required screen carries the visible language switch (2.9453ms)
+✔ request forms are localized in both languages (0.809ms)
+✔ no authentication or login interface was introduced (2.9112ms)
+✔ translation helpers work without browser storage (3.0864ms)
+✔ three working days from a Friday deadline starts on the Wednesday (68.2503ms)
+✔ one working week is five working days and starts on the Monday (25.5627ms)
+✔ weekends and holidays are excluded on the working-day basis (31.0124ms)
+✔ calendar-day basis counts every date including weekends (39.3069ms)
+✔ the range is inclusive: one day starts and ends on the deadline (25.272ms)
+✔ a non-working deadline warns and never moves the committed deadline (30.9625ms)
+✔ missing duration, missing deadline and past dates are reported (54.6836ms)
+✔ a related milestone inside the planned range is reported (40.3492ms)
+✔ only a manager-entered duration derives the planned start (82.4221ms)
+✔ a legacy start survives an unrelated update and no duration is invented (75.1584ms)
+✔ duration never converts to labour hours and the project deadline is untouched (32.2779ms)
+✔ overlapping assignments are allowed for an authorized manager (72.9608ms)
+✔ the calculated start invalidates the schedule confirmation (42.955ms)
+✔ migration 005 is additive and keeps every legacy cell intact (82.0897ms)
+✔ invalid durations and units are refused (29.5846ms)
+✔ V1.3 documentation and check gates exist (14.8362ms)
+✔ operating documentation describes V1.3 (9.1641ms)
+✔ the localization documentation states the rules that must never regress (0.7469ms)
+✔ production readiness stays unapproved for V1.3 (0.6119ms)
+✔ new V1.3 sources contain no credentials, identifiers or employee addresses (222.2354ms)
+✔ the request inbox is never the private workbook or the snapshot (0.7894ms)
+✔ no destructive reset, restore or automatic deletion was added (1.0111ms)
+✔ any internal viewer can request a change for a task they do not own (176.7283ms)
+✔ restricted and unknown tasks cannot receive a request (87.8957ms)
+✔ invalid input is refused before anything is written (69.2917ms)
+✔ duplicate submissions are bounded and a retry returns the original request ID (76.7335ms)
+✔ submissions are rate limited per browser token (51.1107ms)
+✔ an approved request moves the deadline once and records its history (75.8343ms)
+✔ a decision requires the explicit confirmation and a manager role (59.5092ms)
+✔ rejection and return never change the deadline (85.0554ms)
+✔ a request submitted before a newer change becomes STALE and cannot overwrite it (45.7471ms)
+✔ an interrupted decision is finalised without applying the change twice (65.8855ms)
+✔ a completion report only completes the task after manager approval (96.053ms)
+✔ a rejected completion report leaves the task open (79.3662ms)
+✔ importing twice never duplicates a request and mail stays off by default (87.4979ms)
+✔ the request inbox can be initialised only once and never with existing content (73.6596ms)
+✔ the dashboard project only appends to the inbox it is configured with (48.4785ms)
+✔ a pending request never changes the published or authoritative deadline (65.264ms)
+✔ the planning preview calculates a start and writes nothing (110.4367ms)
+✔ the preview reports the warnings the manager has to read (43.985ms)
+✔ a manager can assign a task with a duration and the planned start is derived (135.0893ms)
+✔ an invalid duration is refused before anything is written (29.2043ms)
+✔ the request queue and decisions require a manager role (41.8956ms)
+✔ the manager sidebar imports, lists and decides a request through validated functions (46.8712ms)
+✔ sidebars never expose configuration secrets (2.2087ms)
+✔ a new project stays hidden until a manager publishes it deliberately (151.4806ms)
+✔ subprojects and tasks disappear with their project (85.0182ms)
+✔ the dashboard summary is published while private text never leaves the workbook (107.3476ms)
+✔ a manager owns a new project by default and can then edit it (37.0594ms)
+✔ any manager can edit a project owned by another manager (74.3533ms)
+✔ a member cannot create or publish a project (33.7886ms)
+✔ a project edit patches only the supplied fields and keeps the identity (63.7697ms)
+✔ an invalid visibility or an empty patch is refused (32.8053ms)
+✔ a committed deadline change needs an explicit confirmation (35.7588ms)
+✔ a task edit preserves the fields it does not address (47.9599ms)
+✔ renaming a task invalidates the stale assignment approval but keeps the data (42.1432ms)
+✔ editing the deadline or duration recalculates the derived planned start (71.9347ms)
+✔ a task moves into any project for a manager, but never for a member (161.4641ms)
+✔ a stale task edit is refused instead of overwriting newer data (38.526ms)
+✔ a manager edits any task in the department while a member stays inside their own work (74.6349ms)
+✔ project status changes stay explicit and consistent with the tasks (42.56ms)
+✔ project edits send no mail and never touch another project (29.2033ms)
+✔ opening the request queue imports new inbox rows and is idempotent (39.825ms)
+✔ a concurrent import collision is counted as skipped, not as a failure (66.9413ms)
+✔ an unavailable inbox is reported and the stored queue stays readable (36.9376ms)
+✔ the queue can be opened without an import attempt when asked (65.8529ms)
+✔ notification switches stay off by default and no edit path sends mail (69.4925ms)
+✔ no login, password or browser write path was introduced (3.0842ms)
+✔ the manager manifest keeps its existing scopes only (0.5147ms)
+✔ the create form defaults to hidden and sends the chosen visibility and summary (148.0957ms)
+✔ a rejected save keeps every entered value and shows the error (33.2092ms)
+✔ editing a project loads its values and keeps the immutable identity (85.1122ms)
+✔ an edit refused as stale keeps the typed text and asks for a reload (48.6003ms)
+✔ editing a task preserves the fields the manager did not touch (56.6159ms)
+✔ changing the duration on an existing task recalculates the derived start (49.1106ms)
+✔ a double click submits one task only (88.5386ms)
+✔ editing a project without a selectable owner keeps the stored owner (63.5784ms)
+✔ switching language keeps typed text and translates generated labels (97.5308ms)
+✔ the request queue imports automatically and reports the import (65.0221ms)
+✔ a failing inbox import never hides the requests already imported (41.7864ms)
+✔ the sidebars reference only script functions that exist on the server (61.0968ms)
+✔ every onclick handler in the manager sidebar is defined in the template (1.4556ms)
+✔ the manager sidebar keeps a single control per action (0.6908ms)
+✔ the trial documentation describes the visibility and edit workflow (0.6053ms)
+✔ the installation guide cannot regress to a broken clasp, bootstrap or backup recipe (1.2542ms)
+✔ a nested subproject is created beneath a root subproject and keeps stable IDs (95.6249ms)
+✔ a third level, a self-parent and a cross-project parent are refused (53.2742ms)
+✔ reparenting a root that has children is refused instead of flattening the tree (34.4761ms)
+✔ a valid reparent is audited and never moves tasks (65.9444ms)
+✔ a parent subproject rolls up its own and descendant tasks exactly once (58.0625ms)
+✔ a nested subproject keeps unknown effort unknown and never invents hours (40.4177ms)
+✔ archiving a parent removes descendant tasks from active work but keeps every row (56.6856ms)
+✔ moving a task is explicit, stays inside the project and preserves the schedule (40.2416ms)
+✔ the snapshot publishes the responsibility label, the hierarchy and hierarchical progress (104.8228ms)
+✔ the snapshot never publishes a responsibility description or owner (72.7901ms)
+✔ a snapshot from an older contract is rejected instead of being read as the new one (50.5889ms)
+✔ a project whose responsibility is unknown is published without a label and warns (48.3893ms)
+✔ the V1.4 documentation and check gates exist (4.1556ms)
+✔ every V1.4 gate records an explicit status with evidence (1.9899ms)
+✔ the schema, migration and contract versions are documented consistently (5.2252ms)
+✔ the publisher and the viewer agree on contract 1.4 (39.3993ms)
+✔ the manager templates share one token set and Japanese-first font stack (4.4297ms)
+✔ production readiness stays unapproved for V1.4 (0.6669ms)
+✔ no new source introduces credentials, real identifiers or a destructive reset (5.8611ms)
+✔ the V1.4 release notes describe the behaviour that was implemented (2.61ms)
+✔ schema version 6 adds the responsibility table and project link with a blank default (62.123ms)
+✔ a responsibility gets a stable ID and can be renamed without touching projects (93.7937ms)
+✔ a name must be present, bounded and unique among active responsibilities (61.3901ms)
+✔ only ADMIN may change the responsibility owner (39.1696ms)
+✔ every manager may administer every responsibility, but the owner stays an ADMIN decision (33.0871ms)
+✔ responsibility ownership labels accountability without becoming a project permission (40.2918ms)
+✔ reordering changes the display order only (39.0291ms)
+✔ retiring keeps every project visible and marks it for reassignment (68.7138ms)
+✔ retiring without confirmation is refused, and reactivation restores selectability (43.6235ms)
+✔ a project transfer changes only the responsibility and is audited with both values (52.0378ms)
+✔ a transfer requires confirmation and a known target project for any manager (33.6354ms)
+✔ a retired responsibility needs an extra confirmation from any manager (57.6599ms)
+✔ projects without a responsibility stay unassigned rather than invented (43.8283ms)
+✔ migration 006 is additive and preserves every legacy cell, formula and custom column (50.7768ms)
+✔ repeating migration 006 changes nothing and duplicates no column (59.4171ms)
+✔ migration 006 refuses to run without explicit approval and takes a verified backup (41.1397ms)
+✔ a new database initializes with the responsibility table and no seed rows (28.8378ms)
+✔ every Sheets menu entry opens a distinct, known sidebar handler (26.4203ms)
+✔ the requested section is passed as a template value, not a mutable global (1.7141ms)
+✔ the sidebar keeps collapsed detail sections so stored values survive an edit (11.3484ms)
+✔ the sidebar form sends only the responsibility the manager selected (163.9753ms)
+✔ a manager creates, renames and retires a responsibility through the sidebar bridges (33.9315ms)
+✔ changing a project responsibility asks for confirmation and keeps the owner (65.6797ms)
+✔ the responsibility list shows owners, counts and retired state (72.8008ms)
+✔ nested subprojects are created, archived and moved through the sidebar bridges (44.4303ms)
+✔ the sidebar context exposes the nested level and parent of every subproject (38.6943ms)
+✔ the request queue leads with the type, the dates and the difference (81.1455ms)
+✔ the dashboard offers a responsibility filter and marks a retired one (113.7169ms)
+✔ a nested subproject is indented and its parent reports the descendant count (139.205ms)
+✔ the request form is not offered while submission is disabled (99.2555ms)
+✔ a configuration failure fails closed and never claims requests are open (97.4405ms)
+✔ an enabled configuration offers both request types (80.4887ms)
+✔ switching language keeps an unsent request draft and never submits it (117.9392ms)
+✔ the V1.4.1 check gates exist and record a status (5.5663ms)
+✔ production readiness stays unapproved for V1.4.1 (2.5049ms)
+✔ the installation documentation describes schema 6 and INITIALIZE_V6 (1.0943ms)
+✔ the documentation states the simplified authorization policy (1.3034ms)
+✔ Japanese organizational wording uses 廃止 and 再有効化 (2.3009ms)
+✔ the release notes describe the V1.4.1 behaviour (0.5433ms)
+✔ the package, publisher and README agree on the release version (3.5487ms)
+✔ ADMIN and MANAGER both manage every project, subproject and task (281.4952ms)
+✔ MEMBER and VIEWER cannot change the project structure (73.4553ms)
+✔ a MEMBER still updates progress on their own assigned task only (59.5736ms)
+✔ an unverified identity and browser-supplied roles cannot authorize a write (93.0745ms)
+✔ direct RPC entrypoints re-check the role instead of trusting the caller (53.335ms)
+✔ granting or revoking ADMIN and MANAGER stays an ADMIN decision (70.9883ms)
+✔ reordering validates every id and preserves identity, owners and status (50.2589ms)
+✔ responsibility lifecycle stays explicit and never deletes work (34.2184ms)
+✔ a project edit and its responsibility transfer commit together or not at all (39.8706ms)
+✔ a coordinated edit keeps subprojects, tasks and request history (32.944ms)
+✔ the hierarchy stops at two levels and rejects self, cycle and cross-project parents (45.8632ms)
+✔ malformed hierarchy data cannot recurse without bound (35.6269ms)
+✔ a task is never placed inside an archived branch by accident (40.1495ms)
+✔ active work, reminders and published counts exclude an archived branch once (46.5983ms)
+✔ a published snapshot counts only active work and never duplicates a nested task (80.0273ms)
+✔ an approved request applies its deadline once and records one history row (54.6462ms)
+✔ a new workbook records INITIALIZE_V6 and never pretends to have migrated (15.0158ms)
+✔ a task outside the sidebar window stays reachable by searching (54.6065ms)
+✔ a MEMBERS sheet holding only 999 unchecked checkboxes reports no records (163.5342ms)
+✔ the first and second members land on physical rows 2 and 3 of a preformatted sheet (120.3965ms)
+✔ a real record with Active = FALSE stays readable and keeps its stable ID (57.4528ms)
+✔ every operational table with a checkbox column ignores its empty preformatted rows (98.0614ms)
+✔ a meaningful row without a stable ID is reported and never overwritten (54.8865ms)
+✔ preformatted formulas and custom columns are preserved while records stay contiguous (54.4265ms)
+✔ duplicate stable IDs are still rejected on a preformatted sheet (62.5284ms)
+✔ initialization and migration stay additive with preformatted checkbox rows (105.3998ms)
+✔ a version 5 workbook with preformatted checkbox rows upgrades additively (116.0522ms)
+✔ bounded reads and payloads for 10 projects / 100 tasks (202.4423ms)
+✔ bounded reads and payloads for 100 projects / 1000 tasks (728.6345ms)
+✔ bounded reads and payloads for 300 projects / 3000 tasks (1356.9266ms)
+✔ a task save immediately changes the project list and overview without a report refresh (129.7266ms)
+✔ project cards receive fresh counts and a neutral deadline state (41.9202ms)
+✔ project save keeps the derived progress and never rewrites it from the browser (51.1426ms)
+✔ deadline-only task creation keeps the planned start unknown; a duration still back-plans (73.8019ms)
+✔ hierarchy rollups, revision checks and role authorization are unchanged (39.0464ms)
+✔ interactive reads write nothing and read every table exactly once per request (32.8025ms)
+✔ snapshot Date objects normalize to contract date strings before hash verification and viewer delivery (190.0481ms)
+✔ preview scripts parse and templates are completely expanded (12.651ms)
+✔ navigation lazily loads tasks, search filters and project hierarchy (261.385ms)
+✔ task edit preserves draft across closing, navigation and language switch, then saves partial patch (207.8171ms)
+✔ conflicting saves retain draft and show recoverable error (124.7768ms)
+✔ member and responsibility forms preserve values and submit through authorized endpoints (144.113ms)
+✔ older startup response cannot replace newer navigation and reads retry explicitly (189.9042ms)
+✔ duplicate API writes are refused until acknowledgement and writes are never retried automatically (80.8623ms)
+Request inbox state update failed: Request inbox is not configured
+✔ request approval form records decision and displays deadline history (63.2154ms)
+✔ new task form computes schedule through existing service (93.7787ms)
+✔ new task form accepts a deadline-only assignment with an unknown start (90.8125ms)
+✔ project cards expose an accessible progress bar, health label and deadline state (28.4092ms)
+✔ overdue project work is reported as text as well as colour (41.0212ms)
+Request inbox state update failed: Request inbox is not configured
+✔ web permits verified admin (111.7189ms)
+✔ web permits verified manager (36.6449ms)
+✔ web refuses engineer@example.test (33.3442ms)
+✔ web refuses viewer@example.test (27.729ms)
+✔ web refuses missing@example.test (30.0794ms)
+✔ web refuses admin@outside.test (28.1037ms)
+✔ web refuses blank identity (27.4651ms)
+✔ deactivated manager and unconfigured domain fail closed (46.0269ms)
+✔ compact bootstrap reads each source table at most once and never returns private task details (23.4006ms)
+✔ large task pagination, search, project and responsibility filters remain reachable (58.7667ms)
+✔ task save reuses scheduling, preserves fields, does not regenerate reports, and rejects stale edits (28.8432ms)
+✔ locked precondition catches a write between loading and lock acquisition (18.2683ms)
+✔ project transfer validation and invalid reparent leave all fields unchanged (21.5995ms)
+✔ role spoofing, unknown RPC actions and manager privilege edits are refused (26.1959ms)
+✔ read contexts refuse writes, clear on exceptions, and do not cache across callers (24.7168ms)
+✔ non-working task deadline requires acknowledgement (16.013ms)
+✔ manager manifest is user-executed and employee deployment unchanged (1.3986ms)
+✔ status and records never return deployment identifiers or unknown columns (17.2481ms)
+✔ member partial edits keep untouched directory values (18.1328ms)
+✔ request decisions hold one script lock through validation, task effect and history (30.479ms)
+✔ automation writes require admin and current settings revision; no automatic activation (24.6344ms)
+✔ bootstrap reads every source table once and never ships private task fields (108.149ms)
+✔ the compact task index is columnar, allowlisted and paged-safe (36.9609ms)
+✔ an oversized task set is reported incomplete instead of being silently truncated (220.5987ms)
+✔ project summaries carry the owner id the browser filters on (26.9784ms)
+✔ navigation between overview, projects and tasks never calls the server (113.8428ms)
+✔ local filtering and sorting match the authoritative server result (65.2017ms)
+✔ typing filters locally while an explicit search still queries every field (78.1982ms)
+✔ identical in-flight reads share one RPC and stale responses never repopulate the cache (95.442ms)
+✔ stale data renders instantly, refreshes in the background and keeps a draft (64.376ms)
+✔ a save patches summaries, keeps unrelated caches and revalidates aggregates (94.3428ms)
+✔ a failed save keeps the draft, shows the error and never retries by itself (95.5525ms)
+✔ a revoked manager loses cached views and unsent drafts (110.8827ms)
+✔ large datasets keep the first payload bounded and the local list complete (1200.2119ms)
+✔ existing writes still go through the validated domain path from cached forms (94.1741ms)
+✔ package, publisher, README and UI agree on V1.5.1 (8.2975ms)
+✔ the ten V1.5.1 checkgates exist and keep the release status honest (15.9424ms)
+✔ raw V1.5.1 performance evidence exists and never claims a live measurement (4.9991ms)
+✔ schema, contract, execute-as and the production status are unchanged (7.529ms)
+✔ the manager page keeps private records in memory only (2.5573ms)
+ℹ tests 406
+ℹ suites 0
+ℹ pass 406
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5360.2031
+
+COMMAND: npm run validate
+EXIT: 0
+
+
+> engineering-hub@1.5.1 validate
+> node scripts/validate-source.js
+
+Validated 35 manager Apps Script files, 3 dashboard files, both manifests and 709 translation keys
+
+COMMAND: node scripts/manager-web-benchmark.js
+EXIT: 0
+
+node.exe : Request inbox state update failed: Request inbox is not configured
+発生場所 行:2 文字:382
++ ... ; $bench = (& "$env:ProgramFiles\nodejs\node.exe" scripts\manager-web ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Request inbox s... not configured:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Request inbox state update failed: Request inbox is not configured
+Request inbox state update failed: Request inbox is not configured
+Request inbox state update failed: Request inbox is not configured
+Request inbox state update failed: Request inbox is not configured
+Request inbox state update failed: Request inbox is not configured
+Request inbox state update failed: Request inbox is not configured
+Request inbox state update failed: Request inbox is not configured
+Request inbox state update failed: Request inbox is not configured
+Request inbox state update failed: Request inbox is not configured
+Request inbox state update failed: Request inbox is not configured
+Request inbox state update failed: Request inbox is not configured
+Request inbox state update failed: Request inbox is not configured
+Request inbox state update failed: Request inbox is not configured
+Request inbox state update failed: Request inbox is not configured
+Request inbox state update failed: Request inbox is not configured
+Request inbox state update failed: Request inbox is not configured
+Request inbox state update failed: Request inbox is not configured
+{
+  "baselineCommit": "5c1143edef3f8ba74ce92219a59ea58723847941",
+  "previousClientCommit": "adde446e856f992d16aca18b116489126b9a57c7",
+  "environment": "Windows; Node v24.21.0; Google services mocked; local execution only",
+  "liveWorkspace": "NOT_RUN",
+  "datasets": [
+    {
+      "projects": 10,
+      "tasks": 100,
+      "subprojects": 20,
+      "baseline": {
+        "coldMs": 12.75,
+        "p50Ms": 1.18,
+        "p95Ms": 1.79,
+        "rangeReadsPerCall": 26,
+        "workbookOpensPerCall": 13,
+        "payloadBytes": 46519,
+        "samples": 12
+      },
+      "overview": {
+        "coldMs": 14.64,
+        "p50Ms": 4.28,
+        "p95Ms": 6.35,
+        "rangeReadsPerCall": 10,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 3967,
+        "samples": 12
+      },
+      "bootstrap": {
+        "coldMs": 3.99,
+        "p50Ms": 4.01,
+        "p95Ms": 7.48,
+        "rangeReadsPerCall": 10,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 8515,
+        "samples": 6
+      },
+      "taskIndex": {
+        "coldMs": 2.17,
+        "p50Ms": 1.75,
+        "p95Ms": 4.61,
+        "rangeReadsPerCall": 4,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 15052,
+        "samples": 6
+      },
+      "projectList": {
+        "coldMs": 3.29,
+        "p50Ms": 3.21,
+        "p95Ms": 4.17,
+        "rangeReadsPerCall": 8,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 3625,
+        "samples": 12
+      },
+      "projectDetail": {
+        "coldMs": 1.07,
+        "p50Ms": 0.64,
+        "p95Ms": 4.61,
+        "rangeReadsPerCall": 5,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 1726,
+        "samples": 12
+      },
+      "taskSearch": {
+        "coldMs": 0.81,
+        "p50Ms": 0.52,
+        "p95Ms": 3.65,
+        "rangeReadsPerCall": 4,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 2869,
+        "samples": 12
+      },
+      "taskDetail": {
+        "coldMs": 0.9,
+        "p50Ms": 0.43,
+        "p95Ms": 0.7,
+        "rangeReadsPerCall": 4,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 921,
+        "samples": 12
+      },
+      "taskUpdate": {
+        "coldMs": 4.73,
+        "p50Ms": 2.74,
+        "p95Ms": 3.24,
+        "rangeReadsPerCall": 20,
+        "workbookOpensPerCall": 2,
+        "payloadBytes": 915,
+        "samples": 6
+      },
+      "taskCreate": {
+        "coldMs": 2.33,
+        "p50Ms": 1.79,
+        "p95Ms": 2.85,
+        "rangeReadsPerCall": 17,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 972,
+        "samples": 6
+      },
+      "requestApproval": {
+        "coldMs": 5.43,
+        "p50Ms": 2.54,
+        "p95Ms": 3.15,
+        "rangeReadsPerCall": 24,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 201,
+        "samples": 6,
+        "note": "Six distinct pending deadline requests; fixture setup excluded. Inbox receipt mirroring is unavailable in this mock; authoritative decision/history measured."
+      },
+      "publication": {
+        "coldMs": 4.98,
+        "p50Ms": 2.59,
+        "p95Ms": 3.01,
+        "rangeReadsPerCall": 20,
+        "workbookOpensPerCall": 2,
+        "payloadBytes": 295,
+        "samples": 6,
+        "note": "One INTERNAL project; remaining projects RESTRICTED. Range counters cover private workbook only."
+      },
+      "reportRefresh": {
+        "coldMs": 13.71,
+        "p50Ms": 11.5,
+        "p95Ms": 11.5,
+        "rangeReadsPerCall": 16.666666666666668,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 1500,
+        "samples": 3
+      },
+      "ui": {
+        "firstLoadMs": 35.94,
+        "cachedNavigationMs": {
+          "p50": 0.57,
+          "p95": 0.83,
+          "samples": 12
+        },
+        "localSearchMs": {
+          "p50": 0.06,
+          "p95": 0.19,
+          "samples": 10
+        },
+        "firstDetailOpenMs": 1.45,
+        "cachedDetailOpenMs": 0.08,
+        "taskIndexLoaded": true,
+        "rpcAfterInitialLoad": 2,
+        "pendingDuringInFlightTest": 1,
+        "inFlightNavigationMs": {
+          "p50": 0.6,
+          "p95": 1.22
+        }
+      },
+      "previousUi": {
+        "client": "previous",
+        "firstLoadMs": 9.05,
+        "firstLoadRpc": 1,
+        "rpcForOverviewProjectsTasks": 4,
+        "projectsNavigationMs": 4.3,
+        "tasksNavigationMs": 2.58
+      }
+    },
+    {
+      "projects": 100,
+      "tasks": 1000,
+      "subprojects": 200,
+      "baseline": {
+        "coldMs": 10.35,
+        "p50Ms": 8.49,
+        "p95Ms": 11.56,
+        "rangeReadsPerCall": 26,
+        "workbookOpensPerCall": 13,
+        "payloadBytes": 180010,
+        "samples": 12
+      },
+      "overview": {
+        "coldMs": 42.5,
+        "p50Ms": 38.15,
+        "p95Ms": 79.43,
+        "rangeReadsPerCall": 10,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 7483,
+        "samples": 12
+      },
+      "bootstrap": {
+        "coldMs": 35.28,
+        "p50Ms": 35.25,
+        "p95Ms": 40.1,
+        "rangeReadsPerCall": 10,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 48663,
+        "samples": 6
+      },
+      "taskIndex": {
+        "coldMs": 41.34,
+        "p50Ms": 15.52,
+        "p95Ms": 39.46,
+        "rangeReadsPerCall": 4,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 152716,
+        "samples": 6
+      },
+      "projectList": {
+        "coldMs": 16.88,
+        "p50Ms": 17.6,
+        "p95Ms": 23,
+        "rangeReadsPerCall": 8,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 17668,
+        "samples": 12
+      },
+      "projectDetail": {
+        "coldMs": 15.13,
+        "p50Ms": 4.37,
+        "p95Ms": 23.19,
+        "rangeReadsPerCall": 5,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 1726,
+        "samples": 12
+      },
+      "taskSearch": {
+        "coldMs": 3.95,
+        "p50Ms": 3.66,
+        "p95Ms": 4.11,
+        "rangeReadsPerCall": 4,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 2869,
+        "samples": 12
+      },
+      "taskDetail": {
+        "coldMs": 5.18,
+        "p50Ms": 3.24,
+        "p95Ms": 5.25,
+        "rangeReadsPerCall": 4,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 921,
+        "samples": 12
+      },
+      "taskUpdate": {
+        "coldMs": 18.02,
+        "p50Ms": 16.93,
+        "p95Ms": 18.01,
+        "rangeReadsPerCall": 20,
+        "workbookOpensPerCall": 2,
+        "payloadBytes": 917,
+        "samples": 6
+      },
+      "taskCreate": {
+        "coldMs": 10.61,
+        "p50Ms": 10.5,
+        "p95Ms": 11.61,
+        "rangeReadsPerCall": 17,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 973,
+        "samples": 6
+      },
+      "requestApproval": {
+        "coldMs": 14.77,
+        "p50Ms": 12.71,
+        "p95Ms": 15.37,
+        "rangeReadsPerCall": 24,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 202,
+        "samples": 6,
+        "note": "Six distinct pending deadline requests; fixture setup excluded. Inbox receipt mirroring is unavailable in this mock; authoritative decision/history measured."
+      },
+      "publication": {
+        "coldMs": 10.01,
+        "p50Ms": 7.69,
+        "p95Ms": 11.1,
+        "rangeReadsPerCall": 20,
+        "workbookOpensPerCall": 2,
+        "payloadBytes": 298,
+        "samples": 6,
+        "note": "One INTERNAL project; remaining projects RESTRICTED. Range counters cover private workbook only."
+      },
+      "reportRefresh": {
+        "coldMs": 100.52,
+        "p50Ms": 88.35,
+        "p95Ms": 88.35,
+        "rangeReadsPerCall": 16.666666666666668,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 1507,
+        "samples": 3
+      },
+      "ui": {
+        "firstLoadMs": 68.03,
+        "cachedNavigationMs": {
+          "p50": 1.45,
+          "p95": 1.91,
+          "samples": 12
+        },
+        "localSearchMs": {
+          "p50": 0.36,
+          "p95": 0.86,
+          "samples": 10
+        },
+        "firstDetailOpenMs": 4.14,
+        "cachedDetailOpenMs": 0.06,
+        "taskIndexLoaded": true,
+        "rpcAfterInitialLoad": 2,
+        "pendingDuringInFlightTest": 1,
+        "inFlightNavigationMs": {
+          "p50": 1.31,
+          "p95": 1.46
+        }
+      },
+      "previousUi": {
+        "client": "previous",
+        "firstLoadMs": 39.09,
+        "firstLoadRpc": 1,
+        "rpcForOverviewProjectsTasks": 4,
+        "projectsNavigationMs": 25.94,
+        "tasksNavigationMs": 12.08
+      }
+    },
+    {
+      "projects": 300,
+      "tasks": 3000,
+      "subprojects": 600,
+      "baseline": {
+        "coldMs": 24.36,
+        "p50Ms": 21.72,
+        "p95Ms": 25.65,
+        "rangeReadsPerCall": 26,
+        "workbookOpensPerCall": 13,
+        "payloadBytes": 302191,
+        "samples": 12
+      },
+      "overview": {
+        "coldMs": 119.23,
+        "p50Ms": 104.38,
+        "p95Ms": 165.4,
+        "rangeReadsPerCall": 10,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 7487,
+        "samples": 12
+      },
+      "bootstrap": {
+        "coldMs": 108.99,
+        "p50Ms": 113.22,
+        "p95Ms": 215.58,
+        "rangeReadsPerCall": 10,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 130867,
+        "samples": 6
+      },
+      "taskIndex": {
+        "coldMs": 47.02,
+        "p50Ms": 47.99,
+        "p95Ms": 103.75,
+        "rangeReadsPerCall": 4,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 467516,
+        "samples": 6
+      },
+      "projectList": {
+        "coldMs": 27.54,
+        "p50Ms": 28.58,
+        "p95Ms": 53.08,
+        "rangeReadsPerCall": 8,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 17669,
+        "samples": 12
+      },
+      "projectDetail": {
+        "coldMs": 20.13,
+        "p50Ms": 12.24,
+        "p95Ms": 29.09,
+        "rangeReadsPerCall": 5,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 1728,
+        "samples": 12
+      },
+      "taskSearch": {
+        "coldMs": 11.66,
+        "p50Ms": 12.1,
+        "p95Ms": 14.71,
+        "rangeReadsPerCall": 4,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 2871,
+        "samples": 12
+      },
+      "taskDetail": {
+        "coldMs": 11.16,
+        "p50Ms": 10.68,
+        "p95Ms": 11.6,
+        "rangeReadsPerCall": 4,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 923,
+        "samples": 12
+      },
+      "taskUpdate": {
+        "coldMs": 53.81,
+        "p50Ms": 57.58,
+        "p95Ms": 66.69,
+        "rangeReadsPerCall": 20,
+        "workbookOpensPerCall": 2,
+        "payloadBytes": 918,
+        "samples": 6
+      },
+      "taskCreate": {
+        "coldMs": 35.73,
+        "p50Ms": 48.04,
+        "p95Ms": 51.53,
+        "rangeReadsPerCall": 17,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 975,
+        "samples": 6
+      },
+      "requestApproval": {
+        "coldMs": 42.7,
+        "p50Ms": 36.35,
+        "p95Ms": 43.02,
+        "rangeReadsPerCall": 24,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 204,
+        "samples": 6,
+        "note": "Six distinct pending deadline requests; fixture setup excluded. Inbox receipt mirroring is unavailable in this mock; authoritative decision/history measured."
+      },
+      "publication": {
+        "coldMs": 16.62,
+        "p50Ms": 15.4,
+        "p95Ms": 17,
+        "rangeReadsPerCall": 20,
+        "workbookOpensPerCall": 2,
+        "payloadBytes": 302,
+        "samples": 6,
+        "note": "One INTERNAL project; remaining projects RESTRICTED. Range counters cover private workbook only."
+      },
+      "reportRefresh": {
+        "coldMs": 260.61,
+        "p50Ms": 268.74,
+        "p95Ms": 268.74,
+        "rangeReadsPerCall": 16.666666666666668,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 1516,
+        "samples": 3
+      },
+      "ui": {
+        "firstLoadMs": 104.32,
+        "cachedNavigationMs": {
+          "p50": 0.92,
+          "p95": 1.24,
+          "samples": 12
+        },
+        "localSearchMs": {
+          "p50": 1.8,
+          "p95": 2.08,
+          "samples": 10
+        },
+        "firstDetailOpenMs": 13.76,
+        "cachedDetailOpenMs": 0.07,
+        "taskIndexLoaded": true,
+        "rpcAfterInitialLoad": 3,
+        "pendingDuringInFlightTest": 1,
+        "inFlightNavigationMs": {
+          "p50": 0.02,
+          "p95": 0.04
+        }
+      },
+      "previousUi": {
+        "client": "previous",
+        "firstLoadMs": 105.32,
+        "firstLoadRpc": 1,
+        "rpcForOverviewProjectsTasks": 4,
+        "projectsNavigationMs": 26.75,
+        "tasksNavigationMs": 35.97
+      }
+    }
+  ]
+}

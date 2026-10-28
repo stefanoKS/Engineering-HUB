@@ -1,5 +1,55 @@
 # Changelog
 
+## V1.5.1 — 2026-10-28
+
+Local-first performance release for the manager browser UI. No schema change (still **6**), no
+employee contract change (still **1.4**), no migration, no execute-as change, no trigger, mail or
+Calendar activation, and no change to the sidebar or the employee dashboard.
+
+- **One authorized snapshot.** New read operations `bootstrap` (overview values, reference
+  choices, every project summary, task count) and `taskIndex` (compact columnar task summaries).
+  Both run inside the existing read context, so each source table is read at most once:
+  `bootstrap` reads the same nine tables the overview did (10 range reads including the
+  environment marker) and `taskIndex` reads three. Every call still re-checks identity, the
+  allowed domains and `Access.requireManager()`.
+- **Bounded, all-or-nothing datasets.** `TASK_INDEX_LIMIT = 3000` and `PROJECT_INDEX_LIMIT = 1000`.
+  Above a bound the response reports `complete: false` and carries no rows, so the browser keeps
+  the paginated `tasks`/`projects` operations instead of a silently truncated list. Task
+  summaries carry only id/name/project/subproject/owner/responsibility ids, deadline, status,
+  progress and priority — never descriptions, acceptance criteria, estimates or notes.
+- **Client-side snapshot store.** The manager page keeps the snapshot in memory for the session
+  (no localStorage/IndexedDB, no server cache), deduplicates identical in-flight reads, discards
+  superseded responses, and keeps unrelated cached views when one record changes.
+- **Instant navigation.** Overview → projects → tasks, page changes, sorting and filtering render
+  synchronously from the store with no `google.script.run` call. The 30-second cache policy is
+  replaced by a 30-second *freshness* window per dataset: cached data still paints immediately and
+  is revalidated in the background.
+- **Local filtering with an authoritative search.** Typing narrows by name, ID, project, owner,
+  status, responsibility and deadline range; pressing 検索 still runs the server search, which also
+  covers description and acceptance criteria, so a description-only match cannot be missed.
+- **Fast editing.** Forms open immediately from a cached record and refresh the server copy in the
+  background; an untouched draft adopts a newer revision, an edited draft keeps its original
+  revision so the server refuses a stale save. A successful save patches the affected summaries,
+  invalidates only the affected detail/aggregates, repaints locally and revalidates — no page
+  reload — and "Saved" is shown only after the server confirms. A failed save keeps the draft and
+  the error, and never retries by itself.
+- **Background synchronisation.** 最終更新/更新中… indicators, manual refresh, tab focus and
+  `visibilitychange` revalidation, a clear server-error banner with retry while cached data stays
+  visible, and a DEV 計測/Diagnostics view (RPC count, local reuse, discarded stale responses, p50/p95,
+  table reads, explicit cache clear).
+- **Revocation fails closed.** `MANAGER_ACCESS_DENIED` / `Insufficient role` clears every cached
+  view and unsent draft, blocks further requests and shows the access-denied message.
+- **Smaller task read.** `Tasks.list` loads PROJECTS/SUBPROJECTS only for the ancestor-aware
+  active-work rule, so the paginated `tasks` operation reads three tables instead of four.
+- **Measured locally (mocked services, NOT live):** previous client needed 4 read RPCs for
+  overview→projects→tasks and 2.58–35.97 ms per navigation; V1.5.1 needs 0 RPCs after the first
+  load, with navigation p50 0.57–1.45 ms, local filter p50 0.06–1.80 ms, cached project open
+  ≤0.08 ms and responsiveness under a pending request. First load carries the snapshot:
+  `bootstrap` 8.5/48.7/130.9 KB and `taskIndex` 15.1/152.7/467.5 KB at 10/100/300 projects.
+  Real Workspace latency, browser paint timing and native 200% zoom remain NOT_RUN.
+- 406 local tests pass; benchmark raw data in `docs/checkgates/V1_5_1_PERFORMANCE.json`, ten
+  V1.5.1 checkgates and updated operating documentation. **NOT APPROVED FOR PRODUCTION.**
+
 ## V1.5 — 2026-10-28
 
 - Browser manager in the existing src project: focused authorized APIs, responsive Japanese/English navigation and complete normal manager forms.

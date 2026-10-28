@@ -1,6 +1,8 @@
-# V1.5 DEVELOPMENT Workspace verification plan
+# V1.5.1 DEVELOPMENT Workspace verification plan
 
 **Status: NOT_RUN. NOT APPROVED FOR PRODUCTION.** No step below was executed against Workspace by this implementation task. Use the existing DEVELOPMENT A/B/C and existing separate manager/employee projects. Follow [DEV deployment](MANAGER_WEB_APP_DEPLOYMENT.md) first; do not initialize existing sheets, run migrations, install triggers or activate mail/Calendar. Use synthetic test records and preserve audit/history. Record deployment version/SHA and restricted backup reference privately.
+
+V1.5.1 added no workflow, so the V1.5 cases below stay valid. Cases 21–27 cover the new local-first behaviour and must be recorded separately: they are the only steps that can confirm a real perceived-speed improvement, because the local benchmark uses mocked Google services.
 
 For each numbered test record date, account role, operation, expected result, actual result, measured duration, PASS/FAIL, evidence and corrective action. Do not put real emails, private records or resource IDs into public Git evidence. A real failure reopens the relevant checkgate.
 
@@ -36,6 +38,21 @@ Added by the project-summary/deadline-only/card correction; also NOT_RUN in DEV.
 | R1 | MANAGER | Note a project card's progress/health, save a task progress or status change, return to the overview without refreshing reports | Card, KPI counts and health reflect the new values immediately; no generated sheet is rewritten by the task save | Not executed / — / NOT_RUN / — |
 | R2 | MANAGER | Create a task with a deadline and no required duration, then one with a duration | First keeps an empty planned start; second back-plans the start; non-working deadlines still require acknowledgement | Not executed / — / NOT_RUN / — |
 | R3 | MANAGER | At 375 px and with a screen reader, inspect a project card and switch 日本語 / English | Progress bar announced with its percentage and project name; health, deadline wording and overdue count read as text; labels translate, stored names do not | Not executed / — / NOT_RUN / — |
+
+## Local-first checks (V1.5.1)
+
+Added by the snapshot/local-navigation release; also NOT_RUN in DEV. These are the only steps that
+can confirm the perceived-speed improvement: the repository benchmark uses mocked Google services.
+
+| Test | Account | Steps | Expected result | Actual / duration / status / evidence |
+| --- | --- | --- | --- | --- |
+| 21 | MANAGER | Open the app, then open 概要 → 案件 → タスク → 概要 with the devtools network panel visible | First load makes one `bootstrap` (plus a background `taskIndex` under 1,000 tasks); later navigation makes **no** Apps Script request and paints immediately | Not executed / — / NOT_RUN / — |
+| 22 | MANAGER | Record the real durations of first load, cached navigation, first and second project open, and typing in the task filter | Cached navigation and filtering are visibly faster than in V1.5; record actual values rather than assuming the local targets | Not executed / — / NOT_RUN / — |
+| 23 | MANAGER | Type a task name fragment, then press 検索 for a term that exists only in a task description | Typing narrows instantly; the explicit search returns the description-only match | Not executed / — / NOT_RUN / — |
+| 24 | MANAGER | Leave the app idle several minutes, edit a record in another browser tab, then return to the first tab and switch views | 最終更新 is shown, 更新中… appears on return, and the newer value becomes visible without a manual reload | Not executed / — / NOT_RUN / — |
+| 25 | Two managers | Open the same task from the cache, have the other manager save it, then save the first manager's draft | The stale save is refused; the draft is preserved; Review latest record shows the server version | Not executed / — / NOT_RUN / — |
+| 26 | ADMIN | Revoke the signed-in manager's MANAGER role (or remove the account from the allowed domains), then use the open page | Requests fail closed, cached views and unsent drafts are cleared, and the access-denied message is shown | Not executed / — / NOT_RUN / — |
+| 27 | MANAGER | Open 計測 / Diagnostics after the scenarios above | RPC count, local reuse, discarded stale responses, p50/p95 and sheet reads match what the devtools panel recorded; no private record text is displayed | Not executed / — / NOT_RUN / — |
 
 ## Browser and recovery checks
 

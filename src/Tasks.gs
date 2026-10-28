@@ -114,9 +114,16 @@ var Tasks = (function () {
 
   function list(filter) {
     filter = filter || {};
-    var projects = Object.create(null), subprojects = Object.create(null);
-    Database.read('PROJECTS').forEach(function (project) { projects[project.Project_ID] = project; });
-    Database.read('SUBPROJECTS').forEach(function (subproject) { subprojects[subproject.Subproject_ID] = subproject; });
+    // The project and subproject tables are only needed for the ancestor-aware active-work
+    // rule; an unfiltered task read must not pay for them.
+    var projects = null, subprojects = null;
+    function scope() {
+      if (projects) return;
+      projects = Object.create(null);
+      subprojects = Object.create(null);
+      Database.read('PROJECTS').forEach(function (project) { projects[project.Project_ID] = project; });
+      Database.read('SUBPROJECTS').forEach(function (subproject) { subprojects[subproject.Subproject_ID] = subproject; });
+    }
     var query = String(filter.query || '').toLowerCase();
     var statuses = filter.status ? (Array.isArray(filter.status) ? filter.status : [filter.status]) : null;
     return Database.read('TASKS').filter(function (task) {
@@ -124,7 +131,10 @@ var Tasks = (function () {
       if (filter.subprojectId !== undefined && String(task.Subproject_ID || '') !== String(filter.subprojectId || '')) return false;
       if (filter.ownerId && task.Owner_Member_ID !== filter.ownerId) return false;
       if (statuses && statuses.indexOf(task.Status) < 0) return false;
-      if (filter.activeOnly && !Eligibility.taskInActiveWork(task, projects, subprojects)) return false;
+      if (filter.activeOnly) {
+        scope();
+        if (!Eligibility.taskInActiveWork(task, projects, subprojects)) return false;
+      }
       if (filter.overdueOn && !(task.Due_Date && task.Due_Date < Domain.date(filter.overdueOn) && task.Status !== 'Done' && task.Status !== 'Cancelled')) return false;
       if (query) {
         var haystack = [task.Task_ID, task.Task_Name, task.Description, task.Acceptance_Criteria].join(' ').toLowerCase();

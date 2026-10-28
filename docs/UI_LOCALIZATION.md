@@ -5,6 +5,7 @@ V1.3 ships one bilingual interface for both deployments:
 | Deployment | Screens | Default language |
 | --- | --- | --- |
 | Manager application (container-bound, `src/`) | manager sidebar (project create/edit, task assign/edit, progress, members, skills), request queue, automation settings, system status | 日本語 |
+| Manager browser app (V1.5.1, `src/` HTML Service) | 概要, 案件, 案件の階層, タスク, 申請, 管理 and its sub-screens, create/edit dialogs, 計測 (diagnostics) | 日本語 |
 | Shared dashboard (`dashboard-app/`) | project dashboard, project detail, task detail, deadline change request, completion report | 日本語 |
 
 The official application name is **設計・開発課 管理** and is identical in every language.
@@ -81,6 +82,9 @@ value as one created from the Japanese UI.
 * Selecting English re-renders every visible label immediately (`renderAll()`), without a
   server round trip, without reloading the page and without losing the current project,
   task, filter, drawer or scroll position.
+* In the manager browser app (V1.5.1) the switch also keeps the in-memory snapshot, the
+  current filters and any unsent editor draft; only labels and the 最終更新/計測 wording change.
+  Stored project, task and member names are never translated.
 * In the manager sidebar (V1.3.1) the switch also preserves **unsaved form input**: the
   template captures every field value, re-renders the generated labels and the select
   options, then restores what the manager typed. An edit form keeps the record selected.

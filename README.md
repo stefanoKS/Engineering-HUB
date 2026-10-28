@@ -1,16 +1,23 @@
 ﻿# Engineering-HUB
 
-## Current release — V1.5
+## Current release — V1.5.1
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 
-Version **1.5.0** adds a standalone manager browser UI in the existing manager Apps Script project. Projects, two-level subprojects, tasks, responsibilities, members, skills, employee requests and controlled administration reuse the current services and private workbook. Japanese is default; English is available. The sidebar remains the fallback and the employee web app remains separate. Schema **6**, employee contract **1.4**; no migration.
+Version **1.5.1** is a performance release for the standalone manager browser UI introduced in V1.5. It adds one authorized snapshot (`bootstrap`) plus a compact task index, so ordinary navigation, filtering, sorting and previously opened records render from memory instead of waiting for `google.script.run`. Google Sheets stays the only authoritative store; there is no second database and no server-side cache. Schema **6**, employee contract **1.4**; no migration, no Apps Script execute-as change, no new trigger, mail or Calendar activation.
 
-Project cards show an accessible progress bar, health, translated deadline wording and a text overdue count; these values are derived from the current tasks, milestones and issues on every read, so a task save is visible immediately without regenerating a report. Task creation requires a deadline and treats the required duration as optional: without it the planned start stays unknown, and with it the start is back-planned.
+Measured locally on identical fixtures: overview→projects→tasks cost the previous client **4 read RPCs** and now cost **0** after the first load (navigation p50 0.57–1.45 ms; local filter p50 0.06–1.80 ms; cached project open ≤0.08 ms). The first load and the first project open do pay for the snapshot: `bootstrap` reads the same nine tables as the previous overview but returns 8.5–131 KB and a compact task index of 15–468 KB, so at 300 projects first load is 104.3 ms versus 105.3 ms and a first (uncached) project open is 13.8 ms. Real Workspace latency remains **NOT_RUN**; only correctness and mock read/RPC counts are verified.
 
-Local verification: **387 tests, 387 pass**, 0 failures/skips; npm ci, lint and source validation pass. Google identity, sharing, live publication/latency and native 200% zoom remain unverified. See [manager guide](docs/MANAGER_WEB_APP.md), [DEV deployment](docs/MANAGER_WEB_APP_DEPLOYMENT.md), [performance](docs/MANAGER_WEB_APP_PERFORMANCE.md), [20-case smoke plan](docs/MANAGER_WEB_APP_SMOKE_TEST.md) and [checkgates](docs/checkgates/V1_5_GATE_10.md).
+Stale-while-revalidate keeps the snapshot honest: 最終更新/更新中… indicators, manual refresh, tab-focus and visibility revalidation, deduplicated in-flight reads, discarding of superseded responses, selective invalidation after a write, draft-preserving save failures, and clearing of every cached view plus unsent drafts when the server stops authorizing the user. Pressing 検索 still searches description and acceptance criteria on the server, so local filtering never hides a record it cannot see.
 
-Preview: npm run preview:manager-web → http://127.0.0.1:4175/ (synthetic data only). The existing Workspace report of committedDeadline snapshot mismatch is fixed in local Date/hash round-trip tests; the live fix is UNVERIFIED.
+Local verification: **406 tests, 406 pass**, 0 failures/skips; npm ci, lint and source validation pass; the mock benchmark ran. Google identity, sharing, live latency, the browser paint timing and native 200% zoom remain unverified. See [manager guide](docs/MANAGER_WEB_APP.md), [DEV deployment](docs/MANAGER_WEB_APP_DEPLOYMENT.md), [performance](docs/MANAGER_WEB_APP_PERFORMANCE.md), [20-case smoke plan](docs/MANAGER_WEB_APP_SMOKE_TEST.md) and [checkgates](docs/checkgates/V1_5_1_GATE_10.md).
+
+Preview: npm run preview:manager-web → http://127.0.0.1:4175/ (synthetic data only). The 計測 / Diagnostics button in the header shows the same timings without Chrome DevTools.
+
+## Historical V1.5 release record
+
+V1.5 added the standalone manager browser UI (5 routes, ja/en, one form per record type, current project health/progress derived on read, employee requests and controlled administration) on top of the private workbook. Its implementation and review-correction SHAs are recorded in [the ten V1.5 checkgates](docs/checkgates/V1_5_GATE_1.md); its measurements stay in [V1_5_PERFORMANCE.json](docs/checkgates/V1_5_PERFORMANCE.json) as historical evidence.
+
 
 ## Historical V1.4.1 release record
 
