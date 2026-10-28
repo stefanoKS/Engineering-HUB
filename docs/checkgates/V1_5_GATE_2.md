@@ -3,7 +3,7 @@
 Status: **BLOCKED**
 Date: 2026-10-28
 Starting commit SHA: 5c1143edef3f8ba74ce92219a59ea58723847941
-Implementation commit SHA: pending evidence seal after implementation commit.
+Implementation commit SHA: 63596375251c230afa11ad42cf999cd3a2f0cef9 (V1.5 implementation); review-correction commit: 309a86c17643e01235555f820a921438fe285487 (project summary freshness, deadline-only tasks, project cards).
 
 ## 1. Objective
 
