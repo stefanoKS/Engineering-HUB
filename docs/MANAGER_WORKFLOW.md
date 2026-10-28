@@ -28,6 +28,13 @@ These replace the V1.6/V1.6.1 steps they name; every other step is unchanged.
 7. **Read a member's profile correctly.** 本人の操作履歴 contains only actions performed by that member's verified
    account; 担当業務の変更履歴 also contains manager edits and reassignments by other people. A record whose
    contributor could not be verified says so.
+8. **Filter the task list by responsibility.** 担当領域 is the first control of the task filter bar. It resolves the
+   area through the task's project, so すべての担当領域, one area, 未分類 and a 廃止 area that still owns projects each
+   show exactly their own tasks; the 案件 selector offers only projects of the selected area and returns to すべて when
+   the current project cannot belong to the new area. 状態・担当者・優先度・期限 stay applied, the page returns to the
+   first page, and the previous area's rows disappear while the new page loads. After moving a project to another
+   area, open タスク again (or press 再読み込み) — the list is rebuilt from the project's current area instead of
+   keeping the task under its previous responsibility.
 
 ## V1.6.1 corrections to the daily workflow
 

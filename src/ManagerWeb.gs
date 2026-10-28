@@ -123,11 +123,35 @@ var ManagerWeb = (function () {
       return order || a.Task_ID.localeCompare(b.Task_ID);
     };
   }
+  /** The organisation area of a task, resolved through its project: TASKS never copies it. */
+  function responsibilityOf(projects, task) {
+    return String((projects[task.Project_ID] || {}).Responsibility_ID || '');
+  }
+  /** One area rule for every list: everything, one responsibility, or the 未分類 bucket. */
+  function inArea(scope, id) {
+    if (scope.unassigned) return !id;
+    return !scope.responsibilityId || String(id) === scope.responsibilityId;
+  }
+  /**
+   * Filtered, ordered page of compact task summaries.
+   *
+   * The organisation filter resolves `TASKS.Project_ID -> PROJECTS.Responsibility_ID` and also
+   * understands the 未分類 scope, so `unassigned: true` no longer falls through to every task.
+   * The status filter compares the value the list shows (a container reports its derived
+   * completion), which is exactly what the browser compares locally. Every filter is applied
+   * before `page()`, so a paginated response always counts the filtered set.
+   */
   function taskList(input) {
     var projects = index('PROJECTS'), members = index('MEMBERS');
-    var treeIndex = TaskTree.buildIndex(Database.read('TASKS'));
-    var rows = Tasks.list(input).filter(function (t) {
-      if (input.responsibilityId && String((projects[t.Project_ID] || {}).Responsibility_ID || '') !== input.responsibilityId) return false;
+    var all = Database.read('TASKS'), treeIndex = TaskTree.buildIndex(all);
+    var scope = scopeInput(input);
+    var statuses = input.status ? (Array.isArray(input.status) ? input.status : [input.status]) : null;
+    // The stored column cannot answer a displayed-status question, so it is not pushed down.
+    var base = Object.assign({}, input);
+    delete base.status;
+    var rows = Tasks.list(base).filter(function (t) {
+      if (!inArea(scope, responsibilityOf(projects, t))) return false;
+      if (statuses && statuses.indexOf(TaskTree.viewIn(t, treeIndex).status) < 0) return false;
       if (input.deadlineBefore && (!t.Due_Date || Domain.date(t.Due_Date) > input.deadlineBefore)) return false;
       if (input.deadlineAfter && (!t.Due_Date || Domain.date(t.Due_Date) < input.deadlineAfter)) return false;
       if (input.priority && String(t.Priority || '') !== String(input.priority)) return false;

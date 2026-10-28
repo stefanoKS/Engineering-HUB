@@ -41,16 +41,24 @@ feature was added.
   the HEX field is an optional advanced control, and a preview card shows the result immediately. `Color_Hex` stays
   the stored value, the server keeps validating it, an untouched colour is never rewritten, and a new area keeps its
   deterministic palette default (see [V1_6_2_GATE_6.md](docs/checkgates/V1_6_2_GATE_6.md)).
+- **Tasks filter by their project's responsibility.** The task list resolves the area through
+  `TASKS.Project_ID → PROJECTS.Responsibility_ID` (nothing is copied into `TASKS`), so one area, 未分類 and a retired
+  area that still owns projects each return exactly their own tasks. The responsibility selector is the first control
+  of the filter bar, the project selector only offers the selected area's projects (an incompatible selection is
+  visibly reset), the browser snapshot and the server page apply the same rules, and moving a project to another area
+  invalidates the task index and the area aggregates instead of leaving the work under its previous responsibility
+  (see [V1_6_2_GATE_7.md](docs/checkgates/V1_6_2_GATE_7.md)).
 
 Schema **7** and employee contract **1.5** are unchanged; there is no new migration, and no execute-as, trigger,
 mail, Calendar or publication change.
 
 Local verification: `npm ci`, `npm run lint`, `npm test`, `npm run validate` and
-`node scripts/manager-web-benchmark.js` all pass; **553 tests, 553 pass, 0 fail, 0 skipped** (543 at the sealed
-V1.6.2 delivery plus ten colour-picker cases) and the six V1.6.2 checkgates record local PASS results with their
-live criteria BLOCKED (see [V1_6_2_GATE_5.md](docs/checkgates/V1_6_2_GATE_5.md) and
-[V1_6_2_GATE_6.md](docs/checkgates/V1_6_2_GATE_6.md)). Cached navigation stays at 0.8–1.4 ms and local filtering at
-0.1–1.4 ms; `bootstrap` costs 5.1 / 45.3 / 142.0 ms and 11.0 / 57.8 / 153.2 KB for 10/100/300 projects, and the
+`node scripts/manager-web-benchmark.js` all pass; **567 tests, 567 pass, 0 fail, 0 skipped** (543 at the sealed
+V1.6.2 delivery, ten colour-picker cases and fourteen task-filter cases) and the seven V1.6.2 checkgates record local
+PASS results with their live criteria BLOCKED (see
+[V1_6_2_GATE_5.md](docs/checkgates/V1_6_2_GATE_5.md), [V1_6_2_GATE_6.md](docs/checkgates/V1_6_2_GATE_6.md) and
+[V1_6_2_GATE_7.md](docs/checkgates/V1_6_2_GATE_7.md)). Cached navigation stays at 1.2–2.5 ms and local filtering at
+0.1–1.5 ms; `bootstrap` costs 7.5 / 49.1 / 142.9 ms and 11.2 / 57.9 / 153.3 KB for 10/100/300 projects, and the
 area-scoped overview drops from 137.3 ms / 9.99 KB to 110.8 ms / 8.87 KB at 300 projects. A durable decision costs
 one extra journal read and two journal rows, which is why approval measures 2.7 / 12.5 / 34.1 ms instead of
 2.3 / 11.3 / 31.9 ms. Real Workspace latency, the DEV migration, the request round trip and production rendering

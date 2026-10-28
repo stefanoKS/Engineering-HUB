@@ -68,6 +68,15 @@ stays **7** and the published employee contract stays **1.5**.
   next-palette default, and an edit that does not touch the colour sends no colour at all. Cards, the area
   filter and project/task indicators reuse the same colour. See
   [V1_6_2_GATE_6](docs/checkgates/V1_6_2_GATE_6.md).
+- **Task responsibility filter.** The task list resolves the organisation area through
+  `TASKS.Project_ID -> PROJECTS.Responsibility_ID`; nothing is copied into `TASKS`. `ManagerWeb.taskList` now
+  honours the 未分類 scope (`unassigned: true`), so the server page and the local snapshot agree, and the status
+  filter compares the displayed status (a container reports its derived completion) on both sides. `matchesTask`
+  applies `treeScope` and `parentTaskId` like the server. The responsibility selector is the first control of the
+  task filter bar, the project selector only offers the selected area's projects, an incompatible project
+  selection is visibly reset, and switching responsibility resets paging and clears the previous rows. A project
+  write drops the compact task index, the scoped task pages and the scoped overview, so work moved to another
+  area never stays in the previous area's list. See [V1_6_2_GATE_7](docs/checkgates/V1_6_2_GATE_7.md).
 
 ## V1.6.1 — 2026-10-29
 

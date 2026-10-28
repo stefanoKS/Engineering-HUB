@@ -26,6 +26,12 @@ finalization rule and two presentation rules:
 - **Presentation.** `ManagerWeb.memberProfile` returns verified `memberActions` separately from `taskHistory`, and
   `ManagerWeb.overview(actor, {areas:false})` lets the browser reuse the area snapshot it already holds; the client
   paints a scoped loading state instead of the previous area's figures.
+- **Task area resolution.** `ManagerWeb.taskList` resolves the organisation area of a task through
+  `TASKS.Project_ID -> PROJECTS.Responsibility_ID` (`inArea` / `responsibilityOf`) and understands the 未分類 scope;
+  nothing is copied into `TASKS`. The status filter compares the displayed status (`TaskTree.viewIn`), which is what
+  the browser compares locally, and every filter runs before `page()`. A project write drops the compact task index
+  and the scoped overview (`invalidateAreaSnapshot`) and patches the project summary from the returned row, because
+  each task summary repeats its project's responsibility.
 
 ## V1.6.1 corrective architecture notes
 

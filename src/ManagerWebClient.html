@@ -83,6 +83,13 @@ var api = {
       // Only the entries that can contain the changed record or a derived aggregate are dropped;
       // unrelated cached views stay usable.
       invalidatePrefixes(afterWritePrefixes(operation));
+      if (/^project/.test(operation)) {
+        invalidateAreaSnapshot();
+        // A removed project leaves the summary, a changed one is patched in place so the project
+        // filter keeps offering only the selected area's projects.
+        if (operation === 'projectDelete') store.projects = null;
+        else patchProjectSummary(data);
+      }
       return data;
     }).finally(function () { pending.delete(key); });
   },
@@ -105,7 +112,10 @@ function navigate(next, options) { view = next; if (options) filters[next] = opt
  * ---------------------------------------------------------------- */
 /** Cache prefixes that may hold the changed record or a derived aggregate. */
 function afterWritePrefixes(operation) {
-  if (/^(project|subproject)/.test(operation)) return ['bootstrap', 'references', 'project'];
+  // A project edit can move work from one responsibility to another, so the task index, every
+  // scoped task page and the area overview aggregates are stale, not only the project card.
+  if (/^project/.test(operation)) return ['bootstrap', 'references', 'project', 'tasks', 'taskIndex', 'overview'];
+  if (/^subproject/.test(operation)) return ['bootstrap', 'references', 'project'];
   if (/^task/.test(operation)) return ['bootstrap', 'task'];
   if (/^request/.test(operation)) return ['bootstrap', 'requests'];
   if (/^member/.test(operation)) return ['bootstrap', 'references', 'members'];
@@ -115,6 +125,21 @@ function afterWritePrefixes(operation) {
   if (operation === 'publication') return ['publication'];
   if (operation === 'reportRefresh') return ['status'];
   return ['bootstrap'];
+}
+/**
+ * A project edit can change its responsibility, and the snapshot copies that responsibility onto
+ * every task summary. The rows are dropped (not only the cached payloads) so no list can present
+ * the previous responsibility as the current one; the project summary itself is patched from the
+ * authoritative write result and the area overview is recomputed on the next paint.
+ */
+function invalidateAreaSnapshot() {
+  if (store.tasks) {
+    store.tasks = {items: [], total: store.tasks.total, limit: store.tasks.limit,
+      complete: store.tasks.complete, loaded: false};
+  }
+  store.at.tasks = 0;
+  store.overview = null;
+  store.at.bootstrap = 0;
 }
 function hydrateTasks(data) {
   if (!data || data.items || !data.rows) return data;
@@ -181,11 +206,18 @@ function inActiveArea(record) {
 }
 /** Selects an area as the global filter; offsets of the previous area are reset. */
 function setActiveResponsibility(id, name) {
+  var changed = String(id || '') !== String(activeResponsibility || '');
   activeResponsibility = id || '';
   activeResponsibilityName = name || '';
   Object.keys(filters).forEach(function (kind) { if (filters[kind]) filters[kind].offset = 0; });
   clearNotice();
   renderNav();
+  // A first page is not "the second page of the new area", so paging restarts at zero and the
+  // previous area's rows are never presented as the new area's result.
+  if (changed && (view === 'tasks' || view === 'projects')) currentData = null;
+  // The area scopes the project choices, so a project that cannot be in the new area is dropped
+  // before the results are computed; the rebuilt bar then shows すべて for it.
+  detachProjectOutsideArea(filters.tasks || (filters.tasks = {}));
   load(false);
 }
 /** Request payload for a view: the active area is always resolved server-side as well. */
@@ -228,6 +260,8 @@ function matchesTask(task, input, query) {
   if (input.responsibilityId && String(task.responsibilityId || '') !== String(input.responsibilityId)) return false;
   if (input.unassigned && String(task.responsibilityId || '')) return false;
   if (input.priority && task.priority !== input.priority) return false;
+  if (input.treeScope === 'TOP' && task.parentId) return false;
+  if (input.parentTaskId !== undefined && String(task.parentId || '') !== String(input.parentTaskId || '')) return false;
   if (!inActiveArea(task)) return false;
   if (input.deadlineBefore && (!task.deadline || task.deadline > input.deadlineBefore)) return false;
   if (input.deadlineAfter && (!task.deadline || task.deadline < input.deadlineAfter)) return false;
@@ -499,12 +533,53 @@ function colorPicker(parent, draft) {
 function filterField(bar, kind, key, value, options, apply, type) {
   return field(bar, key, value, options, function (v) { apply(v); localFilter(kind); }, type);
 }
+/**
+ * The organisation filter. On the task list it comes first because the area decides which
+ * projects and therefore which tasks are in scope at all.
+ */
+function responsibilityFilter(bar, kind, values) {
+  var choices = [{id: '', name: t('allResponsibilities')}]
+    .concat(areaItems().map(function (area) { return {id: area.id, name: area.name}; }));
+  var unassignedArea = store.responsibilityCards && store.responsibilityCards.unassigned;
+  // 未分類 stays selectable while it is the active scope, even when no project is unassigned.
+  if (activeResponsibility === UNASSIGNED || (unassignedArea && unassignedArea.totalProjects)) {
+    choices.push({id: UNASSIGNED, name: t('unassigned')});
+  }
+  return field(bar, 'filterResponsibility', activeResponsibility || '', choices, function (v) {
+    setActiveResponsibility(v || '', v ? (v === UNASSIGNED ? t('unassigned') : areaNameOf(v)) : '');
+  });
+}
+/**
+ * Project choices of the selected area. A project filter outside the active area can never match
+ * a task, so the dropdown offers only the area's projects (or every project while the project
+ * index is not loaded, where the area of a project cannot be proven).
+ */
+function projectChoices() {
+  var projects = (store.projects && store.projects.complete && store.projects.items) || [];
+  if (!projects.length) return references().projects.map(function (p) { return {id: p.id, name: p.name}; });
+  return projects.filter(function (p) { return inActiveArea(p); })
+    .map(function (p) { return {id: p.id, name: p.name}; });
+}
+/** Drops a project filter the selected area cannot contain; the rebuilt bar shows すべて. */
+function detachProjectOutsideArea(values) {
+  if (!values.projectId) return false;
+  var known = (store.projects && store.projects.complete && store.projects.items) || [];
+  var project = known.filter(function (p) { return p.id === values.projectId; })[0];
+  if (!project || inActiveArea(project)) return false;
+  delete values.projectId; delete values.subprojectId; delete values.subprojectName;
+  values.offset = 0;
+  return true;
+}
 function listFilters(kind, host) {
   var values = filters[kind] || (filters[kind] = {}), bar = el('form', undefined, 'toolbar');
+  if (kind === 'tasks') {
+    detachProjectOutsideArea(values);
+    responsibilityFilter(bar, kind, values);
+  }
   filterField(bar, kind, 'search', values.query || '', null, function (v) { values.query = v; values.offset = 0; });
   if (kind === 'tasks') {
     if(values.subprojectId){bar.appendChild(el('p',t('subproject')+': '+(values.subprojectName||values.subprojectId)));button('all',function(){delete values.subprojectId;delete values.subprojectName;values.offset=0;load(false);},bar);}
-    filterField(bar, kind, 'projectId', values.projectId || '', [{id:'',name:t('all')}].concat(references().projects), function (v) { values.projectId=v;delete values.subprojectId;delete values.subprojectName;values.offset=0; });
+    filterField(bar, kind, 'projectId', values.projectId || '', [{id:'',name:t('all')}].concat(projectChoices()), function (v) { values.projectId=v;delete values.subprojectId;delete values.subprojectName;values.offset=0; });
     filterField(bar, kind, 'ownerId', values.ownerId || '', [{id:'',name:t('all')}].concat(references().members), function (v) { values.ownerId=v; values.offset=0; });
     filterField(bar, kind, 'statusField', values.status || '', ['','Not Started','Assigned','In Progress','Blocked','On Hold','Done','Cancelled'], function (v) {values.status=v; values.offset=0;});
     filterField(bar, kind, 'priority', values.priority || '', [{id:'',name:t('all')}].concat(['Low','Medium','High','Critical'].map(function(v){return {id:v,name:EH_I18N.priority(lang,v)};})), function (v) {values.priority=v; values.offset=0;});
@@ -516,15 +591,8 @@ function listFilters(kind, host) {
   if (kind === 'projects') {
     filterField(bar, kind, 'priority', values.priority || '', [{id:'',name:t('all')}].concat(['Low','Medium','High','Critical'].map(function(v){return {id:v,name:EH_I18N.priority(lang,v)};})), function (v) {values.priority=v; values.offset=0;});
     filterField(bar, kind, 'statusField', values.status || '', ['','Planned','Active','On Hold','Completed','Cancelled','Archived'], function (v) {values.status=v; values.offset=0;});
-  }
-  if (kind === 'tasks' || kind === 'projects') {
     // The organisation filter is shared with the responsibility section at the top of the page.
-    var areaChoices=[{id:'',name:t('allResponsibilities')}].concat(areaItems().map(function(area){return {id:area.id,name:area.name};}));
-    var unassignedArea=store.responsibilityCards&&store.responsibilityCards.unassigned;
-    if(unassignedArea&&unassignedArea.totalProjects)areaChoices.push({id:UNASSIGNED,name:t('unassigned')});
-    field(bar,'filterResponsibility',activeResponsibility||'',areaChoices,function(v){
-      setActiveResponsibility(v||'',v?(v===UNASSIGNED?t('unassigned'):areaNameOf(v)):'');
-    });
+    responsibilityFilter(bar, kind, values);
   }
   var submit = el('button', t('search')); submit.type='submit'; bar.appendChild(submit);
   bar.appendChild(el('span', t(localDataset(kind).complete ? 'localHint' : 'serverHint'), 'muted hint-wide'));
@@ -664,6 +732,9 @@ function renderList() {
   if (!resultsHost) return;
   resultsHost.replaceChildren();
   var data = currentData;
+  // No authorized result exists yet: a loading state is shown instead of the previous scope's
+  // rows or an "empty" claim that the server has not confirmed.
+  if (!data) { resultsHost.appendChild(el('p', t('loading'), 'muted')); return; }
   if (view === 'projects') { projectCards(data, resultsHost); pagination(data, 'projects', resultsHost); }
   else if (view === 'tasks') { tasks(data, resultsHost); pagination(data, 'tasks', resultsHost); }
 }
@@ -735,6 +806,9 @@ function load(fresh, message) {
     bootstrapFetch(true); return;
   }
   if (requested === 'tasks') syncTaskIndex(true);
+  // Without any local result the previous page is replaced by a loading state, so a switched
+  // responsibility never leaves the old scope's rows on screen while the new page is in flight.
+  if (requested === 'tasks' || requested === 'projects') { currentData = null; render(); }
   fetchView(requested, fresh === true, true);
 }
 /** Authorized snapshot read; the same in-flight request is shared by every caller. */
@@ -795,6 +869,8 @@ function repaintIfAllowed() {
   if (!canRepaint()) { renderSync(); return; }
   if (view === 'diagnostics') { render(); return; }
   var data = peekView(view);
+  // A cleared list repaints as a loading state rather than keeping rows from another scope.
+  if (!data && !currentData && (view === 'tasks' || view === 'projects')) { render(); return; }
   if (!data) { renderSync(); return; }
   currentData = data; syncError = ''; render();
 }
@@ -1050,8 +1126,14 @@ function structured(value,host) { if(value && typeof value==='object'){var dl=el
  */
 function settle(action, payload, result) {
   patchSummary(action, payload, result);
+  // A project write can move work between areas and replaces the area data, so the previous
+  // rows are cleared instead of being left on screen as the current responsibility's result.
+  if (/^project/.test(action) && (view === 'tasks' || view === 'projects')) currentData = null;
   repaintIfAllowed();
   revalidateView(view === 'admin' || view === 'diagnostics' ? 'overview' : view);
+  // The index repeats each task's project responsibility, so it is refetched after a project
+  // write instead of being left empty until the next snapshot revalidation.
+  if (/^project/.test(action)) syncTaskIndex(true);
 }
 /** Local yyyy-MM-dd text for a value that may be a Sheet date serialized as an instant. */
 function dayText(value) {
@@ -1061,6 +1143,20 @@ function dayText(value) {
   if (isNaN(date.getTime())) return '';
   return date.getFullYear() + '-' + ('0' + (date.getMonth() + 1)).slice(-2) + '-' + ('0' + date.getDate()).slice(-2);
 }
+/** Applies the authoritative project row to the local summary, including its new area. */
+function patchProjectSummary(row) {
+  if (!row || !row.Project_ID || !store.projects || !store.projects.complete) return;
+  var areas = Object.create(null);
+  (store.responsibilities || []).forEach(function (area) { areas[area.id] = area; });
+  var area = areas[String(row.Responsibility_ID || '')] || null;
+  store.projects.items = store.projects.items.map(function (p) {
+    if (p.id !== row.Project_ID) return p;
+    return Object.assign({}, p, {name: row.Project_Name, status: row.Status, priority: row.Priority || '',
+      responsibilityId: String(row.Responsibility_ID || ''),
+      responsibility: area ? area.name : '',
+      responsibilityColor: area ? (area.color || '') : ''});
+  });
+}
 /** Applies the authoritative write result to the local summaries without inventing values. */
 function patchSummary(action, payload, result) {
   if (!result) return;
@@ -1068,13 +1164,17 @@ function patchSummary(action, payload, result) {
   if (row && row.Task_ID && indexedTasks()) {
     var projects = Object.create(null);
     ((store.projects && store.projects.items) || []).forEach(function (p) { projects[p.id] = p; });
-    var project = projects[row.Project_ID] || {};
+    var project = projects[row.Project_ID] || null;
+    var previous = store.tasks.items.filter(function (item) { return item.id === row.Task_ID; })[0] || {};
     var owner = {};
     ((store.references && store.references.members) || []).forEach(function (m) { if (m.id === row.Owner_Member_ID) owner = m; });
-    var summary = {id: row.Task_ID, name: row.Task_Name, projectId: row.Project_ID, project: project.name || '',
+    // An unknown project summary cannot prove the area, so the stored area is kept instead of
+    // being replaced by a blank that would silently move the task to 未分類.
+    var summary = {id: row.Task_ID, name: row.Task_Name, projectId: row.Project_ID, project: project ? project.name : (previous.project || ''),
       subprojectId: row.Subproject_ID || '', parentId: row.Parent_Task_ID || '', container: false, depth: 0,
       ownerId: row.Owner_Member_ID || '', owner: owner.name || '',
-      responsibilityId: project.responsibilityId || '', deadline: dayText(row.Due_Date), status: row.Status,
+      responsibilityId: project ? project.responsibilityId || '' : (previous.responsibilityId || ''),
+      deadline: dayText(row.Due_Date), status: row.Status,
       progress: row.Progress_Percent, priority: row.Priority, reviewState: ''};
     var known = store.tasks.items.some(function (item) { return item.id === summary.id; });
     store.tasks.items = known ? store.tasks.items.map(function (item) { return item.id === summary.id ? summary : item; })

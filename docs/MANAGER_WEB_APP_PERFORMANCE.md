@@ -1,12 +1,23 @@
 # Manager Web App performance — V1.6.2
 
 Measured 2026-10-28 on Windows, Node v24.21.0, mocked Google services. **Real Workspace timings: NOT_RUN.** Raw
-results: [V1_6_2_PERFORMANCE.json](checkgates/V1_6_2_PERFORMANCE.json) (V1.6.2),
+results: [V1_6_2_PERFORMANCE.json](checkgates/V1_6_2_PERFORMANCE.json) (V1.6.2 sealed),
+[V1_6_2_GATE_7_PERFORMANCE.json](checkgates/V1_6_2_GATE_7_PERFORMANCE.json) (V1.6.2 task-filter correction),
 [V1_6_1_PERFORMANCE.json](checkgates/V1_6_1_PERFORMANCE.json) (V1.6.1),
 [V1_6_PERFORMANCE.json](checkgates/V1_6_PERFORMANCE.json) (V1.6),
 [V1_5_1_PERFORMANCE.json](checkgates/V1_5_1_PERFORMANCE.json) (V1.5.1) and
 [V1_5_PERFORMANCE.json](checkgates/V1_5_PERFORMANCE.json) (V1.5), kept as historical evidence.
 Reproduce with `BENCHMARK_OUTPUT=V1_6_2_PERFORMANCE.json node scripts/manager-web-benchmark.js`.
+
+## V1.6.2 task-filter correction
+
+The responsibility filter adds no workbook read and no payload: the compact task index is byte-identical to the
+sealed measurement (16 504 / 166 830 / 509 771 B) because the area is resolved from `PROJECTS` on the server and from
+the project summaries the browser already holds. Measured after the correction (`bootstrap` 7.52 / 49.12 /
+142.89 ms, cached navigation 2.50 / 1.43 / 1.18 ms, local filtering 0.10 / 0.41 / 1.45 ms). A project write costs
+one extra `taskIndex` read plus the bootstrap read it already triggered; that is the price of never listing a moved
+project's tasks under its previous responsibility. Details:
+[V1_6_2_GATE_7.md](checkgates/V1_6_2_GATE_7.md).
 
 ## V1.6.2 comparison with V1.6.1
 

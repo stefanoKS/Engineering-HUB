@@ -44,6 +44,20 @@ pass, **553 tests, 553 pass, 0 fail, 0 skipped** (543 sealed cases plus ten colo
 green. Gates 1–5, the validation transcript and the performance artefact of the sealed delivery are left untouched;
 every live criterion stays **BLOCKED / NOT_RUN** and this release is still **NOT APPROVED FOR PRODUCTION**.
 
+### Task responsibility filter follow-up (2026-10-29)
+
+The Tasks page now filters reliably by the responsibility of the task's project: the server honours the 未分類
+scope, both filtering paths apply the same rules (including `treeScope`, `parentTaskId` and the displayed status of a
+container task), the responsibility selector is the first control of the filter bar, the project selector is scoped
+to the selected area, and a project transferred to another area invalidates the task index and the area aggregates.
+This is a read-path and client-correction only: schema **7**, employee contract **1.5**, the colour picker, the
+request/approval workflows, the authorization checks and every stored ID are unchanged, and no deployment, migration,
+trigger or data change was performed. Local evidence is recorded in
+[V1_6_2_GATE_7.md](checkgates/V1_6_2_GATE_7.md): `npm run lint` pass, **567 tests, 567 pass, 0 fail, 0 skipped**
+(553 before this correction plus fourteen task-filter cases), `npm run validate` green and the benchmark recorded in
+`V1_6_2_GATE_7_PERFORMANCE.json`. The sealed artefacts and gates 1–6 are left untouched; every live criterion stays
+**BLOCKED / NOT_RUN** and this release is still **NOT APPROVED FOR PRODUCTION**.
+
 Use the existing DEVELOPMENT resources described by the operator; their actual creation/sharing/deployment state was
 not inspected here. No code was uploaded with clasp, no live deployment/data/migration/trigger/email/Calendar action
 was performed. Follow [the V1.6 runbook](V1_6_DEPLOYMENT_RUNBOOK.md), [DEV installation](MANAGER_WEB_APP_DEPLOYMENT.md)

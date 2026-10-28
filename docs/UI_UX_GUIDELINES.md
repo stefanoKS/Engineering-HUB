@@ -21,6 +21,10 @@ browser zoom. No mobile-specific layout is required.
   navigation and `aria-pressed` on its card.
 - **Hierarchy.** Subprojects render as a collapsible tree (max four levels) and tasks indent by depth (max three)
   with a `↳` marker, a container chip and review chips. Branches render only what is visible; long lists paginate.
+- **Filter order.** The task filter bar starts with 担当領域 (the organisation scope), then search, 案件, 担当者,
+  状態, 優先度, 階層, 期限 and 並べ替え. The 案件 choices are limited to the selected area; a project that cannot
+  belong to it is reset to すべて rather than silently returning an empty list. Changing the area resets paging and
+  shows a loading state instead of the previous area's rows.
 - **Deletion.** The ADMIN panel is visually distinct (critical border): dependency summary, reason, typed
   confirmation, then one action. A blocked record explains why and points at archive.
 - **Accessibility.** Visible focus ring, ≥44 px targets, `role="progressbar"` with a value, status as text, skip
