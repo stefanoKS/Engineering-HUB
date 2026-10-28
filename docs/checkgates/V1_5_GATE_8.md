@@ -15,14 +15,14 @@ tests/v1_5-*.test.js, tests/support/manager-web-harness.js, repository.js; scrip
 
 ## 3. Exact acceptance criteria and result
 
-- npm ci/lint/test/validate complete; all prior passing tests preserved; focused new suites: PASS (378/378, no skips).
+- npm ci/lint/test/validate complete; all prior passing tests preserved; focused new suites: PASS (387/387, no skips).
 - Four responsive widths, contrast tokens, labelled controls, modal and keyboard focus: local PASS.
 - Native 200% zoom, real reduced-motion preference and screen-reader/HTML Service accessibility: NOT_RUN.
 - No fake browser/deployment claim: evidence explicitly distinguishes local vs live.
 
 ## 4. Automated tests performed
 
-npm ci; npm run lint; npm test; npm run validate; v1_5-performance fixtures. Final aggregate: **378 tests, 378 pass, 0 fail, 0 skipped**.
+npm ci; npm run lint; npm test; npm run validate; v1_5-performance fixtures. Final aggregate: **387 tests, 387 pass, 0 fail, 0 skipped**.
 
 ## 5. Manual tests performed
 
@@ -34,7 +34,7 @@ npm ci; npm run lint; npm test; npm run validate. Performance: node scripts/mana
 
 ## 7. Actual results
 
-All four final npm commands exited 0. Dependency audit: 0 vulnerabilities (existing deprecation warnings). Validator: 35 manager .gs files, 3 employee .gs files, both manifests, 684 translation keys. Baseline was 344 tests / 340 pass / 4 fail; corrections are documented, not hidden. No live Workspace test ran.
+All four final npm commands exited 0. Dependency audit: 0 vulnerabilities (existing deprecation warnings). Validator: 35 manager .gs files, 3 employee .gs files, both manifests, 689 translation keys. Baseline was 344 tests / 340 pass / 4 fail; corrections are documented, not hidden. No live Workspace test ran.
 
 ## 8. Relevant logs and evidence
 
@@ -59,3 +59,22 @@ No complete WCAG certification. Native zoom and assistive technology remain requ
 ## 13. Commit SHA
 
 The starting SHA is recorded above. The implementation SHA will be sealed in a subsequent documentation-only commit so this evidence names an actual immutable implementation commit rather than a predicted self-referential hash.
+
+## 14. Review correction — 2026-10-28 (tests and accessibility evidence)
+
+- Aggregate: **387 tests, 387 pass, 0 fail, 0 skipped** (378 before this correction; 9 added, none
+  removed, skipped or weakened).
+- New suites: `tests/v1_5-project-metrics.test.js` (fresh progress/health after a task save, counts
+  and deadline state, project save, deadline-only versus duration creation, hierarchy/role/revision
+  regressions, per-request read-once and no-write checks) and three UI tests in
+  `tests/v1_5-web-ui.test.js` (deadline-only form, progress-bar/health/deadline card semantics in
+  both languages, overdue text).
+- Two existing budget assertions were corrected rather than deleted: `tableReads <= 9` plus a
+  per-sheet “read once” assertion, and `rangeReadsPerCall === 10` with the reason in a comment.
+- Accessibility: the progress bar is a labelled `progressbar` with a visible percentage; health has
+  a text label as well as colour; the overdue count is text. Focus, dialog, skip link and
+  reduced-motion rules are unchanged.
+- Still NOT_RUN: screen-reader output, native 200% zoom and the deployed HTML Service URL.
+
+Evidence: [V1_5_VALIDATION.txt](V1_5_VALIDATION.txt) (full `npm test` output),
+[visual checks](V1_5_VISUAL.md).

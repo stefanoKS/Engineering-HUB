@@ -6,7 +6,9 @@
 
 Version **1.5.0** adds a standalone manager browser UI in the existing manager Apps Script project. Projects, two-level subprojects, tasks, responsibilities, members, skills, employee requests and controlled administration reuse the current services and private workbook. Japanese is default; English is available. The sidebar remains the fallback and the employee web app remains separate. Schema **6**, employee contract **1.4**; no migration.
 
-Local verification: **378 tests, 378 pass**, 0 failures/skips; npm ci, lint and source validation pass. Google identity, sharing, live publication/latency and native 200% zoom remain unverified. See [manager guide](docs/MANAGER_WEB_APP.md), [DEV deployment](docs/MANAGER_WEB_APP_DEPLOYMENT.md), [performance](docs/MANAGER_WEB_APP_PERFORMANCE.md), [20-case smoke plan](docs/MANAGER_WEB_APP_SMOKE_TEST.md) and [checkgates](docs/checkgates/V1_5_GATE_10.md).
+Project cards show an accessible progress bar, health, translated deadline wording and a text overdue count; these values are derived from the current tasks, milestones and issues on every read, so a task save is visible immediately without regenerating a report. Task creation requires a deadline and treats the required duration as optional: without it the planned start stays unknown, and with it the start is back-planned.
+
+Local verification: **387 tests, 387 pass**, 0 failures/skips; npm ci, lint and source validation pass. Google identity, sharing, live publication/latency and native 200% zoom remain unverified. See [manager guide](docs/MANAGER_WEB_APP.md), [DEV deployment](docs/MANAGER_WEB_APP_DEPLOYMENT.md), [performance](docs/MANAGER_WEB_APP_PERFORMANCE.md), [20-case smoke plan](docs/MANAGER_WEB_APP_SMOKE_TEST.md) and [checkgates](docs/checkgates/V1_5_GATE_10.md).
 
 Preview: npm run preview:manager-web → http://127.0.0.1:4175/ (synthetic data only). The existing Workspace report of committedDeadline snapshot mismatch is fixed in local Date/hash round-trip tests; the live fix is UNVERIFIED.
 

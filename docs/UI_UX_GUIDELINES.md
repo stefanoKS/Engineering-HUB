@@ -127,6 +127,11 @@ search, status, responsibility, 期限7日以内. Secondary filters (category, o
 whole portfolio.
 
 Cards prioritise project name, responsibility, owner, committed deadline, progress and health.
+Progress is a bar (`role="progressbar"`, `aria-valuenow`, a visible percentage and an
+`aria-label` naming the project) and is reported as 未計算 / Not calculated when the project has
+no countable task. Health is one pill in the fixed colour vocabulary, and the committed deadline
+carries translated relative wording (あと10日 / 3日超過 / 本日期限) plus a plain-text overdue-task
+count, so no state relies on colour alone and the card does not accumulate badge clutter.
 Forecast dates, last update and detailed counts stay available in the detail view. The layout is
 1 column on mobile, 1–2 on tablet, 2 on desktop and 3 only when there is enough width.
 

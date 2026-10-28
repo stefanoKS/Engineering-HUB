@@ -22,7 +22,7 @@ src/SharedDashboardPublisher.gs, Requests.gs; dashboard-app/DataService.gs; shar
 
 ## 4. Automated tests performed
 
-v1_5-publication.test.js; existing publisher/dashboard/request/isolation suites. Final aggregate: **378 tests, 378 pass, 0 fail, 0 skipped**.
+v1_5-publication.test.js; existing publisher/dashboard/request/isolation suites. Final aggregate: **387 tests, 387 pass, 0 fail, 0 skipped**.
 
 ## 5. Manual tests performed
 
@@ -34,7 +34,7 @@ npm ci; npm run lint; npm test; npm run validate. Performance: node scripts/mana
 
 ## 7. Actual results
 
-All four final npm commands exited 0. Dependency audit: 0 vulnerabilities (existing deprecation warnings). Validator: 35 manager .gs files, 3 employee .gs files, both manifests, 684 translation keys. Baseline was 344 tests / 340 pass / 4 fail; corrections are documented, not hidden. No live Workspace test ran.
+All four final npm commands exited 0. Dependency audit: 0 vulnerabilities (existing deprecation warnings). Validator: 35 manager .gs files, 3 employee .gs files, both manifests, 689 translation keys. Baseline was 344 tests / 340 pass / 4 fail; corrections are documented, not hidden. No live Workspace test ran.
 
 ## 8. Relevant logs and evidence
 
@@ -59,3 +59,19 @@ Earlier Workspace bug is locally fixed but live fix UNVERIFIED. Mock request rec
 ## 13. Commit SHA
 
 The starting SHA is recorded above. The implementation SHA will be sealed in a subsequent documentation-only commit so this evidence names an actual immutable implementation commit rather than a predicted self-referential hash.
+
+## 14. Review correction — 2026-10-28 (employee application untouched)
+
+- `dashboard-app/` source, its manifest, the sanitized snapshot sheets and contract 1.4 are
+  unchanged by this correction. `SharedDashboardModel.CONTRACT_VERSION` is still asserted as `1.4`
+  in `v1_5-web.test.js`.
+- The shared dictionary gained four `web.*` labels plus `web.health`; `npm run sync:i18n` copied the
+  canonical file to `src/I18n.html` and `dashboard-app/I18n.html`, so both projects stay identical
+  and no employee label can drift.
+- The employee reader is unaffected: the manager web app never reads the snapshot and the publisher
+  never reads the manager web DTOs.
+- Request workflows are untouched; the request-decision, staleness and inbox-import suites still
+  pass (387 tests, 0 failures).
+
+This correction provides no new live evidence for the employee deployment; the DEV smoke plan and
+`docs/dashboard/SMOKE_TEST.md` remain unverified.

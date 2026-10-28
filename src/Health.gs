@@ -162,7 +162,7 @@ var Health = (function () {
     }[health] || String(health || '');
   }
 
-  return {classify: classify, staleDays: staleDays, thresholds: thresholds, isAttention: isAttention, label: label, day: day};
+  return {classify: classify, staleDays: staleDays, thresholds: thresholds, isAttention: isAttention, label: label, day: day, daysBetween: daysBetween};
 }());
 function evaluateProjectHealth(projectId, asOf) {
   var project = Domain.required('PROJECTS', projectId);

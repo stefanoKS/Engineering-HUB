@@ -21,7 +21,7 @@ src/ManagerWeb.gs, ManagerWebIndex.html, ManagerWebClient.html, ManagerWebStyles
 
 ## 4. Automated tests performed
 
-v1_5-web.test.js, v1_5-web-ui.test.js and existing sidebar/domain suites. Final aggregate: **378 tests, 378 pass, 0 fail, 0 skipped**.
+v1_5-web.test.js, v1_5-web-ui.test.js and existing sidebar/domain suites. Final aggregate: **387 tests, 387 pass, 0 fail, 0 skipped**.
 
 ## 5. Manual tests performed
 
@@ -33,7 +33,7 @@ npm ci; npm run lint; npm test; npm run validate. Performance: node scripts/mana
 
 ## 7. Actual results
 
-All four final npm commands exited 0. Dependency audit: 0 vulnerabilities (existing deprecation warnings). Validator: 35 manager .gs files, 3 employee .gs files, both manifests, 684 translation keys. Baseline was 344 tests / 340 pass / 4 fail; corrections are documented, not hidden. No live Workspace test ran.
+All four final npm commands exited 0. Dependency audit: 0 vulnerabilities (existing deprecation warnings). Validator: 35 manager .gs files, 3 employee .gs files, both manifests, 689 translation keys. Baseline was 344 tests / 340 pass / 4 fail; corrections are documented, not hidden. No live Workspace test ran.
 
 ## 8. Relevant logs and evidence
 
@@ -58,3 +58,23 @@ No real HTML Service deployment evidence.
 ## 13. Commit SHA
 
 The starting SHA is recorded above. The implementation SHA will be sealed in a subsequent documentation-only commit so this evidence names an actual immutable implementation commit rather than a predicted self-referential hash.
+
+## 14. Review correction — 2026-10-28 (project summary freshness, deadline-only tasks, card usability)
+
+`ManagerWeb.projectList` no longer returns the stored `PROJECTS.Progress_Percent` / `PROJECTS.Health`
+columns. The new pure function `Dashboard.projectMetrics(asOf, only)` derives progress
+(`Progress.rollup`), health (`Health.classify`), task counts and the neutral deadline state from the
+current operational rows, grouping tasks by project once and reading each table at most once per
+request. A task save still skips `Dashboard.refresh`, so the overview and cards now change
+immediately after a save without any report regeneration. `Health.daysBetween` is exported and the
+paginated list recalculates only its visible page.
+
+Compatibility unchanged and re-asserted: Schema 6, employee contract 1.4, the Sheets sidebar, the
+separate `dashboard-app` project and its snapshot contract. No migration, no schema change, no new
+persistence. The sidebar keeps its default behaviour because `Ui.assignTask`/`Tasks` are untouched;
+only the web DTO layer and the web form changed.
+
+Evidence: [V1_5_VALIDATION.txt](V1_5_VALIDATION.txt) (npm ci, npm run lint, npm test = 387 pass /
+0 fail, npm run validate = 35 manager .gs, 3 dashboard .gs, both manifests, 689 keys,
+npm run preview:manager-web GET 200 plus an authorized overview RPC), [raw performance](V1_5_PERFORMANCE.json),
+[visual checks](V1_5_VISUAL.md). Live Workspace verification remains NOT_RUN.

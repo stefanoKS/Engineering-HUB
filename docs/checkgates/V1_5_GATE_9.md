@@ -22,7 +22,7 @@ AGENTS.md, README.md, README_JP.md, ARCHITECTURE.md, DEPLOYMENT.md, DATA_SCHEMA.
 
 ## 4. Automated tests performed
 
-Existing release documentation tests; npm run validate. Final aggregate: **378 tests, 378 pass, 0 fail, 0 skipped**.
+Existing release documentation tests; npm run validate. Final aggregate: **387 tests, 387 pass, 0 fail, 0 skipped**.
 
 ## 5. Manual tests performed
 
@@ -34,7 +34,7 @@ npm ci; npm run lint; npm test; npm run validate. Performance: node scripts/mana
 
 ## 7. Actual results
 
-All four final npm commands exited 0. Dependency audit: 0 vulnerabilities (existing deprecation warnings). Validator: 35 manager .gs files, 3 employee .gs files, both manifests, 684 translation keys. Baseline was 344 tests / 340 pass / 4 fail; corrections are documented, not hidden. No live Workspace test ran.
+All four final npm commands exited 0. Dependency audit: 0 vulnerabilities (existing deprecation warnings). Validator: 35 manager .gs files, 3 employee .gs files, both manifests, 689 translation keys. Baseline was 344 tests / 340 pass / 4 fail; corrections are documented, not hidden. No live Workspace test ran.
 
 ## 8. Relevant logs and evidence
 
@@ -59,3 +59,17 @@ Tenant options, actual sharing, OAuth and rollback must be verified by authorize
 ## 13. Commit SHA
 
 The starting SHA is recorded above. The implementation SHA will be sealed in a subsequent documentation-only commit so this evidence names an actual immutable implementation commit rather than a predicted self-referential hash.
+
+## 14. Review correction — 2026-10-28 (documentation and deployment state)
+
+- Operating documentation updated with the correction: [manager web app](../MANAGER_WEB_APP.md),
+  [performance](../MANAGER_WEB_APP_PERFORMANCE.md), [UI/UX guidelines](../UI_UX_GUIDELINES.md),
+  [task duration policy](../TASK_DURATION_POLICY.md), `CHANGELOG.md` and all ten V1.5 gates.
+- Commands actually executed for this correction: `npm ci` (exit 0, 0 vulnerabilities), `npm run lint`
+  (exit 0), `npm test` (387/387), `npm run validate` (35 manager .gs, 3 dashboard .gs, both manifests,
+  689 translation keys), `npm run preview:manager-web` (loopback GET 200 and an authorized overview
+  RPC), `node scripts/manager-web-benchmark.js` (regenerated [raw performance](V1_5_PERFORMANCE.json)).
+- Nothing was deployed, pushed with clasp, migrated, initialized, triggered, emailed or written to a
+  live spreadsheet. `.clasp.json` and environment bindings were not touched.
+- `docs/PRODUCTION_READINESS.md` remains **NOT APPROVED FOR PRODUCTION**; the DEV Workspace smoke
+  plan remains unexecuted.

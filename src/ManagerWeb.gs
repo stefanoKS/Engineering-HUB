@@ -62,14 +62,34 @@ var ManagerWeb = (function () {
     var limit = Math.min(100, Math.max(1, Math.floor(Number(input.limit) || 50)));
     return {items: rows.slice(offset, offset + limit), total: rows.length, offset: offset, limit: limit};
   }
-  function projectList(input) {
+  function projectList(rows) {
     var members = index('MEMBERS'), responsibilities = index('RESPONSIBILITIES');
-    return Projects.list(input).map(function (p) {
+    var projects = rows || Database.read('PROJECTS'), only = Object.create(null);
+    projects.forEach(function (p) { only[p.Project_ID] = true; });
+    // Fresh values: a task save skips the report refresh, so the stored columns may lag.
+    var metrics = Dashboard.projectMetrics(undefined, only);
+    return projects.map(function (p) {
+      var m = metrics[p.Project_ID] || {}, deadline = Domain.date(p.Committed_Deadline);
+      var state = deadlineState(deadline, p.Status);
       return {id: p.Project_ID, name: p.Project_Name, responsibilityId: p.Responsibility_ID || '',
         responsibility: responsibilities[p.Responsibility_ID] ? responsibilities[p.Responsibility_ID].Name : '',
         owner: members[p.Project_Owner_ID] ? members[p.Project_Owner_ID].Name : '', status: p.Status,
-        deadline: Domain.date(p.Committed_Deadline), progress: p.Progress_Percent, health: p.Health || 'UNKNOWN'};
+        deadline: deadline, deadlineKind: state.kind, daysRemaining: state.days,
+        progress: typeof m.progress === 'number' ? m.progress : '', health: m.health || 'UNKNOWN',
+        healthReasons: m.healthReasons || [], totalTasks: m.tasks || 0,
+        doneTasks: m.doneTasks || 0, overdueTasks: m.overdueTasks || 0};
     });
+  }
+  /** Neutral deadline wording pair; the browser renders the translated label. */
+  function deadlineState(deadline, status) {
+    var due = Health.day(deadline);
+    if (!due) return {kind: 'none', days: null};
+    var days = Health.daysBetween(Domain.today(), due);
+    if (status === 'Completed') return {kind: 'done', days: days};
+    // Cancelled and archived projects keep their date but get no "remaining" wording.
+    if (status === 'Cancelled' || status === 'Archived') return {kind: 'closed', days: days};
+    if (days === 0) return {kind: 'today', days: 0};
+    return {kind: days < 0 ? 'overdue' : 'future', days: days};
   }
   function taskList(input) {
     var projects = index('PROJECTS'), members = index('MEMBERS');
@@ -92,7 +112,7 @@ var ManagerWeb = (function () {
     return result;
   }
   function overview(actor) {
-    var projects = projectList({}), active = projects.filter(function (p) { return ['Archived','Cancelled','Completed'].indexOf(p.status) < 0; });
+    var projects = projectList(), active = projects.filter(function (p) { return ['Archived','Cancelled','Completed'].indexOf(p.status) < 0; });
     var today = Domain.today(), end = new Date(today + 'T00:00:00Z'); end.setUTCDate(end.getUTCDate() + 7);
     var tasks = Tasks.list({activeOnly: true}), soon = 0, overdue = 0, upcoming = [];
     var endDate = end.toISOString().slice(0,10), projectIndex = index('PROJECTS'), memberIndex = index('MEMBERS');
@@ -109,7 +129,12 @@ var ManagerWeb = (function () {
     input = input || {};
     switch (operation) {
       case 'overview': return overview(actor);
-      case 'projects': return page(projectList(input), input);
+      case 'projects': {
+        // Page the stored rows first so only the visible cards are recalculated.
+        var paged = page(Projects.list(input), input);
+        paged.items = projectList(paged.items);
+        return paged;
+      }
       case 'tasks': return taskList(input);
       case 'project': {
         var p = Database.find('PROJECTS', input.id);
@@ -122,7 +147,7 @@ var ManagerWeb = (function () {
       }
       case 'task': return {record: editable('TASKS', Database.find('TASKS', input.id)), confirmations: Database.read('SCHEDULE_CONFIRMATIONS').filter(function (r) { return r.Task_ID === input.id; }).map(function (r) { return record('SCHEDULE_CONFIRMATIONS', r); })};
       case 'references': return {members: Database.read('MEMBERS').map(function (m) { return {id: m.Member_ID, name: m.Name, active: m.Active}; }),
-        projects: projectList({}).map(function (p) { return {id: p.id, name: p.name}; }),
+        projects: Database.read('PROJECTS').map(function (p) { return {id: p.Project_ID, name: p.Project_Name}; }),
         responsibilities: Responsibilities.all().map(function (r) { return {id: r.Responsibility_ID, name: r.Name, status: r.Status}; })};
       case 'members': return page(Database.read('MEMBERS').filter(function (m) { return !input.query || (m.Name + ' ' + m.Department).toLowerCase().indexOf(String(input.query).toLowerCase()) >= 0; }).map(function (m) { return editable('MEMBERS', m); }), input);
       case 'responsibilities': return {items: Responsibilities.all().map(function (r) { return editable('RESPONSIBILITIES', r); })};

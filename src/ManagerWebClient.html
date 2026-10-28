@@ -5,7 +5,7 @@ var lang = EH_I18N.read(), view = 'overview', sequence = 0, drawerSequence = 0, 
 var cache = new Map(), drafts = new Map(), pending = new Set(), queue = [], running = 0, references = null;
 var filters = {}, currentData = null, currentEditor = null, actorRole = '', metrics = [];
 var byId = function (id) { return document.getElementById(id); };
-function t(key) { return EH_I18N.t(lang, 'web.' + key); }
+function t(key, vars) { return EH_I18N.t(lang, 'web.' + key, vars); }
 function el(tag, text, className) { var node = document.createElement(tag); if (text !== undefined) node.textContent = String(text); if (className) node.className = className; return node; }
 function button(key, fn, parent) { var b = el('button', t(key)); b.type = 'button'; b.addEventListener('click', fn); if (parent) parent.appendChild(b); return b; }
 function notice(text, kind) { byId('notice').textContent = text; byId('notice').className = kind || ''; }
@@ -82,10 +82,41 @@ function pagination(data, kind, parent) {
   var prev=button('previous',function(){filters[kind].offset=Math.max(0,(data.offset||0)-data.limit);load(false);},bar);prev.disabled=!data.offset;
   var next=button('next',function(){filters[kind].offset=(data.offset||0)+data.limit;load(false);},bar);next.disabled=(data.offset||0)+data.items.length>=data.total;parent.appendChild(bar);
 }
+function metaItem(parent, label, value, valueClass) { var item = el('div', undefined, 'meta-item'); item.append(el('span', label, 'meta-label'), el('span', value === '' || value === undefined ? '—' : value, 'meta-value' + (valueClass ? ' ' + valueClass : ''))); parent.appendChild(item); }
+function healthClass(value) { return value === 'RED' ? 'pill-red' : value === 'YELLOW' ? 'pill-amber' : value === 'GREEN' ? 'pill-green' : 'pill-gray'; }
+/** Accessible progress bar: the percentage stays visible text, never colour alone. */
+function progressRow(percent, name, parent) {
+  var row = el('div', undefined, 'progress-row');
+  if (typeof percent !== 'number') { row.appendChild(el('span', t('progressUnavailable'), 'progress-value')); parent.appendChild(row); return; }
+  var value = Math.max(0, Math.min(100, percent)), bar = el('div', undefined, 'progress'), fill = el('div', undefined, 'progress-fill');
+  bar.setAttribute('role', 'progressbar'); bar.setAttribute('aria-valuemin', '0'); bar.setAttribute('aria-valuemax', '100');
+  bar.setAttribute('aria-valuenow', String(Math.round(value))); bar.setAttribute('aria-label', t('projectProgressAria', {name: name}));
+  fill.setAttribute('style', 'width: ' + value + '%'); bar.appendChild(fill);
+  row.append(bar, el('span', value + '%', 'progress-value')); parent.appendChild(row);
+}
+function deadlineText(p) {
+  if (p.status === 'Completed') return EH_I18N.deadline(lang, 'done', p.daysRemaining, true);
+  if (p.deadlineKind === 'closed') return '';
+  return EH_I18N.deadline(lang, p.deadlineKind, p.daysRemaining, false);
+}
 function projectCards(data, host) {
   var grid=el('div',undefined,'cards');
   if(!data.items.length) grid.appendChild(el('p',t('empty')));
-  data.items.forEach(function(p){var card=el('article',undefined,'card');card.appendChild(el('h2',p.name));rowValues(card,[[t('responsibility'),p.responsibility],[t('ownerId'),p.owner],[t('statusField'),statusLabel(p.status)],[t('deadline'),p.deadline],[t('progress'),p.progress],[t('risk'),EH_I18N.health(lang,p.health)]]);button('edit',function(){navigate('project',{id:p.id});},card);grid.appendChild(card);});host.appendChild(grid);
+  data.items.forEach(function(p){
+    var card=el('article',undefined,'card');
+    card.appendChild(el('h2',p.name));
+    progressRow(p.progress,p.name,card);
+    var meta=el('div',undefined,'meta'), relative=deadlineText(p);
+    metaItem(meta,t('responsibility'),p.responsibility);
+    metaItem(meta,t('ownerId'),p.owner);
+    metaItem(meta,t('statusField'),statusLabel(p.status));
+    metaItem(meta,t('deadline'),p.deadline?(relative?p.deadline+' · '+relative:p.deadline):(relative||''),p.deadlineKind==='overdue'?'is-overdue':(p.deadlineKind==='today'||(p.deadlineKind==='future'&&p.daysRemaining!==null&&p.daysRemaining<=7))?'is-soon':'');
+    var health=el('div',undefined,'meta-item');health.append(el('span',t('health'),'meta-label'),el('span',EH_I18N.health(lang,p.health),'pill '+healthClass(p.health)));meta.appendChild(health);
+    card.appendChild(meta);
+    if(p.overdueTasks>0) card.appendChild(el('p',t('overdueTasksCount',{count:p.overdueTasks}),'is-overdue'));
+    button('edit',function(){navigate('project',{id:p.id});},card);
+    grid.appendChild(card);
+  });host.appendChild(grid);
 }
 function tasks(data, host) {
   if(!data.items.length)host.appendChild(el('p',t('empty')));
@@ -187,8 +218,11 @@ function renderEditor() {
     var control=field(fields,key,d.values[key],options,function(v){d.values[key]=v;d.dirty=true;if(key==='projectId'){d.values.subprojectId='';d.values.parentId='';loadSubprojects(v,d);}},type);
     if((key==='plannedStart'&&d.values.durationValue)||(key==='projectId'&&d.type==='subproject'&&d.id))control.disabled=true;
     if(['name','taskName','email','projectId'].indexOf(key)>=0)control.required=true;
-    if(d.type==='task'&&['ownerId','deadline','durationValue'].indexOf(key)>=0)control.required=true;
+    if(d.type==='task'&&['ownerId','deadline'].indexOf(key)>=0)control.required=true;
   });
+  // The required duration is optional: without it the planned start stays unknown, exactly as in
+  // the existing manager sidebar and domain workflow.
+  if(d.type==='task')fields.appendChild(el('p',t('durationHint'),'muted hint-wide'));
   var confirms=d.type==='project'?['confirmDeadlineChange','confirmResponsibilityChange','confirmRetiredResponsibility']:d.type==='subproject'?['confirmReparent']:d.type==='task'?['acknowledgeNonWorking','confirmDeadlineChange']:[];
   confirms.forEach(function(k){field(fields,k,d.values[k],null,function(v){d.values[k]=v;},'checkbox');});
   if(d.type==='task')button('plan',function(){api.read('plan',d.values,true).then(function(p){message.textContent=t('plannedStart')+': '+p.startDate+' · '+p.warnings.map(function(w){return EH_I18N.has('web.'+w.code)?t(w.code):EH_I18N.serverMessage(lang,w.code);}).join(', ');}).catch(function(e){message.textContent=e.message;});},form);

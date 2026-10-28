@@ -6,7 +6,9 @@
 
 Version 1.5.0; schema 6; employee contract 1.4. Starting SHA: 5c1143edef3f8ba74ce92219a59ea58723847941. Final source/evidence SHA is recorded in [V1_5_GATE_10.md](checkgates/V1_5_GATE_10.md).
 
-Actual local results: 378 tests, 378 pass, 0 fail, 0 skipped; npm ci/lint/validate exit 0; validator covers 35 manager files, 3 employee files and 684 translation keys. The old 328-test figures below are historical V1.4.1 results and do not describe current evidence.
+Actual local results: 387 tests, 387 pass, 0 fail, 0 skipped; npm ci/lint/validate exit 0; validator covers 35 manager files, 3 employee files and 689 translation keys. The old 328-test figures below are historical V1.4.1 results and do not describe current evidence.
+
+After the review correction described in [V1_5_GATE_10.md](checkgates/V1_5_GATE_10.md) §14 the browser derives project progress/health from current rows, a deadline-only task keeps an unknown planned start and the project cards expose an accessible progress bar. Those are local results only; nothing about the live Workspace assessment changed.
 
 All ten V1.5 checkgates are **BLOCKED** because their complete acceptance criteria include unexecuted real Workspace or accessibility/timing verification. Local subcriteria and corrections are recorded individually; no confirmed local regression failure remains. Required remaining work: real ADMIN/MANAGER and denied-account identity matrix; A sharing isolation; complete DEV CRUD/request/publication/audit workflow; concurrent-manager/quota recovery; original sidebar; real latency/service attribution; actual 200% browser zoom and assistive technology. In particular the prior committedDeadline snapshot mismatch is locally fixed but its live retest remains UNVERIFIED.
 

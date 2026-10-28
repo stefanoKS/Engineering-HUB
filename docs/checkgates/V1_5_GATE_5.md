@@ -22,7 +22,7 @@ src/ManagerWebClient.html, ManagerWebApi.gs, ManagerWeb.gs, Ui.gs; unchanged dom
 
 ## 4. Automated tests performed
 
-v1_5-web.test.js, v1_5-web-ui.test.js; V1.3/V1.4 project/task/responsibility/member/domain suites. Final aggregate: **378 tests, 378 pass, 0 fail, 0 skipped**.
+v1_5-web.test.js, v1_5-web-ui.test.js; V1.3/V1.4 project/task/responsibility/member/domain suites. Final aggregate: **387 tests, 387 pass, 0 fail, 0 skipped**.
 
 ## 5. Manual tests performed
 
@@ -34,7 +34,7 @@ npm ci; npm run lint; npm test; npm run validate. Performance: node scripts/mana
 
 ## 7. Actual results
 
-All four final npm commands exited 0. Dependency audit: 0 vulnerabilities (existing deprecation warnings). Validator: 35 manager .gs files, 3 employee .gs files, both manifests, 684 translation keys. Baseline was 344 tests / 340 pass / 4 fail; corrections are documented, not hidden. No live Workspace test ran.
+All four final npm commands exited 0. Dependency audit: 0 vulnerabilities (existing deprecation warnings). Validator: 35 manager .gs files, 3 employee .gs files, both manifests, 689 translation keys. Baseline was 344 tests / 340 pass / 4 fail; corrections are documented, not hidden. No live Workspace test ran.
 
 ## 8. Relevant logs and evidence
 
@@ -59,3 +59,24 @@ No live CRUD or permission test; automation is not activated by this implementat
 ## 13. Commit SHA
 
 The starting SHA is recorded above. The implementation SHA will be sealed in a subsequent documentation-only commit so this evidence names an actual immutable implementation commit rather than a predicted self-referential hash.
+
+## 14. Review correction — 2026-10-28 (workflow regressions)
+
+- **Project save**: `projectSave` still applies a partial patch, refuses a stale revision and never
+  rewrites `PROJECTS.Progress_Percent`. The card value is derived from tasks, so a rename does not
+  change progress. Regression: `project save keeps the derived progress and never rewrites it from
+  the browser`.
+- **Task save**: progress and status edits are reflected in the project list, the overview cards and
+  the KPI counts on the very next read while `Dashboard.refresh` is stubbed to throw. Regression:
+  `a task save immediately changes the project list and overview without a report refresh`
+  (24.39% → 26.83% after completing the unestimated task; `BLOCKED_TASK` turns the health YELLOW).
+- **Deadline-only task creation restored**: `ManagerWebApi` requires a deadline and no longer
+  requires a duration. A create with only `deadline` + owner succeeds and stores an empty
+  `Planned_Start`/`Planned_Duration_Value` (`Planned_Start_Source` blank = unknown start). A create
+  with `durationValue: 3` still back-plans `Planned_Start = 2026-12-16` (`DERIVED`). A create with no
+  deadline is refused with `Deadline required`. The preview was exercised end to end: the form
+  submitted and the created row had `due=2026-12-18`, empty start, empty duration.
+- **Responsibility/member workflows**: untouched; existing suites still pass (387 tests total).
+
+Evidence: [V1_5_VALIDATION.txt](V1_5_VALIDATION.txt), [visual checks](V1_5_VISUAL.md),
+[task form screenshot](evidence/V1_5-task-form-duration-1366.png).

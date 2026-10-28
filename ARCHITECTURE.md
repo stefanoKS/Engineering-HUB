@@ -6,6 +6,8 @@ The manager has a browser-first HTML Service UI in the existing src project: doG
 
 Request-scoped reads reuse source tables and one workbook, invalidate after mutations and reload before locked revision checks. The browser caches reads for 30 seconds in memory, requests views on demand and serializes duplicate record saves. Project/task/member lists are paginated. Heavy report generation is explicit. Requests.decide now holds one reusable script lock through claim/effect/history/finalization. Sheets writes remain nontransactional. See [full manager architecture](docs/MANAGER_WEB_APP.md).
 
+`ManagerWeb` never returns the stored `PROJECTS.Progress_Percent` / `PROJECTS.Health` columns: `Dashboard.projectMetrics` derives progress, health, task counts and the neutral deadline state from the current TASKS/MILESTONES/ISSUES rows on each read (each table read once per execution, tasks grouped by project once, no writes). That keeps the browser correct after a task save, which deliberately skips `Dashboard.refresh`; the stored columns remain the output of the explicit report refresh only, so there is still exactly one writer for each of them.
+
 
 ## Boundaries and source of truth
 

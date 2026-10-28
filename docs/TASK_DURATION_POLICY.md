@@ -79,6 +79,10 @@ unchanged and remains an informational tool.
   tables. Existing rows, dates, formulas and custom columns are preserved.
 * A task without a duration keeps its stored `Planned_Start`. Historical durations are
   never inferred from old dates.
+* A deadline-only task is still valid in the manager web app: a deadline is required, the
+  required duration is optional, and the planned start stays blank (`Planned_Start_Source`
+  empty) instead of being back-planned. The browser form states this instead of blocking the
+  save, matching `Ui.assignTask` and the sidebar.
 * A legacy start keeps working until a manager explicitly enters a duration, at which point
   the start becomes `DERIVED`.
 * Blank planning fields are reported as incomplete by the UI warnings rather than being

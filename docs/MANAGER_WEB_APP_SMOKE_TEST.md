@@ -27,6 +27,16 @@ For each numbered test record date, account role, operation, expected result, ac
 | 19 | ADMIN | Review audit for CRUD, approval, settings and publication | Actual visiting actor, never deployer substituted | Not executed / — / NOT_RUN / — |
 | 20 | Employee/security reviewer | Attempt access to A; use B/C employee app only | A denied; employee sees sanitized B and request controls only | Not executed / — / NOT_RUN / — |
 
+## Review correction checks (2026-10-28)
+
+Added by the project-summary/deadline-only/card correction; also NOT_RUN in DEV.
+
+| Test | Account | Steps | Expected result | Actual / duration / status / evidence |
+| --- | --- | --- | --- | --- |
+| R1 | MANAGER | Note a project card's progress/health, save a task progress or status change, return to the overview without refreshing reports | Card, KPI counts and health reflect the new values immediately; no generated sheet is rewritten by the task save | Not executed / — / NOT_RUN / — |
+| R2 | MANAGER | Create a task with a deadline and no required duration, then one with a duration | First keeps an empty planned start; second back-plans the start; non-working deadlines still require acknowledgement | Not executed / — / NOT_RUN / — |
+| R3 | MANAGER | At 375 px and with a screen reader, inspect a project card and switch 日本語 / English | Progress bar announced with its percentage and project name; health, deadline wording and overdue count read as text; labels translate, stored names do not | Not executed / — / NOT_RUN / — |
+
 ## Browser and recovery checks
 
 At 375, 768, 1366 and 1920 CSS pixels, inspect Japanese/English labels, long names, task forms, requests, administration, empty lists, keyboard-only navigation, skip link, modal focus and focus visibility. Test actual browser **200% zoom**, screen-reader announcements and reduced-motion OS preference. Local screenshots and synthetic tests are supporting evidence, not proof of Google HTML Service behavior.

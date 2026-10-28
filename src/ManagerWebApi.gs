@@ -35,7 +35,9 @@ var ManagerWebApi = (function () {
     if (spec.table && !spec.create && !p[spec.key]) throw new Error('Record ID required');
     if (action === 'taskSave') {
       if (p.approve || p.confirmSchedule) throw new Error('Approve assignment and confirm schedule separately');
-      if (!p.taskId && (!p.deadline || !p.durationValue)) throw new Error('Deadline and duration required');
+      // A deadline-only assignment stays valid: the required duration is optional and a task
+      // without one keeps an unknown planned start instead of an invented schedule.
+      if (!p.taskId && !p.deadline) throw new Error('Deadline required');
       var existingTask = p.taskId ? Domain.required('TASKS', p.taskId) : null;
       var deadlineChanged = existingTask && p.deadline !== undefined && Domain.date(existingTask.Due_Date) !== p.deadline;
       if (deadlineChanged && p.confirmDeadlineChange !== true) throw new Error('Explicit deadline change confirmation required');

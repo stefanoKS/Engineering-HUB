@@ -22,7 +22,7 @@ src/ManagerWebIndex.html, ManagerWebStyles.html, ManagerWebClient.html; shared/i
 
 ## 4. Automated tests performed
 
-v1_5-web-ui.test.js; source localization/DOM validation. Final aggregate: **378 tests, 378 pass, 0 fail, 0 skipped**.
+v1_5-web-ui.test.js; source localization/DOM validation. Final aggregate: **387 tests, 387 pass, 0 fail, 0 skipped**.
 
 ## 5. Manual tests performed
 
@@ -34,7 +34,7 @@ npm ci; npm run lint; npm test; npm run validate. Performance: node scripts/mana
 
 ## 7. Actual results
 
-All four final npm commands exited 0. Dependency audit: 0 vulnerabilities (existing deprecation warnings). Validator: 35 manager .gs files, 3 employee .gs files, both manifests, 684 translation keys. Baseline was 344 tests / 340 pass / 4 fail; corrections are documented, not hidden. No live Workspace test ran.
+All four final npm commands exited 0. Dependency audit: 0 vulnerabilities (existing deprecation warnings). Validator: 35 manager .gs files, 3 employee .gs files, both manifests, 689 translation keys. Baseline was 344 tests / 340 pass / 4 fail; corrections are documented, not hidden. No live Workspace test ran.
 
 ## 8. Relevant logs and evidence
 
@@ -59,3 +59,28 @@ Native zoom commands did not apply in available browser. Actual Apps Script ifra
 ## 13. Commit SHA
 
 The starting SHA is recorded above. The implementation SHA will be sealed in a subsequent documentation-only commit so this evidence names an actual immutable implementation commit rather than a predicted self-referential hash.
+
+## 14. Review correction — 2026-10-28 (project cards and task form usability)
+
+- Project cards now render an accessible progress bar: `role="progressbar"`, `aria-valuemin="0"`,
+  `aria-valuemax="100"`, a rounded `aria-valuenow`, an `aria-label` of “<project> の進捗 /
+  Progress for <project>”, a visible percentage and a “未計算 / Not calculated” state when no task is
+  countable. The percentage is always text, so colour is never the only signal.
+- Each card shows exactly one health pill (順調 / 注意 / 危険 / 日程不明 …) under the 健全性 / Health
+  label, the committed deadline with translated relative wording (`あと51日`, `3日超過`, `本日期限`)
+  and, only when non-zero, a plain-text “{n} 件が期限超過 / {n} overdue” line. No extra badge layers.
+- The task form marks only タスク名/案件/担当者/完了期限 as required. 必要期間 is optional and an
+  explanatory hint states that a blank duration keeps the planned start unset. Verified in the
+  preview dialog: required fields are `taskName, projectId, ownerId, deadline`.
+- Japanese/English behaviour is preserved: every new label is a `web.*` key in `shared/i18n.js`
+  (689 keys, copied to both projects by `npm run sync:i18n`); stored project/task names are never
+  translated. The language switch keeps the current screen and state.
+
+Screenshots (synthetic preview, no Workspace access):
+[1366 overview cards](evidence/V1_5-project-cards-1366.png),
+[card detail JA](evidence/V1_5-project-card-detail-1366.png),
+[card EN](evidence/V1_5-project-card-en-1366.png),
+[narrow 243 px pane](evidence/V1_5-project-card-narrow.png),
+[task form](evidence/V1_5-task-form-duration-1366.png).
+At the 243 px pane the document reports client/scroll width 243/243 (no horizontal overflow).
+Screen-reader output and native 200% zoom remain NOT_RUN.

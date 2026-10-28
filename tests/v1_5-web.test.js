@@ -18,7 +18,13 @@ test('deactivated manager and unconfigured domain fail closed',()=>{
  const b=base();assert.equal(b.context.managerWebRead('overview').ok,false);
 });
 test('compact bootstrap reads each source table at most once and never returns private task details',()=>{
- const a=make(),r=a.context.managerWebRead('overview');assert.equal(r.ok,true,r.error);assert.ok(r.metrics.tableReads<=6);
+ const a=make(),c=a.context,reads={};
+ for(const sheet of a.book.getSheets()){const get=sheet.getDataRange.bind(sheet);sheet.getDataRange=()=>{const name=sheet.getName();reads[name]=(reads[name]||0)+1;return get();};}
+ const r=c.managerWebRead('overview');assert.equal(r.ok,true,r.error);
+ // Fresh progress and health read MILESTONES, ISSUES and AUTOMATION_SETTINGS in addition to the
+ // former six tables, but no table is read twice and nothing is cached across callers.
+ assert.ok(Object.keys(reads).every(name=>reads[name]===1),JSON.stringify(reads));
+ assert.ok(r.metrics.tableReads<=9);
  assert.ok(!r.data.tasks);assert.ok(!r.data.members);assert.ok(!r.data.skills);assert.ok(!r.data.projects.items[0].description);
  assert.equal(r.data.actor.role,'ADMIN');assert.equal(a.context.Schema.version,6);assert.equal(a.context.SharedDashboardModel.CONTRACT_VERSION,'1.4');
 });

@@ -7,7 +7,22 @@
 - Request decisions hold a single reusable script lock through effect/history; ordinary subproject edits/reparent validate together.
 - Publisher and employee reader normalize known Date fields without weakening A/B verification or snapshot hashes.
 - Schema 6 and contract 1.4 unchanged; sidebar retained. No live deployment, migration, trigger installation or mail/Calendar activation.
-- 378 local tests pass; detailed benchmark, screenshots, ten checkgates and 20-case DEV verification plan. Native 200% zoom and real Workspace checks remain unverified. NOT APPROVED FOR PRODUCTION.
+- **Review correction 1 — project summary freshness.** `ManagerWeb` no longer returns the stored
+  `PROJECTS.Progress_Percent` / `PROJECTS.Health` columns. `Dashboard.projectMetrics` derives
+  progress (`Progress.rollup`), health (`Health.classify`), task counts and the neutral deadline
+  state from current rows, grouping tasks by project once per request. Because a task save still
+  skips `Dashboard.refresh`, the overview, KPI counts and project cards now change immediately
+  after a save without regenerating any generated sheet. The paginated project list recalculates
+  only its visible page.
+- **Review correction 2 — deadline-only tasks restored.** `ManagerWebApi` requires a deadline on
+  create and no longer requires a duration; the web form marks the required duration optional and
+  explains that a blank duration leaves the planned start unset (unknown start). A supplied
+  duration still back-plans the start through `Planning.applyTaskPlan`.
+- **Review correction 3 — project card usability.** Cards show an accessible progress bar
+  (`role="progressbar"`, `aria-valuenow`, visible percentage), one health pill, a deadline with
+  translated remaining/overdue wording and a plain-text overdue-task count. Japanese/English
+  labels come from the shared dictionary; stored text is never translated.
+- 387 local tests pass; detailed benchmark, screenshots, ten checkgates and 20-case DEV verification plan. Native 200% zoom and real Workspace checks remain unverified. NOT APPROVED FOR PRODUCTION.
 
 ## V1.4.2 — checkbox-only rows are never records (database correctness patch)
 

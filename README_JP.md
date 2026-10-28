@@ -6,7 +6,9 @@
 
 バージョン **1.5.0**。既存の管理用 Apps Script にブラウザ画面を追加しました。案件・2階層のサブプロジェクト・タスク・担当領域・メンバー・スキル・申請・管理設定は既存サービスと管理データを使用します。日本語が既定で英語へ切替可能です。従来の Sheets サイドバーは予備の操作画面として残り、社員用アプリは分離したままです。スキーマ **6**、公開契約 **1.4**、新規マイグレーションなし。
 
-ローカル検証は **378件成功、失敗0、スキップ0**。npm ci / lint / validate も成功。Google 実アカウントの識別・権限、公開処理、実通信性能、ブラウザ200%拡大は未確認です。[操作ガイド](docs/MANAGER_WEB_APP.md)、[DEV導入](docs/MANAGER_WEB_APP_DEPLOYMENT.md)、[性能](docs/MANAGER_WEB_APP_PERFORMANCE.md)、[20項目の実機計画](docs/MANAGER_WEB_APP_SMOKE_TEST.md)を参照してください。
+案件カードにはアクセシブルな進捗バー、健全性、期限の残日表示、期限超過件数を表示します。これらの値は読み込みのたびに現在のタスク・マイルストーン・課題から再計算するため、タスク保存の直後にレポート再生成なしで反映されます。タスク登録では完了期限が必須で必要期間は任意です。未入力なら開始予定日は未設定のまま、入力すれば逆算します。
+
+ローカル検証は **387件成功、失敗0、スキップ0**。npm ci / lint / validate も成功。Google 実アカウントの識別・権限、公開処理、実通信性能、ブラウザ200%拡大は未確認です。[操作ガイド](docs/MANAGER_WEB_APP.md)、[DEV導入](docs/MANAGER_WEB_APP_DEPLOYMENT.md)、[性能](docs/MANAGER_WEB_APP_PERFORMANCE.md)、[20項目の実機計画](docs/MANAGER_WEB_APP_SMOKE_TEST.md)を参照してください。
 
 npm run preview:manager-web で合成データのローカル画面を開けます。既報の committedDeadline 公開不整合は Date 型の往復テストで修正を確認しましたが、実際の Workspace では再検証待ちです。
 
