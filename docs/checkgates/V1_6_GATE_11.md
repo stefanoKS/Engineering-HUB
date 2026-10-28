@@ -41,13 +41,15 @@ deduplication, stale repaint, selective invalidation, revocation), `tests/v1_5-w
 
 | Dataset | bootstrap p50 / payload | taskIndex p50 / payload | cached nav p50 | local filter p50 | RPC after load |
 | --- | --- | --- | --- | --- | --- |
-| 10 projects / 100 tasks | 4.40 ms / 10.5 KB | 2.08 ms / 16.5 KB | 0.78 ms | 0.07 ms | 2 |
-| 100 / 1,000 | 37.86 ms / 57.3 KB | 16.49 ms / 166.8 KB | 2.01 ms | 0.42 ms | 2 |
-| 300 / 3,000 | 115.34 ms / 152.7 KB | 48.48 ms / 509.8 KB | 1.01 ms | 1.50 ms | 3 |
+| 10 projects / 100 tasks | 4.43 ms / 10.5 KB | 2.29 ms / 16.5 KB | 0.77 ms | 0.07 ms | 2 |
+| 100 / 1,000 | 43.40 ms / 57.3 KB | 17.37 ms / 166.8 KB | 1.45 ms | 0.39 ms | 2 |
+| 300 / 3,000 | 115.55 ms / 152.7 KB | 49.07 ms / 509.8 KB | 1.13 ms | 2.19 ms | 3 |
 
 V1.5.1 reference: bootstrap 4.01 / 35.25 / 113.22 ms (8.5 / 48.7 / 130.9 KB), taskIndex 1.75 / 15.52 / 47.99 ms
-(15.1 / 152.7 / 467.5 KB). V1.6 costs +2 to +7 % bootstrap latency, +15 to +17 % bootstrap payload and +9 % task
-index payload for the area cards and the four new task fields. Targets are met with a wide margin. Raw:
+(15.1 / 152.7 / 467.5 KB). V1.6 costs +2 to +23 % bootstrap latency, +2 to +31 % task-index latency, +17 %
+bootstrap payload and +9 % task-index payload for the area cards, the four new task columns and the extra cached
+`TASK_REQUESTS` read; single-machine mock timings fluctuate between runs, while the payload growth is deterministic.
+Targets (cached navigation < 100 ms, local filtering < 50 ms) are met with a wide margin. Raw:
 [V1_6_PERFORMANCE.json](V1_6_PERFORMANCE.json). **Live Workspace timing: NOT_RUN.**
 
 ## 7. Manual test cases (DEV, not executed)

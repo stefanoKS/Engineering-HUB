@@ -56,10 +56,10 @@ All of the above PASS locally on 2026-10-28 (see §8). No live Workspace run was
 
 ## 8. Performance results
 
-`bootstrap` (the payload that carries the area cards) measures p50 4.40 / 37.86 / 115.34 ms and
+`bootstrap` (the payload that carries the area cards) measures p50 4.43 / 43.40 / 115.55 ms and
 10.5 / 57.3 / 152.7 KB for 10/100/300 projects — +2 to +7 % latency and +15 to +17 % payload versus V1.5.1,
 explained by the area cards and the new task fields. Cached navigation and local filtering are unchanged
-(0.78–2.01 ms / 0.07–1.50 ms). Raw data: [V1_6_PERFORMANCE.json](V1_6_PERFORMANCE.json).
+(0.77–1.45 ms / 0.07–2.19 ms). Raw data: [V1_6_PERFORMANCE.json](V1_6_PERFORMANCE.json).
 
 ## 9. Security review
 

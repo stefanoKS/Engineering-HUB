@@ -20,8 +20,8 @@ tombstone; archive remains the default and everything with history refuses delet
 Local verification: `npm ci`, `npm run lint`, `npm test`, `npm run validate` and
 `node scripts/manager-web-benchmark.js` all pass; **462 tests, 462 pass, 0 fail, 0 skipped** and the twelve V1.6
 checkgates record local PASS results with their live criteria BLOCKED (see
-[V1_6_GATE_12.md](docs/checkgates/V1_6_GATE_12.md)). Cached navigation stays at 0.78–2.01 ms and local filtering
-at 0.07–1.50 ms; `bootstrap` costs 4.40 / 37.86 / 115.34 ms and 10.5 / 57.3 / 152.7 KB for 10/100/300 projects,
+[V1_6_GATE_12.md](docs/checkgates/V1_6_GATE_12.md)). Cached navigation stays at 0.77–1.45 ms and local filtering
+at 0.07–2.19 ms; `bootstrap` costs 4.43 / 43.40 / 115.55 ms and 10.5 / 57.3 / 152.7 KB for 10/100/300 projects,
 which is +2 to +7 % latency and +15 to +17 % payload versus V1.5.1 for the area cards and new task fields. Real
 Workspace latency, the DEV migration, the request round trip and production rendering remain **NOT_RUN**.
 
