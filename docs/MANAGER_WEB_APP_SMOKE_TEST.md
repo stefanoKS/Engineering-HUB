@@ -1,8 +1,11 @@
-# V1.5.1 DEVELOPMENT Workspace verification plan
+# DEVELOPMENT Workspace verification plan
 
-**Status: NOT_RUN. NOT APPROVED FOR PRODUCTION.** No step below was executed against Workspace by this implementation task. Use the existing DEVELOPMENT A/B/C and existing separate manager/employee projects. Follow [DEV deployment](MANAGER_WEB_APP_DEPLOYMENT.md) first; do not initialize existing sheets, run migrations, install triggers or activate mail/Calendar. Use synthetic test records and preserve audit/history. Record deployment version/SHA and restricted backup reference privately.
+**Status: NOT_RUN. NOT APPROVED FOR PRODUCTION.** No step below was executed against Workspace by this implementation task. Use the existing DEVELOPMENT A/B/C and existing separate manager/employee projects. Follow [DEV deployment](MANAGER_WEB_APP_DEPLOYMENT.md) and the [V1.6 runbook](V1_6_DEPLOYMENT_RUNBOOK.md) first; do not initialize existing sheets, run migrations without approval, install triggers or activate mail/Calendar. Use synthetic test records and preserve audit/history. Record deployment version/SHA and restricted backup reference privately.
 
-V1.5.1 added no workflow, so the V1.5 cases below stay valid. Cases 21–27 cover the new local-first behaviour and must be recorded separately: they are the only steps that can confirm a real perceived-speed improvement, because the local benchmark uses mocked Google services.
+V1.6 adds cases 28–38 at the end of this document (responsibility section and filter, required responsibility, four
+subproject levels, nested tasks and containers, the completion lifecycle, the ADMIN correction, member history, safe
+deletion, contract 1.5 and desktop rendering). The V1.5 and V1.5.1 cases remain valid; cases 21–27 are the only steps
+that can confirm a real perceived-speed improvement, because the local benchmark uses mocked Google services.
 
 For each numbered test record date, account role, operation, expected result, actual result, measured duration, PASS/FAIL, evidence and corrective action. Do not put real emails, private records or resource IDs into public Git evidence. A real failure reopens the relevant checkgate.
 
@@ -63,3 +66,39 @@ On a rejected save, retain and review the draft. On transport failure, check cur
 The earlier reported Workspace defect was “Snapshot value mismatch in PUBLISHED_PROJECTS_B row 2 column 10” (committedDeadline). The new canonical Date normalization passes local regression; specifically retest publication with existing Sheets date-formatted cells, JST midnight Date values, multi-date fields and employee read/hash. **Live fix remains UNVERIFIED** until this test has evidence.
 
 Do not approve production until identity, authorization, A isolation, end-to-end workflows, publication, concurrency, sidebar fallback, accessibility and latency evidence have been reviewed. If execute-as-user cannot resolve reliable identity, keep gate 2 BLOCKED and do not switch to deployer identity.
+
+## V1.6 additional smoke cases (DEV, NOT_RUN)
+
+Record each with date, account, dataset, deployment version, execution ID and observed result. Use synthetic
+records only.
+
+28. **Responsibility section.** Open the dashboard as ADMIN. Expect one card per area above the KPIs with colour,
+    owner, project/open/overdue counts and progress; `すべての担当領域` and `+ 担当領域を追加` are present.
+29. **Area filter.** Select an area as 製品設計. Expect the project list, task list, KPIs and upcoming deadlines to
+    narrow while the network panel shows **no** additional read. Select `すべての担当領域` and expect the full
+    overview to return. Rename the area and confirm the filter still matches by ID.
+30. **Required responsibility.** Open 案件 → 新規作成 with no area defined; expect the refusal plus the create-area
+    action. Create an area, then create a project and confirm the stored `Responsibility_ID` in the sheet.
+31. **Four subproject levels.** Build 5Q45 → 納入部品図作成 → フロント部品 → 断面検討 → 最終確認. Expect the fifth
+    level to be refused, a collapse/expand control on parents, and no change to existing two-level data.
+32. **Nested tasks and containers.** Under 図面作成 create 断面図作成 → 寸法確認 and confirm a fourth level is
+    refused. Try to add a child under a task that already has recorded hours; expect the refusal. Confirm the
+    parent card shows derived progress and that its stored spreadsheet cells were not rewritten.
+33. **Completion lifecycle.** From the employee app submit 作業完了を報告. Expect the task to remain open with
+    承認待ち, the manager to see it in 申請, and the approval to set Done / 100 % once. Return and reject a second
+    report and expect the task to stay open. Confirm the sidebar and the web form refuse Done.
+34. **ADMIN correction.** As ADMIN record one completion correction with a reason and the exact confirmation.
+    Expect Done / 100 % plus a `COMPLETION_OVERRIDDEN` audit row distinct from an approval.
+35. **Member history.** メンバー → a member with one approved completion. Expect current work, previous work with
+    original/actual dates and acceptance, and the recorded activity. A report typed under another name must not
+    create history for that member.
+36. **Safe deletion.** Create an empty mistaken project, then delete it as ADMIN with `DELETE <id>` and a reason.
+    Expect the dependency panel to be empty, a backup reference, a `RECORD_DELETED` row and the record gone.
+    Repeat on a project with tasks (expect refusal) and as MANAGER (expect refusal).
+37. **Contract 1.5.** Publish with one `INTERNAL` project containing a nested subproject and a subtask. Expect the
+    employee app to show the nesting, the approval badge and `completedAt`, to hide the `RESTRICTED` project and
+    every completion note, and an old 1.4 reader to report `SNAPSHOT_CONTRACT_UNSUPPORTED`.
+38. **Desktop rendering.** At 1366×768, 1920×1080 and 150 % zoom confirm the responsibility cards, filter bar,
+    tree and deletion panel are usable with no clipped actions, and that status is readable without colour alone.
+
+Until these are recorded, gates 1, 2, 4–10 remain **BLOCKED** for live verification.
