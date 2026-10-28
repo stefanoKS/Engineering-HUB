@@ -3,7 +3,7 @@
 Status: **PASS** (local delivery) — **BLOCKED** for DEV migration and Workspace verification
 Date: 2026-10-28
 Starting commit SHA: `c769cb5006b13130e1358df3cbad436068a3c3f8`
-Implementation commit SHA: sealed in the delivery header (see §13)
+Implementation commit SHA: 34a2bf1
 
 ## 1. Objective
 
@@ -97,4 +97,4 @@ Twelve gates recorded: 1–12 PASS locally; every gate marks its live criterion 
 
 ## 13. Commit SHA
 
-Starting `c769cb5006b13130e1358df3cbad436068a3c3f8`; implementation SHA sealed in the delivery commit.
+Starting `c769cb5006b13130e1358df3cbad436068a3c3f8`; implementation SHA 34a2bf1.

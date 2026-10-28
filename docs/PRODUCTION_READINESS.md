@@ -5,7 +5,7 @@
 **IMPLEMENTED — DEV MIGRATION AND WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 
 Version 1.6.0; schema **7** (`007_responsibility_hierarchy_and_lifecycle`); employee contract **1.5**. Starting SHA:
-`c769cb5006b13130e1358df3cbad436068a3c3f8`. The delivery SHA is recorded in
+`c769cb5006b13130e1358df3cbad436068a3c3f8`. The delivery SHA `34a2bf1` is recorded in
 [V1_6_GATE_12.md](checkgates/V1_6_GATE_12.md).
 
 | Field | Value |
