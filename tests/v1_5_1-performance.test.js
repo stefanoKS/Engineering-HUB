@@ -170,7 +170,7 @@ test('identical in-flight reads share one RPC and stale responses never repopula
  * Background revalidation
  * ------------------------------------------------------------------ */
 
-test('stale data renders instantly, refreshes in the background and keeps a draft', async () => {
+test('stale data renders instantly, refreshes in the background and keeps the screen', async () => {
   const {a, h} = setup();
   await flush();
   a.context.Database.update('TASKS', 'T0', {Task_Name: 'Background rename'});
@@ -210,7 +210,7 @@ test('a save patches summaries, keeps unrelated caches and revalidates aggregate
   assert.equal(h.calls.filter(c => c.write).length, 1);
 });
 
-test('a failed save keeps the draft, shows the error and never retries by itself', async () => {
+test('a failed save keeps the open form, shows the error and never retries by itself', async () => {
   const {a, h} = setup();
   await flush();
   h.click('nav', 'タスク'); await flush();
@@ -222,14 +222,14 @@ test('a failed save keeps the draft, shows the error and never retries by itself
   assert.equal(h.nodes('formHost').find(n => n.name === 'taskName').value, 'Mine');
   assert.equal(a.context.Database.find('TASKS', 'T0').Task_Name, 'Someone else');
   assert.equal(h.calls.filter(c => c.write).length, 1);
-  assert.equal(h.window.ManagerWebClient.drafts.size, 1, 'the draft survives the refused save');
+  assert.ok(h.window.ManagerWebClient.editor(), 'the open form keeps the entered value');
 });
 
 /* ------------------------------------------------------------------ *
  * Authorization revocation
  * ------------------------------------------------------------------ */
 
-test('a revoked manager loses cached views and unsent drafts', async () => {
+test('a revoked manager loses cached views and the open form', async () => {
   const {a, h} = setup();
   await flush();
   assert.ok(apiOf(h).peek('bootstrap', {}));
@@ -242,7 +242,8 @@ test('a revoked manager loses cached views and unsent drafts', async () => {
   await flush();
   assert.match(notice(h), /権限/);
   assert.equal(h.window.ManagerWebClient.store.projects, null);
-  assert.equal(h.window.ManagerWebClient.drafts.size, 0);
+  assert.equal(h.window.ManagerWebClient.editor(), null, 'the open form is discarded');
+  assert.equal(h.document.getElementById('editor').open, false, 'the dialog is closed');
   const callsBefore = h.calls.length;
   h.click('nav', 'タスク'); await flush();
   assert.equal(h.calls.length, callsBefore, 'no further server request after revocation');

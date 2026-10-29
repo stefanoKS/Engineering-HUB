@@ -10,7 +10,7 @@ var lang = EH_I18N.read(), view = 'overview', sequence = 0, drawerSequence = 0;
  */
 var FRESH_MS = 30000, PAGE = 50, PREFETCH_TASKS = 1000;
 var cache = new Map(), inflight = new Map(), tokens = Object.create(null);
-var drafts = new Map(), pending = new Set(), queue = [], running = 0;
+var pending = new Set(), queue = [], running = 0;
 var store = {actor: null, references: null, responsibilities: [], responsibilityCards: {items: [], unassigned: null}, projects: null, tasks: null, overview: null, at: {}};
 var stats = {rpc: 0, hits: 0, stale: 0, writes: 0};
 var filters = {}, currentData = null, currentEditor = null, actorRole = '', metrics = [];
@@ -26,6 +26,12 @@ var resultsHost = null, syncError = '', refreshing = false, revoked = false;
 var byId = function (id) { return document.getElementById(id); };
 function t(key, vars) { return EH_I18N.t(lang, 'web.' + key, vars); }
 function el(tag, text, className) { var node = document.createElement(tag); if (text !== undefined) node.textContent = String(text); if (className) node.className = className; return node; }
+/** Removes a node from its parent without depending on Element.remove(). */
+function detach(node) {
+  if (!node) return;
+  if (typeof node.remove === 'function') { node.remove(); return; }
+  if (node.parentNode && typeof node.parentNode.removeChild === 'function') node.parentNode.removeChild(node);
+}
 function button(key, fn, parent) { var b = el('button', t(key)); b.type = 'button'; b.addEventListener('click', fn); if (parent) parent.appendChild(b); return b; }
 function notice(text, kind) { byId('notice').textContent = text; byId('notice').className = kind || ''; }
 function success(text) { notice(text, 'success'); }
@@ -103,11 +109,17 @@ var api = {
     store.references = null; store.responsibilities = []; store.responsibilityCards = {items: [], unassigned: null}; store.at = {};
   }
 };
-window.ManagerWebClient = {api: api, metrics: metrics, drafts: drafts, store: store, stats: stats, deletion: openDeletionFor};
+window.ManagerWebClient = {api: api, metrics: metrics, store: store, stats: stats, deletion: openDeletionFor,
+  // Read-only view of the open editor. Nothing is retained after closing it.
+  editor: function () { return currentEditor; }};
 function rowValues(parent, pairs) { var dl = el('dl'); pairs.forEach(function (pair) { dl.append(el('dt', pair[0]), el('dd', pair[1] === '' || pair[1] === undefined ? '—' : pair[1])); }); parent.appendChild(dl); }
 function statusLabel(value) { return EH_I18N.status(lang, value || ''); }
 function title(key, parent) { parent.appendChild(el('h1', t(key))); }
-function navigate(next, options) { view = next; if (options) filters[next] = options; if (next === 'requests') requestSync = {state: 'idle', error: ''}; clearNotice(); load(false); }
+/**
+ * Moves to another screen. Leaving an unfinished form has the same result as closing it: the
+ * entered values are discarded and nothing is retained.
+ */
+function navigate(next, options) { closeEditor(); view = next; if (options) filters[next] = options; if (next === 'requests') requestSync = {state: 'idle', error: ''}; clearNotice(); load(false); }
 /** A stored request status is displayed through the dictionary, never translated in place. */
 function requestStatusLabel(value) { var key = 'requestStatus.' + String(value || ''); return EH_I18N.has('web.' + key) ? t(key) : String(value || ''); }
 
@@ -310,6 +322,9 @@ function peekView(name) {
     if (dataset.complete && (name === 'projects' || indexedTasks())) return localPage(name, dataset, viewFilters(name));
     return null;
   }
+  // Publication is a live administrative read merged with the system versions, so a raw cached
+  // payload would under-report it. The page always refetches instead.
+  if (name === 'publication') return null;
   return api.peek(name, filters[name] || {});
 }
 function staleView(name) {
@@ -861,6 +876,9 @@ function load(fresh, message) {
   if (revoked) { byId('content').replaceChildren(); notice(t('accessDenied'), 'error'); return; }
   if (requested === 'admin' || requested === 'diagnostics') { currentData = {}; syncError = ''; render(); return; }
   if (message) success(message);
+  // Publication affects the shared dashboard immediately, so its page is always read live
+  // instead of painting a snapshot from an earlier visit.
+  if (requested === 'publication') { notice(t('loading')); currentData = null; render(); fetchPublication(); return; }
   var cached = peekView(requested);
   if (cached) {
     currentData = cached; syncError = ''; render(); recordRender(requested, start);
@@ -901,6 +919,25 @@ function fetchView(name, fresh, first) {
   }).catch(function (error) { if (seq === sequence) handleError(error); });
 }
 /**
+ * Publication status plus the database/application versions in one paint.
+ *
+ * The publication payload alone cannot answer "which schema version is this workbook?", so the
+ * system status read is paired with it. Both are manager-only reads; the merged object is not
+ * cached, which keeps the page honest after a publish.
+ */
+function fetchPublication() {
+  var seq = ++sequence, start = performance.now();
+  Promise.all([api.read('publication', {}, true),
+    api.read('status', {}, false).catch(function () { return null; })])
+    .then(function (results) {
+      // A newer navigation wins: this response never paints another screen's data.
+      if (seq !== sequence || !results[0] || view !== 'publication') return;
+      currentData = Object.assign({}, results[0], {system: results[1] || null});
+      syncError = ''; store.at.publication = Date.now();
+      clearNotice(); render(); recordRender('publication', start);
+    }).catch(function (error) { if (seq === sequence && view === 'publication') handleError(error); });
+}
+/**
  * Paints the selected area immediately while its authoritative overview is fetched.
  *
  * No KPI is shown: an area figure must never be approximated from the previous area's data or
@@ -920,6 +957,7 @@ function renderAreaLoading() {
 }
 function revalidateView(name) {
   if (revoked) return;
+  if (name === 'publication') { fetchPublication(); return; }
   if (name === 'overview' && activeResponsibility) { fetchView('overview', true); return; }
   if (name === 'projects' || name === 'tasks') {
     var servedByServer = !!api.peek(name, viewFilters(name));
@@ -949,7 +987,7 @@ function handleError(error) {
   if (!currentData) { byId('content').replaceChildren(); button('retry', function () { load(true); }, byId('content')); return; }
   render();
 }
-/** A revoked or unverifiable identity drops every private cached view and the unsent drafts. */
+/** A revoked or unverifiable identity drops every private cached view and the open form. */
 function revoke() {
   revoked = true;
   api.clear();
@@ -957,8 +995,9 @@ function revoke() {
   store.responsibilityCards = {items: [], unassigned: null};
   store.projects = null; store.tasks = null; store.overview = null; store.at = {};
   activeResponsibility = ''; activeResponsibilityName = '';
-  drafts.clear(); pending.clear();
+  pending.clear();
   currentData = null; currentEditor = null; syncError = ''; refreshing = false;
+  try { if (byId('formHost')) byId('formHost').replaceChildren(); } catch (ignored) { /* no form host */ }
   try { if (byId('editor').open) byId('editor').close(); } catch (ignored) { /* no open dialog */ }
   byId('content').replaceChildren();
   byId('actor').textContent = '';
@@ -1034,11 +1073,13 @@ function loadRevision(table,id){
  * V1.6.1: there is no cascading removal. A parent record with dependants must be cleared
  * child by child (or archived), so the cascade option was removed from the panel and the
  * server refuses it outright.
+ *
+ * V1.7: the reason is memory of this panel only. Closing discards it, and reopening always
+ * starts with an empty reason field; no draft is kept.
  */
 function deletionPanel(container,table,id,name,revision){
   if(container.querySelector&&container.querySelector('.deletion-panel'))return;
-  var draftKey='delete:'+table+':'+id,draft=drafts.get(draftKey)||{reason:'',revision:revision||''};
-  drafts.set(draftKey,draft);
+  var state={reason:'',revision:revision||''};
   var panel=el('section',undefined,'deletion-panel');
   panel.appendChild(el('h3',t('deleteRecord')+': '+name));
   var summary=el('div');
@@ -1047,11 +1088,11 @@ function deletionPanel(container,table,id,name,revision){
   var execute=el('button',t('deleteRecord'),'primary');execute.type='button';execute.disabled=true;
   // The typed `DELETE <id>` code is no longer asked for. The administrator confirms once in a
   // Yes/No dialog and the client derives the exact code the server already requires.
-  field(panel,'deleteReason',draft.reason,null,function(v){draft.reason=v;});
+  field(panel,'deleteReason','',null,function(v){state.reason=v;});
   var feedback=el('div');feedback.setAttribute('role','status');
   var actions=el('div',undefined,'toolbar');
   actions.appendChild(execute);
-  button('close',function(){panel.remove();},actions);
+  button('close',function(){detach(panel);},actions);
   panel.appendChild(actions);
   panel.appendChild(feedback);
   function runDeletion(){
@@ -1059,30 +1100,30 @@ function deletionPanel(container,table,id,name,revision){
     execute.disabled=true;
     feedback.className='';
     feedback.textContent=t('saving');
-    api.write(deletionAction(table),Object.assign({confirmed:true,reason:draft.reason,confirmation:'DELETE '+id}, (function(){var p={};p[deletionKey(table)]=id;p.revision=draft.revision;return p;}())))
-      .then(function(result){drafts.delete(draftKey);panel.remove();success(t('deleted')+' · '+t('needsPublication'));settle(deletionAction(table),{projectId:table==='PROJECTS'?id:undefined,taskId:table==='TASKS'?id:undefined},result);})
+    api.write(deletionAction(table),Object.assign({confirmed:true,reason:state.reason,confirmation:'DELETE '+id}, (function(){var p={};p[deletionKey(table)]=id;p.revision=state.revision;return p;}())))
+      .then(function(result){detach(panel);success(t('deleted')+' · '+t('needsPublication'));settle(deletionAction(table),{projectId:table==='PROJECTS'?id:undefined,taskId:table==='TASKS'?id:undefined},result);})
       .catch(function(error){execute.disabled=false;feedback.className='error';feedback.textContent=error.message;notice(error.message,'error');});
   }
   execute.addEventListener('click',function(){
     if(execute.disabled)return;
-    if(!String(draft.reason||'').trim()){feedback.className='error';feedback.textContent=t('deleteReasonRequired');return;}
+    if(!String(state.reason||'').trim()){feedback.className='error';feedback.textContent=t('deleteReasonRequired');return;}
     deletionConfirmDialog(name,function(){runDeletion();});
   });
   container.appendChild(panel);
   var ready=revision?Promise.resolve(revision):loadRevision(table,id);
   Promise.all([api.read('deletion',{table:table,id:id},true),ready]).then(function(results){
-    var state=results[0],rev=results[1]||'';
-    draft.revision=rev;
+    var preflight=results[0],rev=results[1]||'';
+    state.revision=rev;
     summary.replaceChildren();
     summary.appendChild(el('p',t('deleteSafe'),'muted'));
-    if(state.blocked){
+    if(preflight.blocked){
       summary.appendChild(el('p',t('deleteBlocked'),'error'));
       var list=el('ul');
-      (state.blocking||[]).forEach(function(item){
+      (preflight.blocking||[]).forEach(function(item){
         list.appendChild(el('li',deleteCodeLabel(item.code)+(item.table?' · '+item.table:'')+(item.count?' · '+item.count:'')));
       });
       summary.appendChild(list);
-      if((state.blocking||[]).some(function(item){return item.code==='REFERENCE';}))summary.appendChild(el('p',t('deleteResolveChildren'),'muted'));
+      if((preflight.blocking||[]).some(function(item){return item.code==='REFERENCE';}))summary.appendChild(el('p',t('deleteResolveChildren'),'muted'));
       return;
     }
     execute.disabled=!rev;
@@ -1208,9 +1249,11 @@ function render() {
       rows.push([t('statusField'),requestStatusLabel(r.status)]);
       rowValues(card,rows);
       if(['PENDING','STALE','PROCESSING'].indexOf(r.status)<0){rowValues(card,[[t('note'),r.decisionNote||'—'],[t('member'),r.reviewer||'—']]);host.appendChild(card);return;}
-      var draftKey='request:'+r.requestId, draft=drafts.get(draftKey)||{};drafts.set(draftKey,draft);
-      field(card,'note',draft.note||'',null,function(v){draft.note=v;},'textarea');
-      ['approve','reject','return'].forEach(function(a){button(a,function(){act('requestDecide',{requestId:r.requestId,action:a.toUpperCase(),note:draft.note||'',confirmation:'DECIDE REQUEST'},true).then(function(ok){if(ok)drafts.delete(draftKey);});},card);});
+      // V1.7: the decision note belongs to this open card only. Closing the page or navigating
+      // away drops it; nothing is retained in memory or in localStorage.
+      var note={text:''};
+      field(card,'note','',null,function(v){note.text=v;},'textarea');
+      ['approve','reject','return'].forEach(function(a){button(a,function(){act('requestDecide',{requestId:r.requestId,action:a.toUpperCase(),note:note.text||'',confirmation:'DECIDE REQUEST'},true);},card);});
       host.appendChild(card);
     });
     // One authorized import per page entry: the cached queue paints first, then a single
@@ -1228,32 +1271,316 @@ function render() {
     }
     host.appendChild(el('h2',t('history')));(data.history||[]).forEach(function(h){var item=el('article',undefined,'card');rowValues(item,[[t('task'),h.taskId],[t('deadline'),h.previousDeadline+' → '+h.newDeadline],[t('reason'),h.reason],[t('member'),h.changedBy]]);host.appendChild(item);});
   } else if(view==='automation') {renderAutomation(data,host);
-  } else {host.appendChild(el('p',t('readonly'),'muted'));structured(data,host);if(view==='automation')button('emergencyStop',function(){act('emergencyStop',{},true);},host);if(view==='publication')button('publication',function(){act('publication',{},true);},host);}
+  } else if(view==='publication') {renderPublication(data,host);
+  } else if(view==='status') {renderSystemStatus(data,host);
+  } else {host.appendChild(el('p',t('readonly'),'muted'));}
 }
 
+/* ---------------------------------------------------------------- *
+ * ADMIN layout helpers (V1.7.2)
+ *
+ * The administration pages are purpose built. A server payload is never dumped as a nested
+ * key/value tree: each page shows readable cards, a status badge and, only on request, the
+ * technical metadata behind an expandable details block.
+ * ---------------------------------------------------------------- */
+function adminGrid(host) { var grid = el('div', undefined, 'admin-grid'); host.appendChild(grid); return grid; }
+function adminCard(parent, titleKey, className) {
+  var card = el('section', undefined, 'card admin-card' + (className ? ' ' + className : ''));
+  var head = el('div', undefined, 'admin-card-head');
+  head.appendChild(el('h2', t(titleKey)));
+  card.appendChild(head);
+  parent.appendChild(card);
+  return card;
+}
+function cardBadge(card, text, tone) {
+  var badge = el('span', text, 'pill pill-' + (tone || 'gray'));
+  card.firstChild.appendChild(badge);
+  return badge;
+}
+/** Boolean and mode states are text, never colour alone. */
+function stateBadge(card, on, onKey, offKey) {
+  return cardBadge(card, t(on === true ? (onKey || 'enabledState') : (offKey || 'disabledState')), on === true ? 'green' : 'gray');
+}
+function modeTone(value) { return value === 'LIVE' ? 'green' : value === 'PREVIEW' ? 'amber' : 'gray'; }
+function adminFacts(parent, pairs) {
+  var meta = el('div', undefined, 'meta');
+  pairs.forEach(function (pair) {
+    if (!pair) return;
+    metaItem(meta, pair[0], pair[1] === null ? '—' : pair[1]);
+  });
+  parent.appendChild(meta);
+}
+function timestampText(value) {
+  if (!value) return '';
+  return String(value).replace('T', ' ').slice(0, 16);
+}
+function banner(host, tone, textKey, vars) {
+  var box = el('div', undefined, tone === 'warn' ? 'info-banner is-warn' : 'info-banner');
+  box.appendChild(el('p', t(textKey, vars)));
+  host.appendChild(box);
+  return box;
+}
+/** Technical metadata is available, but only after the administrator opens the details. */
+function detailBlock(parent, rows) {
+  var details = el('details', undefined, 'admin-details');
+  details.appendChild(el('summary', t('adminDetails')));
+  adminFacts(details, rows);
+  parent.appendChild(details);
+  return details;
+}
+/** Contract versions are compared component by component ("1.10" is newer than "1.6"). */
+function contractParts(value) { return String(value || '').split('.').map(function (part) { return parseInt(part, 10) || 0; }); }
+function contractCompare(left, right) {
+  var a = contractParts(left), b = contractParts(right), length = Math.max(a.length, b.length);
+  for (var index = 0; index < length; index++) {
+    var one = a[index] || 0, two = b[index] || 0;
+    if (one !== two) return one > two ? 1 : -1;
+  }
+  return 0;
+}
+
+/**
+ * 共有ダッシュボード公開 (V1.7): publication status, the last successful run, the schedule, the
+ * published counts and the two contract versions, each in its own card.
+ *
+ * Four different values are kept apart on purpose: the database schema version, the
+ * application version, the publisher version and the snapshot contract. A publisher that
+ * supports a newer contract than the published snapshot is an informational update, not a
+ * failure; the publication itself is not changed by this page.
+ */
+function renderPublication(data, host) {
+  var snapshot = data.snapshot || null;
+  var counts = (snapshot && snapshot.counts) || {};
+  var system = data.system || null;
+  var configured = data.destinationConfigured === true;
+  var failed = !!data.error || /^(FAIL|ERROR)/i.test(String(data.lastResult || ''));
+  var enabled = data.enabled === true;
+  // The contract of the published snapshot and the contract this publisher supports are
+  // different facts: a newer publisher is an update waiting for the next publication.
+  var publishedContract = (snapshot && snapshot.contractVersion) || '';
+  var supportedContract = data.contractVersion || '';
+  var comparison = publishedContract ? contractCompare(supportedContract, publishedContract) : 0;
+  if (comparison > 0) banner(host, 'info', 'snapshotUpdateAvailable', {published: publishedContract, supported: supportedContract});
+  else if (comparison < 0) banner(host, 'warn', 'snapshotContractNewer', {published: publishedContract, supported: supportedContract});
+
+  var grid = adminGrid(host);
+  var state = adminCard(grid, 'publicationState');
+  var stateTone = !configured ? 'red' : failed ? 'red' : enabled ? 'green' : 'gray';
+  var stateKey = !configured ? 'publicationNotConfigured' : failed ? 'publicationFailed' : enabled ? 'publicationEnabled' : 'publicationDisabled';
+  cardBadge(state, t(stateKey), stateTone);
+  if (!configured) state.appendChild(el('p', t('publicationNotConfiguredHint'), 'muted'));
+  if (data.lastResult) adminFacts(state, [[t('lastResult'), data.lastResult]]);
+  state.appendChild(el('p', t('publicationHint'), 'muted'));
+
+  var lastSuccess = adminCard(grid, 'publicationLastSuccess');
+  cardBadge(lastSuccess, timestampText(data.lastSuccessAt) || t('neverPublished'), timestampText(data.lastSuccessAt) ? 'green' : 'gray');
+  adminFacts(lastSuccess, [[t('publishedAt'), timestampText(snapshot && snapshot.publishedAt)],
+    [t('snapshotVersion'), snapshot ? snapshot.version : ''],
+    [t('ageHours'), snapshot && snapshot.ageHours !== null && snapshot.ageHours !== undefined ? snapshot.ageHours : '']]);
+
+  var auto = adminCard(grid, 'publicationAuto');
+  stateBadge(auto, enabled, 'publicationEnabled', 'publicationDisabled');
+  adminFacts(auto, [[t('publicationInterval'), data.intervalMinutes],
+    [t('publicationApprovedBy'), data.approvedBy]]);
+
+  var published = adminCard(grid, 'publicationCounts');
+  adminFacts(published, [[t('responsibilities'), counts.responsibilities],
+    [t('projects'), counts.projects], [t('subprojects'), counts.subprojects],
+    [t('tasks'), counts.tasks], [t('milestones'), counts.milestones]]);
+  if (!snapshot && configured) published.appendChild(el('p', t('publicationSnapshotUnreadable'), 'muted'));
+
+  var contracts = adminCard(grid, 'publicationContract');
+  adminFacts(contracts, [[t('publishedContract'), publishedContract],
+    [t('supportedContract'), supportedContract]]);
+
+  var versions = adminCard(grid, 'publicationVersions');
+  adminFacts(versions, [[t('schemaVersion'), system ? system.schema : ''],
+    [t('applicationVersion'), system ? system.version : ''],
+    [t('publisherVersion'), data.publisherVersion],
+    [t('snapshotVersion'), snapshot ? snapshot.version : '']]);
+
+  // Failures are never hidden behind the details block.
+  var problem = data.lastError || data.error || '';
+  if (problem) {
+    var errorCard = adminCard(grid, 'publicationLastError', 'admin-card-error');
+    errorCard.appendChild(el('p', problem, 'error'));
+  }
+
+  var actions = el('div', undefined, 'admin-actions');
+  button('publishNow', function () { act('publication', {}, true); }, actions);
+  host.appendChild(actions);
+
+  detailBlock(host, [[t('publisherVersion'), data.publisherVersion],
+    [t('supportedContract'), supportedContract],
+    [t('publishedContract'), publishedContract],
+    [t('activeSlot'), snapshot ? snapshot.activeSlot : ''],
+    [t('snapshotVersion'), snapshot ? snapshot.version : ''],
+    [t('ageHours'), snapshot && snapshot.ageHours !== null && snapshot.ageHours !== undefined ? snapshot.ageHours : ''],
+    [t('destinationConfigured'), configured ? t('enabledState') : t('disabledState')],
+    [t('lastResult'), data.lastResult],
+    [t('publicationLastVersion'), data.lastVersion],
+    [t('publicationInterval'), data.intervalMinutes]]);
+}
+
+/**
+ * システム状態 (V1.7): environment and database, application version, operational status,
+ * integrations and the consistency result, in cards. Row counts and flags that a manager does
+ * not need first stay in the details block; a security or configuration failure never does.
+ */
+function renderSystemStatus(data, host) {
+  var grid = adminGrid(host);
+  var valid = data.valid === true;
+
+  var database = adminCard(grid, 'systemDatabase');
+  cardBadge(database, data.environment || t('unknown'), data.environment ? 'green' : 'amber');
+  adminFacts(database, [[t('environment'), data.environment], [t('schemaVersion'), data.schema]]);
+
+  var application = adminCard(grid, 'application');
+  cardBadge(application, data.version || t('unknown'), data.version ? 'gray' : 'amber');
+  adminFacts(application, [[t('applicationVersion'), data.version]]);
+
+  var health = adminCard(grid, 'systemHealth');
+  cardBadge(health, valid ? t('systemValid') : t('systemInvalid', {count: data.errorCount || 0}), valid ? 'green' : 'red');
+  adminFacts(health, [[t('errorCount'), data.errorCount === undefined ? '' : data.errorCount]]);
+
+  var integrations = adminCard(grid, 'systemIntegrations');
+  cardBadge(integrations, String(data.emailMode || 'OFF'), modeTone(data.emailMode));
+  adminFacts(integrations, [[t('emailMode'), data.emailMode],
+    [t('calendarSync'), data.calendarEnabled === true ? t('enabledState') : t('disabledState')],
+    [t('dryRun'), data.dryRun === true ? t('enabledState') : t('disabledState')]]);
+
+  var issues = adminCard(grid, 'systemIssues');
+  if (!valid) {
+    cardBadge(issues, t('systemInvalid', {count: data.errorCount || 0}), 'red');
+    issues.appendChild(el('p', t('systemErrorHint'), 'muted'));
+  } else {
+    cardBadge(issues, t('systemValid'), 'green');
+    issues.appendChild(el('p', t('noIssues'), 'muted'));
+  }
+  // An active emergency stop and an unverified identity are configuration facts a manager must see.
+  if (data.emergencyStop === true) issues.appendChild(el('p', t('emergencyActive'), 'is-overdue'));
+  issues.appendChild(el('p', t('readonly'), 'muted'));
+
+  detailBlock(host, [[t('systemMeta'), ''],
+    [t('errorCount'), data.errorCount],
+    [t('EMERGENCY_STOP'), data.emergencyStop === true ? t('enabledState') : t('disabledState')],
+    [t('dryRun'), data.dryRun === true ? t('enabledState') : t('disabledState')]]);
+  var counts = data.rowCounts || {};
+  var countRows = Object.keys(counts).sort().map(function (table) { return [table, counts[table]]; });
+  if (countRows.length) {
+    var table = el('details', undefined, 'admin-details');
+    table.appendChild(el('summary', t('rowCounts')));
+    adminFacts(table, countRows);
+    host.appendChild(table);
+  }
+}
+
+/**
+ * 自動化 (V1.7): the same settings, grouped by purpose. The save payload and the ADMIN check are
+ * unchanged; only the presentation, the group headings and the state badges are new. Every
+ * unsaved value lives in this render only, so leaving the page discards it.
+ */
+var AUTOMATION_GROUPS = [
+  {title: 'automationEmail', keys: ['EMAIL_MODE', 'ASSIGNMENT_EMAIL_ENABLED', 'REASSIGNMENT_EMAIL_ENABLED', 'DEADLINE_CHANGE_EMAIL_ENABLED', 'DEADLINE_REMINDER_ENABLED', 'OVERDUE_REMINDER_ENABLED', 'REMINDER_OFFSETS', 'REMINDER_CATCHUP_DAYS', 'OVERDUE_FREQUENCY_DAYS', 'WEEKDAY_ONLY_SENDING', 'EXECUTION_WINDOW_START', 'EXECUTION_WINDOW_END']},
+  {title: 'automationRequests', keys: ['DEADLINE_REQUEST_EMAIL_ENABLED', 'COMPLETION_REPORT_EMAIL_ENABLED', 'PENDING_REQUEST_REMINDER_ENABLED']},
+  {title: 'automationReports', keys: ['WEEKLY_MANAGER_REPORT_ENABLED', 'WEEKLY_REPORT_DAY', 'WEEKLY_REPORT_TIME', 'MANAGEMENT_REPORT_RECIPIENTS', 'DAILY_BACKUP_ENABLED', 'CALENDAR_SYNC_ENABLED', 'AUTO_DASHBOARD_REFRESH_ENABLED', 'AUTO_WORKLOAD_REFRESH_ENABLED', 'PROJECT_STALE_ALERT_ENABLED', 'PROJECT_STALE_DAYS']},
+  {title: 'automationEmergency', keys: ['EMERGENCY_STOP']}
+];
+function automationKeys() {
+  var keys = [];
+  AUTOMATION_GROUPS.forEach(function (group) { keys = keys.concat(group.keys); });
+  return keys;
+}
 function renderAutomation(data,host) {
-  rowValues(host,[[t('EMAIL_MODE'),data.status.mode],[t('EMERGENCY_STOP'),data.status.emergencyStop?'ON':'OFF']]);
-  button('emergencyStop',function(){act('emergencyStop',{},true);},host);
-  var draft=drafts.get('automation');if(!draft){draft={values:{},base:{},revision:data.revision};data.settings.forEach(function(s){if(!s.status){draft.values[s.key]=s.value;draft.base[s.key]=s.value;}});drafts.set('automation',draft);}
-  var form=el('form'),box=el('div',undefined,'fields');form.appendChild(box);
-  var keys=["EMAIL_MODE","EMERGENCY_STOP","ASSIGNMENT_EMAIL_ENABLED","REASSIGNMENT_EMAIL_ENABLED","DEADLINE_CHANGE_EMAIL_ENABLED","DEADLINE_REMINDER_ENABLED","OVERDUE_REMINDER_ENABLED","WEEKLY_MANAGER_REPORT_ENABLED","DEADLINE_REQUEST_EMAIL_ENABLED","COMPLETION_REPORT_EMAIL_ENABLED","PENDING_REQUEST_REMINDER_ENABLED","REMINDER_OFFSETS","REMINDER_CATCHUP_DAYS","OVERDUE_FREQUENCY_DAYS","WEEKDAY_ONLY_SENDING","EXECUTION_WINDOW_START","EXECUTION_WINDOW_END","MANAGEMENT_REPORT_RECIPIENTS","WEEKLY_REPORT_DAY","WEEKLY_REPORT_TIME","CALENDAR_SYNC_ENABLED","DAILY_BACKUP_ENABLED","AUTO_DASHBOARD_REFRESH_ENABLED","AUTO_WORKLOAD_REFRESH_ENABLED","PROJECT_STALE_ALERT_ENABLED","PROJECT_STALE_DAYS"];
-  keys.forEach(function(k){var value=draft.values[k],type=typeof value==='boolean'?'checkbox':typeof value==='number'?'number':'text';
-    var control=field(box,k,Array.isArray(value)?value.join(','):value,k==='EMAIL_MODE'?['OFF','PREVIEW','LIVE']:null,function(v){draft.values[k]=v;draft.dirty=true;},type);control.disabled=actorRole!=='ADMIN';});
-  if(actorRole==='ADMIN') {field(form,'confirmation',draft.confirmation||'',null,function(v){draft.confirmation=v;});var save=el('button',t('settingsSave'));save.type='submit';form.appendChild(save);form.addEventListener('submit',function(e){e.preventDefault();if(!window.confirm(t('confirm')))return;var changes={};keys.forEach(function(k){if(JSON.stringify(draft.values[k])!==JSON.stringify(draft.base[k]))changes[k]=draft.values[k];});save.disabled=true;api.write('automationSave',{changes:changes,confirmation:draft.confirmation||'',confirmed:true,revision:draft.revision}).then(function(result){drafts.delete('automation');settle('automationSave',{},result);success(t('saved'));}).catch(function(e){notice(e.message,'error');}).finally(function(){save.disabled=false;});});}
+  var keys=automationKeys();
+  var settings=Object.create(null);
+  (data.settings||[]).forEach(function(s){settings[s.key]=s;});
+  // V1.7.2: a fresh form per render; nothing is kept after the page is left.
+  var draft={values:{},base:{},revision:data.revision,confirmation:''};
+  (data.settings||[]).forEach(function(s){if(!s.status){draft.values[s.key]=s.value;draft.base[s.key]=s.value;}});
+
+  var summary=adminGrid(host);
+  var emergency=adminCard(summary,'automationEmergency','admin-card-emergency');
+  var stopped=data.status.emergencyStop===true;
+  cardBadge(emergency,stopped?t('emergencyActive'):t('disabledState'),stopped?'red':'gray');
+  adminFacts(emergency,[[t('EMAIL_MODE'),data.status.mode],[t('EMERGENCY_STOP'),data.status.emergencyStop?'ON':'OFF']]);
+  var actions=el('div',undefined,'admin-actions');
+  button('emergencyStop',function(){act('emergencyStop',{},true);},actions);
+  emergency.appendChild(actions);
+  var publication=adminCard(summary,'automationPublication');
+  var publishEnabled=settings.SHARED_DASHBOARD_PUBLISH_ENABLED&&settings.SHARED_DASHBOARD_PUBLISH_ENABLED.value===true;
+  stateBadge(publication,publishEnabled);
+  adminFacts(publication,[[t('publicationInterval'),settings.SHARED_DASHBOARD_PUBLISH_INTERVAL_MINUTES?settings.SHARED_DASHBOARD_PUBLISH_INTERVAL_MINUTES.value:'']]);
+  publication.appendChild(el('p',t('automationPublicationHint'),'muted'));
+
+  var form=el('form');
+  AUTOMATION_GROUPS.forEach(function(group){
+    if(!group.keys.length)return;
+    var section=el('section',undefined,'card settings-group');
+    section.appendChild(el('h3',t(group.title)));
+    var box=el('div',undefined,'fields');
+    group.keys.forEach(function(key){
+      var value=draft.values[key];
+      var type=typeof value==='boolean'?'checkbox':typeof value==='number'?'number':'text';
+      var setting=el('div',undefined,'setting');
+      var badge=null;
+      var control=field(setting,key,Array.isArray(value)?value.join(','):value,key==='EMAIL_MODE'?['OFF','PREVIEW','LIVE']:null,function(v){
+        draft.values[key]=v;
+        if(badge)paintBadge(v);
+      },type);
+      function paintBadge(current){
+        if(!badge)return;
+        var on=current===true;
+        badge.textContent=t(on?'enabledState':'disabledState');
+        badge.className='pill pill-'+(on?'green':'gray');
+      }
+      if(type==='checkbox'||key==='EMAIL_MODE'){
+        badge=el('span','','pill pill-gray');
+        control.parentNode.appendChild(badge);
+        if(key==='EMAIL_MODE'){badge.textContent=String(draft.values[key]||'OFF');badge.className='pill pill-'+modeTone(draft.values[key]);}
+        else paintBadge(draft.values[key]);
+      }
+      control.disabled=actorRole!=='ADMIN';
+      box.appendChild(setting);
+    });
+    section.appendChild(box);
+    form.appendChild(section);
+  });
+  if(actorRole==='ADMIN'){
+    var submitRow=el('div',undefined,'toolbar settings-save-row');
+    field(submitRow,'confirmation','',null,function(v){draft.confirmation=v;});
+    var save=el('button',t('settingsSave'),'primary');save.type='submit';submitRow.appendChild(save);
+    form.appendChild(submitRow);
+    var saving=false;
+    form.addEventListener('submit',function(e){
+      e.preventDefault();
+      // One write per save; the changed keys are computed from this form only.
+      if(saving)return;
+      if(!window.confirm(t('confirm')))return;
+      var changes={};
+      keys.forEach(function(k){if(JSON.stringify(draft.values[k])!==JSON.stringify(draft.base[k]))changes[k]=draft.values[k];});
+      saving=true;save.disabled=true;
+      api.write('automationSave',{changes:changes,confirmation:draft.confirmation||'',confirmed:true,revision:draft.revision})
+        .then(function(result){settle('automationSave',{},result);success(t('saved'));})
+        .catch(function(error){notice(error.message,'error');})
+        .finally(function(){saving=false;save.disabled=false;});
+    });
+  }
   host.appendChild(form);
+  if(actorRole!=='ADMIN')host.appendChild(el('p',t('readonly'),'muted'));
   // V1.6.1: the recovery entry point for a deletion that stopped between the row removal and
   // its record. It only appends a missing record; it never removes anything.
   if(actorRole==='ADMIN'){
     var maintenance=el('section',undefined,'deletion-panel');
     maintenance.appendChild(el('h3',t('deletionReconcile')));
     maintenance.appendChild(el('p',t('deletionReconcileHint'),'muted'));
-    var confirmDraft=drafts.get('reconcile')||{confirmation:''};drafts.set('reconcile',confirmDraft);
-    field(maintenance,'deletionReconcileConfirmation',confirmDraft.confirmation,null,function(v){confirmDraft.confirmation=v;});
+    var confirmation='';
+    field(maintenance,'deletionReconcileConfirmation','',null,function(v){confirmation=v;});
     var reconcileButton=el('button',t('deletionReconcile'));reconcileButton.type='button';
     reconcileButton.addEventListener('click',function(){
       if(!window.confirm(t('confirm')))return;
       reconcileButton.disabled=true;
-      api.write('deletionReconcile',{confirmed:true,confirmation:confirmDraft.confirmation}).then(function(result){
+      api.write('deletionReconcile',{confirmed:true,confirmation:confirmation}).then(function(result){
         success(t('deletionReconcileDone',{confirmed:(result&&result.confirmed||[]).length,present:(result&&result.rowPresent||[]).length}));
       }).catch(function(error){notice(error.message,'error');}).finally(function(){reconcileButton.disabled=false;});
     });
@@ -1261,8 +1588,6 @@ function renderAutomation(data,host) {
     host.appendChild(maintenance);
   }
 }
-
-function structured(value,host) { if(value && typeof value==='object'){var dl=el('dl');Object.keys(value).forEach(function(k){dl.appendChild(el('dt',EH_I18N.has('web.'+k)?t(k):k));var dd=el('dd');structured(value[k],dd);dl.appendChild(dd);});host.appendChild(dl);}else host.appendChild(el('span',value===null?'—':String(value))); }
 /**
  * Records a confirmed write: the snapshot is patched where it can be, the current view is
  * repainted from local data and only the affected aggregates are revalidated. No page reload and
@@ -1343,23 +1668,178 @@ var schemas={
  skill:{create:'skillCreate',fields:{name:'Skill_Name',category:'Category',description:'Description',requiredLevel:'Required_Level'}},
  skillAssess:{create:'skillAssess',fields:{memberId:'Member_ID',skillId:'Skill_ID',level:'Current_Level',evidence:'Evidence',trainingAction:'Training_Action',nextReviewDate:'Next_Review_Date'}}
 };
+/**
+ * Opens one create/edit form for a record type (V1.7 lifecycle: open → edit → save or close).
+ *
+ * The form always starts from the latest server copy of the record. Nothing from an earlier
+ * editor is restored, neither in memory nor in localStorage, and no draft is ever written. A
+ * form that is closed, replaced or abandoned is discarded.
+ */
 function openEditor(type,id,record,defaults) {
-  var seq=++drawerSequence, key=type+':'+(id||'new'), old=drafts.get(key), fromCache=!record&&!!id&&!!api.peek(type,{id:id}), loading=!(record||fromCache);
-  if(loading)notice(t('loading'));
-  var fetch=record?Promise.resolve(record):id?detail(type,id,false):Promise.resolve({});
-  Promise.all([fetch,api.read('references')]).then(function(results){if(seq!==drawerSequence)return;var schema=schemas[type];if(!old){old={type:type,id:id,original:results[0],values:{},base:{},subprojects:[],parentName:(defaults||{}).parentTaskName||''};Object.keys(schema.fields).forEach(function(k){old.values[k]=results[0][schema.fields[k]]===undefined?'':results[0][schema.fields[k]];});if(!id){var initial=Object.assign({priority:'Medium',statusField:type==='project'?'Planned':'Assigned',visibility:'RESTRICTED',durationUnit:'DAY',durationBasis:'WORKING_DAYS',enabled:true,role:'MEMBER'},defaults||{});if(type==='project'&&(!defaults||defaults.responsibilityId===undefined))initial.responsibilityId=activeResponsibility&&activeResponsibility!==UNASSIGNED?activeResponsibility:'';Object.assign(old.values,initial);}old.base=Object.assign({},old.values);old.additionalIds=((results[0]&&(results[0]._additional||results[0]._additionalMemberIds))||[]).slice();old.baseAdditional=old.additionalIds.slice();drafts.set(key,old);}currentEditor={key:key,draft:old};renderEditor();byId('editor').showModal();if(loading)notice('');if(old.values.projectId)loadSubprojects(old.values.projectId,old);if(type==='skillAssess')api.read('skills').then(function(d){old.skills=d.items;renderEditor();});if(fromCache)refreshDetail(type,id,old);}).catch(function(e){notice(e.message,'error');});
+  var seq=++drawerSequence, schema=schemas[type];
+  closeEditor();
+  notice(t('loading'));
+  var fetch=record?Promise.resolve(record):id?detail(type,id,true):Promise.resolve({});
+  Promise.all([fetch,api.read('references')]).then(function(results){
+    if(seq!==drawerSequence)return;
+    var source=results[0]||{};
+    var state={type:type,id:id,original:source,values:{},base:{},subprojects:[],parentTasks:[],
+      parentName:(defaults||{}).parentTaskName||'',additionalIds:[],baseAdditional:[],dirty:false,saving:false};
+    Object.keys(schema.fields).forEach(function(k){state.values[k]=source[schema.fields[k]]===undefined?'':source[schema.fields[k]];});
+    if(!id){
+      var initial=Object.assign({priority:'Medium',statusField:type==='project'?'Planned':'Assigned',visibility:'RESTRICTED',durationUnit:'DAY',durationBasis:'WORKING_DAYS',enabled:true,role:'MEMBER'},defaults||{});
+      if(type==='project'&&(!defaults||defaults.responsibilityId===undefined))initial.responsibilityId=activeResponsibility&&activeResponsibility!==UNASSIGNED?activeResponsibility:'';
+      Object.assign(state.values,initial);
+    }
+    state.base=Object.assign({},state.values);
+    state.additionalIds=((source._additional||source._additionalMemberIds)||[]).slice();
+    state.baseAdditional=state.additionalIds.slice();
+    currentEditor=state;
+    renderEditor();
+    byId('editor').showModal();
+    clearNotice();
+    if(state.values.projectId){
+      loadSubprojects(state.values.projectId,state);
+      if(type==='task')loadParentTasks(state.values.projectId,state);
+    }
+    if(type==='skillAssess')api.read('skills').then(function(data){if(currentEditor!==state)return;state.skills=data.items;renderEditor();});
+  }).catch(function(error){notice(error.message,'error');});
 }
-/** Cached record for an instant form; the server copy is fetched separately. */
+/**
+ * Closes the form and discards everything it held. No confirmation, no autosave and no
+ * retained values: reopening always builds a new form from the stored record.
+ */
+function closeEditor() {
+  var hadEditor=!!currentEditor;
+  currentEditor=null;
+  var host=byId('formHost');
+  if(host)host.replaceChildren();
+  var dialog=byId('editor');
+  try{if(dialog&&dialog.open)dialog.close();}catch(ignored){/* no open dialog */}
+  if(hadEditor)renderSync();
+}
+/** Latest authorized copy of one record; the editor never edits a stale payload. */
 function detail(type,id,fresh) {
-  return api.read(type,{id:id},fresh===true).then(function(d){var r=d.record;r._confirmations=d.confirmations||[];r._additional=(d.additionalAssigneeIds||d.additionalMemberIds||r._additionalMemberIds||[]).slice();return r;});
+  return api.read(type,{id:id},fresh!==false).then(function(d){var r=d.record;r._confirmations=d.confirmations||[];r._additional=(d.additionalAssigneeIds||d.additionalMemberIds||r._additionalMemberIds||[]).slice();return r;});
 }
-/** A cached form refreshes in the background; an untouched draft adopts the newer revision. */
-function refreshDetail(type,id,draft) {
-  detail(type,id,true).then(function(record){if(currentEditor&&currentEditor.draft===draft&&!draft.dirty){draft.original=record;Object.keys(schemas[type].fields).forEach(function(k){draft.values[k]=record[schemas[type].fields[k]]===undefined?'':record[schemas[type].fields[k]];});draft.additionalIds=(record._additional||[]).slice();draft.baseAdditional=draft.additionalIds.slice();draft.base=Object.assign({},draft.values);renderEditor();}}).catch(function(){ /* the save path still checks the revision */ });
+function loadSubprojects(projectId,draft){var seq=(draft.subSequence||0)+1;draft.subSequence=seq;api.read('project',{id:projectId}).then(function(d){if(draft.subSequence!==seq)return;draft.subprojects=d.subprojects;if(currentEditor===draft)renderEditor();}).catch(function(e){notice(e.message,'error');});}
+/**
+ * Parent-task choices come from the compact index. A workbook above the index bound falls back
+ * to one scoped server page, so the selector never silently offers an incomplete list.
+ */
+function loadParentTasks(projectId,draft){
+  if(!projectId)return;
+  if(store.tasks&&store.tasks.loaded&&store.tasks.complete)return;
+  if(draft.parentTasksProject===projectId)return;
+  draft.parentTasksProject=projectId;
+  api.read('tasks',{projectId:projectId,limit:100}).then(function(page){
+    if(currentEditor!==draft)return;
+    draft.parentTasks=(page&&page.items)||[];
+    renderEditor();
+  }).catch(function(e){notice(e.message,'error');});
 }
-function loadSubprojects(projectId,draft){var seq=(draft.subSequence||0)+1;draft.subSequence=seq;api.read('project',{id:projectId}).then(function(d){if(draft.subSequence!==seq)return;draft.subprojects=d.subprojects;if(currentEditor&&currentEditor.draft===draft)renderEditor();}).catch(function(e){notice(e.message,'error');});}
+/** Ancestor names of one choice, so the selected parent and its hierarchy stay visible. */
+function choicePath(choices,id) {
+  var byId=Object.create(null);
+  choices.forEach(function(choice){byId[choice.id]=choice;});
+  var names=[],cursor=String(id||''),guard=0;
+  while(cursor&&guard++<16){
+    var found=byId[cursor];
+    if(!found)return '';
+    names.unshift(found.name);
+    cursor=String(found.parentId||'');
+  }
+  return names.join(' › ');
+}
+/**
+ * Searchable single choice by name (V1.7.2 hierarchy controls).
+ *
+ * The stored value stays the stable ID, but the manager picks a readable name and sees the
+ * selected record with its ancestor path. A stored parent that is not currently offered is kept
+ * as an explicit choice instead of being replaced by a blank.
+ */
+function searchSelect(parent,key,value,choices,emptyLabel,onChange) {
+  var wrap=el('div',undefined,'search-select'),label=el('label');
+  label.appendChild(el('span',t(key)));
+  var search=el('input');search.type='search';search.setAttribute('placeholder',t('searchByName'));
+  search.setAttribute('aria-label',t(key)+' · '+t('search'));
+  label.appendChild(search);
+  var select=el('select');select.name=key;select.setAttribute('aria-label',t(key));
+  var echo=el('p',undefined,'search-select-echo muted');
+  var current=value===undefined||value===null?'':String(value);
+  function painted(choiceList){
+    select.replaceChildren();
+    var empty=el('option',emptyLabel||t('none'));empty.value='';select.appendChild(empty);
+    var query=String(search.value||'').toLowerCase();
+    choiceList.forEach(function(choice){
+      var text=choice.name+(choice.note?' · '+choice.note:'');
+      if(query&&text.toLowerCase().indexOf(query)<0)return;
+      var option=el('option',text);option.value=choice.id;select.appendChild(option);
+    });
+    if(current&&!Array.prototype.some.call(select.childNodes,function(node){return node.value===current;})){
+      var kept=el('option',t('currentSelection')+': '+(choicePath(choiceList,current)||t('unknown')));
+      kept.value=current;select.appendChild(kept);
+    }
+    select.value=current;
+    paintEcho(choiceList);
+  }
+  function paintEcho(choiceList){
+    if(!current){echo.textContent=t('noParent');return;}
+    echo.textContent=t('selectedParent')+': '+(choicePath(choiceList||choices(),current)||t('unknown'));
+  }
+  select.addEventListener('change',function(){current=select.value;onChange(current);paintEcho();});
+  search.addEventListener('input',function(){painted(choices());});
+  wrap.append(label,select,echo);
+  parent.appendChild(wrap);
+  painted(choices());
+  return select;
+}
+/** Candidate parents for a subproject: same project, never itself or one of its descendants. */
+function subprojectParentChoices(d) {
+  var all=(d.subprojects||[]).filter(function(s){return !!s.Subproject_ID;}),byId=Object.create(null);
+  all.forEach(function(s){byId[s.Subproject_ID]=s;});
+  function isSelfOrDescendant(id){
+    var cursor=String(id||''),guard=0;
+    if(!d.id)return false;
+    while(cursor&&guard++<16){
+      if(cursor===String(d.id))return true;
+      cursor=String((byId[cursor]||{}).Parent_Subproject_ID||'');
+    }
+    return false;
+  }
+  return all.filter(function(s){return !isSelfOrDescendant(s.Subproject_ID);}).map(function(s){
+    return {id:s.Subproject_ID,name:s.Subproject_Name,parentId:s.Parent_Subproject_ID||'',
+      note:s.Status==='Archived'?statusLabel('Archived'):''};
+  });
+}
+/** Candidate parents for a task: same project and subproject, no self, no descendant. */
+function taskParentChoices(d) {
+  var items=(store.tasks&&store.tasks.loaded&&store.tasks.complete)?store.tasks.items:(d.parentTasks||[]);
+  var projectId=String(d.values.projectId||''),subprojectId=String(d.values.subprojectId||'');
+  var scoped=items.filter(function(task){
+    return String(task.projectId||'')===projectId&&String(task.subprojectId||'')===subprojectId;
+  });
+  var byId=Object.create(null);
+  scoped.forEach(function(task){byId[task.id]=task;});
+  function isSelfOrDescendant(id){
+    var cursor=String(id||''),guard=0;
+    if(!d.id)return false;
+    while(cursor&&guard++<16){
+      if(cursor===String(d.id))return true;
+      cursor=String((byId[cursor]||{}).parentId||'');
+    }
+    return false;
+  }
+  return scoped.filter(function(task){
+    // A task at the deepest allowed level cannot become a parent.
+    return !isSelfOrDescendant(task.id)&&Number(task.depth||0)<2;
+  }).map(function(task){
+    return {id:task.id,name:task.name,parentId:task.parentId||'',
+      note:task.container?t('containerTask'):''};
+  });
+}
 function renderEditor() {
-  if(!currentEditor)return;var d=currentEditor.draft,schema=schemas[d.type],host=byId('formHost');host.replaceChildren();byId('editorTitle').textContent=t(d.type)+' · '+t(d.id?'edit':'new');
+  if(!currentEditor)return;var d=currentEditor,schema=schemas[d.type],host=byId('formHost');host.replaceChildren();byId('editorTitle').textContent=t(d.type)+' · '+t(d.id?'edit':'new');
   var form=el('form'), fields=el('div',undefined,'fields'), message=el('div');message.setAttribute('role','status');form.append(fields,message);if(d.type==='task'&&d.id){rowValues(form,[[t('taskApprove'),d.original.Assignment_Approved_At||'—'],[t('plannedStart'),d.original.Planned_Start||'—'],[t('scheduleState'),(d.original._confirmations||[]).filter(function(c){return c.Active;}).map(function(c){return c.Confirmed_At+' · '+c.Confirmed_By;}).join(', ')||t('notConfirmed')]]);}
   var colorUi=null;
   Object.keys(schema.fields).forEach(function(key){if(key==='role'&&actorRole!=='ADMIN')return;
@@ -1381,15 +1861,21 @@ function renderEditor() {
       options=[{id:'',name:d.type==='project'&&!d.id?t('responsibilityRequired'):'—'}].concat(areas);
     }
     if(key==='parentTaskId'){
-      var pool=(store.tasks&&store.tasks.items)||[];
-      var candidates=pool.filter(function(task){
-        return task.id!==d.id&&task.projectId===d.values.projectId&&
-          String(task.subprojectId||'')===String(d.values.subprojectId||'')&&Number(task.depth||0)<2;
-      }).map(function(task){return{id:task.id,name:task.name};});
-      if(d.values[key]&&!candidates.some(function(item){return item.id===d.values[key];}))candidates.push({id:d.values[key],name:d.parentName||d.values[key]});
-      options=[{id:'',name:t('noSubtask')}].concat(candidates);
+      // V1.7: the parent is chosen by name from the same project and subproject, and a task can
+      // never be its own parent or the parent of one of its own descendants.
+      searchSelect(fields,key,d.values[key],function(){return taskParentChoices(d);},t('noSubtask'),function(v){
+        d.values[key]=v;d.dirty=true;
+      });
+      return;
     }
-    if(key==='subprojectId'||key==='parentId')options=[{id:'',name:'—'}].concat((d.subprojects||[]).filter(function(s){return s.Subproject_ID!==d.id;}).map(function(s){return{id:s.Subproject_ID,name:s.Subproject_Name+' · '+statusLabel(s.Status)};}));
+    if(key==='parentId'){
+      // The stored hierarchy is validated server-side; this list only removes impossible choices.
+      searchSelect(fields,key,d.values[key],function(){return subprojectParentChoices(d);},t('topLevel'),function(v){
+        d.values[key]=v;d.dirty=true;
+      });
+      return;
+    }
+    if(key==='subprojectId')options=[{id:'',name:'—'}].concat((d.subprojects||[]).map(function(s){return{id:s.Subproject_ID,name:s.Subproject_Name+' · '+statusLabel(s.Status)};}));
     if(key==='skillId')options=[{id:'',name:'—'}].concat((d.skills||[]).map(function(s){return{id:s.Skill_ID,name:s.Skill_Name};}));
     if(key==='statusField')options=d.type==='project'?['Planned','Active','On Hold','Completed','Cancelled']:['Not Started','Assigned','In Progress','Blocked','On Hold','Done','Cancelled'].filter(function(value){return value!=='Done'||d.values.statusField==='Done';});
     if(key==='priority')options=['Low','Medium','High','Critical'].map(function(v){return{id:v,name:EH_I18N.priority(lang,v)};});
@@ -1397,7 +1883,18 @@ function renderEditor() {
     if(key==='visibility')options=[{id:'RESTRICTED',name:lang==='ja'?'非公開':'Restricted'},{id:'INTERNAL',name:lang==='ja'?'社内公開':'Internal'}];
     if(key==='durationUnit')options=[{id:'DAY',name:lang==='ja'?'日':'Days'},{id:'WEEK',name:lang==='ja'?'週':'Weeks'}];
     if(key==='durationBasis')options=[{id:'WORKING_DAYS',name:lang==='ja'?'営業日':'Working days'},{id:'CALENDAR_DAYS',name:lang==='ja'?'暦日':'Calendar days'}];
-    var control=field(fields,key,d.values[key],options,function(v){d.values[key]=v;d.dirty=true;if(colorUi&&key==='name')colorUi.refresh('name');if(key==='projectId'){d.values.subprojectId='';d.values.parentId='';loadSubprojects(v,d);}},type);
+    var control=field(fields,key,d.values[key],options,function(v){
+      d.values[key]=v;d.dirty=true;
+      if(colorUi&&key==='name')colorUi.refresh('name');
+      // The parent choices depend on the project and subproject, so an invalid combination is
+      // cleared instead of being sent to the server.
+      if(key==='projectId'){
+        d.values.subprojectId='';d.values.parentId='';d.values.parentTaskId='';d.parentTasks=[];
+        loadSubprojects(v,d);
+        if(d.type==='task')loadParentTasks(v,d);
+      }
+      if(key==='subprojectId'){d.values.parentTaskId='';if(d.type==='task')renderEditor();}
+    },type);
     if((key==='plannedStart'&&d.values.durationValue)||(key==='projectId'&&d.type==='subproject'&&d.id))control.disabled=true;
     if(['name','taskName','email','projectId'].indexOf(key)>=0)control.required=true;
     if(d.type==='project'&&!d.id&&key==='responsibilityId')control.required=true;
@@ -1433,18 +1930,18 @@ function renderEditor() {
   if(d.type==='task')button('plan',function(){api.read('plan',d.values,true).then(function(p){message.textContent=t('plannedStart')+': '+p.startDate+' · '+p.warnings.map(function(w){return EH_I18N.has('web.'+w.code)?t(w.code):EH_I18N.serverMessage(lang,w.code);}).join(', ');}).catch(function(e){message.textContent=e.message;});},form);
   var languageButton=el('button','日本語 | English');languageButton.type='button';languageButton.addEventListener('click',switchLanguage);form.appendChild(languageButton);
   var actions=el('div',undefined,'toolbar'),save=el('button',t('save'),'primary');save.type='submit';save.disabled=!!d.saving;actions.appendChild(save);
-  button('close',function(){byId('editor').close();},actions);
-  button('discard',function(){if(window.confirm(t('confirm'))){drafts.delete(currentEditor.key);currentEditor=null;byId('editor').close();}},actions);
-  if(d.id&&(d.type==='project'||d.type==='task'))button('reloadDraft',function(){api.read(d.type,{id:d.id},true).then(function(result){message.replaceChildren(el('p',t('draft')));structured(result.record,message);button('useLatest',function(){if(window.confirm(t('confirm'))){drafts.delete(currentEditor.key);byId('editor').close();openEditor(d.type,d.id,result.record);}},message);});},actions);
-  if(d.type==='task'&&d.id)['taskApprove','taskConfirm'].forEach(function(a){button(a,function(){act(a,{taskId:d.id,revision:d.original._revision},true).then(function(ok){if(ok)api.read('task',{id:d.id},true).then(function(r){d.original=r.record;d.original._confirmations=r.confirmations;renderEditor();});});},actions);});
-  form.appendChild(actions);form.addEventListener('submit',function(e){e.preventDefault();if(d.saving)return;var savedKey=currentEditor.key;var payload={};Object.keys(schema.fields).forEach(function(k){if(k==='role'&&actorRole!=='ADMIN')return;if(d.id&&String(d.values[k])===String(d.base[k]))return;var target=k==='statusField'?'status':k==='enabled'?'active':k;payload[target]=d.values[k];});confirms.forEach(function(k){payload[k]=d.values[k]===true;});if(d.id){payload[schema.key]=d.id;payload.revision=d.original._revision;}if(d.type==='task'){payload.deadline=d.values.deadline;payload.durationValue=d.values.durationValue;payload.durationUnit=d.values.durationUnit;payload.durationBasis=d.values.durationBasis;}
+  // V1.7: closing is closing. No confirmation, no draft question and no retained values.
+  button('close',function(){closeEditor();},actions);
+  if(d.type==='task'&&d.id)['taskApprove','taskConfirm'].forEach(function(a){button(a,function(){act(a,{taskId:d.id,revision:d.original._revision},true).then(function(ok){if(ok)api.read('task',{id:d.id},true).then(function(r){if(currentEditor!==d)return;d.original=r.record;d.original._confirmations=r.confirmations;renderEditor();});});},actions);});
+  form.appendChild(actions);form.addEventListener('submit',function(e){e.preventDefault();if(d.saving)return;var payload={};Object.keys(schema.fields).forEach(function(k){if(k==='role'&&actorRole!=='ADMIN')return;if(d.id&&String(d.values[k])===String(d.base[k]))return;var target=k==='statusField'?'status':k==='enabled'?'active':k;payload[target]=d.values[k];});confirms.forEach(function(k){payload[k]=d.values[k]===true;});if(d.id){payload[schema.key]=d.id;payload.revision=d.original._revision;}if(d.type==='task'){payload.deadline=d.values.deadline;payload.durationValue=d.values.durationValue;payload.durationUnit=d.values.durationUnit;payload.durationBasis=d.values.durationBasis;}
     // A membership list is only sent when the manager actually changed it, so an untouched
     // form can never rewrite an assignment.
     if((d.type==='task'||d.type==='responsibility')&&JSON.stringify(d.additionalIds||[])!==JSON.stringify(d.baseAdditional||[])){
       if(d.type==='task')payload.additionalAssigneeIds=d.additionalIds||[];else payload.additionalMemberIds=d.additionalIds||[];
     }
     d.saving=true;save.disabled=true;message.textContent=t('saving');
-    api.write(d.id?schema.save:schema.create,payload).then(function(result){drafts.delete(savedKey);if(currentEditor&&currentEditor.draft===d){currentEditor=null;byId('editor').close();}settle(d.id?schema.save:schema.create,payload,result);success(t('saved'));}).catch(function(error){message.textContent=error.message;message.className='error';}).finally(function(){d.saving=false;save.disabled=false;});
+    // One write per save: a second click is refused above, and a confirmed save closes the form.
+    api.write(d.id?schema.save:schema.create,payload).then(function(result){if(currentEditor===d)closeEditor();settle(d.id?schema.save:schema.create,payload,result);success(t('saved'));}).catch(function(error){message.textContent=error.message;message.className='error';}).finally(function(){d.saving=false;save.disabled=false;});
   });host.appendChild(form);
 }
 function switchLanguage(){lang=EH_I18N.write(lang==='ja'?'en':'ja');renderNav();render();if(currentEditor)renderEditor();}
@@ -1453,7 +1950,6 @@ byId('navToggle').addEventListener('click',function(){var hidden=document.body.c
 if(byId('diagnostics'))byId('diagnostics').addEventListener('click',function(){navigate('diagnostics');});
 window.addEventListener('focus',revalidateCurrent);
 if(typeof document.addEventListener==='function')document.addEventListener('visibilitychange',function(){if(document.hidden!==true)revalidateCurrent();});
-window.addEventListener('beforeunload',function(e){if(pending.size||Array.from(drafts.values()).some(function(d){return d.dirty||d.note;})){e.preventDefault();e.returnValue='';}});
 metrics.push({operation:'shell',renderMs:performance.now()});load(false);
 }());
 </script>

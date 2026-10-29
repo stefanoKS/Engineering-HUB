@@ -67,6 +67,32 @@ remain **NOT_RUN**.
 Preview: npm run preview:manager-web → http://127.0.0.1:4175/ (synthetic data only). The 計測 / Diagnostics button
 in the header shows the same timings without Chrome DevTools.
 
+### V1.7.2 administration layout and editor lifecycle
+
+The administration screens are purpose-built pages and the record editors no longer keep drafts.
+
+- **Open → edit → save or close.** A form is built from the latest stored record; closing it, or
+  navigating away, discards every entered value and reopening starts fresh. There is no autosave,
+  no draft store, no draft question and no retained form data in memory or in `localStorage`. One
+  save is one write, and a confirmed save closes the form.
+- **Purpose-built administration pages.** 共有ダッシュボード公開 shows the publication state, the last
+  successful run, the schedule, the published counts, the snapshot contract and the last error as
+  cards, keeps the database schema, the application version, the publisher version and the snapshot
+  contract clearly separate, and treats a newer publisher contract as an informational update
+  (`更新あり`) rather than an error. システム状態 groups database/environment, application, operational
+  status, integrations and the consistency result. 自動化 groups the unchanged settings under Mail
+  notifications, Request synchronization, Scheduled reports, Snapshot publication and Emergency
+  stop with explicit on/off badges. Technical metadata stays in expandable details blocks, and no
+  page dumps a nested server payload.
+- **Hierarchy by name.** 親サブプロジェクト and 親タスク are searchable selectors that display record
+  names and the selected parent's ancestor path; a record is never offered as its own parent, and
+  the server-side depth/cycle validation is unchanged.
+- Backend, schema, migrations, publication contract, authorization and every server-side
+  validation are unchanged. Local result: 622 tests, 622 pass (19 new in
+  [tests/v1_7_2-admin-ui.test.js](tests/v1_7_2-admin-ui.test.js)), with
+  [V1_7_2_GATE_1.md](docs/checkgates/V1_7_2_GATE_1.md) recording the evidence and the live criteria
+  BLOCKED.
+
 ## Historical V1.6.1 release record
 
 Version **1.6.1** fixed the correctness, integrity and compatibility defects an audit of V1.6 found: one counting

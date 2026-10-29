@@ -1,5 +1,33 @@
 # UI/UX guidelines
 
+## V1.7.2 administration layout
+
+- **Cards, not payload dumps.** An administration page presents each fact as a `.card.admin-card`
+  inside a responsive `.admin-grid` (`repeat(auto-fit, minmax(min(100%, 300px), 1fr))`, one column
+  below 640 px). A server object is never rendered as a nested key/value tree; a page that shows a
+  collection (record counts, row counts) lists it as labelled values instead.
+- **Status badges always carry text.** `有効 / On`, `無効 / Off`, the mail mode, `公開先が未設定` or
+  `前回の公開に失敗しました` are rendered as a `.pill` with a label, so colour is never the only
+  signal and the state is readable as text.
+- **Versions are never interchangeable.** The database schema version, the application version, the
+  publisher version and the snapshot contract are separate labelled rows. A publisher that supports
+  a newer contract than the published snapshot is an informational `.info-banner` (`更新あり`), not
+  an error; a snapshot newer than the publisher is a warning.
+- **Technical metadata is secondary.** Internal values (slot, age, last result, record counts) sit
+  in a `<details class="admin-details">` block. Failures, an active emergency stop and a failing
+  consistency check are never hidden there.
+- **Settings are grouped.** The automation page groups the unchanged keys under Mail notifications,
+  Request synchronization, Scheduled reports, Snapshot publication and Emergency stop, each group a
+  card, each boolean a control plus an on/off badge.
+- **Hierarchy is chosen by name.** `親サブプロジェクト / Parent subproject` and `親タスク / Parent task`
+  use a searchable selector (`.search-select`): a search box, a `<select>` of record names and an
+  echo of the selected record with its ancestor path. The record itself and its own descendants are
+  never offered, the stored value stays the stable ID, and the server keeps validating depth and
+  cycles.
+- **Editor lifecycle.** A form is `開く → 編集 → 保存 または 閉じる`. Closing (or navigating away)
+  discards everything, reopening always starts from the stored record, and there is no draft
+  indicator, "keep draft" wording or close confirmation.
+
 ## V1.6 desktop design
 
 The application is desktop-first (1366–2560 px) and must stay usable with normal window resizing and 125–150 %

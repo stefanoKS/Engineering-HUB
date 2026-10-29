@@ -53,15 +53,18 @@ can confirm the perceived-speed improvement: the repository benchmark uses mocke
 | 22 | MANAGER | Record the real durations of first load, cached navigation, first and second project open, and typing in the task filter | Cached navigation and filtering are visibly faster than in V1.5; record actual values rather than assuming the local targets | Not executed / — / NOT_RUN / — |
 | 23 | MANAGER | Type a task name fragment, then press 検索 for a term that exists only in a task description | Typing narrows instantly; the explicit search returns the description-only match | Not executed / — / NOT_RUN / — |
 | 24 | MANAGER | Leave the app idle several minutes, edit a record in another browser tab, then return to the first tab and switch views | 最終更新 is shown, 更新中… appears on return, and the newer value becomes visible without a manual reload | Not executed / — / NOT_RUN / — |
-| 25 | Two managers | Open the same task from the cache, have the other manager save it, then save the first manager's draft | The stale save is refused; the draft is preserved; Review latest record shows the server version | Not executed / — / NOT_RUN / — |
-| 26 | ADMIN | Revoke the signed-in manager's MANAGER role (or remove the account from the allowed domains), then use the open page | Requests fail closed, cached views and unsent drafts are cleared, and the access-denied message is shown | Not executed / — / NOT_RUN / — |
+| 25 | Two managers | Open the same task in both pages, have the other manager save it, then save the first manager's form | The stale save is refused with `EDIT_CONFLICT`; the open form keeps its values and sends no retry | Not executed / — / NOT_RUN / — |
+| 26 | ADMIN | Revoke the signed-in manager's MANAGER role (or remove the account from the allowed domains), then use the open page | Requests fail closed, cached views and the open form are cleared, and the access-denied message is shown | Not executed / — / NOT_RUN / — |
 | 27 | MANAGER | Open 計測 / Diagnostics after the scenarios above | RPC count, local reuse, discarded stale responses, p50/p95 and sheet reads match what the devtools panel recorded; no private record text is displayed | Not executed / — / NOT_RUN / — |
 
 ## Browser and recovery checks
 
 At 375, 768, 1366 and 1920 CSS pixels, inspect Japanese/English labels, long names, task forms, requests, administration, empty lists, keyboard-only navigation, skip link, modal focus and focus visibility. Test actual browser **200% zoom**, screen-reader announcements and reduced-motion OS preference. Local screenshots and synthetic tests are supporting evidence, not proof of Google HTML Service behavior.
 
-On a rejected save, retain and review the draft. On transport failure, check current record and audit before manual retry; creation is not durably idempotent. Test quota errors and partial request recovery without claiming spreadsheet transactions. Verify private custom columns/formulas survive edits, phantom checkbox rows are ignored and insertion positions remain correct.
+On a rejected save, review the conflict message and reload; the open form keeps its values but nothing is merged
+automatically. On transport failure, check current record and audit before manual retry; creation is not durably
+idempotent. Test quota errors and partial request recovery without claiming spreadsheet transactions. Verify private
+custom columns/formulas survive edits, phantom checkbox rows are ignored and insertion positions remain correct.
 
 The earlier reported Workspace defect was “Snapshot value mismatch in PUBLISHED_PROJECTS_B row 2 column 10” (committedDeadline). The new canonical Date normalization passes local regression; specifically retest publication with existing Sheets date-formatted cells, JST midnight Date values, multi-date fields and employee read/hash. **Live fix remains UNVERIFIED** until this test has evidence.
 
@@ -134,3 +137,32 @@ records only.
     `SNAPSHOT_CONTRACT_UNSUPPORTED`.
 
 Until these are recorded, the six V1.6.1 gates remain **BLOCKED** for live verification.
+
+## V1.7.2 administration layout and editor lifecycle (DEV, NOT_RUN)
+
+50. **Close discards.** Open a task, change the name, press 閉じる, and reopen the same task. Expect the stored name,
+    no confirmation question, no draft indicator and no `localStorage` entry beyond `eh.lang`.
+51. **Save closes.** Change a value, press 保存, and reopen. Expect the saved value, a 保存完了 notice and a closed
+    form. Press 保存 twice quickly and expect exactly one audit row for the save.
+52. **Navigate away.** Open a form, type, then use the navigation. Expect the form to be gone and the typed value to
+    be absent when it is reopened.
+53. **Deletion reason.** Open 完全削除, type a reason, press 閉じる, and reopen. Expect an empty reason field and no
+    deletion record.
+54. **Request note.** Type a decision note in 申請, leave the page and return. Expect an empty note and no decision
+    until 承認 / 却下 / 差戻し is pressed.
+55. **Publication cards.** Open 共有ダッシュボード公開. Expect the status, last success, automatic publication,
+    published counts, snapshot contract and last error as cards, the four version labels separately, no raw payload,
+    and the technical metadata inside 技術情報を表示.
+56. **Contract update indicator.** Publish with contract 1.6, then redeploy a publisher that supports 1.6 while the
+    committed snapshot still records 1.5. Expect 更新あり as an informational banner (not an error card), and
+    expect 今すぐ公開 to still require the explicit confirmation.
+57. **Hierarchy selector.** Edit a nested subproject: the parent selector must list record names, preselect the stored
+    parent, exclude the record itself and its descendants, and echo the ancestor path. Repeat for a task parent and
+    confirm the server still refuses a cross-project, cross-subproject, self or cyclic parent.
+58. **Status and automation.** Confirm システム状態 groups the database, application, health, integrations and
+    consistency result, that a failing consistency check and an active emergency stop stay visible, and that the
+    grouped 自動化 save still writes only the changed keys.
+59. **Narrow viewport.** At 375 and 768 CSS pixels, the navigation must stack above the content, the administration
+    cards must render in one column, and no horizontal scrolling may appear.
+
+These are **NOT_RUN**: the repository tests and the local preview are not Workspace evidence.

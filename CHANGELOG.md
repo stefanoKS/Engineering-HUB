@@ -6,6 +6,43 @@ Multi-assignee work, a worker-centred employee view, non-blocking request submis
 simplified permanent-deletion confirmation. Schema **8** (`008_task_and_responsibility_members`) and
 employee contract **1.6**; both are additive and neither is applied or published automatically.
 
+### V1.7.2 — administration layout and the simplified editor lifecycle (no version bump)
+
+- **Closing means closing.** `src/ManagerWebClient.html` no longer keeps a `drafts` map. A form is
+  opened from the latest stored record, saved or closed, and a close (or a navigation away, or a
+  revoked identity) discards every entered value. Reopening always builds a new form, so an
+  unfinished edit can never reappear later, in memory or in `localStorage`. No autosave, no draft
+  recovery and no "keep draft" question were added.
+- **One write per save.** A second submit while a save is in flight is refused, a confirmed save
+  closes the form, and a refused save (`EDIT_CONFLICT`) keeps the open form without retrying by
+  itself.
+- **Deletion and request panels forget their input.** The deletion panel keeps its reason only
+  while it is open (reopening starts empty, the Yes/No confirmation is unchanged), and an unsent
+  request decision note is dropped when the page is left. Submitted server operations, employee
+  request receipts and audit rows are untouched by any of this.
+- **Publication page redesigned.** `共有ダッシュボード公開` is a status page built from cards: current
+  state, last successful publication, automatic publication, published counts, the snapshot
+  contract and the last error. The database schema, the application version, the publisher version
+  and the snapshot contract are labelled separately instead of being shown as one number. A
+  publisher that supports a newer contract than the published snapshot is an **informational
+  update** (`更新あり`), not an error; the reverse is a warning. Technical metadata lives in an
+  expandable details block. The backend, the A/B commit and the confirmation are unchanged.
+- **System status and automation pages grouped.** `システム状態` shows database/environment,
+  application, operational status, integrations and the consistency result as cards, with record
+  counts behind a details block. `自動化` groups the same keys under Mail notifications, Request
+  synchronization, Scheduled reports, Snapshot publication and Emergency stop, with explicit
+  on/off badges; the save payload, the ADMIN check and the settings revision check are unchanged.
+  Publication enabling stays with the existing sidebar approval procedure.
+- **Subproject and task hierarchy controls.** `親サブプロジェクト / Parent subproject` and
+  `親タスク / Parent task` are searchable name selectors instead of free-text IDs. The selected
+  parent is echoed with its ancestor path, a record is never offered as its own parent (nor as the
+  parent of its own descendant), and a task parent is limited to the same project and subproject.
+  The server-side depth, cycle and container validation is unchanged.
+- The unused `web.draft`, `web.discard`, `web.reloadDraft` and `web.useLatest` labels were removed
+  and `web.close` is now `閉じる / Close`. Regression coverage lives in
+  [tests/v1_7_2-admin-ui.test.js](tests/v1_7_2-admin-ui.test.js) and
+  [docs/checkgates/V1_7_2_GATE_1.md](docs/checkgates/V1_7_2_GATE_1.md).
+
 ### Multiple assignees and multiple responsibility members
 
 - **`TASK_ASSIGNEES` and `RESPONSIBILITY_MEMBERS`** hold *additional* members only. The primary owner

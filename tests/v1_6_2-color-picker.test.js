@@ -188,7 +188,7 @@ test('an invalid colour is refused in the form and again on the server', async (
   assert.equal(app.context.Database.find('RESPONSIBILITIES', created.Responsibility_ID).Color_Hex, '#357C9B');
 });
 
-test('closing the form writes nothing and discarding restores the stored colour', async () => {
+test('closing the form writes nothing and reopening shows the stored colour', async () => {
   const app = managerApp();
   app.context.Responsibilities.create({Name: '製品設計', Owner_Member_ID: 'M-MGR', Color_Hex: '#357C9B'});
   const area = app.context.Database.read('RESPONSIBILITIES')[0];
@@ -196,17 +196,15 @@ test('closing the form writes nothing and discarding restores the stored colour'
   await openEditResponsibility(h);
 
   swatches(h).filter(node => node.getAttribute('data-color') === '#A74646')[0].dispatchEvent('click', {});
-  h.click('formHost', '閉じる（下書きを保持）');
+  h.click('formHost', '閉じる');
   await flush();
   assert.equal(saves(h).length, 0, 'closing the form never saves');
   assert.equal(app.context.Database.find('RESPONSIBILITIES', area.Responsibility_ID).Color_Hex, '#357C9B');
-  assert.deepEqual(pressed(h), ['#A74646'], 'the unsaved draft stays exactly as it was');
+  assert.equal(h.window.ManagerWebClient.editor(), null, 'closing discards the form');
 
-  h.click('formHost', '下書きを破棄');
-  await flush();
   h.click('content', '編集');
   await flush();
-  assert.deepEqual(pressed(h), ['#357C9B'], 'after discarding, the stored colour is shown again');
+  assert.deepEqual(pressed(h), ['#357C9B'], 'reopening starts from the stored colour, not the unsaved one');
   assert.equal(app.context.Database.find('RESPONSIBILITIES', area.Responsibility_ID).Color_Hex, '#357C9B');
 });
 

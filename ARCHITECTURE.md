@@ -91,7 +91,14 @@ background once a dataset is older than 30 seconds or after a relevant write. Da
 (`TASK_INDEX_LIMIT = 3000`, `PROJECT_INDEX_LIMIT = 1000`): above a bound the server reports `complete: false` and
 the browser falls back to the paginated `tasks`/`projects` operations. Free-text search remains a server operation
 (it also covers description and acceptance criteria). Every call re-checks `Session.getActiveUser()`, the allowed
-domains and `Access.requireManager()`; a revocation clears the snapshot and the unsent drafts.
+domains and `Access.requireManager()`; a revocation clears the snapshot and the open form.
+
+`ManagerWebClient` keeps no draft store (V1.7.2). A record form is built from the latest server copy, saved or closed,
+and a close, a navigation or a revocation discards every entered value, so nothing about a form can be restored from
+page memory or from `localStorage`. The administration views (`共有ダッシュボード公開`, `システム状態`, `自動化`) are
+purpose-built cards over the same authorized reads; the publication page pairs the `publication` and `status`
+operations so the schema version, the application version, the publisher version and the snapshot contract are
+reported separately, and no view dumps a nested server payload.
 
 `ManagerWeb` never returns the stored `PROJECTS.Progress_Percent` / `PROJECTS.Health` columns:
 `Dashboard.projectMetrics` derives progress (leaf-only), health, task counts and the neutral deadline state from the

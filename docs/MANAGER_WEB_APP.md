@@ -2,6 +2,40 @@
 
 **IMPLEMENTED — DEV MIGRATION AND WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 
+## V1.7.2 administration layout and editor lifecycle
+
+- **Open → edit → save or close.** `src/ManagerWebClient.html` no longer keeps a `drafts` map. A
+  form is built from the latest stored record (`detail(type, id, true)`), a confirmed save closes
+  it, and closing — or navigating away, or a revoked identity — discards every entered value.
+  Reopening always creates a new form, so an abandoned edit can never reappear. There is no
+  autosave, no draft recovery and no "keep draft" question, and `web.close` is now
+  `閉じる / Close`.
+- **One write per save.** A submit while a save is in flight is ignored, a confirmed save closes
+  the form, and a refused save (`EDIT_CONFLICT`) keeps the open form with its values and sends no
+  second request.
+- **Deletion and request panels forget their input.** The deletion reason lives only while the
+  panel is open; reopening starts empty and the Yes/No confirmation is unchanged. An unsent request
+  decision note is dropped when the page is left. Submitted operations, employee receipts and audit
+  rows are unaffected.
+- **Purpose-built administration pages.** `共有ダッシュボード公開` is a card page (state, last success,
+  automatic publication, published counts, snapshot contract, last error) that keeps the database
+  schema, the application version, the publisher version and the snapshot contract separate; a
+  publisher supporting a newer contract than the published snapshot is an informational `更新あり`
+  notice, the reverse is a warning, and technical metadata sits in a `<details>` block.
+  `システム状態` groups database/environment, application, operational status, integrations and the
+  consistency result, with record counts behind a details block. `自動化` groups the unchanged
+  settings under Mail notifications, Request synchronization, Scheduled reports, Snapshot
+  publication and Emergency stop with on/off badges; the payload, the ADMIN check and the settings
+  revision check are unchanged, and publication enabling stays with the sidebar approval
+  procedure. The generic nested key/value dump (`structured`) is gone.
+- **Hierarchy by name.** `親サブプロジェクト / Parent subproject` and `親タスク / Parent task` are
+  searchable selectors that show record names and the selected parent's ancestor path. The record
+  itself (and its own descendants) is never offered, a task parent is limited to the same project
+  and subproject, and the server-side depth, cycle, archived-branch and container validation is
+  untouched. The client sends the stable ID, never a typed name.
+- Publication is read live (`publication` + `status`) instead of from the cached snapshot, so the
+  version card is never served from stale data.
+
 ## V1.6.1 corrections
 
 - **Area selection is server-resolved.** Choosing an area sends `{responsibilityId}` (or `{unassigned: true}`) to
@@ -60,7 +94,7 @@ Projects, Subprojects, Responsibilities, Tasks, Members, Skills, Planning, Progr
 2. Projects: search and responsibility filter, paginated cards, create/edit, responsibility/deadline confirmations, explicit visibility and archive. New projects default RESTRICTED. Each card shows an accessible progress bar (`role="progressbar"` with `aria-valuenow` and the visible percentage), one health pill, the committed deadline with translated remaining/overdue wording and a plain-text overdue-task count. Open a project to manage root/nested subprojects, reparent, archive/reactivate and open its task list. Root plus nested level is the existing maximum.
 3. Tasks: search, project/responsibility/assignee/status/date filters, deadline/priority sorting and pagination. Opening a subproject scopes its tasks; creating from that list carries the project/subproject selection. Create/edit captures the deadline (required) and the required duration (optional); Preview schedule calls existing planning. A supplied duration back-plans the planned start; a deadline-only task keeps an unknown (blank) planned start, matching the sidebar and `Ui.assignTask`. Approval and schedule confirmation are separate explicit actions. The editor shows active confirmation and approval timestamps.
 4. Requests: explicit Import requests, stored pending queue, deadline difference/reason/completion note, approve/reject/return, optional decided records and last 50 deadline-history records. Reads never import or change data. A stale decision is shown as stale rather than as approval success.
-5. Administration: members, editable responsibilities and ordering, skills and assessments, automation settings, publication status/manual publish, system status, explicit report refresh. ADMIN changes roles, responsibility ownership and automation settings; MANAGER can use normal departmental workflows and emergency stop. Existing LIVE activation checks remain enforced.
+5. Administration: members, editable responsibilities and ordering, skills and assessments, automation settings (grouped by purpose with on/off badges), publication status/manual publish (cards, version separation, expandable technical details), system status (database, application, health, integrations, consistency, errors) and explicit report refresh. ADMIN changes roles, responsibility ownership and automation settings; MANAGER can use normal departmental workflows and emergency stop. Publication is enabled only through the existing sidebar approval procedure. Existing LIVE activation checks remain enforced.
 
 ## Read and write contracts
 
@@ -78,13 +112,13 @@ Sheets writes are not database transactions. A quota failure after a partial ext
 
 The client limits RPC concurrency to two, deduplicates identical in-flight reads and uses response tokens so a superseded response never overwrites newer data. The authorized snapshot (projects, task summaries, references, visited details) stays in memory for the session; each dataset is revalidated in the background once it is older than 30 seconds, after tab focus/visibility, and after a relevant write. Nothing is persisted: there is no localStorage/IndexedDB record cache and no server-side cache. The 計測/Diagnostics view has an explicit ローカルデータを破棄/Clear local data action.
 
-The toolbar of every list shows 最終更新 (local time of the last applied data) and 更新中… while a refresh runs; 再読み込み forces one. A failed refresh keeps the cached view visible, adds an error banner with 再試行, and never clears the user's draft.
+The toolbar of every list shows 最終更新 (local time of the last applied data) and 更新中… while a refresh runs; 再読み込み forces one. A failed refresh keeps the cached view visible, adds an error banner with 再試行, and never discards an open form.
 
-If the server stops authorizing the session (`MANAGER_ACCESS_DENIED` or `Insufficient role`), the client drops every cached view and unsent draft, stops issuing requests and shows the access-denied message. Without that response, already displayed data can remain on screen; it can never authorize a write, because every write re-checks the verified role.
+If the server stops authorizing the session (`MANAGER_ACCESS_DENIED` or `Insufficient role`), the client drops every cached view and the open form, stops issuing requests and shows the access-denied message. Without that response, already displayed data can remain on screen; it can never authorize a write, because every write re-checks the verified role.
 
-Create/edit drafts live only in a Map in the current page. Closing a dialog and ordinary navigation preserve them; language switching preserves values. A form opens from the cached record, refreshes the server copy in the background, and only an untouched draft adopts a newer revision — an edited draft keeps its original revision so a stale save is refused rather than silently overwriting. Before unload warns for dirty drafts or pending writes. A forced reload/closed browser loses in-memory drafts. Only language preference is in localStorage. Do not add private draft persistence without an explicit privacy design.
+A record form exists only while it is open (V1.7.2). Opening it reads the latest stored record, closing it (or navigating away) discards every entered value, and reopening builds a new form from the stored data — an unfinished edit is never restored and is never written to `localStorage`. There is no autosave and no before-unload draft prompt. A save is refused when the stored revision changed after the form was loaded, and the refused form stays open with its values. Only the language preference is in localStorage. Do not add private draft persistence without an explicit privacy design.
 
-Repeated clicks are suppressed while the same record/action is pending. No write is automatically retried. On a transport failure the result is uncertain: reload/search/audit before a manual retry, especially for creation. This release does not promise exactly-once create delivery. Conflict errors preserve the draft; Review latest record shows the server version, and Use latest explicitly discards the draft after confirmation.
+Repeated clicks are suppressed while the same record/action is pending. No write is automatically retried. On a transport failure the result is uncertain: reload/search/audit before a manual retry, especially for creation. This release does not promise exactly-once create delivery. A conflict error (`EDIT_CONFLICT`) keeps the open form and asks the manager to reload; nothing is merged or overwritten automatically.
 
 ## Search behaviour
 

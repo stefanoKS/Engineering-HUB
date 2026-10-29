@@ -132,3 +132,21 @@ both languages. The Japanese labels are `作業担当者`, `追加担当者`, `�
 `Outcome unknown`, `Recent requests`, `Yes, delete`, `No, cancel`. Switching the language on either
 screen keeps the current view, filters, unsent form draft and receipt list. Stored spreadsheet text,
 identifiers and enum values are never translated.
+
+## V1.7.2 additions
+
+The administration pages and the record editors are fully bilingual: 共有ダッシュボード公開 /
+Dashboard publication, システム状態 / System status, 自動化 / Automation, 親サブプロジェクト /
+Parent subproject and 親タスク / Parent task.
+
+- New `web.*` keys cover the card titles, the states (`有効` / `On`, `無効` / `Off`), the four
+  version labels, the `更新あり` update notice and the hierarchy controls (`選択中の親`,
+  `親なし（最上位）`, `名前で検索`, `現在の設定（一覧にないため保持）`).
+- Two labels that the V1.7 task filter used without a dictionary entry are now translated:
+  `web.assigneeId` (`担当者` / `Assignee`) and `web.treeScope` (`階層` / `Hierarchy`).
+- `web.close` is now `閉じる / Close`; the draft labels (`web.draft`, `web.discard`,
+  `web.reloadDraft`, `web.useLatest`) were removed with the feature they described, and
+  `web.accessDenied` / `web.uncertain` no longer claim that a draft is preserved.
+- The language switch still preserves the current screen, project, task and filter state. An open
+  editor keeps its values while it is open, but a closed or abandoned form is gone — the switch
+  never restores an editor that was closed.
