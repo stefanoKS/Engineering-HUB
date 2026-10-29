@@ -61,6 +61,20 @@ employee contract **1.6**; both are additive and neither is applied or published
   record only after Yes; the reason field, ADMIN authorization, dependency preflight, revision check,
   verified backup, tombstone and reconciliation behaviour are unchanged.
 
+### V1.7 correction — request date typing (no version bump)
+
+`TASK_REQUESTS.Due_Date_At_Submission` is now explicitly typed `date`, next to the unchanged
+`Task_Revision_At_Submission` override (`type: 'string'`). Google Sheets returns a date cell as a
+JavaScript `Date`, and `Database.update` re-validates the whole stored row, so a text-typed field
+holding a `Date` made every decision that rewrites the request row fail with
+`Invalid text: Due_Date_At_Submission` — completion approvals, deadline-change approvals, reject,
+return and the recovery paths all write `Status`. The fix changes application-side validation only:
+no sheet column, migration, API or contract changes, and `PROJECTS.Actual_Completion` is left alone
+because no failure is demonstrated for it. Regression coverage lives in
+[tests/v1_7_1-request-date-types.test.js](tests/v1_7_1-request-date-types.test.js) and
+[docs/checkgates/V1_7_1_GATE_1.md](docs/checkgates/V1_7_1_GATE_1.md). The release version stays
+`1.7.0` because V1.7 has not been deployed anywhere.
+
 ## V1.6.2 — 2026-10-28
 
 Corrective reliability release after an audit of V1.6.1. Every V1.6 and V1.6.1 capability is kept; no

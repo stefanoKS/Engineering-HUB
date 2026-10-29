@@ -58,6 +58,12 @@ for an existing record. The migration publishes nothing, sends no mail and enabl
 automation. Contract 1.6 appends one allowlisted task field (`assigneeNames`, a JSON list of
 display names) and keeps `ownerName` for compatibility; readers for 1.4 and 1.5 stay supported.
 
+Every date-valued column of `TASK_REQUESTS` is typed (`Original_Due_Date`/`Requested_Due_Date` and
+`Due_Date_At_Submission` as `date`, the `*_At` columns as `datetime`), because Google Sheets returns a
+date cell as a JavaScript `Date` and validation rejects a `Date` for a text field.
+`Task_Revision_At_Submission` is deliberately the exception: it is an opaque revision digest, never a
+date, and stays typed `string`.
+
 ## Contract and versions
 
 `src/Schema.gs` is authoritative. The current schema version is **8**.

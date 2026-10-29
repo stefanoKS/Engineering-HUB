@@ -115,6 +115,11 @@ var Schema = (function () {
   set('TASKS', 'Planned_Start_Source', { type: 'string', defaultValue: '' });
   // The task revision is an opaque digest, not a timestamp: it must never be re-typed as a date.
   set('TASK_REQUESTS', 'Task_Revision_At_Submission', { type: 'string', defaultValue: '' });
+  // V1.7.1: Google Sheets returns a date cell as a Date object, and `Database.validate` refuses a
+  // non-string value for a text field. This deadline is a calendar date, so it must be validated
+  // as one; otherwise every decision that rewrites the request row (approve/reject/return and the
+  // recovery paths) fails with `Invalid text: Due_Date_At_Submission`.
+  set('TASK_REQUESTS', 'Due_Date_At_Submission', { type: 'date', defaultValue: '' });
   // A blank responsibility means 未分類 (unassigned); a retired one keeps its historical links.
   set('PROJECTS', 'Responsibility_ID', { defaultValue: '', ref: 'RESPONSIBILITIES' });
   set('RESPONSIBILITIES', 'Sort_Order', { type: 'number', defaultValue: 0, min: 0, integer: true });

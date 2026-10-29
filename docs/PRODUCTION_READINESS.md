@@ -26,6 +26,12 @@ Live verification remains **BLOCKED**/**NOT_RUN**; the local evidence is recorde
 checkgates and never claims a Workspace measurement. See
 [V1_7_DEPLOYMENT_RUNBOOK.md](V1_7_DEPLOYMENT_RUNBOOK.md).
 
+A V1.7 corrective change types `TASK_REQUESTS.Due_Date_At_Submission` as a date, so a decision no
+longer fails with `Invalid text: Due_Date_At_Submission` when Sheets returns that cell as a `Date`
+object. It is application-side validation only (no column, migration, contract or API change) and is
+recorded in [V1_7_1_GATE_1.md](checkgates/V1_7_1_GATE_1.md); the live items for it are also
+**NOT_RUN**.
+
 ## Historical V1.6.2 assessment (2026-10-28)
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
