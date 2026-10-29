@@ -84,7 +84,7 @@ test('the publisher and the viewer agree on the published contract', () => {
   const tables = viewer.context.DashboardData.TABLES;
   assert.deepEqual(plain(tables.projects.fields), plain(model.PROJECT_PUBLIC_FIELDS));
   assert.deepEqual(plain(tables.subprojects.fields), plain(model.SUBPROJECT_PUBLIC_FIELDS));
-  assert.deepEqual(plain(tables.tasks.fields), plain(model.TASK_PUBLIC_FIELDS));
+  // The current contract is the 1.6 task header; the untouched 1.5 list stays readable.\n  const current = viewer.context.DashboardData.CONTRACTS[viewer.context.DashboardData.CONTRACT_VERSION];\n  assert.deepEqual(plain(current.tasks.fields), plain(model.TASK_PUBLIC_FIELDS));\n  assert.deepEqual(plain(tables.tasks.fields), plain(model.TASK_PUBLIC_FIELDS.filter(field => field !== 'assigneeNames')));
   assert.deepEqual(plain(tables.milestones.fields), plain(model.MILESTONE_PUBLIC_FIELDS));
   assert.equal(viewer.context.DashboardData.CONTRACT_VERSION, model.CONTRACT_VERSION);
 });
@@ -273,7 +273,7 @@ test('the viewer exposes no write path and caches only the bounded portfolio', (
   const app = viewer.context.DashboardApp;
   assert.equal(typeof app, 'object');
   const api = Object.keys(viewer.context).filter(name => /^dashboard/.test(name));
-  assert.deepEqual(plain(api).sort(), ['dashboardPortfolio', 'dashboardProject', 'dashboardTask']);
+  assert.deepEqual(plain(api).sort(), ['dashboardPortfolio', 'dashboardProject', 'dashboardTask', 'dashboardWorkerTasks']);
   const dataKeys = Object.keys(viewer.context.DashboardData);
   ['save', 'update', 'create', 'delete', 'send', 'publish'].forEach(verb => {
     assert.equal(dataKeys.some(key => key.toLowerCase().indexOf(verb) >= 0), false, verb + ' must not exist');

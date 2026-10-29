@@ -1,6 +1,6 @@
 # Engineering-HUB
 
-## Current release — V1.6.2
+## Current release — V1.7
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 
@@ -76,6 +76,20 @@ survives reassignment, and contracts **1.4 and 1.5** read through their own head
 [V1_6_1_PERFORMANCE.json](docs/checkgates/V1_6_1_PERFORMANCE.json) keep that release's local PASS results and
 BLOCKED live criteria.
 
+## V1.7 release record
+
+V1.7 adds multi-assignee work and a worker-centred employee view without changing the ownership model:
+`TASK_ASSIGNEES` and `RESPONSIBILITY_MEMBERS` hold additional members only, the primary owner columns
+stay authoritative, and membership never grants authority. Schema **8**
+(`008_task_and_responsibility_members`) and employee contract **1.6** (`assigneeNames`); both are
+additive and neither is applied or published automatically. The manager now imports new requests with
+one authorized operation when 申請一覧 opens, permanent deletion asks once with a Yes/No dialog, and the
+Members list shows Position. On the employee side, submission is non-blocking with an explicit receipt
+state (`送信中` / `受付完了` / `送信失敗` / `送信結果不明`) and `作業担当者別タスク / Tasks by Worker`
+filters published work by any assignee. See [CHANGELOG.md](CHANGELOG.md),
+[docs/dashboard/DATA_CONTRACT.md](docs/dashboard/DATA_CONTRACT.md) and
+[docs/V1_7_DEPLOYMENT_RUNBOOK.md](docs/V1_7_DEPLOYMENT_RUNBOOK.md).
+
 ## Historical V1.6 release record
 
 V1.6 made responsibilities the top organisational level of the manager dashboard and finished the work hierarchy:
@@ -118,7 +132,7 @@ Engineering project management using Google Sheets as the database, Google Apps 
 | Release | V1.4.1 (final pre-trial stabilization) on top of V1.4 (responsibilities, nested subprojects, UI refinement), V1.3 (planning, requests, Japanese/English UI), V1.2 (shared read-only dashboard) and V1.1 + production hardening |
 | Version | `1.4.1` |
 | Local test count | **328 passing** (`npm test`), 0 failing; `npm run lint` and `npm run validate` pass |
-| Schema version | **6** — `006_responsibilities_and_nested_subprojects` (additive only; approval + verified backup required). V1.4.1 adds **no** schema change |
+| Schema version | **8** — `008_task_and_responsibility_members` (additive only; approval + verified backup required) |
 | Verified locally | Simplified role policy (ADMIN/MANAGER manage the whole department, MEMBER keeps own-task self-service), server-side re-checks on every global RPC wrapper, validated responsibility reordering, a single coordinated project edit (ordinary fields + responsibility transfer), bounded hierarchy walks on malformed data, ancestor-aware active-work and reminder eligibility, a bounded task selector with server search, project visibility controls, partial-patch project/task editing, stale-edit refusal, automatic request import with idempotency and lock, unknown-vs-zero estimates, deadline-only assignment, separated approval/schedule confirmation, weighted progress, deterministic health, safe DOM rendering, first-admin bootstrap, OFF/PREVIEW/LIVE matrix, reminder offsets and catch-up, weekly report, trigger drift recreation, ledger states, data preservation on upgrade, sanitized dashboard DTO allowlist, `INTERNAL`-only publication, A/B snapshot commit and rollback-on-failure, read-only viewer API, deadline wording in Asia/Tokyo |
 | Known production blockers | No live Google Workspace execution of any kind; development/production projects not created; roles blank after migration until bootstrap; real Sheets quota/performance unmeasured; repository visibility undecided; dashboard deployment ACL, Drive ACLs and scheduled publication unverified; request submission flag intentionally OFF until the operator enables it |
 | Google Workspace verification | **UNVERIFIED** — nothing in this repository has been run against a real Workspace |

@@ -220,3 +220,19 @@ Project progress, health, task counts and deadline wording are derived on every 
 Each task query still scans the source TASKS table in memory after one batch read. Google Sheets is not an indexed database. Project and member reference choices are loaded on demand. Large request/history queues and very large member directories may need additional server paging beyond this release. Browser tables are paginated; no thousands-of-tasks dropdown is loaded.
 
 Targets remain goals: local navigation approximately 100 ms, cached filters under 150 ms, warm Workspace overview under 3 seconds, project detail under 2 seconds, common save under 3 seconds. Measure warm/cold p50/p95 in DEV with the actual account, dataset, timestamp, execution ID and deployment version. Do not substitute mock timings for those targets.
+
+## V1.7 measurement note
+
+V1.7 adds an execution-local membership index (`Database.memo` + `src/Assignees.gs`) rather than a new
+spreadsheet read per task. The authorized manager bootstrap still reads each source table at most once
+(`rangeReadsPerCall = 10` for the interactive overview) and the compact task index gained three
+columns (`assigneeIds`, `assigneeNames`, `sharedAssignment`) without changing its read count beyond the
+one `TASK_ASSIGNEES` pass. Recorded local mock figures for V1.7 are in
+[V1_7_PERFORMANCE.json](checkgates/V1_7_PERFORMANCE.json): bootstrap p50 6.68 ms / 46.31 ms /
+165.79 ms and task index p50 2.33 ms / 19.21 ms / 53.79 ms for 100 / 1,000 / 3,000 tasks. These are
+Node mock timings, not Google Sheets measurements; `liveWorkspace` stays `NOT_RUN`.
+
+No batchGet experiment was adopted in this release. A Sheets API `batchGet` reader would change value
+representations (dates, booleans, empty rows) and requires a typed-value normalization and equivalence
+suite before it may replace `SpreadsheetApp`; that work is not done here, so the existing reader stays
+the only path.

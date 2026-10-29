@@ -13,11 +13,11 @@ const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
 test('package, publisher, README and the manager page agree on V1.6', () => {
-  assert.match(read('package.json'), /"version": "1\.6\.2"/);
-  assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.6\.2'/);
-  assert.match(read('README.md'), /## Current release — V1\.6\.2/);
-  assert.match(read('README_JP.md'), /## 現行リリース — V1\.6\.2/);
-  assert.match(read('src/ManagerWebIndex.html'), /V1\.6/);
+  assert.match(read('package.json'), /"version": "1\.7\.0"/);
+  assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.7\.0'/);
+  assert.match(read('README.md'), /## Current release — V1\.7/);
+  assert.match(read('README_JP.md'), /## 現行リリース — V1\.7/);
+  assert.match(read('src/ManagerWebIndex.html'), /V1\.7/);
   assert.match(read('CHANGELOG.md'), /## V1\.6/);
 });
 
@@ -34,28 +34,32 @@ test('the twelve V1.6 checkgates and the deployment runbook exist and stay hones
   assert.match(runbook, /rollback/i);
 });
 
-test('the schema, migration and contract documents describe V1.6', () => {
-  assert.match(read('src/Schema.gs'), /return \{ version: 7,/);
+test('the schema, migration and contract documents describe the current release', () => {
+  assert.match(read('src/Schema.gs'), /return \{ version: 8,/);
   assert.match(read('src/Migrations.gs'), /007_responsibility_hierarchy_and_lifecycle', from: 6, to: 7/);
-  assert.match(read('DATA_SCHEMA.md'), /current schema version is \*\*7\*\*/);
+  assert.match(read('DATA_SCHEMA.md'), /current schema version is \*\*8\*\*/);
   assert.match(read('DATA_SCHEMA.md'), /007_responsibility_hierarchy_and_lifecycle/);
   assert.match(read('docs/dashboard/DATA_CONTRACT.md'), /## Contract 1\.5/);
   assert.match(read('DEPLOYMENT.md'), /V1\.6/);
 });
 
-test('the publisher and the employee reader agree on contract 1.5 fields', () => {
+test('the publisher and the employee reader agree on contract 1.6 fields', () => {
   const manager = loadApp();
   const viewer = loadDashboard();
   const model = manager.context.SharedDashboardModel;
-  assert.equal(model.CONTRACT_VERSION, '1.5');
-  assert.equal(viewer.context.DashboardData.CONTRACT_VERSION, '1.5');
-  const tables = viewer.context.DashboardData.TABLES;
-  assert.deepEqual(JSON.parse(JSON.stringify(tables.tasks.fields)), JSON.parse(JSON.stringify(model.TASK_PUBLIC_FIELDS)));
-  assert.deepEqual(JSON.parse(JSON.stringify(tables.responsibilities.fields)),
+  assert.equal(model.CONTRACT_VERSION, '1.6');
+  assert.equal(viewer.context.DashboardData.CONTRACT_VERSION, '1.6');
+  const contracts = viewer.context.DashboardData.CONTRACTS;
+  assert.deepEqual(JSON.parse(JSON.stringify(contracts['1.6'].tasks.fields)),
+    JSON.parse(JSON.stringify(model.TASK_PUBLIC_FIELDS)));
+  assert.deepEqual(JSON.parse(JSON.stringify(contracts['1.6'].responsibilities.fields)),
     JSON.parse(JSON.stringify(model.RESPONSIBILITY_PUBLIC_FIELDS)));
-  ['parentTaskId', 'container', 'reviewState', 'completedAt'].forEach(field =>
+  ['parentTaskId', 'container', 'reviewState', 'completedAt', 'assigneeNames'].forEach(field =>
     assert.ok(model.TASK_PUBLIC_FIELDS.indexOf(field) >= 0, field));
   assert.ok(model.RESPONSIBILITY_PUBLIC_FIELDS.indexOf('color') >= 0);
+  // A snapshot published by the previous release stays readable.
+  assert.ok(viewer.context.DashboardData.SUPPORTED_CONTRACTS.indexOf('1.5') >= 0);
+  assert.equal(contracts['1.5'].tasks.fields.indexOf('assigneeNames'), -1);
 });
 
 test('the employee dashboard renders the hierarchy and the review state without unsafe HTML', () => {
@@ -92,7 +96,7 @@ test('production readiness stays unapproved and separates local evidence from li
   const readiness = read('docs/PRODUCTION_READINESS.md');
   assert.match(readiness, /NOT APPROVED FOR PRODUCTION/);
   assert.match(readiness, /V1\.6/);
-  assert.match(readiness, /Schema version \| 7/);
+  assert.match(readiness, /Schema version \| 8/);
   assert.match(readiness, /BLOCKED|NOT_RUN|unverified|UNVERIFIED/i);
 });
 

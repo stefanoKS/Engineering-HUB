@@ -11,7 +11,7 @@
  * task row to the browser.
  */
 var DashboardData = (function () {
-  var DEFAULT_CONTRACT = '1.5';
+  var DEFAULT_CONTRACT = '1.6';
   var META_SHEET = 'PUBLISHED_META';
   var CACHE_TTL_SECONDS = 300;
   var CACHE_MAX_CHARS = 90000;
@@ -19,6 +19,8 @@ var DashboardData = (function () {
   var MAX_REQUESTED_TASKS = 1000;
   var DUE_SOON_DAYS = 7;
   var RISK = ['RED', 'YELLOW', 'UNKNOWN'];
+  // Contract 1.6 fields that carry a JSON name list instead of a scalar cell value.
+  var LIST_FIELDS = ['assigneeNames'];
 
   // Must match SharedDashboardModel.PROJECT_PUBLIC_FIELDS / ... in the manager project.
   // The pairing is asserted by tests/v1_2-dashboard.test.js so the two apps cannot drift.
@@ -57,9 +59,14 @@ var DashboardData = (function () {
         'status', 'priority', 'plannedStart', 'dueDate', 'progress', 'publicNote', 'revision', 'pendingRequest']},
       milestones: TABLES.milestones
     },
-    '1.5': TABLES
+    '1.5': TABLES,
+    // Contract 1.6 adds an allowlisted display-name list per task. `ownerName` keeps its
+    // meaning, so a reader that only understands 1.5 stays correct.
+    '1.6': Object.assign({}, TABLES, {
+      tasks: {sheet: TABLES.tasks.sheet, fields: TABLES.tasks.fields.concat(['assigneeNames'])}
+    })
   };
-  var SUPPORTED_CONTRACTS = ['1.4', '1.5'];
+  var SUPPORTED_CONTRACTS = ['1.4', '1.5', '1.6'];
 
   var LABELS = {
     status: {
@@ -197,9 +204,23 @@ var DashboardData = (function () {
       .filter(function (row) { return row.some(function (value) { return value !== ''; }); })
       .map(function (row) {
         var record = {};
-        table.fields.forEach(function (field, index) { record[field] = snapshotDate(field, row[index]); });
+        table.fields.forEach(function (field, index) {
+          record[field] = LIST_FIELDS.indexOf(field) >= 0 ? nameList(row[index]) : snapshotDate(field, row[index]);
+        });
         return record;
       });
+  }
+
+  /** A published display-name list is JSON text; anything unreadable degrades to an empty list. */
+  function nameList(value) {
+    if (value === '' || value === null || value === undefined) return [];
+    if (Array.isArray(value)) return value.map(text).filter(function (name) { return !!name; });
+    try {
+      var parsed = JSON.parse(String(value));
+      return Array.isArray(parsed) ? parsed.map(text).filter(function (name) { return !!name; }) : [];
+    } catch (error) {
+      return [];
+    }
   }
 
   function metaPayload(snapshot, config) {
@@ -270,6 +291,11 @@ var DashboardData = (function () {
       depth: Math.max(0, Number(depth) || 0),
       name: text(task.name),
       ownerName: text(task.ownerName),
+      // Contract 1.6: every assignee's display name, primary first. A 1.4/1.5 snapshot has no
+      // list, so the primary owner remains the only known assignee.
+      assigneeNames: Array.isArray(task.assigneeNames) && task.assigneeNames.length
+        ? task.assigneeNames : (text(task.ownerName) ? [text(task.ownerName)] : []),
+      sharedAssignment: (Array.isArray(task.assigneeNames) ? task.assigneeNames.length : 0) > 1,
       status: text(task.status),
       statusLabel: label('status', text(task.status)),
       priority: text(task.priority),
@@ -396,6 +422,10 @@ var DashboardData = (function () {
           categories: unique(projects.map(function (project) { return project.category; })),
           owners: unique(projects.map(function (project) { return project.ownerName; })),
           statuses: unique(projects.map(function (project) { return project.status; })),
+          // Contract 1.6: every published assignee display name, primary first per task.
+          workers: unique(snapshot.tables.tasks.reduce(function (list, row) {
+            return list.concat(taskAssigneeNames(row));
+          }, [])),
           responsibilities: responsibilityOptions(snapshot, projects)
         },
         query: query
@@ -608,6 +638,143 @@ var DashboardData = (function () {
   }
 
   /**
+   * A worker's assigned work across every published project (contract 1.6).
+   *
+   * The query runs entirely inside the published snapshot: restricted projects, private
+   * descriptions and member identifiers are not present, so no filter can leak them. The
+   * worker name is a self-selected display filter, not authentication — two people sharing a
+   * name are indistinguishable here by design (docs/dashboard/DATA_CONTRACT.md).
+   */
+  function workerTasks(request) {
+    return respond(function () {
+      DashboardApp.requireViewer();
+      request = request || {};
+      var config = DashboardApp.config();
+      var snapshot = openTab();
+      var today = todayJst();
+      var worker = text(request.worker).trim();
+      var projectId = text(request.projectId).trim();
+      var responsibilityId = text(request.responsibilityId).trim();
+      var priority = text(request.priority).trim();
+      var query = DashboardApp.cleanQuery(request.query).trim().toLowerCase();
+      var group = text(request.group) === 'completed' ? 'completed' : (text(request.group) === 'all' ? 'all' : 'open');
+      var overdueOnly = request.overdue === true;
+      var dueWithin = Number(request.dueWithin) > 0 ? Number(request.dueWithin) : 0;
+      var offset = Math.max(0, Math.floor(Number(request.offset) || 0));
+      var limit = Math.min(100, Math.max(1, Math.floor(Number(request.limit) || 20)));
+      var cacheKey = 'sd:worker:' + text(snapshot.meta.SNAPSHOT_VERSION) + ':' + today + ':' + encodeHash(JSON.stringify({
+        worker: worker, projectId: projectId, responsibilityId: responsibilityId, priority: priority,
+        query: query, group: group, overdue: overdueOnly, dueWithin: dueWithin, offset: offset, limit: limit
+      }));
+      var cached = cacheGet(cacheKey);
+      if (cached) return cached;
+
+      var projects = Object.create(null), projectOrder = [];
+      snapshot.tables.projects.forEach(function (row) {
+        projects[text(row.projectId)] = row;
+        projectOrder.push(text(row.projectId));
+      });
+      var subprojects = Object.create(null);
+      snapshot.tables.subprojects.forEach(function (row) {
+        subprojects[text(row.subprojectId)] = text(row.name);
+      });
+      function terminal(status) { return status === 'Done' || status === 'Cancelled'; }
+      var horizon = '';
+      if (dueWithin) {
+        var date = new Date(today + 'T00:00:00Z');
+        date.setUTCDate(date.getUTCDate() + dueWithin);
+        horizon = date.toISOString().slice(0, 10);
+      }
+      var matched = [], workers = Object.create(null);
+      snapshot.tables.tasks.forEach(function (row) {
+        var assignees = taskAssigneeNames(row);
+        assignees.forEach(function (name) { if (name) workers[name] = true; });
+        if (worker && assignees.indexOf(worker) < 0) return;
+        var project = projects[text(row.projectId)] || {};
+        if (projectId && text(row.projectId) !== projectId) return;
+        var projectResponsibility = text(project.responsibilityId);
+        if (responsibilityId === '__none__') { if (projectResponsibility) return; }
+        else if (responsibilityId && projectResponsibility !== responsibilityId) return;
+        if (priority && text(row.priority) !== priority) return;
+        var status = text(row.status);
+        if (group === 'open' && terminal(status)) return;
+        if (group === 'completed' && status !== 'Done') return;
+        var dueDate = text(row.dueDate);
+        if (overdueOnly && !(dueDate && dueDate < today && !terminal(status))) return;
+        if (horizon && !(dueDate && dueDate >= today && dueDate <= horizon && !terminal(status))) return;
+        if (query) {
+          var haystack = [text(row.taskId), text(row.name), text(project.projectName),
+            subprojects[text(row.subprojectId)] || ''].join(' ').toLowerCase();
+          if (haystack.indexOf(query) < 0) return;
+        }
+        matched.push(row);
+      });
+      // Overdue first, then today, then the nearest deadline, then work without a deadline.
+      function bucket(row) {
+        var dueDate = text(row.dueDate);
+        if (terminal(text(row.status))) return 3;
+        if (!dueDate) return 3;
+        if (dueDate < today) return 0;
+        if (dueDate === today) return 1;
+        return 2;
+      }
+      matched.sort(function (a, b) {
+        var order = bucket(a) - bucket(b);
+        if (order) return order;
+        var left = text(a.dueDate) || '9999-12-31', right = text(b.dueDate) || '9999-12-31';
+        if (left !== right) return left < right ? -1 : 1;
+        return text(a.taskId).localeCompare(text(b.taskId));
+      });
+      var page = matched.slice(offset, offset + limit).map(function (row) {
+        var project = projects[text(row.projectId)] || {};
+        return taskSummary(row, today, text(project.projectName), subprojects[text(row.subprojectId)] || '',
+          nestingDepth(row, snapshot.tables.tasks));
+      });
+      var openCount = matched.filter(function (row) { return !terminal(text(row.status)); }).length;
+      var payload = {
+        meta: metaPayload(snapshot, config),
+        workers: Object.keys(workers).sort(function (a, b) { return a.localeCompare(b, 'ja'); }),
+        projects: projectOrder.map(function (id) {
+          return {projectId: id, projectName: text(projects[id].projectName),
+            responsibilityId: text(projects[id].responsibilityId)};
+        }),
+        responsibilities: responsibilityOptions(snapshot, snapshot.tables.projects.map(function (row) {
+          return projectSummary(row, today);
+        })),
+        totals: {matched: matched.length, open: openCount, completed: matched.length - openCount,
+          overdue: matched.filter(function (row) { return text(row.dueDate) && text(row.dueDate) < today && !terminal(text(row.status)); }).length},
+        filters: {worker: worker, projectId: projectId, responsibilityId: responsibilityId, priority: priority,
+          query: query, group: group, overdue: overdueOnly, dueWithin: dueWithin},
+        tasks: page,
+        offset: offset, limit: limit, total: matched.length
+      };
+      cachePut(cacheKey, payload);
+      return payload;
+    });
+  }
+
+  /** Contract 1.6 name list, with the 1.4/1.5 primary owner as the honest fallback. */
+  function taskAssigneeNames(task) {
+    if (Array.isArray(task.assigneeNames) && task.assigneeNames.length) return task.assigneeNames;
+    return text(task.ownerName) ? [text(task.ownerName)] : [];
+  }
+
+  /** Bounded parent walk: a malformed or circular link stops instead of recursing forever. */
+  function nestingDepth(task, tasks) {
+    var byId = Object.create(null);
+    tasks.forEach(function (row) { byId[text(row.taskId)] = row; });
+    var depth = 0, cursor = text(task.parentTaskId), seen = Object.create(null);
+    while (cursor && depth < 3 && !seen[cursor]) {
+      seen[cursor] = true;
+      var parent = byId[cursor];
+      if (!parent) break;
+      depth++;
+      cursor = text(parent.parentTaskId);
+    }
+    return depth;
+  }
+
+  /**
    * Published identity of one task, used to validate a request submission.
    *
    * Only published rows resolve, so a restricted project can never receive a request. The
@@ -644,6 +811,8 @@ var DashboardData = (function () {
     requestTarget: requestTarget,
     portfolio: portfolio,
     project: project,
-    task: task
+    task: task,
+    workerTasks: workerTasks,
+    taskAssigneeNames: taskAssigneeNames
   };
 }());

@@ -192,3 +192,41 @@
     `upgradeExistingDatabase`, `reconcileDeletions`), and never claim a live result a local run cannot produce.
 96. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_6_1_GATE_<n>.md`, keep the V1.6 gate records
     unchanged, and keep `docs/PRODUCTION_READINESS.md` **NOT APPROVED FOR PRODUCTION**.
+## V1.7 mandatory rules (multiple assignees, worker view, non-blocking submission)
+
+97. Additional assignees and additional responsibility members live only in `TASK_ASSIGNEES` and
+    `RESPONSIBILITY_MEMBERS`. The primary owner columns (`TASKS.Owner_Member_ID`,
+    `RESPONSIBILITIES.Owner_Member_ID`) stay authoritative and are never copied into a relationship
+    table. Never store a comma separated identifier list.
+98. Removal is a soft relationship change: stamp `Removed_At`/`Removed_By`, never delete the row.
+    Re-adding a former member reactivates the existing row instead of inserting a duplicate.
+99. A new assignment must name an existing, active member. An existing relationship survives a later
+    deactivation; never drop it because of an unrelated edit.
+100. A membership change is a material assignment change: bump `Assignment_Version`, clear
+    `Assignment_Approved_At` and write one audit row. Never silently preserve an approval.
+101. Membership is never authorization. Only an ADMIN may change the primary responsibility owner;
+    additional members grant no manager capability, and ownership remains accountability only.
+102. Read membership through one indexed pass per execution (`src/Assignees.gs` + `Database.memo`).
+    Never perform one Sheets read per task or per member.
+103. Publish only display names. Contract 1.6 appends `assigneeNames` and keeps `ownerName`; never
+    publish member identifiers, e-mail addresses, roles or any other member field, and never publish
+    the private `MEMBERS` table to support worker filtering.
+104. A shared task stays one task: one ID, one deadline, one status, one progress value and one
+    manager approval. Never divide progress per assignee or invent individual completion percentages.
+105. The employee worker filter is a display filter, not authentication. Never claim it verifies a
+    worker, and document that two people who share a display name cannot be distinguished.
+106. Employee submission is non-blocking: validate, show `送信中`, close the form, and report
+    `受付完了` only after a durable server acknowledgement. An unobservable outcome is
+    `送信結果不明` and is never retried automatically or reported as success.
+107. Persist only non-sensitive receipt metadata in the employee browser (task, type, time, state,
+    request ID). Never persist explanation text, completion notes or manager data, and never add
+    browser persistence to the manager application.
+108. Opening 申請一覧 performs exactly one authorized import per page entry. A filter, language or
+    render change must never re-import, and import feedback must never claim success on an error or
+    `configured:false`.
+109. The permanent-deletion confirmation is one Yes/No dialog. The client derives `DELETE <id>` from
+    the selected record only after Yes; never weaken the ADMIN check, dependency preflight, revision
+    check, verified backup, tombstone or reconciliation, and never allow a duplicate submission.
+110. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_7_GATE_<n>.md`, keep every
+    earlier gate file unchanged, and keep `docs/PRODUCTION_READINESS.md` NOT APPROVED FOR PRODUCTION
+    until recorded live evidence exists.

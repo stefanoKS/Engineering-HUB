@@ -77,6 +77,14 @@ var Schema = (function () {
       Status: ['PENDING', 'PROCESSING', 'APPROVED', 'REJECTED', 'RETURNED', 'WITHDRAWN', 'STALE'] });
   table('TASK_DEADLINE_HISTORY', 'History_ID', 'History_ID Task_ID Request_ID Previous_Due_Date New_Due_Date Previous_Planned_Start New_Planned_Start Reason Changed_At Changed_By Source',
     {}, ['Task_ID'], { Task_ID: 'TASKS', Request_ID: 'TASK_REQUESTS' });
+  // V1.7: additional assignees and additional responsibility members are normalized relation
+  // rows. The primary owner stays in TASKS.Owner_Member_ID / RESPONSIBILITIES.Owner_Member_ID,
+  // so these tables never duplicate it and no comma separated identifier list is stored.
+  // A removal keeps the row and stamps Removed_At, so assignment history survives.
+  table('TASK_ASSIGNEES', 'Assignment_ID', 'Assignment_ID Task_ID Member_ID Assigned_At Assigned_By Removed_At Removed_By',
+    {}, ['Task_ID', 'Member_ID'], { Task_ID: 'TASKS', Member_ID: 'MEMBERS' });
+  table('RESPONSIBILITY_MEMBERS', 'Assignment_ID', 'Assignment_ID Responsibility_ID Member_ID Assigned_At Assigned_By Removed_At Removed_By',
+    {}, ['Responsibility_ID', 'Member_ID'], { Responsibility_ID: 'RESPONSIBILITIES', Member_ID: 'MEMBERS' });
   ['TASKS', 'MEMBERS'].forEach(function (name) {
     tables[name].fields.forEach(function (f) {
       if (f.name === 'Notification_Enabled') f.defaultValue = false;
@@ -105,12 +113,16 @@ var Schema = (function () {
   // V1.3 planning: the duration is a schedule length, never a labour-hour estimate.
   set('TASKS', 'Planned_Duration_Value', { type: 'number', defaultValue: '', min: 0, integer: true });
   set('TASKS', 'Planned_Start_Source', { type: 'string', defaultValue: '' });
+  // The task revision is an opaque digest, not a timestamp: it must never be re-typed as a date.
   set('TASK_REQUESTS', 'Task_Revision_At_Submission', { type: 'string', defaultValue: '' });
   // A blank responsibility means 未分類 (unassigned); a retired one keeps its historical links.
   set('PROJECTS', 'Responsibility_ID', { defaultValue: '', ref: 'RESPONSIBILITIES' });
   set('RESPONSIBILITIES', 'Sort_Order', { type: 'number', defaultValue: 0, min: 0, integer: true });
   set('RESPONSIBILITIES', 'Status', { defaultValue: 'Active' });
   set('SUBPROJECTS', 'Parent_Subproject_ID', { defaultValue: '', ref: 'SUBPROJECTS' });
+  // V1.7: additional assignee rows record who added and who removed the relationship.
+  set('TASK_ASSIGNEES', 'Removed_At', { defaultValue: '' });
+  set('RESPONSIBILITY_MEMBERS', 'Removed_At', { defaultValue: '' });
   // V1.6: nested work, a validated area colour and explicit deletion markers. A blank
   // Parent_Task_ID is a top-level task, so every pre-V1.6 row keeps its meaning.
   set('TASKS', 'Parent_Task_ID', { defaultValue: '', ref: 'TASKS' });
@@ -118,7 +130,7 @@ var Schema = (function () {
   set('PROJECTS', 'Deleted_At', { editable: false });
   set('SUBPROJECTS', 'Deleted_At', { editable: false });
   set('TASKS', 'Deleted_At', { editable: false });
-  return { version: 7, tables: tables,
+  return { version: 8, tables: tables,
     generated: ['DASHBOARD', 'PROJECT_OVERVIEW', 'TEAM_VIEW', 'GANTT_OVERVIEW', 'TIMELINE_DATA',
       'WORKLOAD', 'SKILL_MATRIX', 'BACKPLAN', 'AUTOMATION_STATUS'],
     field: field };

@@ -9,6 +9,8 @@ test('member and responsibility forms preserve values and submit through authori
 test('older startup response cannot replace newer navigation and reads retry explicitly',async()=>{const a=fixture(),h=harness(null,{manual:true});await flush();const startup=h.waiting.shift();assert.equal(startup.operation,'bootstrap');
  // Navigate before the startup snapshot answers: the newer view must win.
  h.click('nav','申請');await flush();const recent=h.waiting.shift();recent.success(a.context.managerWebRead('requests',{}));await flush();
+ // Entering 申請 performs exactly one authorized import; it answers before anything else.
+ const sync=h.waiting.shift();assert.equal(sync.operation,'requestSync');sync.success(a.context.managerWebRead('requests',{}));await flush();
  startup.success(a.context.managerWebRead('bootstrap',{}));await flush();
  // The snapshot now fills the in-memory store, including the background task index.
  assert.equal(h.waiting.length,1);assert.equal(h.waiting[0].operation,'taskIndex');h.waiting.shift().success(a.context.managerWebRead('taskIndex'));await flush();

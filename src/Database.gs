@@ -3,9 +3,25 @@ var Database = (function () {
   var readContext = null;
   function withReadContext(fn, allowWrites) {
     var previous = readContext;
-    readContext = {tables: Object.create(null), book: null, reads: 0, dataMs: 0, allowWrites: allowWrites === true};
+    readContext = {tables: Object.create(null), memo: Object.create(null), book: null, reads: 0, dataMs: 0, allowWrites: allowWrites === true};
     try { return fn(readContext); } finally { readContext = previous; }
   }
+  /**
+   * Execution-local derived cache.
+   *
+   * Indexed maps computed from more than one table (for example the additional assignee
+   * relationships) are built once per execution instead of once per task. The cache never
+   * leaves the execution: there is no CacheService entry and no browser storage, so a write
+   * boundary can simply clear it.
+   */
+  function memo(key, build) {
+    if (!readContext) return build();
+    if (Object.prototype.hasOwnProperty.call(readContext.memo, key)) return readContext.memo[key];
+    var value = build();
+    readContext.memo[key] = value;
+    return value;
+  }
+  function forgetMemo() { if (readContext) readContext.memo = Object.create(null); }
   function book() {
     if (readContext && readContext.book) return readContext.book;
     var config = Config.get(), spreadsheet = SpreadsheetApp.openById(config.spreadsheetId);
@@ -166,7 +182,7 @@ var Database = (function () {
     var row = freeRow(name, d);
     ensureSize(d.sheet, row, d.headers.length);
     d.sheet.getRange(row, 1, 1, d.headers.length).setValues([d.headers.map(function (h) { return cell(obj[h] === undefined ? '' : obj[h]); })]);
-    if (readContext) delete readContext.tables[name];
+    if (readContext) { delete readContext.tables[name]; forgetMemo(); }
     return obj;
   }
   function update(name, id, patch) {
@@ -186,7 +202,7 @@ var Database = (function () {
     });
     // Only explicit fields are written: formulas and manually maintained cells remain untouched.
     Object.keys(patch).forEach(function (key) { d.sheet.getRange(index + 1, d.headers.indexOf(key) + 1).setValue(cell(obj[key])); });
-    if (readContext) delete readContext.tables[name];
+    if (readContext) { delete readContext.tables[name]; forgetMemo(); }
     return Object.assign({}, previous, obj);
   }
   function updateMany(name, changes) {
@@ -228,6 +244,7 @@ var Database = (function () {
       }
     });
     if (readContext) delete readContext.tables[name];
+    forgetMemo();
     return results;
   }
   function writeGenerated(name, rows) {
@@ -244,5 +261,5 @@ var Database = (function () {
   }
   return { withMutationCheck: withMutationCheck, withReadContext: withReadContext, book: book, read: read, find: find, insert: insert, update: update, validate: validate,
     withLock: withLock, writeGenerated: writeGenerated, ensureSize: ensureSize, updateMany: updateMany,
-    checkboxColumns: checkboxColumns, recordData: recordData };
+    checkboxColumns: checkboxColumns, recordData: recordData, memo: memo, forgetMemo: forgetMemo };
 }());

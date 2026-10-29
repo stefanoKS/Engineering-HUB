@@ -13,12 +13,12 @@ const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const exists = file => fs.existsSync(path.join(root, file));
 
-test('package, publisher, README, UI and changelog agree on V1.6.2', () => {
-  assert.match(read('package.json'), /"version": "1\.6\.2"/);
-  assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.6\.2'/);
-  assert.match(read('README.md'), /## Current release — V1\.6\.2/);
-  assert.match(read('README_JP.md'), /## 現行リリース — V1\.6\.2/);
-  assert.match(read('src/ManagerWebIndex.html'), /V1\.6\.2/);
+test('package, publisher, README, UI and changelog agree on the current version', () => {
+  assert.match(read('package.json'), /"version": "1\.7\.0"/);
+  assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.7\.0'/);
+  assert.match(read('README.md'), /## Current release — V1\.7/);
+  assert.match(read('README_JP.md'), /## 現行リリース — V1\.7/);
+  assert.match(read('src/ManagerWebIndex.html'), /V1\.7/);
   assert.match(read('CHANGELOG.md'), /## V1\.6\.2 — /);
   // Earlier records are kept as history, never overwritten.
   assert.match(read('README.md'), /## Historical V1\.6\.1 release record/);
@@ -27,7 +27,7 @@ test('package, publisher, README, UI and changelog agree on V1.6.2', () => {
   assert.match(read('CHANGELOG.md'), /## V1\.6\.1 — /);
   assert.match(read('CHANGELOG.md'), /## V1\.6 — /);
   // The overview payload and the manager page report the same version.
-  assert.match(read('src/ManagerWeb.gs'), /version: '1\.6\.2'/);
+  assert.match(read('src/ManagerWeb.gs'), /version: '1\.7'/);
 });
 
 test('the five V1.6.2 checkgates exist and keep the release status honest', () => {
@@ -87,11 +87,12 @@ test('the V1.6.2 evidence artefacts record measured results only', () => {
 });
 
 test('the schema, contract and migration boundaries are unchanged by this release', () => {
-  assert.match(read('src/Schema.gs'), /return \{ version: 7,/);
+  assert.match(read('src/Schema.gs'), /return \{ version: 8,/);
   assert.match(read('src/Migrations.gs'), /007_responsibility_hierarchy_and_lifecycle', from: 6, to: 7/);
-  assert.doesNotMatch(read('src/Migrations.gs'), /008_/, 'a corrective release adds no migration');
-  assert.match(read('src/SharedDashboardModel.gs'), /CONTRACT_VERSION = '1\.5'/);
-  assert.match(read('DATA_SCHEMA.md'), /current schema version is \*\*7\*\*/);
+  // V1.7 adds its own reviewed identifier; the corrective release still added none of its own.
+  assert.match(read('src/Migrations.gs'), /008_task_and_responsibility_members', from: 7, to: 8/);
+  assert.match(read('src/SharedDashboardModel.gs'), /CONTRACT_VERSION = '1\.6'/);
+  assert.match(read('DATA_SCHEMA.md'), /current schema version is \*\*8\*\*/);
   assert.match(read('DATA_SCHEMA.md'), /## V1\.6\.2 compatibility/);
   // The request journal reuses AUDIT_LOG instead of adding a column or a table.
   assert.doesNotMatch(read('src/Schema.gs'), /REQUEST_JOURNAL|REQUEST_OPERATIONS/);
@@ -113,8 +114,8 @@ test('the new recovery entrypoints stay authorisation-gated', () => {
 test('the production readiness record is updated and claims no live evidence', () => {
   const readiness = read('docs/PRODUCTION_READINESS.md');
   assert.match(readiness, /NOT APPROVED FOR PRODUCTION/);
-  assert.match(readiness, /Current assessment — V1\.6\.2/);
-  assert.match(readiness, /543 tests, 543 pass/);
+  assert.match(readiness, /Current assessment — V1\.7/);
+  assert.match(readiness, /Historical V1\.6\.2 assessment/);
   assert.match(readiness, /UNVERIFIED/);
   assert.match(readiness, /## Historical V1\.6\.1 assessment/);
 });

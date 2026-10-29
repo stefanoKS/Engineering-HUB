@@ -38,30 +38,32 @@ test('every V1.4 gate records an explicit status with evidence', () => {
 
 test('the schema, migration and contract versions are documented consistently', () => {
   const schema = read('src/Schema.gs');
-  assert.match(schema, /return \{ version: 7,/);
+  assert.match(schema, /return \{ version: 8,/);
   const migrations = read('src/Migrations.gs');
   assert.match(migrations, /006_responsibilities_and_nested_subprojects', from: 5, to: 6/);
-  assert.match(read('DATA_SCHEMA.md'), /current schema version is \*\*7\*\*/);
+  assert.match(read('DATA_SCHEMA.md'), /current schema version is \*\*8\*\*/);
   assert.match(read('DATA_SCHEMA.md'), /006_responsibilities_and_nested_subprojects/);
   assert.match(read('DATA_SCHEMA.md'), /007_responsibility_hierarchy_and_lifecycle/);
   assert.match(read('DEPLOYMENT.md'), /V1\.4 upgrade \(5 → 6\)/);
-  assert.match(read('docs/dashboard/DATA_CONTRACT.md'), /## Contract 1\.5/);
+  assert.match(read('docs/dashboard/DATA_CONTRACT.md'), /## Contract 1\.6/);
+  assert.match(migrations, /008_task_and_responsibility_members', from: 7, to: 8/);
 });
 
 test('the publisher and the viewer agree on the published contract version', () => {
   const manager = loadApp();
   const viewer = loadDashboard();
   const published = manager.context.SharedDashboardModel.CONTRACT_VERSION;
-  assert.equal(published, '1.5');
+  assert.equal(published, '1.6');
   assert.equal(viewer.context.DashboardData.CONTRACT_VERSION, published);
   // Field lists must match exactly, or a publication would be unreadable.
   var model = manager.context.SharedDashboardModel;
-  const tables = viewer.context.DashboardData.TABLES;
-  assert.deepEqual(plain(tables.responsibilities.fields), plain(model.RESPONSIBILITY_PUBLIC_FIELDS));
-  assert.deepEqual(plain(tables.projects.fields), plain(model.PROJECT_PUBLIC_FIELDS));
-  assert.deepEqual(plain(tables.subprojects.fields), plain(model.SUBPROJECT_PUBLIC_FIELDS));
-  assert.deepEqual(plain(tables.tasks.fields), plain(model.TASK_PUBLIC_FIELDS));
-  assert.deepEqual(plain(tables.milestones.fields), plain(model.MILESTONE_PUBLIC_FIELDS));
+  const contracts = viewer.context.DashboardData.CONTRACTS;
+  const current = contracts[published];
+  assert.deepEqual(plain(current.responsibilities.fields), plain(model.RESPONSIBILITY_PUBLIC_FIELDS));
+  assert.deepEqual(plain(current.projects.fields), plain(model.PROJECT_PUBLIC_FIELDS));
+  assert.deepEqual(plain(current.subprojects.fields), plain(model.SUBPROJECT_PUBLIC_FIELDS));
+  assert.deepEqual(plain(current.tasks.fields), plain(model.TASK_PUBLIC_FIELDS));
+  assert.deepEqual(plain(current.milestones.fields), plain(model.MILESTONE_PUBLIC_FIELDS));
 });
 
 test('the manager templates share one token set and Japanese-first font stack', () => {

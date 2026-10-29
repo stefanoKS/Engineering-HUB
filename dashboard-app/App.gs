@@ -108,3 +108,8 @@ function dashboardProject(projectId, options) {
 function dashboardTask(projectId, taskId) {
   return DashboardData.task(projectId, taskId);
 }
+
+/** Worker-centred task list: published data only, bounded and paginated. */
+function dashboardWorkerTasks(request) {
+  return DashboardData.workerTasks(request);
+}

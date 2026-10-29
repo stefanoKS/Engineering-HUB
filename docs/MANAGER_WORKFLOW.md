@@ -396,3 +396,15 @@ Overlapping assignments are allowed: the manager decides whether the schedule is
 Use `日本語 | English` at the top of every sidebar. The choice is remembered per browser and
 never changes stored data.
 
+
+## V1.7 — request import, shared assignments and the deletion confirmation
+
+Opening 申請一覧 performs exactly one authorized import (`requestSync`) that returns the refreshed
+queue, so newly received worker requests appear without a manual step; the Import button remains for
+retries and a filter change never re-imports. A request card now depends on its type: a completion
+report shows the reported time, the task status and the completion note, while a deadline change shows
+the current and requested dates, the day difference and the reason. A task may carry additional
+assignees, so the task list can be filtered by any assignee; the task itself stays one task with one
+status, one progress value and one approval. Permanent deletion now asks once with a Yes/No dialog and
+derives the required `DELETE <id>` confirmation from the selected record; the dependency preflight, the
+revision check, the verified backup and the ADMIN-only authorization are unchanged.

@@ -1,6 +1,6 @@
 # Engineering-HUB
 
-## 現行リリース — V1.6.2
+## 現行リリース — V1.7
 
 **実装済み・DEV Workspace 検証待ち。本番未承認（NOT APPROVED FOR PRODUCTION）。**
 
@@ -22,6 +22,19 @@
 ローカル検証は `npm ci` / `npm run lint` / `npm test` / `npm run validate` / `node scripts/manager-web-benchmark.js` がすべて成功し、**567件すべて成功（失敗0・スキップ0）**（確定済み V1.6.2 の543件、カラーピッカー10件、タスク絞り込み14件）、7つの V1.6.2 チェックゲートはローカル PASS・実機項目は BLOCKED として [V1.6.2 チェックゲート](docs/checkgates/V1_6_2_GATE_5.md)、[V1.6.2 gate 6](docs/checkgates/V1_6_2_GATE_6.md)、[V1.6.2 gate 7](docs/checkgates/V1_6_2_GATE_7.md) に記録しています。キャッシュ済み画面移動は 1.2〜2.5 ms、ローカル絞り込みは 0.1〜1.5 ms を維持し、`bootstrap` は10/100/300案件で 7.5 / 49.1 / 142.9 ms、11.2 / 57.9 / 153.3 KB です。領域別概況は300案件で 137.3 ms / 9.99 KB から 110.8 ms / 8.87 KB に短縮しました。判断の記録を永続化するため監査ログの読み取り1回と記録2件が増え、承認は 2.7 / 12.5 / 34.1 ms（従来 2.3 / 11.3 / 31.9 ms）です。実 Workspace の通信時間、DEV マイグレーション、申請の往復、本番描画は**未計測**です。
 
 npm run preview:manager-web で合成データのローカル画面を開けます。ヘッダーの「計測」から Chrome DevTools なしで同じ計測値を確認できます。
+
+## V1.7 リリース記録
+
+V1.7 は担当者を複数にし、作業担当者を中心とした従業員ビューを追加しました。所有権の考え方は変えていません。
+`TASK_ASSIGNEES` と `RESPONSIBILITY_MEMBERS` は「追加」の担当者のみを保持し、主担当の列
+（`TASKS.Owner_Member_ID` / `RESPONSIBILITIES.Owner_Member_ID`）が引き続き正であり、担当であることは
+権限ではありません。スキーマ **8**（`008_task_and_responsibility_members`）と従業員向け公開契約 **1.6**
+（`assigneeNames`）はどちらも追加のみで、自動適用・自動公開は行いません。管理画面は申請一覧を開いたときに
+1回だけ認可された取込を実行し、完全削除は「はい／いいえ」の1回の確認になり、メンバー一覧に職位を表示します。
+従業員側は送信が画面をブロックせず、`送信中` / `受付完了` / `送信失敗` / `送信結果不明` を明示し、
+`作業担当者別タスク` で公開済みの作業を担当者ごとに絞り込めます。詳細は
+[CHANGELOG.md](CHANGELOG.md)、[docs/dashboard/DATA_CONTRACT.md](docs/dashboard/DATA_CONTRACT.md)、
+[docs/V1_7_DEPLOYMENT_RUNBOOK.md](docs/V1_7_DEPLOYMENT_RUNBOOK.md) を参照してください。
 
 ## 過去のリリース記録（V1.6.1）
 

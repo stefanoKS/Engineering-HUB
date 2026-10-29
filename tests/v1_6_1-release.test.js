@@ -13,11 +13,11 @@ const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
 test('package, publisher, README and the manager page agree on V1.6.1', () => {
-  assert.match(read('package.json'), /"version": "1\.6\.2"/);
-  assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.6\.2'/);
-  assert.match(read('README.md'), /## Current release — V1\.6\.2/);
-  assert.match(read('README_JP.md'), /## 現行リリース — V1\.6\.2/);
-  assert.match(read('src/ManagerWebIndex.html'), /V1\.6\.2/);
+  assert.match(read('package.json'), /"version": "1\.7\.0"/);
+  assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.7\.0'/);
+  assert.match(read('README.md'), /## Current release — V1\.7/);
+  assert.match(read('README_JP.md'), /## 現行リリース — V1\.7/);
+  assert.match(read('src/ManagerWebIndex.html'), /V1\.7/);
   assert.match(read('CHANGELOG.md'), /## V1\.6\.1/);
   // The V1.6 and V1.6.1 records are kept as history, never overwritten.
   assert.match(read('README.md'), /## Historical V1\.6 release record/);
@@ -61,12 +61,13 @@ test('the V1.6.1 evidence artefacts record measured results only', () => {
 });
 
 test('the schema, contract and migration boundaries are unchanged by this release', () => {
-  assert.match(read('src/Schema.gs'), /return \{ version: 7,/);
+  assert.match(read('src/Schema.gs'), /return \{ version: 8,/);
   assert.match(read('src/Migrations.gs'), /007_responsibility_hierarchy_and_lifecycle', from: 6, to: 7/);
-  assert.doesNotMatch(read('src/Migrations.gs'), /008_/, 'a corrective release adds no migration');
+  // V1.7 adds its own reviewed identifier; the corrective release still added none of its own.
+  assert.match(read('src/Migrations.gs'), /008_task_and_responsibility_members', from: 7, to: 8/);
   const model = read('src/SharedDashboardModel.gs');
-  assert.match(model, /CONTRACT_VERSION = '1\.5'/);
-  assert.match(read('DATA_SCHEMA.md'), /current schema version is \*\*7\*\*/);
+  assert.match(model, /CONTRACT_VERSION = '1\.6'/);
+  assert.match(read('DATA_SCHEMA.md'), /current schema version is \*\*8\*\*/);
 });
 
 test('the production readiness record is unchanged and claims no live evidence', () => {

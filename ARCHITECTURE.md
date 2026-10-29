@@ -133,6 +133,7 @@ Git / reviewed source → clasp push → environment-specific Apps Script projec
 | `Progress.gs` | Effort-weighted task/subproject/project rollup with the documented fallback weight 1. |
 | `Health.gs` | Deterministic health labels, reason codes, staleness and configurable thresholds. |
 | `Projects.gs`, `Subprojects.gs`, `Tasks.gs`, `ScheduleConfirmations.gs` | Validated domain mutations, separate assignment approval and schedule confirmation, freshness tracking, task queries. |
+| `Assignees.gs` | One indexed read of the additional task assignees and additional responsibility members, membership validation and synchronisation, membership audit. |
 | `Members.gs`, `Skills.gs` | Member lifecycle with safe deactivation, role field, skill assessments and gap detection. |
 | `Milestones.gs`, `Issues.gs` | Gates, milestone state, issue tracking. |
 | `Planning.gs` | Holiday-aware reverse planning with persisted per-project plans, and weekly workload estimates. |
@@ -186,11 +187,33 @@ Notification baselines are written through `Database.updateMany` for the changed
 
 ## Versioning and recovery
 
-Current schema version is **3**.
+Current schema version is **8** (V1.7); the table below records the additive history.
 
 - Version 1: base tables and fields.
 - `002_task_assignment_safety` (1 → 2): task assignment version, approval timestamp, notification baseline.
 - `003_management_reliability` (2 → 3): `AUTOMATION_SETTINGS`, `PROJECT_PHASES`, `SCHEDULE_CONFIRMATIONS`, `PROJECTS.Notification_Enabled`, `MEMBERS.Role`, notification reconciliation columns, and seeded safe automation defaults (mail OFF).
+- `004_shared_dashboard` (3 → 4): `PROJECTS.Dashboard_Visibility`, `PROJECTS.Dashboard_Summary`, `TASKS.Public_Note`.
+- `005_task_planning_and_requests` (4 → 5): planned duration/start columns, `TASK_REQUESTS`, `TASK_DEADLINE_HISTORY`.
+- `006_responsibilities_and_nested_subprojects` (5 → 6): `RESPONSIBILITIES`, `PROJECTS.Responsibility_ID`, `SUBPROJECTS.Parent_Subproject_ID`.
+- `007_responsibility_hierarchy_and_lifecycle` (6 → 7): nested tasks, area colour, deletion markers.
+- `008_task_and_responsibility_members` (7 → 8, V1.7): `TASK_ASSIGNEES`, `RESPONSIBILITY_MEMBERS` — additional
+  members only, with the primary owner columns still authoritative. It creates no assignment and publishes
+  nothing.
+
+## Multi-assignee work (V1.7)
+
+A task keeps one authoritative primary assignee (`TASKS.Owner_Member_ID`) and a normalised list of
+additional assignees in `TASK_ASSIGNEES`; a responsibility keeps one primary owner and additional
+members in `RESPONSIBILITY_MEMBERS`. `src/Assignees.gs` owns the one indexed read (execution-local
+`Database.memo`), the validation and the synchronisation, and every consumer — the manager task index,
+the member profile, the responsibility list and the published snapshot — reads through it, so no path
+performs one Sheets read per task. A membership change is a material assignment change: it bumps
+`Assignment_Version`, clears `Assignment_Approved_At` and writes one audit row. Removal stamps
+`Removed_At` instead of deleting the row, so assignment history survives.
+
+The employee snapshot advertises the effective assignees as an allowlisted display-name list
+(contract 1.6 `assigneeNames`), which powers `作業担当者別タスク / Tasks by Worker`. The employee app
+still reads only the published snapshot; worker filtering is a display filter, not authentication.
 
 A fresh empty workbook is initialized directly to the current version. Existing versioned workbooks use explicit migration approval. Unversioned workbooks require an administrator-reviewed import/migration design; they are not automatically adopted.
 

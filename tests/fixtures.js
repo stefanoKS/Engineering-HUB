@@ -15,10 +15,10 @@ function app(options = {}) {
 function base(options = {}) {
   const instance = app(options);
   const db = instance.context.Database;
-  db.insert('MEMBERS', { Member_ID: 'M-ADMIN', Name: '管理 太郎', Email: 'admin@example.test', Department: '設計', Active: true, Role: 'ADMIN', Weekly_Capacity_Hours: 40 });
-  db.insert('MEMBERS', { Member_ID: 'M-MGR', Name: '管理 花子', Email: 'manager@example.test', Department: '設計', Active: true, Role: 'MANAGER', Weekly_Capacity_Hours: 40 });
-  db.insert('MEMBERS', { Member_ID: 'M-ENG', Name: '設計 次郎', Email: 'engineer@example.test', Department: '設計', Active: true, Role: 'MEMBER', Weekly_Capacity_Hours: 40 });
-  db.insert('MEMBERS', { Member_ID: 'M-VIEW', Name: '閲覧 三郎', Email: 'viewer@example.test', Department: '管理', Active: true, Role: 'VIEWER', Weekly_Capacity_Hours: 0 });
+  db.insert('MEMBERS', { Member_ID: 'M-ADMIN', Name: '管理 太郎', Email: 'admin@example.test', Department: '設計', Position: '課長', Active: true, Role: 'ADMIN', Weekly_Capacity_Hours: 40 });
+  db.insert('MEMBERS', { Member_ID: 'M-MGR', Name: '管理 花子', Email: 'manager@example.test', Department: '設計', Position: '主任', Active: true, Role: 'MANAGER', Weekly_Capacity_Hours: 40 });
+  db.insert('MEMBERS', { Member_ID: 'M-ENG', Name: '設計 次郎', Email: 'engineer@example.test', Department: '設計', Position: '一般社員', Active: true, Role: 'MEMBER', Weekly_Capacity_Hours: 40 });
+  db.insert('MEMBERS', { Member_ID: 'M-VIEW', Name: '閲覧 三郎', Email: 'viewer@example.test', Department: '管理', Position: '', Active: true, Role: 'VIEWER', Weekly_Capacity_Hours: 0 });
   db.insert('PROJECTS', { Project_ID: 'P1', Project_Name: '検査装置', Status: 'Active', Project_Owner_ID: 'M-MGR', Planned_Start: '2026-10-01', Committed_Deadline: '2026-12-31' });
   db.insert('PROJECTS', { Project_ID: 'P2', Project_Name: '旧ライン', Status: 'Archived', Project_Owner_ID: 'M-MGR', Committed_Deadline: '2026-11-30', Archived_At: '2026-09-30T00:00:00.000Z' });
   db.insert('SUBPROJECTS', { Subproject_ID: 'S1', Project_ID: 'P1', Subproject_Name: '試作', Owner_ID: 'M-ENG', Status: 'Active', Planned_Start: '2026-10-01', Deadline: '2026-12-15' });

@@ -5,6 +5,14 @@ var Tasks = (function () {
     'Required_Skill_ID', 'Required_Skill_Level'];
   // Progress updates must not revoke approval; date/effort changes must revoke schedule confirmation.
   var scheduleFields = ['Planned_Start', 'Due_Date', 'Estimated_Hours'];
+  // V1.7: an additional-assignee change is an assignment change. It bumps the assignment
+  // version and clears the approval, because the approved scope of work changed.
+  var pendingMembershipChange = false;
+  function withMembershipChange(flag, fn) {
+    var previous = pendingMembershipChange;
+    pendingMembershipChange = flag;
+    try { return fn(); } finally { pendingMembershipChange = previous; }
+  }
 
   function dependencies(value) {
     if (!value) return [];
@@ -66,7 +74,7 @@ var Tasks = (function () {
     graph.push(Object.assign({}, row, { Task_ID: row.Task_ID || '__new_task__' }));
     validateGraph(graph);
     TaskTree.validate(Object.assign({}, row, { Task_ID: row.Task_ID || '__new_task__' }), before, graph);
-    if (!before || assignmentFields.some(function (field) { return row[field] !== before[field]; })) {
+    if (!before || pendingMembershipChange || assignmentFields.some(function (field) { return row[field] !== before[field]; })) {
       row.Assignment_Version = before ? Number(before.Assignment_Version || 0) + 1 : 1;
       row.Assignment_Approved_At = '';
       if (typeof Notifications !== 'undefined' && Notifications.snapshot) row.Notification_Baseline = Notifications.snapshot(row);
@@ -148,24 +156,42 @@ var Tasks = (function () {
   }
 
   function create(data) {
-    return Domain.save('TASKS', null, Object.assign({ Status: 'Not Started', Progress_Percent: 0 }, data), validate, null, function (row) {
+    data = data || {};
+    // The additional assignee list is a relationship, not a TASKS column, so it is removed
+    // from the stored row and applied inside the same locked operation.
+    var requested = data.Additional_Assignee_IDs;
+    var payload = Object.assign({ Status: 'Not Started', Progress_Percent: 0 }, data);
+    delete payload.Additional_Assignee_IDs;
+    if (requested !== undefined) Assignees.check('TASK', '', requested);
+    return Domain.save('TASKS', null, payload, validate, null, function (row) {
       Projects.touch(row.Project_ID);
+      if (requested !== undefined) Assignees.sync('TASK', row.Task_ID, requested, AuditLog.actor());
     });
   }
 
   function update(id, patch) {
-    return Domain.save('TASKS', id, Object.assign({Last_Updated: Domain.now()}, patch), validate, null, function (row, before) {
-      if (before && before.Project_ID !== row.Project_ID) Projects.touch(before.Project_ID);
-      Projects.touch(row.Project_ID);
-      // V1.6.1: ownership is history. An explicit reassignment event keeps the previous and
-      // the new owner attributable even after later edits, without a parallel history table.
-      if (before && String(before.Owner_Member_ID || '') !== String(row.Owner_Member_ID || '')) {
-        AuditLog.write('TASK_REASSIGNED', 'TASK', row.Task_ID, {
-          previousOwner: String(before.Owner_Member_ID || ''),
-          newOwner: String(row.Owner_Member_ID || ''),
-          project: String(row.Project_ID || '')
-        });
-      }
+    patch = Object.assign({}, patch || {});
+    var requested = patch.Additional_Assignee_IDs;
+    delete patch.Additional_Assignee_IDs;
+    // Validate the membership change before the row is written: a rejected assignee must not
+    // leave a half-applied task save behind.
+    var planned = requested === undefined ? null : Assignees.check('TASK', id, requested);
+    var membershipChanged = !!planned && (planned.added.length > 0 || planned.removed.length > 0);
+    return withMembershipChange(membershipChanged, function () {
+      return Domain.save('TASKS', id, Object.assign({Last_Updated: Domain.now()}, patch), validate, null, function (row, before) {
+        if (requested !== undefined) Assignees.sync('TASK', row.Task_ID, requested, AuditLog.actor());
+        if (before && before.Project_ID !== row.Project_ID) Projects.touch(before.Project_ID);
+        Projects.touch(row.Project_ID);
+        // V1.6.1: ownership is history. An explicit reassignment event keeps the previous and
+        // the new owner attributable even after later edits, without a parallel history table.
+        if (before && String(before.Owner_Member_ID || '') !== String(row.Owner_Member_ID || '')) {
+          AuditLog.write('TASK_REASSIGNED', 'TASK', row.Task_ID, {
+            previousOwner: String(before.Owner_Member_ID || ''),
+            newOwner: String(row.Owner_Member_ID || ''),
+            project: String(row.Project_ID || '')
+          });
+        }
+      });
     });
   }
 

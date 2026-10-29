@@ -56,10 +56,11 @@ test('the compact task index is columnar, allowlisted and paged-safe', () => {
   const result = c.managerWebRead('taskIndex');
   assert.equal(result.ok, true, result.error);
   // SETTINGS is the environment marker read, not a data table.
-  assert.deepEqual(Object.keys(reads).sort(), ['MEMBERS', 'PROJECTS', 'SETTINGS', 'TASKS', 'TASK_REQUESTS']);
+  assert.deepEqual(Object.keys(reads).sort(), ['MEMBERS', 'PROJECTS', 'SETTINGS', 'TASKS', 'TASK_ASSIGNEES', 'TASK_REQUESTS']);
   assert.ok(Object.values(reads).every(count => count === 1), JSON.stringify(reads));
-  assert.equal(result.metrics.tableReads, 4);
-  assert.deepEqual(plain(result.data.columns), ['id', 'name', 'projectId', 'project', 'subprojectId', 'ownerId', 'owner', 'responsibilityId', 'deadline', 'status', 'progress', 'priority', 'parentId', 'container', 'depth', 'reviewState']);
+  assert.equal(result.metrics.tableReads, 5);
+  assert.deepEqual(plain(result.data.columns), ['id', 'name', 'projectId', 'project', 'subprojectId', 'ownerId', 'owner', 'responsibilityId', 'deadline', 'status', 'progress', 'priority', 'parentId', 'container', 'depth', 'reviewState',
+    'assigneeIds', 'assigneeNames', 'sharedAssignment']);
   assert.equal(result.data.rows.length, 100);
   assert.equal(result.data.complete, true);
   assert.ok(result.data.rows.every(row => row.length === result.data.columns.length));

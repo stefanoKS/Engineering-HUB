@@ -1,6 +1,34 @@
-# Shared dashboard data contract (V1.6 / V1.6.1)
+# Shared dashboard data contract (V1.7 / contract 1.6)
 
-## Contract 1.5 (V1.6) — readable by V1.6.1
+## Contract 1.6 (V1.7) — readable by V1.6 readers for 1.4 and 1.5
+
+V1.7 adds one allowlisted field to the published task row: the display names of every assignee.
+`CONTRACT_VERSION` is now **1.6**; the publisher and the employee reader were updated together, the
+A/B slot commit and the row-count/hash verification are unchanged.
+
+| Sheet | Added field |
+| --- | --- |
+| `PUBLISHED_TASKS` | `assigneeNames` (JSON text: an ordered array of display names, primary first) |
+
+Behavioural rules:
+
+- `ownerName` keeps its exact previous meaning (the primary assignee display name). A reader that
+  only understands contract 1.5 therefore stays correct.
+- `assigneeNames` contains display names only. Member identifiers, e-mail addresses, roles,
+  departments and any other member field are never published, and the private `MEMBERS` table is
+  never published to support worker filtering.
+- A task with no additional assignee publishes a one-element list (the primary owner) or an empty
+  list when the task has no owner. Nothing is invented.
+- Worker filtering happens entirely inside the sanitized snapshot, so a restricted project cannot
+  appear, and a worker name is a **display filter, not authentication**: two people who share a
+  display name cannot be distinguished (see `docs/dashboard/EMPLOYEE_WORKER_VIEW.md`).
+- An unreadable list cell degrades to an empty list in the reader; it is never guessed.
+
+Rollout order: migrate the manager workbook to schema 8, deploy the manager publisher, publish once
+so the snapshot carries contract 1.6, then deploy the employee reader. An employee app on 1.5 keeps
+reading its own contract; the current reader still accepts 1.4 and 1.5 snapshots.
+
+## Contract 1.5 (V1.6) — readable by V1.6.1 and later
 
 V1.6 adds the nested-task hierarchy, the responsibility colour and the completion review state.
 `CONTRACT_VERSION` is now **1.5**; the publisher and the employee reader were updated together, the

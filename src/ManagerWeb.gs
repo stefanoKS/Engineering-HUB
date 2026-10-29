@@ -99,15 +99,23 @@ var ManagerWeb = (function () {
     return {kind: days < 0 ? 'overdue' : 'future', days: days};
   }
   /** Compact, allowlisted task summary. Descriptions, criteria, notes and hours stay out. */
-  function taskSummary(task, projects, members, treeIndex, reviewStates) {
+  function taskSummary(task, projects, members, treeIndex, reviewStates, assigneeResolver) {
     var project = projects[task.Project_ID] || {};
     var view = treeIndex ? TaskTree.viewIn(task, treeIndex)
       : {container: false, progress: Progress.percent(task), status: task.Status, depth: 0};
+    var list = assigneeResolver ? assigneeResolver(task) : [];
+    if (!list.length && (members[task.Owner_Member_ID] || {}).Name) {
+      list = [{memberId: task.Owner_Member_ID, name: members[task.Owner_Member_ID].Name, primary: true}];
+    }
     return {id: task.Task_ID, name: task.Task_Name, projectId: task.Project_ID,
       project: project.Project_Name || '', subprojectId: task.Subproject_ID || '',
       parentId: task.Parent_Task_ID || '', container: view.container, depth: view.depth,
       ownerId: task.Owner_Member_ID || '',
       owner: (members[task.Owner_Member_ID] || {}).Name || '',
+      // V1.7: every assignee, primary first. `owner`/`ownerId` keep their meaning.
+      assigneeIds: list.map(function (entry) { return entry.memberId; }),
+      assigneeNames: list.map(function (entry) { return entry.name; }).filter(function (name) { return !!name; }),
+      sharedAssignment: list.length > 1,
       responsibilityId: project.Responsibility_ID || '',
       deadline: Domain.date(task.Due_Date), status: view.status,
       progress: view.progress, priority: task.Priority,
@@ -144,6 +152,8 @@ var ManagerWeb = (function () {
   function taskList(input) {
     var projects = index('PROJECTS'), members = index('MEMBERS');
     var all = Database.read('TASKS'), treeIndex = TaskTree.buildIndex(all);
+    var assignees = Assignees.taskAssignees();
+    var assigneeFilter = input.assigneeId ? String(input.assigneeId) : '';
     var scope = scopeInput(input);
     var statuses = input.status ? (Array.isArray(input.status) ? input.status : [input.status]) : null;
     // The stored column cannot answer a displayed-status question, so it is not pushed down.
@@ -151,6 +161,8 @@ var ManagerWeb = (function () {
     delete base.status;
     var rows = Tasks.list(base).filter(function (t) {
       if (!inArea(scope, responsibilityOf(projects, t))) return false;
+      // V1.7: the member filter matches the primary owner *and* every additional assignee.
+      if (assigneeFilter && !Assignees.isAssigned('TASK', t, assigneeFilter)) return false;
       if (statuses && statuses.indexOf(TaskTree.viewIn(t, treeIndex).status) < 0) return false;
       if (input.deadlineBefore && (!t.Due_Date || Domain.date(t.Due_Date) > input.deadlineBefore)) return false;
       if (input.deadlineAfter && (!t.Due_Date || Domain.date(t.Due_Date) < input.deadlineAfter)) return false;
@@ -163,7 +175,7 @@ var ManagerWeb = (function () {
     rows.sort(taskOrder(input));
     var result = page(rows, input);
     var reviewStates = Requests.pendingCompletionStates();
-    result.items = result.items.map(function (t) { return taskSummary(t, projects, members, treeIndex, reviewStates); });
+    result.items = result.items.map(function (t) { return taskSummary(t, projects, members, treeIndex, reviewStates, assignees); });
     return result;
   }
   function responsibilityOptions() {
@@ -221,10 +233,11 @@ var ManagerWeb = (function () {
       // Only leaf work carries weight, so the container index is not rebuilt per area.
       var rolled = Progress.rollup(rows.rows.filter(function (task) { return !scope.isContainer(task); }));
       return {id: bucket.id, name: bucket.name, status: bucket.status, color: bucket.color,
-        ownerId: bucket.ownerId, owner: bucket.owner, totalProjects: bucket.totalProjects,
-        projects: bucket.projects, openTasks: counts.openWork, overdueTasks: counts.overdueWork,
-        workItems: counts.workItems, containers: counts.containers, completedWork: counts.completedWork,
-        progress: rolled.calculated ? rolled.percent : '', progressCalculated: rolled.calculated};
+        ownerId: bucket.ownerId, owner: bucket.owner,
+        totalProjects: bucket.totalProjects, projects: bucket.projects, openTasks: counts.openWork,
+        overdueTasks: counts.overdueWork, workItems: counts.workItems, containers: counts.containers,
+        completedWork: counts.completedWork, progress: rolled.calculated ? rolled.percent : '',
+        progressCalculated: rolled.calculated};
     }
     var items = Responsibilities.all().map(function (row) { return finish(areas[row.Responsibility_ID]); });
     return {items: items, unassigned: finish(unassigned),
@@ -233,7 +246,9 @@ var ManagerWeb = (function () {
   }
   /** Reference choices for the create/edit forms; identifiers and names only. */
   function referenceOptions() {
-    return {members: Database.read('MEMBERS').map(function (m) { return {id: m.Member_ID, name: m.Name, active: m.Active}; }),
+    return {members: Database.read('MEMBERS').map(function (m) {
+        return {id: m.Member_ID, name: m.Name, active: m.Active, department: m.Department, position: m.Position};
+      }),
       projects: Database.read('PROJECTS').map(function (p) { return {id: p.Project_ID, name: p.Project_Name}; }),
       responsibilities: responsibilityOptions(),
       // The responsibility colour picker draws these swatches; the server stays authoritative.
@@ -278,7 +293,7 @@ var ManagerWeb = (function () {
         status: view.status, progress: view.progress, responsibilityId: (projectIndex[t.Project_ID] || {}).Responsibility_ID || ''};
     });
     var member = Database.find('MEMBERS', actor.memberId);
-    return {    version: '1.6.2', actor: {name: member.Name, role: actor.role},
+    return {    version: '1.7', actor: {name: member.Name, role: actor.role},
       kpis: {active: active.length, risk: active.filter(function (p) { return ['RED','YELLOW','UNKNOWN'].indexOf(p.health) >= 0; }).length,
         soon: window.length, overdue: counts.overdueWork},
       upcoming: {items: upcoming, total: window.length},
@@ -312,13 +327,15 @@ var ManagerWeb = (function () {
   // Compact task index: one header row plus value rows, so a few thousand summaries do not
   // repeat every field name. The browser rebuilds the objects and never sees a private field.
   var TASK_COLUMNS = ['id', 'name', 'projectId', 'project', 'subprojectId', 'ownerId', 'owner',
-    'responsibilityId', 'deadline', 'status', 'progress', 'priority', 'parentId', 'container', 'depth', 'reviewState'];
+    'responsibilityId', 'deadline', 'status', 'progress', 'priority', 'parentId', 'container', 'depth', 'reviewState',
+    'assigneeIds', 'assigneeNames', 'sharedAssignment'];
   function taskIndex(projects, members) {
     var all = Tasks.list({}), complete = all.length <= TASK_INDEX_LIMIT;
     var treeIndex = TaskTree.buildIndex(all);
     var reviewStates = Requests.pendingCompletionStates();
+    var assignees = Assignees.taskAssignees();
     var rows = complete ? all.sort(taskOrder({})).map(function (t) {
-      var summary = taskSummary(t, projects, members, treeIndex, reviewStates);
+      var summary = taskSummary(t, projects, members, treeIndex, reviewStates, assignees);
       return TASK_COLUMNS.map(function (column) { return summary[column]; });
     }) : [];
     return {columns: TASK_COLUMNS, rows: rows, total: all.length, complete: complete, limit: TASK_INDEX_LIMIT};
@@ -432,10 +449,11 @@ var ManagerWeb = (function () {
     });
 
     var current = [], previous = [];
+    var assignees = Assignees.taskAssignees();
     Object.keys(ownership).forEach(function (taskId) {
       var task = byId[taskId];
       if (!task) return;
-      var summary = taskSummary(task, projects, members, treeIndex, reviewStates);
+      var summary = taskSummary(task, projects, members, treeIndex, reviewStates, assignees);
       var former = String(task.Owner_Member_ID || '') !== String(member.Member_ID);
       var owner = members[task.Owner_Member_ID] || {};
       summary.completedAt = task.Completed_At ? String(task.Completed_At).slice(0, 10) : '';
@@ -447,6 +465,19 @@ var ManagerWeb = (function () {
       summary.currentOwnerId = String(task.Owner_Member_ID || '');
       summary.currentOwner = owner.Name || '';
       previous.push(summary);
+    });
+    // V1.7: shared assignments are reported separately from primary ownership. Being an
+    // additional assignee is work, never authority, and it is never presented as ownership.
+    var additionalCurrent = [], additionalPrevious = [];
+    allTasks.forEach(function (task) {
+      if (String(task.Owner_Member_ID || '') === String(member.Member_ID)) return;
+      if (!Assignees.isAssigned('TASK', task, member.Member_ID)) return;
+      var shared = taskSummary(task, projects, members, treeIndex, reviewStates, assignees);
+      shared.primaryOwnerId = String(task.Owner_Member_ID || '');
+      shared.primaryOwner = (members[task.Owner_Member_ID] || {}).Name || '';
+      shared.completedAt = task.Completed_At ? String(task.Completed_At).slice(0, 10) : '';
+      if (['Done', 'Cancelled'].indexOf(shared.status) < 0) additionalCurrent.push(shared);
+      else additionalPrevious.push(shared);
     });
     // Compact summaries carry `id` (not `Task_ID`), so the list ordering is expressed here.
     current.sort(function (a, b) {
@@ -472,12 +503,14 @@ var ManagerWeb = (function () {
       member: {id: member.Member_ID, name: member.Name, department: member.Department,
         position: member.Position, role: Roles.normalize(member.Role), active: member.Active === true},
       current: current, previous: previous,
+      additionalCurrent: additionalCurrent, additionalPrevious: additionalPrevious,
       memberActions: memberActions.slice(0, 50), memberActionsTotal: memberActions.length,
       taskHistory: activity.slice(0, 50), taskHistoryTotal: activity.length,
       // `activity` stays the documented alias of the full task history for existing callers.
       activity: activity.slice(0, 50),
       activityTotal: activity.length,
       ownership: {current: current.length, previous: previous.length, historicalOnly: evidenceRows,
+        additionalCurrent: additionalCurrent.length, additionalPrevious: additionalPrevious.length,
         unverifiedPrevious: unverified, limitation: limitation, evidence: 'AUDIT_LOG'}
     };
   }
@@ -505,13 +538,24 @@ var ManagerWeb = (function () {
           subprojects: subs.map(function (s) { var dto = editable('SUBPROJECTS', s);
             dto._progress = Progress.rollup(Progress.subtreeTasks(s.Subproject_ID, children, grouped)); return dto; })};
       }
-      case 'task': return {record: editable('TASKS', Database.find('TASKS', input.id)), confirmations: Database.read('SCHEDULE_CONFIRMATIONS').filter(function (r) { return r.Task_ID === input.id; }).map(function (r) { return record('SCHEDULE_CONFIRMATIONS', r); })};
+      case 'task': {
+        var taskRow = Database.find('TASKS', input.id);
+        return {record: editable('TASKS', taskRow),
+          // V1.7: the editor loads the effective assignees so a partial save never drops them.
+          assignees: Assignees.effective('TASK', taskRow),
+          additionalAssigneeIds: Assignees.additionalIds('TASK', taskRow),
+          assigneeHistory: Assignees.history('TASK', String(input.id || '')),
+          confirmations: Database.read('SCHEDULE_CONFIRMATIONS').filter(function (r) { return r.Task_ID === input.id; }).map(function (r) { return record('SCHEDULE_CONFIRMATIONS', r); })};
+      }
       case 'references': return referenceOptions();
-      case 'members': return page(Database.read('MEMBERS').filter(function (m) { return !input.query || (m.Name + ' ' + m.Department).toLowerCase().indexOf(String(input.query).toLowerCase()) >= 0; }).map(function (m) { return editable('MEMBERS', m); }), input);
+      case 'members': return page(Database.read('MEMBERS').filter(function (m) { return !input.query || (m.Name + ' ' + m.Department + ' ' + (m.Position || '')).toLowerCase().indexOf(String(input.query).toLowerCase()) >= 0; }).map(function (m) { return editable('MEMBERS', m); }), input);
       case 'responsibilities': return {items: Responsibilities.all().map(function (r, position) {
         var dto = editable('RESPONSIBILITIES', r);
         // Same display colour as the area card, so a list and a card never disagree.
         dto._color = Responsibilities.colorOf(r, position);
+        // V1.7: primary owner plus additional responsible members, and the history behind them.
+        dto._members = Assignees.effective('RESPONSIBILITY', r);
+        dto._additionalMemberIds = Assignees.additionalIds('RESPONSIBILITY', r);
         return dto;
       })};
       case 'skills': return {items: Database.read('SKILLS').map(function (s) { return record('SKILLS', s); }), assessments: unwrap(Ui.skills())};

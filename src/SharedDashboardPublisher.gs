@@ -19,7 +19,7 @@
  *   duplicates tasks.
  */
 var SharedDashboardPublisher = (function () {
-  var PUBLISHER_VERSION = '1.6.2';
+  var PUBLISHER_VERSION = '1.7.0';
   var CONTRACT_VERSION = SharedDashboardModel.CONTRACT_VERSION;
   var DESTINATION_PROPERTY = 'SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID';
   var META_SHEET = 'PUBLISHED_META';
@@ -94,6 +94,9 @@ var SharedDashboardPublisher = (function () {
   function cell(value) {
     if (value === null || value === undefined) return '';
     if (typeof value === 'boolean' || typeof value === 'number') return value;
+    // Contract 1.6 publishes a display-name list as JSON text so a name containing a comma or
+    // a separator character can never be mis-split by the reader.
+    if (Array.isArray(value)) return JSON.stringify(value);
     var text = String(value);
     // A public string must never become a formula in the snapshot workbook.
     return /^[=+\-@]/.test(text) ? "'" + text : text;
@@ -252,7 +255,9 @@ var SharedDashboardPublisher = (function () {
       issues: Database.read('ISSUES'),
       limits: Health.thresholds(),
       pendingRequests: pendingRequests(),
-      reviewStates: completionStates()
+      reviewStates: completionStates(),
+      // Contract 1.6: one indexed resolver for the additional assignee display names.
+      assigneeNames: Assignees.taskNames()
     };
   }
 

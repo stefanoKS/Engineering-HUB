@@ -502,14 +502,14 @@ test('an approved request applies its deadline once and records one history row'
  * G. Installation record
  * ================================================================ */
 
-test('a new workbook records INITIALIZE_V7 and never pretends to have migrated', () => {
+test('a new workbook records INITIALIZE_V8 and never pretends to have migrated', () => {
   const app = fixtures.app();
   const rows = app.context.Database.read('SCHEMA_MIGRATIONS');
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].Migration_ID, 'INITIALIZE_V7');
-  assert.equal(Number(rows[0].New_Version), 7);
+  assert.equal(rows[0].Migration_ID, 'INITIALIZE_V8');
+  assert.equal(Number(rows[0].New_Version), 8);
   assert.equal(rows[0].Result, 'SUCCESS');
-  assert.equal(app.context.Migrations.currentVersion(), 7);
+  assert.equal(app.context.Migrations.currentVersion(), 8);
   assert.ok(!rows.some(row => String(row.Migration_ID).indexOf('007_') === 0),
     'a fresh V7 workbook does not run migration 007');
   assert.equal(app.context.Database.read('RESPONSIBILITIES').length, 0, 'no example area is seeded');

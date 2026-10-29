@@ -719,4 +719,27 @@
   }
   .review-badge { background: var(--amber-soft); color: var(--amber); }
   .review-badge.stale { background: var(--red-soft, #f9eceb); color: var(--red); }
+
+  /* V1.7 worker view and non-blocking request receipts. */
+  .view-switch { display: flex; gap: 8px; margin: 0 0 16px; flex-wrap: wrap; }
+  .view-option {
+    padding: 8px 16px; border: 1px solid var(--line, #d7dde3); border-radius: 999px;
+    background: #fff; color: var(--text, #27333e); font: inherit; cursor: pointer;
+  }
+  .view-option[aria-selected="true"] { background: var(--accent, #365f7d); border-color: var(--accent, #365f7d); color: #fff; font-weight: 600; }
+  .request-activity { margin: 0 0 20px; padding: 14px 16px; border: 1px solid var(--line, #d7dde3); border-radius: 10px; background: #fbfcfd; }
+  .request-activity-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .request-activity-item { border: 1px solid var(--line, #d7dde3); border-radius: 8px; background: #fff; padding: 10px 12px; }
+  .request-activity-item dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 6px 0; font-size: 13.5px; }
+  .request-activity-item dt { color: var(--text-soft, #5f6b76); }
+  .request-activity-item dd { margin: 0; }
+  .task-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .task-item { border: 1px solid var(--line, #d7dde3); border-radius: 10px; background: #fff; padding: 12px 14px; }
+  .task-head { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+  .task-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 8px 0; font-size: 13.5px; }
+  .task-actions { display: flex; gap: 8px; }
+  @media (max-width: 640px) {
+    .task-head { flex-direction: column; gap: 4px; }
+    .request-activity-item dl { grid-template-columns: 1fr; }
+  }
 </style>

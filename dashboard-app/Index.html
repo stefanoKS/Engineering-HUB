@@ -32,6 +32,17 @@
   <div class="shell">
     <div class="notices" id="notices" aria-live="polite"></div>
 
+    <nav class="view-switch" id="view-switch" role="tablist" aria-label="表示">
+      <button type="button" class="view-option" id="view-portfolio" role="tab" aria-selected="true" data-i18n="dashboard.view.portfolio">案件一覧</button>
+      <button type="button" class="view-option" id="view-workers" role="tab" aria-selected="false" data-i18n="dashboard.view.workers">作業担当者別タスク</button>
+    </nav>
+
+    <section class="request-activity" id="request-activity" aria-labelledby="request-activity-heading" hidden>
+      <h2 class="section-title" id="request-activity-heading" data-i18n="request.activity.heading">申請履歴</h2>
+      <ul class="request-activity-list" id="request-activity-list"></ul>
+      <p class="request-hint" data-i18n="request.activity.note"></p>
+    </section>
+
     <main id="main" tabindex="-1">
       <section id="overview" aria-labelledby="portfolio-heading">
         <h2 class="visually-hidden" id="portfolio-heading" data-i18n="dashboard.projects.heading">プロジェクト一覧</h2>
@@ -120,6 +131,59 @@
         <div class="state" id="detail-empty" hidden>
           <h3 data-i18n="dashboard.detail.noTasks">タスクがありません</h3>
           <p data-i18n="dashboard.detail.noTasksBody">このプロジェクトには公開されているタスクがまだありません。</p>
+        </div>
+      </section>
+
+      <section id="workers" aria-labelledby="workers-heading" hidden>
+        <h2 class="section-title" id="workers-heading" data-i18n="dashboard.workers.heading">作業担当者別タスク</h2>
+        <p class="request-hint" data-i18n="dashboard.workers.identityNote"></p>
+        <div class="toolbar">
+          <div class="filters">
+            <label class="filter"><span data-i18n="dashboard.workers.worker">作業担当者</span>
+              <select id="worker-worker"></select>
+            </label>
+            <label class="filter"><span data-i18n="dashboard.workers.responsibility">担当領域</span>
+              <select id="worker-responsibility"></select>
+            </label>
+            <label class="filter"><span data-i18n="dashboard.workers.project">プロジェクト</span>
+              <select id="worker-project"></select>
+            </label>
+            <label class="filter"><span data-i18n="dashboard.workers.group">表示</span>
+              <select id="worker-group">
+                <option value="open" data-i18n="dashboard.workers.group.open">未完了</option>
+                <option value="completed" data-i18n="dashboard.workers.group.completed">完了</option>
+                <option value="all" data-i18n="dashboard.workers.group.all">すべて</option>
+              </select>
+            </label>
+            <label class="filter"><span data-i18n="dashboard.workers.priority">優先度</span>
+              <select id="worker-priority"></select>
+            </label>
+            <button class="chip" id="worker-overdue" type="button" aria-pressed="false" data-i18n="dashboard.workers.overdue">期限超過のみ</button>
+            <button class="chip" id="worker-due" type="button" aria-pressed="false" data-i18n="dashboard.workers.dueWithin">期限7日以内</button>
+          </div>
+          <div class="search-row">
+            <div class="search-field">
+              <label class="visually-hidden" for="worker-search" data-i18n="dashboard.workers.search">タスク名で検索</label>
+              <input id="worker-search" type="search" data-i18n-placeholder="dashboard.workers.search"
+                     placeholder="タスク名で検索" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="toolbar-meta">
+              <p class="result-count" id="worker-count" role="status" aria-live="polite"></p>
+            </div>
+          </div>
+        </div>
+        <div class="state" id="worker-empty" hidden>
+          <h3 data-i18n="dashboard.workers.empty">該当するタスクはありません</h3>
+        </div>
+        <div class="state state-error" id="worker-error" hidden>
+          <h3 data-i18n="dashboard.notice.loadFailed">データを読み込めませんでした</h3>
+          <p id="worker-error-detail"></p>
+          <button class="link-button" id="worker-retry" type="button" data-i18n="common.retry">再試行</button>
+        </div>
+        <ul class="task-list" id="worker-list"></ul>
+        <div class="toolbar toolbar-meta">
+          <button class="link-button" id="worker-prev" type="button" data-i18n="dashboard.workers.prev">前へ</button>
+          <button class="link-button" id="worker-next" type="button" data-i18n="dashboard.workers.next">次へ</button>
         </div>
       </section>
     </main>

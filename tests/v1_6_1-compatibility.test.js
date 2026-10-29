@@ -67,12 +67,12 @@ test('a contract 1.4 snapshot stays readable by the new employee reader', () => 
   assert.equal(task.completedAt, '');
 });
 
-test('a contract 1.5 snapshot is read through its own header row', () => {
+test('a snapshot is read through its own published header row', () => {
   const {snapshot} = published();
   const viewer = dashboardFixtures.dashboardFor(snapshot);
   const portfolio = viewer.context.dashboardPortfolio({query: ''});
   assert.equal(portfolio.ok, true, JSON.stringify(portfolio));
-  assert.equal(portfolio.data.meta.contractVersion, '1.5');
+  assert.equal(portfolio.data.meta.contractVersion, viewer.context.DashboardData.CONTRACT_VERSION);
 });
 
 test('an unknown or mixed contract still fails closed', () => {
@@ -144,7 +144,7 @@ test('the employee reader refuses a container completion report without a server
   const viewer = dashboardFixtures.dashboardFor(snapshot);
   const target = viewer.context.DashboardData.requestTarget('T-BOX');
   assert.equal(target.container, true, 'the published container flag reaches the request service');
-  assert.equal(target.contract, '1.5');
+  assert.equal(target.contract, viewer.context.DashboardData.CONTRACT_VERSION);
   assert.equal(viewer.context.DashboardData.requestTarget('T-BOX1').container, false);
 });
 

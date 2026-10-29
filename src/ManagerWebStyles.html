@@ -57,4 +57,16 @@ nav{background:var(--v16-surface)}
 .color-preview-meta{font-size:13px;color:var(--v16-text-soft);font-variant-numeric:tabular-nums}
 .color-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px;background:var(--v16-accent)}
 .color-chip{gap:2px}
+/* V1.7 additional members, shared-assignment chips and the Yes/No deletion confirmation. */
+.member-multiselect{display:flex;flex-direction:column;gap:6px;border:1px solid var(--v16-border);border-radius:8px;padding:10px 12px;background:var(--v16-surface)}
+.member-multiselect label{display:flex;flex-direction:column;gap:4px;font-weight:600}
+.member-multiselect select{min-height:120px;width:100%}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.member-chip{display:inline-flex;align-items:center;gap:6px;background:var(--v16-surface-alt,#eef2f5);border-radius:999px;padding:2px 10px}
+.member-chip button{border:0;background:transparent;color:var(--v16-text-soft);cursor:pointer;font-size:15px;line-height:1;padding:0 2px}
+.chip-shared{background:#eef2f5;color:var(--v16-text-soft)}
+.deletion-confirm{border:1px solid var(--v16-border);border-radius:12px;padding:18px 22px;max-width:460px;background:#fff}
+.deletion-confirm::backdrop{background:rgba(20,28,36,.45)}
+.deletion-confirm .toolbar{display:flex;gap:8px;margin-top:14px}
+@media (max-width:640px){.member-multiselect select{min-height:96px}}
 </style>

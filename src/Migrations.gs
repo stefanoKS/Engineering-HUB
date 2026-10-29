@@ -7,7 +7,10 @@ var Migrations = (function () {
     { id: '006_responsibilities_and_nested_subprojects', from: 5, to: 6 },
     // V1.6 additive extension: nested tasks, validated area colour and deletion markers.
     // No existing column is renamed, reordered or rewritten.
-    { id: '007_responsibility_hierarchy_and_lifecycle', from: 6, to: 7 }
+    { id: '007_responsibility_hierarchy_and_lifecycle', from: 6, to: 7 },
+    // V1.7 additive extension: normalized additional assignees and responsibility members.
+    // The primary owner columns stay authoritative, so nothing is converted or backfilled.
+    { id: '008_task_and_responsibility_members', from: 7, to: 8 }
   ];
   function currentVersion() {
     var sheet = Database.book().getSheetByName('SCHEMA_MIGRATIONS');

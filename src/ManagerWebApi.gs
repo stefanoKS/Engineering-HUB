@@ -18,6 +18,9 @@ var ManagerWebApi = (function () {
     memberSave: {call: 'saveMember', table: 'MEMBERS', key: 'memberId', create: true},
     skillCreate: {call: 'createSkill'}, skillAssess: {call: 'setSkill'},
     requestImport: {call: 'importRequests'}, requestDecide: {call: 'decideRequest', confirm: true},
+    // V1.7: opening 申請一覧 performs exactly one authorized import and returns the queue, so the
+    // page needs one round trip instead of an import plus a separate list read.
+    requestSync: {call: 'requests'},
     publication: {call: 'publishPublicationNow', confirm: true},
     reportRefresh: {call: 'refresh', confirm: true},
     emergencyStop: {confirm: true},

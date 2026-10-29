@@ -36,14 +36,15 @@ function build(model, input) {
   }, input));
 }
 
-test('schema version 7 keeps the V1.2-V1.4 fields and adds the V1.6 lifecycle columns', () => {
+test('schema version 8 keeps the V1.2-V1.4 fields and adds the V1.6 and V1.7 lifecycle tables', () => {
   const app = loadApp();
   const context = app.context;
-  assert.equal(context.Schema.version, 7);
+  assert.equal(context.Schema.version, 8);
   assert.deepEqual(plain(context.Migrations.registry.map(item => item.id)),
     ['002_task_assignment_safety', '003_management_reliability', '004_shared_dashboard',
       '005_task_planning_and_requests', '006_responsibilities_and_nested_subprojects',
-      '007_responsibility_hierarchy_and_lifecycle']);
+      '007_responsibility_hierarchy_and_lifecycle',
+      '008_task_and_responsibility_members']);
   const visibility = context.Schema.tables.PROJECTS.fields.find(field => field.name === 'Dashboard_Visibility');
   assert.equal(visibility.defaultValue, 'RESTRICTED');
   assert.deepEqual(plain(visibility.values), ['INTERNAL', 'RESTRICTED']);

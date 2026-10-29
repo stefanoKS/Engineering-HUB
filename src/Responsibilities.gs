@@ -153,16 +153,22 @@ var Responsibilities = (function () {
     if (owner !== current.memberId && current.role !== 'ADMIN') {
       fail('責任者の指定は ADMIN のみが変更できます');
     }
-    var row = Object.assign({ Description: '' }, data, {
+    var requested = data.Additional_Member_IDs;
+    var payload = Object.assign({}, data);
+    delete payload.Additional_Member_IDs;
+    if (requested !== undefined) Assignees.check('RESPONSIBILITY', '', requested);
+    var row = Object.assign({ Description: '' }, payload, {
       Responsibility_ID: 'RESP_' + Utilities.getUuid(),
       Owner_Member_ID: owner,
       Status: ACTIVE,
       Retired_At: '',
-      Color_Hex: data.Color_Hex === undefined || data.Color_Hex === '' ? nextColor() : data.Color_Hex,
-      Sort_Order: data.Sort_Order === undefined ? nextOrder() : data.Sort_Order,
+      Color_Hex: payload.Color_Hex === undefined || payload.Color_Hex === '' ? nextColor() : payload.Color_Hex,
+      Sort_Order: payload.Sort_Order === undefined ? nextOrder() : payload.Sort_Order,
       Updated_At: Domain.now()
     });
-    return Domain.save('RESPONSIBILITIES', null, row, validate, 'CREATE');
+    return Domain.save('RESPONSIBILITIES', null, row, validate, 'CREATE', function (saved) {
+      if (requested !== undefined) Assignees.sync('RESPONSIBILITY', saved.Responsibility_ID, requested, current.email);
+    });
   }
 
   function update(id, patch) {
@@ -171,6 +177,10 @@ var Responsibilities = (function () {
     requireManage(current, before);
     patch = Object.assign({}, patch || {});
     delete patch.Responsibility_ID;
+    // V1.7: additional members are a relationship, never a stored responsibility column.
+    var requested = patch.Additional_Member_IDs;
+    delete patch.Additional_Member_IDs;
+    var planned = requested === undefined ? null : Assignees.check('RESPONSIBILITY', id, requested);
     if (Object.prototype.hasOwnProperty.call(patch, 'Owner_Member_ID') &&
         text(patch.Owner_Member_ID) !== text(before.Owner_Member_ID)) {
       // Choosing who is accountable for an area stays an administrative act.
@@ -183,9 +193,13 @@ var Responsibilities = (function () {
     if (Object.prototype.hasOwnProperty.call(patch, 'Status')) {
       fail('状態の変更には retire / reactivate を使用してください');
     }
-    if (!Object.keys(patch).length) fail('変更する項目がありません');
+    if (!Object.keys(patch).length && (!planned || (!planned.added.length && !planned.removed.length))) {
+      fail('変更する項目がありません');
+    }
     patch.Updated_At = Domain.now();
-    return Domain.save('RESPONSIBILITIES', id, patch, validate, 'UPDATE');
+    return Domain.save('RESPONSIBILITIES', id, patch, validate, 'UPDATE', function (saved) {
+      if (requested !== undefined) Assignees.sync('RESPONSIBILITY', saved.Responsibility_ID, requested, current.email);
+    });
   }
 
   /**

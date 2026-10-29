@@ -274,3 +274,15 @@ way to upgrade an existing database.
 - Everything in this document was verified with local mocks. Live Google Workspace behaviour
   (sidebar fit, menu routing, Drive backup permissions) still needs a development deployment; see
   [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md), which stays **NOT APPROVED**.
+
+## V1.7 — additional responsible members and additional task assignees
+
+Each responsibility now has one primary owner (`RESPONSIBILITIES.Owner_Member_ID`) plus any number of
+additional responsible members (`RESPONSIBILITY_MEMBERS`), and each task has one primary assignee
+(`TASKS.Owner_Member_ID`) plus any number of additional assignees (`TASK_ASSIGNEES`). The primary
+columns stay authoritative; the relationship tables hold only additional members and never a
+comma-separated list. Membership is accountability, never permission: any ADMIN or MANAGER manages
+additional members, only an ADMIN may change the primary responsibility owner, and ownership never
+gates a write. Retirement keeps every membership row so the assignment history survives, and a change
+to the member list is audited (`RESPONSIBILITY_MEMBERS_CHANGED`, `TASK_ASSIGNEES_CHANGED`). See
+[MULTI_ASSIGNEE.md](MULTI_ASSIGNEE.md).

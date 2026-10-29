@@ -48,9 +48,19 @@ schema-7 code update must not be run against a schema-6 workbook for writes: the
 required by the new task, colour and deletion paths, so apply the approved migration (with its
 verified backup) first. Reads of an old workbook are unaffected because every new field is blank.
 
+## V1.7 compatibility
+
+Schema is **8** and the employee snapshot contract is **1.6**. V1.7 adds one reviewed, additive
+migration (`008_task_and_responsibility_members`) that creates two relationship tables:
+`TASK_ASSIGNEES` and `RESPONSIBILITY_MEMBERS`. No existing column is renamed, reordered or
+rewritten, no primary owner is copied into a relationship table, and no assignment is created
+for an existing record. The migration publishes nothing, sends no mail and enables no
+automation. Contract 1.6 appends one allowlisted task field (`assigneeNames`, a JSON list of
+display names) and keeps `ownerName` for compatibility; readers for 1.4 and 1.5 stay supported.
+
 ## Contract and versions
 
-`src/Schema.gs` is authoritative. The current schema version is **7**.
+`src/Schema.gs` is authoritative. The current schema version is **8**.
 
 | Version | Migration | Adds |
 | --- | --- | --- |
@@ -61,9 +71,10 @@ verified backup) first. Reads of an old workbook are unaffected because every ne
 | 5 | `005_task_planning_and_requests` | `TASKS.Planned_Duration_Value`/`_Unit`/`_Basis`/`Planned_Start_Source`, `TASK_REQUESTS`, `TASK_DEADLINE_HISTORY` |
 | 6 | `006_responsibilities_and_nested_subprojects` | `RESPONSIBILITIES` (new table), `PROJECTS.Responsibility_ID`, `SUBPROJECTS.Parent_Subproject_ID` (additive; seeds no responsibility and leaves every existing project unassigned) |
 | 7 | `007_responsibility_hierarchy_and_lifecycle` | `TASKS.Parent_Task_ID`, `TASKS.Deleted_At`, `PROJECTS.Deleted_At`, `SUBPROJECTS.Deleted_At`, `RESPONSIBILITIES.Color_Hex` (additive; nests nothing, converts nothing, colours nothing automatically and deletes nothing) |
+| 8 | `008_task_and_responsibility_members` | `TASK_ASSIGNEES` and `RESPONSIBILITY_MEMBERS` (new tables; additive, hold only additional members, keep the primary owner columns authoritative, and create no assignment) |
 
 Approved migrations upgrade one version at a time, each with its own verified backup. Fresh empty workbooks
-initialize directly to version 7 and record `INITIALIZE_V7`. `SCHEMA_MIGRATIONS` records successful versions;
+initialize directly to version 8 and record `INITIALIZE_V8`. `SCHEMA_MIGRATIONS` records successful versions;
 changing code or a header manually does not apply a migration.
 
 The upgrade appends missing schema elements; it does not invent assignment approvals, roles or notification
@@ -473,6 +484,27 @@ an unrelated update.
 `History_ID`, `Task_ID`, `Request_ID`, `Previous_Due_Date`, `New_Due_Date`,
 `Previous_Planned_Start`, `New_Planned_Start`, `Reason`, `Changed_At`, `Changed_By`,
 `Source`. Rows are never deleted; superseded history is retained.
+
+### TASK_ASSIGNEES (new in V1.7)
+
+`Assignment_ID`, `Task_ID`, `Member_ID`, `Assigned_At`, `Assigned_By`, `Removed_At`, `Removed_By`.
+
+Additional assignees only. `TASKS.Owner_Member_ID` stays the authoritative primary assignee and is
+never copied into this table. Effective assignees are the primary owner plus every row whose
+`Removed_At` is blank. A removal stamps `Removed_At`/`Removed_By` instead of deleting the row, so
+historical assignment attribution survives. The manager's task list, the member profile and the
+published snapshot all read this table through one indexed pass (`src/Assignees.gs`), never one
+query per task.
+
+### RESPONSIBILITY_MEMBERS (new in V1.7)
+
+`Assignment_ID`, `Responsibility_ID`, `Member_ID`, `Assigned_At`, `Assigned_By`, `Removed_At`,
+`Removed_By`.
+
+Additional responsible members only. `RESPONSIBILITIES.Owner_Member_ID` stays the authoritative
+primary owner, and only an ADMIN may change it. Membership is accountability, never authorization:
+an additional member gains no manager capability. Retiring a responsibility keeps every row so the
+assignment history is preserved.
 
 ### Automation settings
 

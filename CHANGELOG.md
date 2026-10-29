@@ -1,5 +1,66 @@
 # Changelog
 
+## V1.7 — 2026-10-29
+
+Multi-assignee work, a worker-centred employee view, non-blocking request submission and the
+simplified permanent-deletion confirmation. Schema **8** (`008_task_and_responsibility_members`) and
+employee contract **1.6**; both are additive and neither is applied or published automatically.
+
+### Multiple assignees and multiple responsibility members
+
+- **`TASK_ASSIGNEES` and `RESPONSIBILITY_MEMBERS`** hold *additional* members only. The primary owner
+  columns (`TASKS.Owner_Member_ID`, `RESPONSIBILITIES.Owner_Member_ID`) stay authoritative, so no
+  primary relationship is duplicated and no comma separated identifier list is stored.
+- **Removal is a soft relationship change.** `Removed_At`/`Removed_By` keep the history, and a member
+  who was removed can be re-added without a duplicate row.
+- **One indexed read.** `src/Assignees.gs` builds a per-execution index (`Database.memo`) so a
+  3,000-task list never performs one Sheets read per task.
+- **Approval is not silently preserved.** Changing the assignee list bumps `Assignment_Version` and
+  clears `Assignment_Approved_At`, exactly like any other material assignment change.
+- **New assignments reject inactive or unknown members**; an existing relationship survives a later
+  deactivation so an unrelated edit cannot drop it.
+- **Responsibility membership is not authorization.** Any ADMIN or MANAGER manages additional members;
+  only an ADMIN may change the primary responsibility owner. Retirement keeps every membership row.
+- **A shared task stays one task**: one ID, one deadline, one status, one progress value and one
+  completion approval. Progress is never divided per assignee.
+- The manager task list gained an **assignee filter** (primary owner *or* any additional assignee),
+  assignee chips on the task cards, and an additional-member multi-select in the task and
+  responsibility editors. The member profile now separates primary work, additional work and history.
+
+### Employee dashboard
+
+- **Contract 1.6** publishes `assigneeNames` (display names, primary first) next to the unchanged
+  `ownerName`. Readers for 1.4 and 1.5 stay supported; the exact header validation, A/B slot commit
+  and content-hash verification are unchanged.
+- **作業担当者別タスク / Tasks by Worker** — a new published-data view filtered by worker,
+  responsibility, project, status group, priority, overdue, due-within-7-days and free text, sorted
+  overdue → today → upcoming → no deadline, with bounded pagination and a shared-assignment marker.
+- **Non-blocking submission.** Submit validates locally, closes the form immediately, shows
+  `送信中 / Sending`, and resolves to `受付完了 / Received`, `送信失敗 / Failed` or
+  `送信結果不明 / Outcome unknown`. A new 申請履歴 / Recent requests panel lists the receipts, offers a
+  status check and a safe retry. Only receipt metadata (task, type, time, state, request ID) is stored
+  in the browser; request text never is.
+- **No new inbox column.** A retry reuses the browser token, so the existing duplicate guard returns
+  the original request ID; the 15-column inbox contract and the rate limit are unchanged.
+
+### Manager requests
+
+- **Opening 申請一覧 performs exactly one authorized import** (`requestSync`: import → reread the
+  queue), so the page needs one round trip. The cached queue paints first, the manual Import button
+  remains for retries, and a filter change never re-imports.
+- **Type-aware request cards**: a completion report no longer shows a meaningless deadline arrow, and
+  `PENDING`, `PROCESSING`, `APPROVED`, `REJECTED`, `RETURNED` and `STALE` are labelled distinctly. The
+  decision engine is unchanged.
+
+### Members and deletion
+
+- The Members list shows **Position / 職位** next to department and system role. Role and position stay
+  separate concepts and no schema or API change was needed.
+- Permanent deletion now asks **once** with a Yes/No dialog (`Delete permanently? /
+  完全に削除しますか？`). The client derives the existing `DELETE <id>` confirmation from the selected
+  record only after Yes; the reason field, ADMIN authorization, dependency preflight, revision check,
+  verified backup, tombstone and reconciliation behaviour are unchanged.
+
 ## V1.6.2 — 2026-10-28
 
 Corrective reliability release after an audit of V1.6.1. Every V1.6 and V1.6.1 capability is kept; no

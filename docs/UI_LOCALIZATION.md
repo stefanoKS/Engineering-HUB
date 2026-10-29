@@ -122,3 +122,13 @@ plus `dashboard.filter.responsibility*`, `dashboard.filter.more`, `dashboard.fil
 The rules do not change: stored text (a responsibility name included) is never translated, 未分類
 is a label that may be translated, and the language preference stays browser-local. Switching
 language preserves the current screen, project, task, filters and any unsent request draft.
+
+## V1.7 additions
+
+`作業担当者別タスク / Tasks by Worker` and the 申請履歴 / Recent requests receipt panel are available in
+both languages. The Japanese labels are `作業担当者`, `追加担当者`, `追加メンバー`, `送信中`, `受付完了`,
+`送信失敗`, `送信結果不明`, `申請履歴`, `はい、削除する`, `いいえ、キャンセル`; the English labels are
+`Worker`, `Additional assignees`, `Additional members`, `Sending`, `Received`, `Failed`,
+`Outcome unknown`, `Recent requests`, `Yes, delete`, `No, cancel`. Switching the language on either
+screen keeps the current view, filters, unsent form draft and receipt list. Stored spreadsheet text,
+identifiers and enum values are never translated.

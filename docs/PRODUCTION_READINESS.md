@@ -1,6 +1,32 @@
 # Production readiness
 
-## Current assessment — V1.6.2 (2026-10-28)
+## Current assessment — V1.7 (2026-10-29)
+
+**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+
+Version 1.7; schema **8** (`008_task_and_responsibility_members`, additive and not applied
+automatically); employee contract **1.6** published, with **1.4**, **1.5** and **1.6** readable by the
+current reader.
+
+| Field | Value |
+| --- | --- |
+| Version | 1.7 |
+| Schema version | 8 (`008_task_and_responsibility_members`; additive, reviewed ID, verified backup first) |
+| Employee contract | 1.6 published; 1.4, 1.5 and 1.6 readable |
+| Google Workspace verification | **UNVERIFIED** — nothing in this repository has been run against a real Workspace |
+
+V1.7 adds additional task assignees and additional responsibility members as normalised relationship
+tables, keeps the primary owner columns authoritative, publishes only an allowlisted display-name
+list, adds the employee `作業担当者別タスク / Tasks by Worker` view, makes request submission
+non-blocking with explicit receipt states, imports new requests with one authorized operation when
+申請一覧 opens, shows member Position and simplifies the permanent-deletion confirmation to one
+Yes/No dialog. No permission, counting, approval, backup or publication-safety rule was weakened.
+
+Live verification remains **BLOCKED**/**NOT_RUN**; the local evidence is recorded in the V1.7
+checkgates and never claims a Workspace measurement. See
+[V1_7_DEPLOYMENT_RUNBOOK.md](V1_7_DEPLOYMENT_RUNBOOK.md).
+
+## Historical V1.6.2 assessment (2026-10-28)
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 

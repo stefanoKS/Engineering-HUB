@@ -40,14 +40,14 @@ function version5() {
   const history = app.book.getSheetByName('SCHEMA_MIGRATIONS');
   const versionColumn = history.rows[0].indexOf('New_Version');
   history.rows.forEach((row, index) => { if (index > 0) row[versionColumn] = 5; });
-  app.properties.setProperty('APPROVED_MIGRATIONS', '006_responsibilities_and_nested_subprojects,007_responsibility_hierarchy_and_lifecycle');
+  app.properties.setProperty('APPROVED_MIGRATIONS', '006_responsibilities_and_nested_subprojects,007_responsibility_hierarchy_and_lifecycle,008_task_and_responsibility_members');
   return app;
 }
 
-test('schema version 7 keeps the V1.4 responsibility table and adds the V1.6 lifecycle columns', () => {
+test('schema version 8 keeps the V1.4 responsibility table and adds the V1.6 lifecycle columns', () => {
   const app = fixtures.app();
   const context = app.context;
-  assert.equal(context.Schema.version, 7);
+  assert.equal(context.Schema.version, 8);
   assert.ok(context.Schema.tables.RESPONSIBILITIES);
   const link = context.Schema.tables.PROJECTS.fields.find(field => field.name === 'Responsibility_ID');
   assert.equal(link.defaultValue, '');
@@ -295,7 +295,7 @@ test('projects without a responsibility stay unassigned rather than invented', (
   assert.equal(context.Responsibilities.needsReassignment(context.Database.find('PROJECTS', 'P2')), false);
 });
 
-test('migrations 006 and 007 are additive and preserve every legacy cell, formula and custom column', () => {
+test('migrations 006 to 008 are additive and preserve every legacy cell, formula and custom column', () => {
   const app = version5();
   const projects = app.book.getSheetByName('PROJECTS');
   projects.rows[0].push('Manual_Notes');
@@ -309,7 +309,7 @@ test('migrations 006 and 007 are additive and preserve every legacy cell, formul
   assert.equal(app.context.Migrations.currentVersion(), 5);
 
   const before = JSON.parse(JSON.stringify(app.context.Backup.snapshot(app.book)));
-  assert.equal(app.context.Migrations.upgrade(), 7);
+  assert.equal(app.context.Migrations.upgrade(), 8);
 
   const legacy = app.context.Database.find('PROJECTS', 'P1');
   assert.equal(legacy.Responsibility_ID, '', 'existing projects stay unassigned');
@@ -329,7 +329,7 @@ test('migrations 006 and 007 are additive and preserve every legacy cell, formul
   assert.equal(projects.getDataRange().getValues()[1][custom], 'retain this note');
 });
 
-test('repeating the V1.4 and V1.6 migrations changes nothing and duplicates no column', () => {
+test('repeating the V1.4 to V1.7 migrations changes nothing and duplicates no column', () => {
   const app = version5();
   app.context.Migrations.upgrade();
   const after = JSON.stringify(app.context.Backup.snapshot(app.book));
@@ -351,15 +351,20 @@ test('each migration refuses to run without its own explicit approval and takes 
   app.properties.setProperty('APPROVED_MIGRATIONS', '006_responsibilities_and_nested_subprojects');
   assert.throws(() => app.context.Migrations.upgrade(), /007_responsibility_hierarchy_and_lifecycle/);
 
+  // V1.7 has its own reviewed identifier too; it is never implied by an earlier approval.
   app.properties.setProperty('APPROVED_MIGRATIONS',
     '006_responsibilities_and_nested_subprojects,007_responsibility_hierarchy_and_lifecycle');
-  assert.equal(app.context.Migrations.upgrade(), 7);
-  assert.equal(app.backups.length, 2);
+  assert.throws(() => app.context.Migrations.upgrade(), /008_task_and_responsibility_members/);
+
+  app.properties.setProperty('APPROVED_MIGRATIONS',
+    '006_responsibilities_and_nested_subprojects,007_responsibility_hierarchy_and_lifecycle,008_task_and_responsibility_members');
+  assert.equal(app.context.Migrations.upgrade(), 8);
+  assert.equal(app.backups.length, 3);
 });
 
 test('a new database initializes with the responsibility table and no seed rows', () => {
   const app = fixtures.app();
   assert.ok(app.book.getSheetByName('RESPONSIBILITIES'));
   assert.equal(app.context.Database.read('RESPONSIBILITIES').length, 0);
-  assert.equal(app.context.Migrations.currentVersion(), 7);
+  assert.equal(app.context.Migrations.currentVersion(), 8);
 });

@@ -65,8 +65,195 @@
     requestConfig: {enabled: false, state: 'loading'},
     // Unsent request form data lives in memory only: a language switch, a validation error
     // or a temporary server error must never discard what the viewer typed.
-    draft: {taskId: '', type: '', fields: {}, lookup: '', receipt: null, statusResult: null}
+    draft: {taskId: '', type: '', fields: {}, lookup: '', receipt: null, statusResult: null},
+    // V1.7 worker view and the non-blocking submission activity list.
+    view: 'portfolio',
+    worker: {worker: '', responsibilityId: '', projectId: '', group: 'open', priority: '',
+      overdue: false, dueWithin: false, query: '', offset: 0},
+    workerData: null,
+    workerToken: 0
   };
+
+  /* ---------------- non-blocking request submission ---------------- */
+
+  /**
+   * Transport state of one submission. This is deliberately separate from the manager's
+   * approval state: RECEIVED means the inbox accepted the row, never that it was approved.
+   *
+   * Only non-sensitive receipt metadata is persisted (task id, type, time, state, request ID).
+   * Explanation text, completion notes and any manager data stay in memory and are lost on
+   * reload by design.
+   */
+  var SUBMISSION_KEY = 'eh.submissions';
+  var MAX_SUBMISSION_RECORDS = 20;
+  var submissions = [];
+
+  function storage() { return typeof localStorage === 'undefined' ? null : localStorage; }
+
+  function readSubmissions() {
+    try {
+      var raw = storage().getItem(SUBMISSION_KEY);
+      var list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? list : [];
+    } catch (error) { return []; }
+  }
+
+  function persistSubmissions() {
+    try {
+      // Only the allowlisted receipt metadata is stored; request text is never persisted.
+      var safe = submissions.map(function (entry) {
+        return {attemptId: entry.attemptId, type: entry.type, taskId: entry.taskId,
+          taskName: entry.taskName, at: entry.at, transport: entry.transport,
+          requestId: entry.requestId, serverStatus: entry.serverStatus || ''};
+      });
+      storage().setItem(SUBMISSION_KEY, JSON.stringify(safe.slice(-MAX_SUBMISSION_RECORDS)));
+    } catch (error) { /* storage is an optimisation; the in-memory list stays authoritative */ }
+  }
+
+  function newAttemptId() {
+    return 'A-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+  }
+
+  /**
+   * Loads the stored receipts and reports an interrupted send honestly.
+   *
+   * A record left in SENDING means the browser could not observe the answer. It may have been
+   * stored in the inbox or not, so it becomes OUTCOME_UNKNOWN instead of being retried.
+   */
+  function loadSubmissions() {
+    submissions = readSubmissions().map(function (entry) {
+      var record = Object.assign({}, entry);
+      if (record.transport === 'SENDING' || record.transport === 'LOCAL_PENDING') record.transport = 'OUTCOME_UNKNOWN';
+      return record;
+    });
+    persistSubmissions();
+  }
+
+  function findSubmission(attemptId) {
+    return submissions.filter(function (entry) { return entry.attemptId === attemptId; })[0] || null;
+  }
+
+  /**
+   * Sends one request without blocking the interface.
+   *
+   * The caller closes the form immediately; this controller owns the RPC, the durable receipt
+   * and the failure state. A retry reuses the same browser token, so the server's existing
+   * duplicate guard returns the original request ID instead of creating a second request.
+   */
+  function startSubmission(type, payload, meta) {
+    var entry = {
+      attemptId: newAttemptId(), type: type, taskId: String(payload.taskId || ''),
+      taskName: String((meta && meta.taskName) || ''), at: new Date().toISOString(),
+      transport: 'SENDING', requestId: '', error: '',
+      // Kept in memory only so a retry in this page can re-send the exact same request.
+      payload: payload
+    };
+    submissions.push(entry);
+    persistSubmissions();
+    renderActivity();
+    var call = type === 'DEADLINE_CHANGE' ? api.submitDeadline : api.submitCompletion;
+    return call(payload).then(function (result) {
+      if (result && result.ok) {
+        entry.transport = 'RECEIVED';
+        entry.requestId = String((result.data && result.data.requestId) || '');
+        entry.serverStatus = String((result.data && result.data.status) || 'RECEIVED');
+      } else {
+        entry.transport = 'FAILED';
+        entry.error = I18n.errorMessage(language, result && result.error);
+      }
+      persistSubmissions(); renderActivity();
+      return entry;
+    }).catch(function (error) {
+      // A transport failure is ambiguous: the inbox row may or may not exist.
+      entry.transport = 'OUTCOME_UNKNOWN';
+      entry.error = String((error && error.message) || error || '');
+      persistSubmissions(); renderActivity();
+      return entry;
+    });
+  }
+
+  function transportLabel(value) {
+    var key = 'request.transport.' + String(value || '');
+    return I18n.has(key) ? T(key) : String(value || '');
+  }
+
+  function renderActivity() {
+    if (!dom.activity || !dom.activityList) return;
+    clear(dom.activityList);
+    if (!submissions.length) { dom.activity.hidden = true; return; }
+    dom.activity.hidden = false;
+    submissions.slice().reverse().forEach(function (entry) {
+      var item = el('li', {className: 'request-activity-item'});
+      item.appendChild(el('strong', {text: entry.taskName || entry.taskId}));
+      var facts = el('dl');
+      facts.appendChild(el('dt', {text: T('request.activity.type.' + entry.type)}));
+      facts.appendChild(el('dd', {text: transportLabel(entry.transport)}));
+      facts.appendChild(el('dt', {text: T('request.activity.at')}));
+      facts.appendChild(el('dd', {text: String(entry.at || '').replace('T', ' ').slice(0, 16)}));
+      if (entry.requestId) {
+        facts.appendChild(el('dt', {text: T('request.confirm.id')}));
+        facts.appendChild(el('dd', {text: entry.requestId}));
+      }
+      if (entry.serverStatus) {
+        facts.appendChild(el('dt', {text: T('request.activity.approval')}));
+        facts.appendChild(el('dd', {text: I18n.t(language, 'request.status.' + entry.serverStatus)}));
+      }
+      item.appendChild(facts);
+      if (entry.error) item.appendChild(el('p', {className: 'request-error', text: entry.error}));
+      if (entry.transport === 'OUTCOME_UNKNOWN') item.appendChild(el('p', {className: 'request-hint', text: T('request.activity.outcomeUnknown')}));
+      var actions = el('div', {className: 'request-actions'});
+      if (entry.requestId) {
+        actions.appendChild(el('button', {className: 'request-button', attrs: {type: 'button'}, text: T('request.activity.check')}))
+          .addEventListener('click', function () { checkSubmission(entry); });
+      }
+      if (entry.transport === 'FAILED' && entry.requestId) {
+        actions.appendChild(el('button', {className: 'request-button', attrs: {type: 'button'}, text: T('request.activity.retry')}))
+          .addEventListener('click', function () { retrySubmission(entry); });
+      }
+      actions.appendChild(el('button', {className: 'request-button', attrs: {type: 'button'}, text: T('request.activity.dismiss')}))
+        .addEventListener('click', function () {
+          submissions = submissions.filter(function (item2) { return item2.attemptId !== entry.attemptId; });
+          persistSubmissions(); renderActivity();
+        });
+      item.appendChild(actions);
+      dom.activityList.appendChild(item);
+    });
+  }
+
+  /** Reads the authoritative inbox state of one receipt; never changes the request. */
+  function checkSubmission(entry) {
+    api.requestStatus(entry.requestId).then(function (result) {
+      if (!result || !result.ok) {
+        toast(I18n.errorMessage(language, result && result.error));
+        return;
+      }
+      entry.serverStatus = String((result.data && result.data.status) || '');
+      persistSubmissions(); renderActivity();
+      toast(I18n.t(language, 'request.status.' + entry.serverStatus));
+    }).catch(function () { toast(T('request.error.REQUEST_UNEXPECTED')); });
+  }
+
+  /**
+   * Re-sends a request whose acknowledgement was lost *and* whose receipt is unknown.
+   *
+   * The browser reuses the same client token, so the server returns the original request ID
+   * when the row already exists. The attempt is never sent twice concurrently.
+   */
+  function retrySubmission(entry) {
+    if (entry.transport === 'SENDING' || !entry.payload) {
+      toast(T('request.activity.outcomeUnknown'));
+      return;
+    }
+    var payload = entry.payload;
+    var type = entry.type;
+    submissions = submissions.filter(function (item) { return item.attemptId !== entry.attemptId; });
+    persistSubmissions(); renderActivity();
+    startSubmission(type, payload, {taskName: entry.taskName}).then(function (result) {
+      if (result.transport === 'RECEIVED') toast(T('request.transport.RECEIVED'));
+      else if (result.transport === 'FAILED') toast(result.error || T('request.transport.FAILED'));
+      else toast(T('request.activity.outcomeUnknown'));
+    });
+  }
 
   /* ---------------- DOM helpers ---------------- */
 
@@ -132,7 +319,30 @@
     drawerBadge: byId('drawer-badge'),
     drawerClose: byId('drawer-close'),
     backdrop: byId('drawer-backdrop'),
-    toast: byId('toast')
+    toast: byId('toast'),
+    // V1.7 worker view and request activity.
+    viewSwitch: byId('view-switch'),
+    viewPortfolio: byId('view-portfolio'),
+    viewWorkers: byId('view-workers'),
+    workers: byId('workers'),
+    workerWorker: byId('worker-worker'),
+    workerResponsibility: byId('worker-responsibility'),
+    workerProject: byId('worker-project'),
+    workerGroup: byId('worker-group'),
+    workerPriority: byId('worker-priority'),
+    workerOverdue: byId('worker-overdue'),
+    workerDue: byId('worker-due'),
+    workerSearch: byId('worker-search'),
+    workerCount: byId('worker-count'),
+    workerEmpty: byId('worker-empty'),
+    workerError: byId('worker-error'),
+    workerErrorDetail: byId('worker-error-detail'),
+    workerRetry: byId('worker-retry'),
+    workerList: byId('worker-list'),
+    workerPrev: byId('worker-prev'),
+    workerNext: byId('worker-next'),
+    activity: byId('request-activity'),
+    activityList: byId('request-activity-list')
   };
 
   /* ---------------- server access ---------------- */
@@ -165,7 +375,8 @@
         submitDeadline: function (payload) { return Promise.resolve(previewSubmit(payload, 'DEADLINE_CHANGE')); },
         submitCompletion: function (payload) { return Promise.resolve(previewSubmit(payload, 'COMPLETION_REPORT')); },
         requestStatus: function (id) { return Promise.resolve(previewStatus(id)); },
-        requestConfig: function () { return Promise.resolve({ok: true, data: {enabled: true}}); }
+        requestConfig: function () { return Promise.resolve({ok: true, data: {enabled: true}}); },
+        workerTasks: function (request) { return Promise.resolve(previewWorkerTasks(request)); }
       }
     : {
         portfolio: function (request) { return callServer('dashboardPortfolio', [request]); },
@@ -174,8 +385,22 @@
         submitDeadline: function (payload) { return callServer('submitDeadlineRequest', [payload]); },
         submitCompletion: function (payload) { return callServer('submitCompletionReport', [payload]); },
         requestStatus: function (id) { return callServer('requestSubmissionStatus', [id]); },
-        requestConfig: function () { return callServer('requestSubmissionConfig', []); }
+        requestConfig: function () { return callServer('requestSubmissionConfig', []); },
+        workerTasks: function (request) { return callServer('dashboardWorkerTasks', [request]); }
       };
+
+  /** Static preview only: the deployed page always reads the server query. */
+  function previewWorkerTasks(request) {
+    var source = (PREVIEW && PREVIEW.workerTasks) || {tasks: [], workers: [], projects: [], responsibilities: []};
+    request = request || {};
+    var worker = String(request.worker || '');
+    var tasks = (source.tasks || []).filter(function (task) {
+      if (!worker) return true;
+      var names = task.assigneeNames || (task.ownerName ? [task.ownerName] : []);
+      return names.indexOf(worker) >= 0;
+    });
+    return {ok: true, data: Object.assign({}, source, {tasks: tasks, total: tasks.length, offset: 0, limit: tasks.length || 20})};
+  }
 
   function previewPortfolio(request) {
     var query = String((request && request.query) || '').toLowerCase();
@@ -1196,9 +1421,7 @@
         error.textContent = T('request.error.REQUEST_DATE_UNCHANGED');
         return;
       }
-      submit.disabled = true;
-      submit.textContent = T('request.form.submitting');
-      api.submitDeadline({
+      var payload = {
         projectId: task.projectId,
         taskId: task.taskId,
         requestedDate: requested.value,
@@ -1206,23 +1429,16 @@
         explanation: explanation.value,
         requesterName: requester.value.trim(),
         clientToken: clientToken()
-      }).then(function (result) {
-        submit.disabled = false;
-        submit.textContent = T('request.form.submit');
-        if (!result || !result.ok) {
-          // The typed values stay in the draft so the viewer can correct and resend.
-          error.textContent = I18n.errorMessage(language, result && result.error);
-          return;
-        }
-        var requestId = result.data.requestId;
-        var status = result.data.status || 'RECEIVED';
-        clearDraft();
-        state.draft.receipt = {requestId: requestId, status: status, completion: false};
-        refreshDrawer();
-      }).catch(function () {
-        submit.disabled = false;
-        submit.textContent = T('request.form.submit');
-        error.textContent = T('request.error.REQUEST_UNEXPECTED');
+      };
+      // Non-blocking: the form closes immediately and the submission controller owns the RPC,
+      // the receipt and the failure state. Unconfirmed sends are never reported as success.
+      clearDraft();
+      closeDrawer();
+      toast(T('request.transport.SENDING'));
+      startSubmission('DEADLINE_CHANGE', payload, {taskName: task.name}).then(function (entry) {
+        if (entry.transport === 'RECEIVED') toast(T('request.transport.RECEIVED') + ' · ' + T('request.activity.received', {id: entry.requestId}));
+        else if (entry.transport === 'FAILED') toast(entry.error || T('request.transport.FAILED'));
+        else toast(T('request.transport.OUTCOME_UNKNOWN'));
       });
     });
 
@@ -1258,34 +1474,154 @@
     submit.addEventListener('click', function () {
       clear(error);
       if (!reporter.value.trim()) { error.textContent = T('request.error.REQUEST_REQUESTER_REQUIRED'); return; }
-      submit.disabled = true;
-      submit.textContent = T('request.form.submitting');
-      api.submitCompletion({
+      var payload = {
         projectId: task.projectId,
         taskId: task.taskId,
         note: note.value,
         reporterName: reporter.value.trim(),
         clientToken: clientToken()
-      }).then(function (result) {
-        submit.disabled = false;
-        submit.textContent = T('request.completion.button');
-        if (!result || !result.ok) {
-          error.textContent = I18n.errorMessage(language, result && result.error);
-          return;
-        }
-        var requestId = result.data.requestId;
-        var status = result.data.status || 'RECEIVED';
-        clearDraft();
-        state.draft.receipt = {requestId: requestId, status: status, completion: true};
-        refreshDrawer();
-      }).catch(function () {
-        submit.disabled = false;
-        submit.textContent = T('request.completion.button');
-        error.textContent = T('request.error.REQUEST_UNEXPECTED');
+      };
+      clearDraft();
+      closeDrawer();
+      toast(T('request.transport.SENDING'));
+      startSubmission('COMPLETION_REPORT', payload, {taskName: task.name}).then(function (entry) {
+        if (entry.transport === 'RECEIVED') toast(T('request.transport.RECEIVED') + ' · ' + T('request.activity.received', {id: entry.requestId}));
+        else if (entry.transport === 'FAILED') toast(entry.error || T('request.transport.FAILED'));
+        else toast(T('request.transport.OUTCOME_UNKNOWN'));
       });
     });
 
     return form;
+  }
+
+  /* ---------------- worker view ---------------- */
+
+  /** Switches between the project portfolio and the worker-centred task list. */
+  function setView(next) {
+    state.view = next === 'workers' ? 'workers' : 'portfolio';
+    dom.overview.hidden = state.view !== 'portfolio';
+    // The project detail belongs to the portfolio; returning restores it from state.
+    if (dom.detail) dom.detail.hidden = state.view === 'workers' ? true : !state.detail;
+    if (dom.workers) dom.workers.hidden = state.view !== 'workers';
+    if (dom.viewPortfolio) dom.viewPortfolio.setAttribute('aria-selected', state.view === 'portfolio' ? 'true' : 'false');
+    if (dom.viewWorkers) dom.viewWorkers.setAttribute('aria-selected', state.view === 'workers' ? 'true' : 'false');
+    if (state.view === 'workers') loadWorkers();
+  }
+
+  function workerRequest(overrides) {
+    Object.assign(state.worker, overrides || {});
+    var w = state.worker;
+    return {
+      worker: w.worker, responsibilityId: w.responsibilityId, projectId: w.projectId,
+      group: w.group, priority: w.priority, overdue: w.overdue === true,
+      dueWithin: w.dueWithin ? 7 : 0, query: w.query, offset: w.offset, limit: 20
+    };
+  }
+
+  /** One bounded, published-data query; a stale answer never replaces a newer filter state. */
+  function loadWorkers() {
+    var token = ++state.workerToken;
+    if (dom.workerError) dom.workerError.hidden = true;
+    api.workerTasks(workerRequest()).then(function (result) {
+      if (token !== state.workerToken) return;
+      if (!result || !result.ok) {
+        dom.workerError.hidden = false;
+        dom.workerErrorDetail.textContent = I18n.errorMessage(language, result && result.error);
+        return;
+      }
+      state.workerData = result.data;
+      renderWorkerFilters();
+      renderWorkers();
+    }).catch(function () {
+      if (token !== state.workerToken) return;
+      dom.workerError.hidden = false;
+      dom.workerErrorDetail.textContent = T('request.error.REQUEST_UNEXPECTED');
+    });
+  }
+
+  function workerSelect(select, allLabel, values, current) {
+    if (!select) return;
+    clear(select);
+    select.appendChild(el('option', {text: allLabel, attrs: {value: ''}}));
+    values.forEach(function (value) {
+      select.appendChild(el('option', {text: value.name, attrs: {value: value.id}}));
+    });
+    select.value = values.some(function (value) { return value.id === current; }) ? current : '';
+  }
+
+  function renderWorkerFilters() {
+    var data = state.workerData || {};
+    var workers = (data.workers || []).map(function (name) { return {id: name, name: name}; });
+    workerSelect(dom.workerWorker, T('dashboard.workers.allWorkers'), workers, state.worker.worker);
+    state.worker.worker = dom.workerWorker ? dom.workerWorker.value : state.worker.worker;
+    var responsibilities = (data.responsibilities || []).map(function (item) {
+      return {id: item.responsibilityId, name: item.retired ? T('dashboard.filter.responsibility.retired', {name: item.name}) : item.name};
+    });
+    workerSelect(dom.workerResponsibility, T('dashboard.filter.responsibility.all'), responsibilities, state.worker.responsibilityId);
+    state.worker.responsibilityId = dom.workerResponsibility ? dom.workerResponsibility.value : state.worker.responsibilityId;
+    var projects = (data.projects || []).map(function (item) { return {id: item.projectId, name: item.projectName}; });
+    workerSelect(dom.workerProject, T('common.all'), projects, state.worker.projectId);
+    state.worker.projectId = dom.workerProject ? dom.workerProject.value : state.worker.projectId;
+    var priorities = ['Low', 'Medium', 'High', 'Critical'].map(function (value) {
+      return {id: value, name: I18n.label(language, 'priority', value)};
+    });
+    workerSelect(dom.workerPriority, T('common.all'), priorities, state.worker.priority);
+    state.worker.priority = dom.workerPriority ? dom.workerPriority.value : state.worker.priority;
+    if (dom.workerGroup) dom.workerGroup.value = state.worker.group;
+    if (dom.workerOverdue) dom.workerOverdue.setAttribute('aria-pressed', state.worker.overdue ? 'true' : 'false');
+    if (dom.workerDue) dom.workerDue.setAttribute('aria-pressed', state.worker.dueWithin ? 'true' : 'false');
+  }
+
+  /** Approval status is displayed separately from the task status, never merged into it. */
+  function approvalText(task) {
+    if (task.reviewLabel) return task.reviewLabel;
+    if (task.pendingRequest) return T('dashboard.drawer.requestPending');
+    return T('common.none');
+  }
+
+  function workerTaskRow(task) {
+    var item = el('li', {className: 'task-item'});
+    item.setAttribute('data-worker-task', task.taskId);
+    item.setAttribute('data-worker-project', task.projectId);
+    var head = el('div', {className: 'task-head'}, [
+      el('span', {className: 'task-name', text: task.name}),
+      el('span', {className: 'task-status', text: statusText(task.status)})
+    ]);
+    item.appendChild(head);
+    var names = task.assigneeNames || (task.ownerName ? [task.ownerName] : []);
+    var meta = el('div', {className: 'task-meta'}, [
+      metaItem(T('request.form.project'), task.projectName || T('common.none')),
+      metaItem(T('dashboard.workers.assignees'), names.join('、') || T('common.none')),
+      metaItem(T('dashboard.table.deadline'), deadlineText(task), deadlineClass(task)),
+      metaItem(T('dashboard.table.progress'), percentText(task.progress)),
+      metaItem(T('dashboard.workers.approval'), approvalText(task)),
+      metaItem(T('dashboard.table.priority'), priorityText(task.priority))
+    ]);
+    item.appendChild(meta);
+    item.appendChild(progressBar(task.progress, task.name));
+    var actions = el('div', {className: 'task-actions'});
+    actions.appendChild(el('button', {className: 'link-button', attrs: {type: 'button'}, text: T('dashboard.detail.open')}))
+      .addEventListener('click', function () { openTask(task.projectId, task.taskId); });
+    item.appendChild(actions);
+    return item;
+  }
+
+  function renderWorkers() {
+    if (!dom.workerList) return;
+    var data = state.workerData;
+    clear(dom.workerList);
+    if (!data) return;
+    var tasks = data.tasks || [];
+    dom.workerEmpty.hidden = tasks.length > 0;
+    var from = tasks.length ? data.offset + 1 : 0;
+    var to = data.offset + tasks.length;
+    dom.workerCount.textContent = T('dashboard.workers.count', {from: from, to: to, total: data.total});
+    var totals = data.totals || {};
+    dom.workerCount.textContent += ' · ' + T('dashboard.workers.open', {count: totals.open || 0}) +
+      ' · ' + T('dashboard.workers.overdueCount', {count: totals.overdue || 0});
+    tasks.forEach(function (task) { dom.workerList.appendChild(workerTaskRow(task)); });
+    dom.workerPrev.disabled = data.offset <= 0;
+    dom.workerNext.disabled = data.offset + tasks.length >= data.total;
   }
 
   /* ---------------- drawer plumbing ---------------- */
@@ -1429,6 +1765,9 @@
     if (state.detail) renderDetail();
     // The drawer is rebuilt from state, so unsent request data survives the switch.
     refreshDrawer();
+    // Worker labels and the receipt list follow the language too, without re-querying.
+    if (state.view === 'workers' && state.workerData) { renderWorkerFilters(); renderWorkers(); }
+    renderActivity();
   }
 
   function wireLanguage() {
@@ -1484,6 +1823,52 @@
     document.addEventListener('keydown', function (event) {
       if ((event.key === 'Escape' || event.key === 'Esc') && !state.drawerOpen && !dom.detail.hidden) closeDetail();
     });
+
+    // V1.7 worker view.
+    if (dom.viewPortfolio) dom.viewPortfolio.addEventListener('click', function () { setView('portfolio'); });
+    if (dom.viewWorkers) dom.viewWorkers.addEventListener('click', function () { setView('workers'); });
+    function workerFilter(key, control) {
+      if (!control) return;
+      control.addEventListener('change', function () {
+        state.worker[key] = control.value;
+        state.worker.offset = 0;
+        loadWorkers();
+      });
+    }
+    workerFilter('worker', dom.workerWorker);
+    workerFilter('responsibilityId', dom.workerResponsibility);
+    workerFilter('projectId', dom.workerProject);
+    workerFilter('group', dom.workerGroup);
+    workerFilter('priority', dom.workerPriority);
+    function workerToggle(key, control) {
+      if (!control) return;
+      control.addEventListener('click', function () {
+        state.worker[key] = !state.worker[key];
+        control.setAttribute('aria-pressed', state.worker[key] ? 'true' : 'false');
+        state.worker.offset = 0;
+        loadWorkers();
+      });
+    }
+    workerToggle('overdue', dom.workerOverdue);
+    workerToggle('dueWithin', dom.workerDue);
+    if (dom.workerSearch) {
+      var workerTimer = null;
+      dom.workerSearch.addEventListener('input', function () {
+        if (workerTimer) window.clearTimeout(workerTimer);
+        workerTimer = window.setTimeout(function () {
+          state.worker.query = dom.workerSearch.value.trim();
+          state.worker.offset = 0;
+          loadWorkers();
+        }, SEARCH_DEBOUNCE_MS);
+      });
+    }
+    if (dom.workerPrev) dom.workerPrev.addEventListener('click', function () {
+      state.worker.offset = Math.max(0, state.worker.offset - 20); loadWorkers();
+    });
+    if (dom.workerNext) dom.workerNext.addEventListener('click', function () {
+      state.worker.offset += 20; loadWorkers();
+    });
+    if (dom.workerRetry) dom.workerRetry.addEventListener('click', loadWorkers);
   }
 
   function boot() {
@@ -1493,6 +1878,10 @@
     I18n.apply(language, document);
     renderLanguageButtons();
     renderSync();
+    // Receipts survive a reload; an interrupted send is reported honestly, never as success.
+    loadSubmissions();
+    renderActivity();
+    setView('portfolio');
     // Request availability fails closed: nothing is offered until the server confirms it.
     state.requestConfig = {enabled: false, state: 'loading'};
     api.requestConfig().then(function (result) {

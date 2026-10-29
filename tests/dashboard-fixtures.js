@@ -90,6 +90,7 @@ function runClient(server, options = {}) {
   });
   document.querySelectorAll = selector => (selector === '.lang-option' ? buttons : []);
   const store = new Map();
+  Object.keys(options.storage || {}).forEach(key => store.set(key, String(options.storage[key])));
   const windowObject = {
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: id => clearTimeout(id),

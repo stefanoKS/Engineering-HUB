@@ -223,8 +223,8 @@ test('switching responsibility resets paging and drops an incompatible project f
   const control = name => h.nodes('content').filter(node => node.name === name)[0];
   control('projectId').value = 'P1';
   control('projectId').dispatchEvent('change', {});
-  control('ownerId').value = 'M-ENG';
-  control('ownerId').dispatchEvent('change', {});
+  control('assigneeId').value = 'M-ENG';
+  control('assigneeId').dispatchEvent('change', {});
   assert.match(content(h), /1–3 \/ 3/);
   // The area keeps the compatible owner filter and clears the project that is outside it.
   const area = control('filterResponsibility');
@@ -232,7 +232,7 @@ test('switching responsibility resets paging and drops an incompatible project f
   area.dispatchEvent('change', {});
   await flush();
   assert.equal(control('projectId').value, '', 'the project select is visibly back to すべて');
-  assert.equal(control('ownerId').value, 'M-ENG', 'the compatible member filter is preserved');
+  assert.equal(control('assigneeId').value, 'M-ENG', 'the compatible member filter is preserved');
   assert.equal(h.window.ManagerWebClient.api.peek('tasks', {}), null);
   assert.match(content(h), /1–1 \/ 1/);
   assert.ok(content(h).indexOf('旧ライン保守') >= 0, 'only the new area is listed');

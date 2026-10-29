@@ -19,7 +19,7 @@ var SharedDashboardModel = (function () {
   // V1.5 adds the nested-task hierarchy, the responsibility colour and the completion review
   // state. The version is explicit so an older snapshot is rejected instead of being read as
   // if it had the new fields (see docs/dashboard/DATA_CONTRACT.md).
-  var CONTRACT_VERSION = '1.5';
+  var CONTRACT_VERSION = '1.6';
   var VISIBILITY = ['INTERNAL', 'RESTRICTED'];
   var DONE = 'Done';
   var CANCELLED = 'Cancelled';
@@ -274,7 +274,12 @@ var SharedDashboardModel = (function () {
       pendingRequest: !!(context.pendingRequests && context.pendingRequests[String(task.Task_ID)]),
       // '' | 'PENDING' | 'STALE' — a state only, never the reporter or the note.
       reviewState: (context.reviewStates || {})[String(task.Task_ID)] || '',
-      completedAt: day(task.Completed_At)
+      completedAt: day(task.Completed_At),
+      // Contract 1.6: the primary assignee first, then the additional assignees. A display-name
+      // list only: no member identifier, e-mail address or role is published.
+      assigneeNames: (context.assigneeNames ? context.assigneeNames(task) : []).filter(function (name) {
+        return !!text(name);
+      })
     };
   }
 
@@ -407,12 +412,13 @@ var SharedDashboardModel = (function () {
       return text(left.Name).localeCompare(text(right.Name), 'ja');
     });
 
+    var memberNameMap = memberNames(input.members);
     var context = {
       today: today,
       limits: limits,
       // Aggregates and grouping use only published tasks, so a restricted sibling can
       // never change a published project's numbers.
-      memberNames: memberNames(input.members),
+      memberNames: memberNameMap,
       responsibilities: publishedResponsibilities,
       responsibilityNames: responsibilityNames(publishedResponsibilities),
       subprojectLevels: subprojectLevels(publishedSubprojects),
@@ -444,7 +450,15 @@ var SharedDashboardModel = (function () {
       // Only a boolean indicator and a review state are published; request text stays in the
       // private workbook.
       pendingRequests: input.pendingRequests || Object.create(null),
-      reviewStates: input.reviewStates || Object.create(null)
+      reviewStates: input.reviewStates || Object.create(null),
+      // Contract 1.6: display names of every assignee, resolved once per snapshot. Member
+      // identifiers, e-mail addresses and roles are never part of this list. A caller that
+      // publishes additional assignees supplies the resolver; otherwise the primary owner is
+      // the only assignee the model can honestly name.
+      assigneeNames: input.assigneeNames || function (task) {
+        var owner = memberNameMap[String(task.Owner_Member_ID || '')] || '';
+        return owner ? [owner] : [];
+      }
     };
 
     var projectDtos = publishedProjects.map(function (project) { return projectDto(project, context); });
@@ -512,7 +526,7 @@ var SharedDashboardModel = (function () {
   var RESPONSIBILITY_PUBLIC_FIELDS = ['responsibilityId', 'name', 'sortOrder', 'retired', 'color'];
   var TASK_PUBLIC_FIELDS = ['taskId', 'projectId', 'subprojectId', 'parentTaskId', 'container', 'name',
     'ownerName', 'status', 'priority', 'plannedStart', 'dueDate', 'progress', 'publicNote', 'revision',
-    'pendingRequest', 'reviewState', 'completedAt'];
+    'pendingRequest', 'reviewState', 'completedAt', 'assigneeNames'];
   var MILESTONE_PUBLIC_FIELDS = ['milestoneId', 'projectId', 'subprojectId', 'name', 'targetDate', 'actualDate', 'status'];
 
   return {

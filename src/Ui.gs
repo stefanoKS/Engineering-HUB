@@ -97,6 +97,25 @@ var Ui = (function () {
   }
 
   /**
+   * Accepts a browser multi-select value (array or a single identifier) as a member ID list.
+   *
+   * Only trimming, de-duplication and rejection of a repeated identifier happen here; member
+   * existence and active state stay with `Assignees.check`, so one rule serves both entities.
+   */
+  function memberIdList(value, label) {
+    var values = Array.isArray(value) ? value : (value === '' || value === null || value === undefined ? [] : [value]);
+    var out = [], seen = Object.create(null);
+    values.forEach(function (item) {
+      var id = String(item === undefined || item === null ? '' : item).trim();
+      if (!id) return;
+      if (seen[id]) throw new Error(label + 'が重複しています: ' + id);
+      seen[id] = true;
+      out.push(id);
+    });
+    return out;
+  }
+
+  /**
    * Opens a sidebar at a specific section.
    *
    * The initial section and action are template values, never a mutable global, so two
@@ -496,6 +515,10 @@ var Ui = (function () {
       if (payload.ownerId !== undefined) patch.Owner_Member_ID = String(payload.ownerId || '');
       // A colour is optional; only a validated #RRGGBB value is stored.
       if (payload.color !== undefined) patch.Color_Hex = String(payload.color || '');
+      // V1.7: additional responsible members are relationship rows, never a stored column.
+      if (payload.additionalMemberIds !== undefined) {
+        patch.Additional_Member_IDs = memberIdList(payload.additionalMemberIds, '追加メンバー');
+      }
       if (payload.responsibilityId) {
         if (!Object.keys(patch).length) throw new Error('変更する項目がありません');
         return plain(Responsibilities.update(payload.responsibilityId, patch));
@@ -564,7 +587,7 @@ var Ui = (function () {
    * unrelated column. An explicit empty value (for example an empty duration) is a
    * deliberate clear and is written.
    */
-  function taskPatch(payload, existing) {
+  function taskPatch(payload, existing, membershipMayBeTheOnlyChange) {
     var patch = {};
     if (payload.projectId !== undefined) patch.Project_ID = text(payload.projectId, 'プロジェクト');
     if (payload.subprojectId !== undefined) patch.Subproject_ID = String(payload.subprojectId).trim();
@@ -601,7 +624,7 @@ var Ui = (function () {
       ? patch.Planned_Duration_Value : existing.Planned_Duration_Value;
     var noDuration = effectiveDuration === '' || effectiveDuration === null || effectiveDuration === undefined;
     if (patch.Planned_Start && noDuration) patch.Planned_Start_Source = 'MANUAL';
-    if (!Object.keys(patch).length) throw new Error('変更する項目がありません');
+    if (!Object.keys(patch).length && membershipMayBeTheOnlyChange !== true) throw new Error('変更する項目がありません');
     return patch;
   }
 
@@ -619,7 +642,11 @@ var Ui = (function () {
         if (stampChanged(payload.updatedAt, existing.Last_Updated)) {
           throw new Error('このタスクは読み込み後に更新されています。再読み込みしてから保存してください');
         }
-        var patch = taskPatch(payload, existing);
+        var patch = taskPatch(payload, existing, payload.additionalAssigneeIds !== undefined);
+        // V1.7: additional assignees are relationship rows applied under the same lock.
+        if (payload.additionalAssigneeIds !== undefined) {
+          patch.Additional_Assignee_IDs = memberIdList(payload.additionalAssigneeIds, '追加担当者');
+        }
         // Moving a task into another project requires rights on the destination project.
         if (patch.Project_ID && patch.Project_ID !== existing.Project_ID) {
           Access.requireProjectWrite(patch.Project_ID, current.email);
@@ -656,6 +683,9 @@ var Ui = (function () {
         };
         // An explicit start without a duration is a deliberate manual override.
         if (payload.plannedStart && durationValue === '') data.Planned_Start_Source = 'MANUAL';
+        if (payload.additionalAssigneeIds !== undefined) {
+          data.Additional_Assignee_IDs = memberIdList(payload.additionalAssigneeIds, '追加担当者');
+        }
         task = Tasks.create(data);
       }
       AuditLog.write(payload.taskId ? 'UI_TASK_UPDATED' : 'UI_TASK_ASSIGNED', 'TASK', task.Task_ID,

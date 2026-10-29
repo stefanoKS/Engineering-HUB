@@ -1,6 +1,30 @@
 # Deployment and activation
 
-## V1.6.1 corrective release (current)
+## V1.7 release (current)
+
+V1.7 adds one additive migration (`008_task_and_responsibility_members`, schema 7 → 8) and employee
+contract **1.6**. Follow [docs/V1_7_DEPLOYMENT_RUNBOOK.md](docs/V1_7_DEPLOYMENT_RUNBOOK.md) in DEV in
+this order: verified backup with `createDatabaseBackup()` → approved migration
+(`APPROVED_MIGRATIONS = 008_task_and_responsibility_members`, then `upgradeExistingDatabase()`) →
+manager code upload → new manager web deployment → publication once so the snapshot carries contract
+1.6 → employee upload/deployment → worker view and request-receipt checks → rollback rehearsal.
+
+`rootDir` stays `src` for the manager project and `dashboard-app` for the employee project;
+`MANAGER_WEB_ALLOWED_DOMAINS` remains mandatory; the manager web app still runs as *User accessing the
+web app*, domain restricted; the employee app still runs as the deployer. Nothing is migrated,
+deployed, initialized, triggered or published automatically. **NOT APPROVED FOR PRODUCTION.**
+
+Compatibility: the employee reader accepts contracts **1.4**, **1.5** and **1.6** through separate
+exact header lists, so a snapshot published before the manager upgrade stays readable. An older
+employee deployment that only understands 1.4 refuses a newer snapshot with
+`SNAPSHOT_CONTRACT_UNSUPPORTED`, which stays the documented fail-closed behaviour.
+
+Rollback: redeploy the previous Apps Script version. Schema 8 is forward compatible for reads (the two
+new tables are simply unused), so no data restoration is needed; restore the pre-migration backup only
+when the migration itself must be undone, because a restore loses everything written after it. Never
+clear or re-initialize an existing workbook.
+
+## V1.6.1 corrective release (historical)
 
 V1.6.1 adds **no** migration, schema change, scope, Script Property or manifest change. Schema stays **7** and the
 published contract stays **1.5** (the employee reader additionally understands **1.4**). Follow

@@ -1,0 +1,14 @@
+﻿Engineering-HUB V1.7 local validation record
+Generated: 2026-10-29 13:40:57 +09:00
+Environment: Windows; Node v24.21.0; Google services mocked; local execution only.
+
+\$ npm run validate
+Validated 40 manager Apps Script files, 3 dashboard files, both manifests and 892 translation keys
+
+\$ npm run lint
+exit code 0 (no findings)
+
+\$ npm test
+592 tests, 592 pass, 0 fail, 0 cancelled, 0 skipped.
+
+Live Google Workspace verification: NOT_RUN (no Workspace access in this environment).
