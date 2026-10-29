@@ -22,22 +22,59 @@ var ManagerWeb = (function () {
     if (!result || result.ok !== true) throw new Error(result && result.error || 'Operation failed');
     return result.data;
   }
-  function response(fn, readOnly) {
-    var started = Date.now(), metrics = {dataMs: 0, tableReads: 0};
+  function response(fn, readOnly, detail) {
+    var started = Date.now(), metrics = {dataMs: 0, tableReads: 0, workbookOpens: 0, rangeReads: 0,
+      bindMs: 0, lockMs: 0, writes: 0, cellsWritten: 0, serializationMs: 0, payloadBytes: 0, readBackend: 'SPREADSHEETAPP'};
     try {
       var execute = function (context) {
         var actor = authorize();
         var result = fn(actor);
-        if (context) { metrics.dataMs = context.dataMs; metrics.tableReads = context.reads; }
+        if (context) {
+          metrics.dataMs = context.dataMs; metrics.tableReads = context.reads;
+          metrics.workbookOpens = context.book ? 1 : 0; metrics.rangeReads = context.rangeReads;
+          metrics.openMs = context.openMs; metrics.bindMs = context.bindMs; metrics.lockMs = context.lockMs;
+          metrics.writes = context.writes; metrics.cellsWritten = context.cellsWritten;
+          metrics.readBackend = context.backend || SheetReadBackend.name();
+          metrics.tableMs = context.tableMs;
+        }
         return result;
       };
       var data = Database.withReadContext(execute, !readOnly);
       metrics.executionMs = Date.now() - started;
       metrics.applicationMs = Math.max(0, metrics.executionMs - metrics.dataMs);
-      return {ok: true, data: JSON.parse(JSON.stringify(data)), metrics: metrics};
+      // Serialization is measured because a large payload costs real time before Apps Script
+      // hands the response to the browser; the byte count is the UTF-8 size actually sent.
+      var serializeStarted = Date.now();
+      var payload = JSON.stringify(data);
+      metrics.serializationMs = Date.now() - serializeStarted;
+      metrics.payloadBytes = byteLength(payload);
+      metrics.totalMs = Date.now() - started;
+      return {ok: true, data: JSON.parse(payload), metrics: detail === true ? metrics : compact(metrics)};
     } catch (error) {
       return {ok: false, error: String(error.message || error), metrics: {executionMs: Date.now() - started}};
     }
+  }
+  /**
+   * Ordinary responses carry only the few numbers the diagnostics page summarises. The per-table
+   * timings and totals ride along only when the caller explicitly asks (計測 / diagnostics), so a
+   * normal payload stays as small as before.
+   */
+  function compact(metrics) {
+    // Only the three numbers the diagnostics table needs on every call; everything else rides
+    // along when the caller asks for the detailed measurement.
+    return {executionMs: metrics.executionMs, tableReads: metrics.tableReads, payloadBytes: metrics.payloadBytes};
+  }
+  /** UTF-8 byte length without an extra Apps Script service call. */
+  function byteLength(text) {
+    var value = String(text), bytes = 0;
+    for (var index = 0; index < value.length; index++) {
+      var code = value.charCodeAt(index);
+      if (code < 0x80) bytes++;
+      else if (code < 0x800) bytes += 2;
+      else if (code >= 0xD800 && code <= 0xDBFF && index + 1 < value.length) { bytes += 4; index++; }
+      else bytes += 3;
+    }
+    return bytes;
   }
   function record(table, row) {
     if (!row) throw new Error('NOT_FOUND');
@@ -178,8 +215,41 @@ var ManagerWeb = (function () {
     result.items = result.items.map(function (t) { return taskSummary(t, projects, members, treeIndex, reviewStates, assignees); });
     return result;
   }
-  function responsibilityOptions() {
-    return Responsibilities.all().map(function (r) {
+  /**
+   * Bounded parent-task search (V1.7.3).
+   *
+   * The parent selector used to read one page of at most 100 tasks, so a valid parent beyond
+   * that page could not be found. This read applies the same hierarchy rules as the save path
+   * (same project and subproject, never the task itself, never one of its descendants, never a
+   * task that is already at the deepest level) and pages the matches. It never returns the whole
+   * task table into the browser.
+   */
+  var PARENT_OPTION_LIMIT = 200;
+  function parentOptions(input) {
+    var projectId = String(input.projectId || '');
+    if (!projectId) return {items: [], total: 0, complete: true, limit: PARENT_OPTION_LIMIT};
+    var subprojectId = String(input.subprojectId || '');
+    var exclude = String(input.excludeTaskId || '');
+    var query = String(input.query || '').trim().toLowerCase();
+    var all = Database.read('TASKS'), treeIndex = TaskTree.buildIndex(all);
+    var rows = all.filter(function (task) {
+      if (String(task.Project_ID || '') !== projectId) return false;
+      if (String(task.Subproject_ID || '') !== subprojectId) return false;
+      if (TaskTree.viewIn(task, treeIndex).depth >= 2) return false;
+      // A task can never be its own parent nor the parent of its own descendant.
+      if (exclude && TaskTree.isAncestor(exclude, task.Task_ID, treeIndex)) return false;
+      return !query || String(task.Task_Name || '').toLowerCase().indexOf(query) >= 0;
+    }).sort(function (a, b) {
+      return String(a.Task_Name || '').localeCompare(String(b.Task_Name || '')) || String(a.Task_ID).localeCompare(String(b.Task_ID));
+    });
+    return {items: rows.slice(0, PARENT_OPTION_LIMIT).map(function (task) {
+      var view = TaskTree.viewIn(task, treeIndex);
+      return {id: task.Task_ID, name: task.Task_Name, parentId: task.Parent_Task_ID || '',
+        projectId: task.Project_ID || '', subprojectId: task.Subproject_ID || '',
+        depth: view.depth, container: view.container};
+    }), total: rows.length, complete: rows.length <= PARENT_OPTION_LIMIT, limit: PARENT_OPTION_LIMIT};
+  }
+  function responsibilityOptions() {    return Responsibilities.all().map(function (r) {
       return {id: r.Responsibility_ID, name: r.Name, status: r.Status, color: Responsibilities.colorOf(r)};
     });
   }
@@ -193,9 +263,9 @@ var ManagerWeb = (function () {
    * rollup or the overview KPIs. `openTasks` and `overdueTasks` mean *open work items in
    * active work*; `completedWork` is reported separately as history.
    */
-  function responsibilitySummaries() {
+  function responsibilitySummaries(memberIndex) {
     var today = Domain.today();
-    var members = index('MEMBERS');
+    var members = memberIndex || index('MEMBERS');
     var scope = TaskScope.create();
     var areas = Object.create(null);
     Responsibilities.all().forEach(function (row, position) {
@@ -245,12 +315,13 @@ var ManagerWeb = (function () {
         completedWork: 'DONE_WORK_ITEMS_HISTORY', containers: 'ORGANISATION_ONLY'}};
   }
   /** Reference choices for the create/edit forms; identifiers and names only. */
-  function referenceOptions() {
+  function referenceOptions(responsibilities) {
     return {members: Database.read('MEMBERS').map(function (m) {
         return {id: m.Member_ID, name: m.Name, active: m.Active, department: m.Department, position: m.Position};
       }),
       projects: Database.read('PROJECTS').map(function (p) { return {id: p.Project_ID, name: p.Project_Name}; }),
-      responsibilities: responsibilityOptions(),
+      // The caller may already have built this list in the same execution (bootstrap).
+      responsibilities: responsibilities || responsibilityOptions(),
       // The responsibility colour picker draws these swatches; the server stays authoritative.
       colors: Responsibilities.PALETTE.slice()};
   }
@@ -276,7 +347,7 @@ var ManagerWeb = (function () {
    * before the top-five cut, never after it. All task figures use the `TaskScope` policy:
    * containers are organisation, only open work items in active work are counted.
    */
-  function overviewCore(actor, projects, scope) {
+  function overviewCore(actor, projects, scope, indexes) {
     var active = projects.filter(function (p) { return ['Archived','Cancelled','Completed'].indexOf(p.status) < 0; });
     var today = Domain.today(), end = new Date(today + 'T00:00:00Z'); end.setUTCDate(end.getUTCDate() + 7);
     var endDate = end.toISOString().slice(0,10);
@@ -284,7 +355,7 @@ var ManagerWeb = (function () {
     projects.forEach(function (p) { only[String(p.id)] = true; });
     function mine(task) { return !!only[String(task.Project_ID)]; }
     var taskScope = TaskScope.create(), counts = taskScope.summarise(mine, today);
-    var projectIndex = index('PROJECTS'), memberIndex = index('MEMBERS');
+    var projectIndex = indexes && indexes.projects || index('PROJECTS'), memberIndex = indexes && indexes.members || index('MEMBERS');
     var window = taskScope.upcoming(today, endDate, mine);
     var upcoming = window.slice(0, 5).map(function (t) {
       var view = TaskTree.viewIn(t, taskScope.tree);
@@ -293,7 +364,7 @@ var ManagerWeb = (function () {
         status: view.status, progress: view.progress, responsibilityId: (projectIndex[t.Project_ID] || {}).Responsibility_ID || ''};
     });
     var member = Database.find('MEMBERS', actor.memberId);
-    return {    version: '1.7', actor: {name: member.Name, role: actor.role},
+    return {    version: APP_VERSION, actor: {name: member.Name, role: actor.role},
       kpis: {active: active.length, risk: active.filter(function (p) { return ['RED','YELLOW','UNKNOWN'].indexOf(p.health) >= 0; }).length,
         soon: window.length, overdue: counts.overdueWork},
       upcoming: {items: upcoming, total: window.length},
@@ -353,13 +424,17 @@ var ManagerWeb = (function () {
   function bootstrap(actor, input) {
     input = input || {};
     var scope = scopeInput(input), projects = projectList(), visible = scoped(projects, scope);
-    var core = overviewCore(actor, visible, scope);
-    var all = Tasks.list({});
+    // One index per table for this execution: the overview, the area cards and the reference
+    // choices previously rebuilt the same project/member maps three times.
+    var indexes = {projects: index('PROJECTS'), members: index('MEMBERS')};
+    var responsibilities = responsibilityOptions();
+    var core = overviewCore(actor, visible, scope, indexes);
+    var all = Database.read('TASKS');
     return {contract: '1.6', version: core.version, actor: core.actor, refreshedAt: core.refreshedAt,
       kpis: core.kpis, upcoming: core.upcoming, counts: core.counts, scope: core.scope, pending: core.pending,
       overviewProjects: page(visible, {limit: 20}),
-      responsibilities: responsibilityOptions(), responsibilityCards: responsibilitySummaries(),
-      references: referenceOptions(),
+      responsibilities: responsibilities, responsibilityCards: responsibilitySummaries(indexes.members),
+      references: referenceOptions(responsibilities),
       projects: dataset(projects, PROJECT_INDEX_LIMIT),
       tasks: {total: all.length, complete: all.length <= TASK_INDEX_LIMIT, limit: TASK_INDEX_LIMIT}};
   }
@@ -514,6 +589,27 @@ var ManagerWeb = (function () {
         unverifiedPrevious: unverified, limitation: limitation, evidence: 'AUDIT_LOG'}
     };
   }
+  /**
+   * Latest authorized row for one open form.
+   *
+   * The record type is mapped through an explicit allowlist, so a browser cannot read an
+   * arbitrary table through this operation. The returned `_revision` is the optimistic
+   * concurrency marker the save path re-checks under the script lock.
+   */
+  var EDITOR_TABLES = {task: 'TASKS', project: 'PROJECTS', member: 'MEMBERS',
+    responsibility: 'RESPONSIBILITIES', subproject: 'SUBPROJECTS'};
+  function editorRecord(input) {
+    var table = EDITOR_TABLES[String(input.type || '')];
+    if (!table) throw new Error('Unknown editor type');
+    var id = String(input.id || '');
+    if (!id) throw new Error('Record ID required');
+    var row = Database.find(table, id);
+    if (!row) throw new Error('NOT_FOUND');
+    var dto = editable(table, row);
+    if (table === 'TASKS') dto._additional = Assignees.additionalIds('TASK', row);
+    if (table === 'RESPONSIBILITIES') dto._additionalMemberIds = Assignees.additionalIds('RESPONSIBILITY', row);
+    return {record: dto};
+  }
   function read(operation, input, actor) {
     input = input || {};
     switch (operation) {
@@ -527,6 +623,7 @@ var ManagerWeb = (function () {
         return paged;
       }
       case 'tasks': return taskList(input);
+      case 'parentOptions': return parentOptions(input);
       case 'bootstrap': return bootstrap(actor, input);
       case 'taskIndex': return taskIndex(index('PROJECTS'), index('MEMBERS'));
       case 'project': {
@@ -548,6 +645,10 @@ var ManagerWeb = (function () {
           confirmations: Database.read('SCHEDULE_CONFIRMATIONS').filter(function (r) { return r.Task_ID === input.id; }).map(function (r) { return record('SCHEDULE_CONFIRMATIONS', r); })};
       }
       case 'references': return referenceOptions();
+      // V1.7.3: narrow, allowlisted editor-detail read. A form that must not edit a stale list
+      // row asks for exactly one table row plus its concurrency revision; no list, no history and
+      // no private column is returned.
+      case 'editor': return editorRecord(input);
       case 'members': return page(Database.read('MEMBERS').filter(function (m) { return !input.query || (m.Name + ' ' + m.Department + ' ' + (m.Position || '')).toLowerCase().indexOf(String(input.query).toLowerCase()) >= 0; }).map(function (m) { return editable('MEMBERS', m); }), input);
       case 'responsibilities': return {items: Responsibilities.all().map(function (r, position) {
         var dto = editable('RESPONSIBILITIES', r);
@@ -564,7 +665,7 @@ var ManagerWeb = (function () {
       case 'publication': return unwrap(Ui.publicationStatus());
       case 'status': {
         var status = unwrap(Ui.status());
-        return {version: '1.6.1', schema: Schema.version, environment: status.health.environment,
+        return {version: APP_VERSION, schema: Schema.version, environment: status.health.environment,
           valid: status.valid, errorCount: status.errorCount, rowCounts: status.rowCounts,
           emailMode: status.health.emailMode, emergencyStop: status.health.emergencyStop,
           calendarEnabled: status.health.calendarEnabled, dryRun: status.health.dryRun};
@@ -577,5 +678,6 @@ var ManagerWeb = (function () {
 }());
 
 function managerWebRead(operation, payload) {
-  return ManagerWeb.response(function (actor) { return ManagerWeb.read(operation, payload, actor); }, true);
+  return ManagerWeb.response(function (actor) { return ManagerWeb.read(operation, payload, actor); }, true,
+    !!payload && payload.diagnostics === true);
 }

@@ -26,8 +26,10 @@ test('package, publisher, README, UI and changelog agree on the current version'
   assert.match(read('README_JP.md'), /## 過去のリリース記録（V1\.6\.1）/);
   assert.match(read('CHANGELOG.md'), /## V1\.6\.1 — /);
   assert.match(read('CHANGELOG.md'), /## V1\.6 — /);
-  // The overview payload and the manager page report the same version.
-  assert.match(read('src/ManagerWeb.gs'), /version: '1\.7'/);
+  // The overview payload, the status page and the sidebar report one application version.
+  assert.match(read('src/Config.gs'), /var APP_VERSION = '1\.7\.3'/);
+  assert.match(read('src/ManagerWeb.gs'), /version: APP_VERSION/);
+  assert.doesNotMatch(read('src/ManagerWeb.gs'), /version: '1\.6\.1'/);
 });
 
 test('the five V1.6.2 checkgates exist and keep the release status honest', () => {

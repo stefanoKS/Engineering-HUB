@@ -8,7 +8,7 @@ var lang = EH_I18N.read(), view = 'overview', sequence = 0, drawerSequence = 0;
  * session and is revalidated in the background once it is older than FRESH_MS, invalidated by an
  * explicit refresh or a write, or dropped when the server stops authorizing this user.
  */
-var FRESH_MS = 30000, PAGE = 50, PREFETCH_TASKS = 1000;
+var FRESH_MS = 30000, PAGE = 50;
 var cache = new Map(), inflight = new Map(), tokens = Object.create(null);
 var pending = new Set(), queue = [], running = 0;
 var store = {actor: null, references: null, responsibilities: [], responsibilityCards: {items: [], unassigned: null}, projects: null, tasks: null, overview: null, at: {}};
@@ -38,12 +38,20 @@ function success(text) { notice(text, 'success'); }
 function clearNotice() { notice(''); }
 function pump() { while (running < 2 && queue.length) { running++; queue.shift()(); } }
 function rpc(write, operation, payload) {
-  var started = performance.now();
+  var queued = performance.now();
   return new Promise(function (resolve, reject) {
     queue.push(function () {
+      // V1.7.3: queue wait and server round trip are measured separately, so a slow first paint
+      // can be told apart from a slow Apps Script execution.
+      var dispatched = performance.now();
       function done(result, error) {
         running--; pump();
-        metrics.push({operation: operation, kind: write ? 'write' : 'read', roundTripMs: performance.now() - started, server: result && result.metrics || null});
+        var finished = performance.now();
+        var server = result && result.metrics || null;
+        metrics.push({operation: operation, kind: write ? 'write' : 'read',
+          queueMs: dispatched - queued, serverRoundTripMs: finished - dispatched,
+          roundTripMs: finished - queued, server: server,
+          payloadBytes: server && typeof server.payloadBytes === 'number' ? server.payloadBytes : 0});
         if (metrics.length > 300) metrics.shift();
         if (error || !result || result.ok !== true) reject(new Error(error && (write ? t('unknownSave')+' '+error.message : error.message) || result && result.error || 'Request failed'));
         else resolve(result.data);
@@ -130,12 +138,12 @@ function requestStatusLabel(value) { var key = 'requestStatus.' + String(value |
 function afterWritePrefixes(operation) {
   // A project edit can move work from one responsibility to another, so the task index, every
   // scoped task page and the area overview aggregates are stale, not only the project card.
-  if (/^project/.test(operation)) return ['bootstrap', 'references', 'project', 'tasks', 'taskIndex', 'overview'];
-  if (/^subproject/.test(operation)) return ['bootstrap', 'references', 'project'];
-  if (/^task/.test(operation)) return ['bootstrap', 'task'];
+  if (/^project/.test(operation)) return ['bootstrap', 'references', 'project', 'tasks', 'taskIndex', 'overview', 'editor'];
+  if (/^subproject/.test(operation)) return ['bootstrap', 'references', 'project', 'editor'];
+  if (/^task/.test(operation)) return ['bootstrap', 'task', 'editor'];
   if (/^request/.test(operation)) return ['bootstrap', 'requests'];
-  if (/^member/.test(operation)) return ['bootstrap', 'references', 'members'];
-  if (/^responsibility/.test(operation)) return ['bootstrap', 'references', 'responsibilities'];
+  if (/^member/.test(operation)) return ['bootstrap', 'references', 'members', 'editor'];
+  if (/^responsibility/.test(operation)) return ['bootstrap', 'references', 'responsibilities', 'editor'];
   if (/^skill/.test(operation)) return ['skills'];
   if (/^automation/.test(operation) || operation === 'emergencyStop') return ['automation', 'status'];
   if (operation === 'publication') return ['publication'];
@@ -192,12 +200,17 @@ function applyBootstrap(data) {
   if (store.references) cache.set(keyOf('references', {}), {at: at, data: store.references});
   // The responsibility section mirrors the snapshot, so the navigation is refreshed with it.
   if (byId('nav')) renderNav();
-  syncTaskIndex(false);
 }
-/** Loads or refreshes the compact task index; a large index loads only when the view opens. */
+/**
+ * Loads or refreshes the compact task index.
+ *
+ * V1.7.3: the index is no longer prefetched after `bootstrap`. The first paint is one RPC, and
+ * the index is read when タスク is opened (or after a project write invalidated it). This removes
+ * a second Apps Script execution — and its Sheets reads — from the initial page load.
+ */
 function syncTaskIndex(force) {
   if (revoked || !store.tasks || !store.tasks.complete) return;
-  if (!force && !store.tasks.loaded && store.tasks.total > PREFETCH_TASKS) return;
+  if (!force && !store.tasks.loaded) return;
   // Each dataset has its own freshness window, so a revalidation does not re-download an index
   // that was refreshed moments ago.
   if (!force && store.tasks.loaded && store.at.tasks && Date.now() - store.at.tasks < FRESH_MS) return;
@@ -209,7 +222,10 @@ function syncTaskIndex(force) {
     store.at.tasks = Date.now();
     if ((view === 'tasks' || view === 'diagnostics') && canRepaint()) { currentData = peekView(view); render(); }
     else renderSync();
-  }).catch(function () { /* the paginated server path stays available */ });
+  }).catch(function () {
+    // The paginated server path stays available when the compact index cannot be read.
+    if (view === 'tasks' && !indexedTasks()) { render(); fetchView('tasks', true, true); }
+  });
 }
 function indexedTasks() {
   return !!(store.tasks && store.tasks.loaded && store.tasks.complete === true);
@@ -832,31 +848,109 @@ function renderDiagnostics(host) {
   host.appendChild(summary);
   var operations = Object.create(null);
   metrics.forEach(function (entry) {
-    var key = entry.operation, bucket = operations[key] || (operations[key] = {operation: key, count: 0, rpc: [], render: [], server: []});
+    var key = entry.operation, bucket = operations[key] || (operations[key] = {operation: key, count: 0, rpc: [], render: [], server: [], queue: [], payload: [], reads: [], opens: []});
     bucket.count++;
     if (typeof entry.roundTripMs === 'number') bucket.rpc.push(entry.roundTripMs);
+    if (typeof entry.queueMs === 'number') bucket.queue.push(entry.queueMs);
     if (typeof entry.renderMs === 'number') bucket.render.push(entry.renderMs);
+    if (typeof entry.payloadBytes === 'number') bucket.payload.push(entry.payloadBytes);
     if (entry.server && typeof entry.server.executionMs === 'number') bucket.server.push(entry.server.executionMs);
+    if (entry.server && typeof entry.server.tableReads === 'number') bucket.reads.push(entry.server.tableReads);
+    if (entry.server && typeof entry.server.workbookOpens === 'number') bucket.opens.push(entry.server.workbookOpens);
   });
+  // V1.7.3: real service-call figures (workbook opens, range reads, writes, lock wait, payload
+  // size) are shown with the timings; no cell value, record text or identifier is displayed.
+  var totals = {reads: 0, payload: 0};
+  metrics.forEach(function (entry) {
+    if (!entry.server) return;
+    totals.reads += Number(entry.server.tableReads) || 0;
+    totals.payload = Math.max(totals.payload, Number(entry.server.payloadBytes) || 0);
+  });
+  var service = el('dl');
+  rowValues(service, [[t('tableReads'), String(totals.reads)], [t('maxPayload'), String(totals.payload) + ' B']]);
+  host.appendChild(service);
   var table = el('table', undefined, 'metrics');
-  var head = el('tr'); ['operation', 'count', 'p50', 'p95', 'serverMs', 'tableReads'].forEach(function (key) { head.appendChild(el('th', t(key))); });
+  var head = el('tr'); ['operation', 'count', 'queueP50', 'p50', 'p95', 'serverMs', 'tableReads'].forEach(function (key) { head.appendChild(el('th', t(key))); });
   table.appendChild(head);
   Object.keys(operations).sort().forEach(function (key) {
     var bucket = operations[key], row = el('tr');
     var samples = bucket.rpc.length ? bucket.rpc : bucket.render;
     row.appendChild(el('td', bucket.operation));
     row.appendChild(el('td', String(bucket.count)));
+    row.appendChild(el('td', percentile(bucket.queue, 0.5)));
     row.appendChild(el('td', percentile(samples, 0.5)));
     row.appendChild(el('td', percentile(samples, 0.95)));
     row.appendChild(el('td', percentile(bucket.server, 0.5)));
-    var reads = metrics.filter(function (entry) { return entry.operation === key && entry.server && typeof entry.server.tableReads === 'number'; });
-    row.appendChild(el('td', reads.length ? String(reads[reads.length - 1].server.tableReads) : '—'));
+    row.appendChild(el('td', bucket.reads.length ? String(bucket.reads[bucket.reads.length - 1]) : '—'));
     table.appendChild(row);
   });
   host.appendChild(table);
+  var detail = el('section', undefined, 'card');
+  detail.appendChild(el('h2', t('tableTime')));
+  var detailHost = el('div');
+  host.appendChild(detail);
+  detail.appendChild(detailHost);
   var tools = el('div', undefined, 'toolbar');
+  button('runDiagnostics', function () { runDiagnostics(detailHost); }, tools);
   button('clearCache', function () { api.clear(); currentData = null; success(t('cacheCleared')); bootstrapFetch(); }, tools);
   host.appendChild(tools);
+}
+/**
+ * Detailed, read-only measurement run (V1.7.3).
+ *
+ * Every operation is an ordinary authorized manager read; nothing is written, no request is
+ * imported and no identifier or record text is displayed. The server returns the full metric
+ * envelope only because each call sets `diagnostics: true`.
+ */
+function runDiagnostics(host) {
+  host.replaceChildren(el('p', t('diagnosticsRunning'), 'muted'));
+  var operations = [{operation: 'bootstrap', payload: {diagnostics: true}},
+    {operation: 'overview', payload: {areas: false, diagnostics: true}},
+    {operation: 'taskIndex', payload: {diagnostics: true}},
+    {operation: 'projects', payload: {diagnostics: true}},
+    {operation: 'tasks', payload: {diagnostics: true}},
+    {operation: 'references', payload: {diagnostics: true}},
+    {operation: 'requests', payload: {diagnostics: true}}];
+  var started = performance.now();
+  Promise.all(operations.map(function (entry) {
+    return api.read(entry.operation, entry.payload, true)
+      .then(function () { return {operation: entry.operation}; })
+      .catch(function (error) { return {operation: entry.operation, error: error.message}; });
+  })).then(function (results) {
+    function detailOf(operation) {
+      var samples = metrics.filter(function (sample) { return sample.operation === operation; });
+      return samples.length ? samples[samples.length - 1].server : null;
+    }
+    function roundTrips(operation) {
+      return metrics.filter(function (sample) { return sample.operation === operation; })
+        .map(function (sample) { return sample.roundTripMs; });
+    }
+    var table = el('table', undefined, 'metrics');
+    var head = el('tr');
+    ['operation', 'workbookOpens', 'rangeReads', 'writeCalls', 'cellsWritten', 'lockWait', 'bindingCheck', 'serialization', 'p50'].forEach(function (key) { head.appendChild(el('th', t(key))); });
+    table.appendChild(head);
+    results.forEach(function (entry) {
+      var row = el('tr'), detail = detailOf(entry.operation) || {};
+      row.appendChild(el('td', entry.operation));
+      if (entry.error) {
+        var cell = el('td', entry.error);
+        cell.colSpan = 8;
+        row.appendChild(cell);
+      } else {
+        row.appendChild(el('td', detail.workbookOpens === undefined ? '—' : String(detail.workbookOpens)));
+        row.appendChild(el('td', detail.rangeReads === undefined ? '—' : String(detail.rangeReads)));
+        row.appendChild(el('td', detail.writes === undefined ? '—' : String(detail.writes)));
+        row.appendChild(el('td', detail.cellsWritten === undefined ? '—' : String(detail.cellsWritten)));
+        row.appendChild(el('td', detail.lockMs === undefined ? '—' : detail.lockMs + ' ms'));
+        row.appendChild(el('td', detail.bindMs === undefined ? '—' : detail.bindMs + ' ms'));
+        row.appendChild(el('td', detail.serializationMs === undefined ? '—' : detail.serializationMs + ' ms'));
+        row.appendChild(el('td', percentile(roundTrips(entry.operation), 0.5)));
+      }
+      table.appendChild(row);
+    });
+    host.replaceChildren(table);
+    host.appendChild(el('p', t('diagnosticsDone', {ms: Math.round(performance.now() - started)}), 'muted'));
+  });
 }
 function percentile(values, fraction) {
   if (!values.length) return '—';
@@ -891,7 +985,12 @@ function load(fresh, message) {
     if (activeResponsibility) { renderAreaLoading(); fetchView('overview', fresh === true, true); return; }
     bootstrapFetch(true); return;
   }
-  if (requested === 'tasks') syncTaskIndex(true);
+  if (requested === 'tasks') {
+    syncTaskIndex(true);
+    // V1.7.3: the compact index answers this view, so the paginated server page is only requested
+    // when the index is unavailable. This keeps one round trip instead of two.
+    if (store.tasks && store.tasks.complete && !store.tasks.loaded) { currentData = null; render(); return; }
+  }
   // Without any local result the previous page is replaced by a loading state, so a switched
   // responsibility never leaves the old scope's rows on screen while the new page is in flight.
   if (requested === 'tasks' || requested === 'projects') { currentData = null; render(); }
@@ -990,6 +1089,8 @@ function handleError(error) {
 /** A revoked or unverifiable identity drops every private cached view and the open form. */
 function revoke() {
   revoked = true;
+  // A pending editor-open read must not render anything after access was lost.
+  drawerSequence++;
   api.clear();
   store.actor = null; store.references = null; store.responsibilities = [];
   store.responsibilityCards = {items: [], unassigned: null};
@@ -1676,10 +1777,13 @@ var schemas={
  * form that is closed, replaced or abandoned is discarded.
  */
 function openEditor(type,id,record,defaults) {
+  // A newer open/close owns the drawer from here on: an older response is discarded below.
   var seq=++drawerSequence, schema=schemas[type];
-  closeEditor();
+  discardEditor();
   notice(t('loading'));
-  var fetch=record?Promise.resolve(record):id?detail(type,id,true):Promise.resolve({});
+  // V1.7.3: an edit never starts from a list row. The newest authorized row and its revision are
+  // read from the server, so a stale list cannot become a save that overwrites newer data.
+  var fetch=id?detail(type,id,true):Promise.resolve({});
   Promise.all([fetch,api.read('references')]).then(function(results){
     if(seq!==drawerSequence)return;
     var source=results[0]||{};
@@ -1708,8 +1812,16 @@ function openEditor(type,id,record,defaults) {
 /**
  * Closes the form and discards everything it held. No confirmation, no autosave and no
  * retained values: reopening always builds a new form from the stored record.
+ *
+ * V1.7.3: closing (or navigating away, or Escape) also invalidates a pending editor-open read,
+ * so a response that arrives afterwards can never reopen a form the manager already left.
  */
 function closeEditor() {
+  drawerSequence++;
+  discardEditor();
+}
+/** Drops the open form without touching the pending-open sequence. */
+function discardEditor() {
   var hadEditor=!!currentEditor;
   currentEditor=null;
   var host=byId('formHost');
@@ -1718,25 +1830,54 @@ function closeEditor() {
   try{if(dialog&&dialog.open)dialog.close();}catch(ignored){/* no open dialog */}
   if(hadEditor)renderSync();
 }
-/** Latest authorized copy of one record; the editor never edits a stale payload. */
+/**
+ * Latest authorized copy of one record; the editor never edits a stale payload.
+ *
+ * Task and project details already return their own editor shape. Member, responsibility and
+ * subproject have no such read, so they use the narrow allowlisted `editor` read instead of a
+ * list payload.
+ */
 function detail(type,id,fresh) {
-  return api.read(type,{id:id},fresh!==false).then(function(d){var r=d.record;r._confirmations=d.confirmations||[];r._additional=(d.additionalAssigneeIds||d.additionalMemberIds||r._additionalMemberIds||[]).slice();return r;});
+  var operation=type==='task'||type==='project'?type:'editor';
+  var payload=operation==='editor'?{type:type,id:id}:{id:id};
+  return api.read(operation,payload,fresh!==false).then(function(d){var r=d.record;r._confirmations=d.confirmations||[];r._additional=(d.additionalAssigneeIds||d.additionalMemberIds||r._additionalMemberIds||[]).slice();return r;});
 }
 function loadSubprojects(projectId,draft){var seq=(draft.subSequence||0)+1;draft.subSequence=seq;api.read('project',{id:projectId}).then(function(d){if(draft.subSequence!==seq)return;draft.subprojects=d.subprojects;if(currentEditor===draft)renderEditor();}).catch(function(e){notice(e.message,'error');});}
 /**
- * Parent-task choices come from the compact index. A workbook above the index bound falls back
- * to one scoped server page, so the selector never silently offers an incomplete list.
+ * Parent-task choices come from the compact index. When the index is not held locally (large
+ * workbook) the server returns one bounded page, and its name search stays available so a parent
+ * beyond the page is still discoverable instead of silently missing (V1.7.3).
  */
 function loadParentTasks(projectId,draft){
   if(!projectId)return;
   if(store.tasks&&store.tasks.loaded&&store.tasks.complete)return;
-  if(draft.parentTasksProject===projectId)return;
+  if(draft.parentTasksProject===projectId&&draft.parentTasks)return;
   draft.parentTasksProject=projectId;
-  api.read('tasks',{projectId:projectId,limit:100}).then(function(page){
+  draft.parentTasksQuery='';
+  api.read('parentOptions',parentQuery(draft)).then(function(page){
     if(currentEditor!==draft)return;
     draft.parentTasks=(page&&page.items)||[];
+    draft.parentTasksTotal=page?page.total:0;
+    draft.parentTasksComplete=!page||page.complete!==false;
     renderEditor();
   }).catch(function(e){notice(e.message,'error');});
+}
+/** Scope of one parent-task search; the server re-applies every hierarchy rule. */
+function parentQuery(draft){
+  return {projectId:String(draft.values.projectId||''),subprojectId:String(draft.values.subprojectId||''),
+    excludeTaskId:draft.id||'',query:String(draft.parentTasksQuery||'')};
+}
+/** Bounded server search used only while the locally offered list is known to be incomplete. */
+function searchParents(draft,query,paint){
+  if(draft.parentTasksComplete||(store.tasks&&store.tasks.loaded&&store.tasks.complete))return;
+  draft.parentTasksQuery=String(query||'');
+  var seq=(draft.parentSearchSequence||0)+1;draft.parentSearchSequence=seq;
+  api.read('parentOptions',parentQuery(draft)).then(function(page){
+    if(currentEditor!==draft||draft.parentSearchSequence!==seq)return;
+    draft.parentTasks=(page&&page.items)||[];
+    draft.parentTasksTotal=page?page.total:0;
+    paint();
+  }).catch(function(){/* the shown page stays usable */});
 }
 /** Ancestor names of one choice, so the selected parent and its hierarchy stay visible. */
 function choicePath(choices,id) {
@@ -1758,7 +1899,7 @@ function choicePath(choices,id) {
  * selected record with its ancestor path. A stored parent that is not currently offered is kept
  * as an explicit choice instead of being replaced by a blank.
  */
-function searchSelect(parent,key,value,choices,emptyLabel,onChange) {
+function searchSelect(parent,key,value,choices,emptyLabel,onChange,onSearch) {
   var wrap=el('div',undefined,'search-select'),label=el('label');
   label.appendChild(el('span',t(key)));
   var search=el('input');search.type='search';search.setAttribute('placeholder',t('searchByName'));
@@ -1788,7 +1929,7 @@ function searchSelect(parent,key,value,choices,emptyLabel,onChange) {
     echo.textContent=t('selectedParent')+': '+(choicePath(choiceList||choices(),current)||t('unknown'));
   }
   select.addEventListener('change',function(){current=select.value;onChange(current);paintEcho();});
-  search.addEventListener('input',function(){painted(choices());});
+  search.addEventListener('input',function(){painted(choices());if(onSearch)onSearch(String(search.value||''),function(){painted(choices());});});
   wrap.append(label,select,echo);
   parent.appendChild(wrap);
   painted(choices());
@@ -1862,10 +2003,11 @@ function renderEditor() {
     }
     if(key==='parentTaskId'){
       // V1.7: the parent is chosen by name from the same project and subproject, and a task can
-      // never be its own parent or the parent of one of its own descendants.
+      // never be its own parent or the parent of one of its own descendants. V1.7.3: when the
+      // offered page is known to be incomplete, typing asks the server for a bounded match.
       searchSelect(fields,key,d.values[key],function(){return taskParentChoices(d);},t('noSubtask'),function(v){
         d.values[key]=v;d.dirty=true;
-      });
+      },function(query,paint){searchParents(d,query,paint);});
       return;
     }
     if(key==='parentId'){
@@ -1893,7 +2035,7 @@ function renderEditor() {
         loadSubprojects(v,d);
         if(d.type==='task')loadParentTasks(v,d);
       }
-      if(key==='subprojectId'){d.values.parentTaskId='';if(d.type==='task')renderEditor();}
+      if(key==='subprojectId'){d.values.parentTaskId='';if(d.type==='task'){d.parentTasksProject='';d.parentTasks=[];loadParentTasks(d.values.projectId,d);renderEditor();}}
     },type);
     if((key==='plannedStart'&&d.values.durationValue)||(key==='projectId'&&d.type==='subproject'&&d.id))control.disabled=true;
     if(['name','taskName','email','projectId'].indexOf(key)>=0)control.required=true;
@@ -1948,6 +2090,9 @@ function switchLanguage(){lang=EH_I18N.write(lang==='ja'?'en':'ja');renderNav();
 byId('language').addEventListener('click',switchLanguage);
 byId('navToggle').addEventListener('click',function(){var hidden=document.body.classList.toggle('collapsed');byId('navToggle').setAttribute('aria-expanded',String(!hidden));});
 if(byId('diagnostics'))byId('diagnostics').addEventListener('click',function(){navigate('diagnostics');});
+// V1.7.3: a native dialog close (Escape, backdrop, browser UI) discards the form exactly like
+// the close button. The handler never re-enters closeEditor, so it cannot reopen anything.
+if(byId('editor')&&typeof byId('editor').addEventListener==='function')byId('editor').addEventListener('close',function(){if(currentEditor)discardEditor();});
 window.addEventListener('focus',revalidateCurrent);
 if(typeof document.addEventListener==='function')document.addEventListener('visibilitychange',function(){if(document.hidden!==true)revalidateCurrent();});
 metrics.push({operation:'shell',renderMs:performance.now()});load(false);

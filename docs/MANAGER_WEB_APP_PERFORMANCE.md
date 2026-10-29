@@ -1,4 +1,4 @@
-# Manager Web App performance — V1.6.2
+# Manager Web App performance — V1.7.3 (history from V1.6.2)
 
 Measured 2026-10-28 on Windows, Node v24.21.0, mocked Google services. **Real Workspace timings: NOT_RUN.** Raw
 results: [V1_6_2_PERFORMANCE.json](checkgates/V1_6_2_PERFORMANCE.json) (V1.6.2 sealed),
@@ -7,7 +7,94 @@ results: [V1_6_2_PERFORMANCE.json](checkgates/V1_6_2_PERFORMANCE.json) (V1.6.2 s
 [V1_6_PERFORMANCE.json](checkgates/V1_6_PERFORMANCE.json) (V1.6),
 [V1_5_1_PERFORMANCE.json](checkgates/V1_5_1_PERFORMANCE.json) (V1.5.1) and
 [V1_5_PERFORMANCE.json](checkgates/V1_5_PERFORMANCE.json) (V1.5), kept as historical evidence.
-Reproduce with `BENCHMARK_OUTPUT=V1_6_2_PERFORMANCE.json node scripts/manager-web-benchmark.js`.
+Reproduce with `BENCHMARK_OUTPUT=V1_7_3_PERFORMANCE.json node scripts/manager-web-benchmark.js` (V1.7.3);
+earlier runs used `V1_6_2_PERFORMANCE.json`.
+
+## V1.7.3 — corrective fixes and real Sheets work
+
+Local, mocked Google services (Windows, Node v24.21.0). **Real Workspace timings: NOT_RUN** — see the
+DEV procedure below. Raw results: [V1_7_3_PERFORMANCE.json](checkgates/V1_7_3_PERFORMANCE.json).
+
+The release changes *what* the code asks Google Sheets for, so the figures below are the honest local
+effect; only a DEV run can show the service-latency effect.
+
+| Operation | 10 / 100 | 100 / 1,000 | 300 / 3,000 | Sheet range reads | Workbook opens |
+| --- | --- | --- | --- | ---: | ---: |
+| `bootstrap` p50 | 5.46 ms | 47.18 ms | 138.41 ms | 10 | 1 |
+| `overview` p50 | 5.35 ms | 47.70 ms | 142.25 ms | 10 | 1 |
+| `taskIndex` p50 | 2.29 ms | 18.86 ms | 56.87 ms | 6 | 1 |
+| `projects` p50 | 3.28 ms | 17.06 ms | 24.91 ms | 8 | 1 |
+| `tasks` (one page, local index path) p50 | 0.65 ms | 4.23 ms | 12.33 ms | 6 | 1 |
+| `task` detail p50 | 0.41 ms | 3.34 ms | 10.08 ms | 5 | 1 |
+| `taskUpdate` p50 | 2.31 ms | 17.62 ms | 47.30 ms | 17 | 1 |
+| `taskSave` (create) p50 | 1.71 ms | 9.88 ms | 33.54 ms | — | 1 |
+| `requestApproval` p50 | 2.72 ms | 10.09 ms | 27.65 ms | — | 1 |
+| First page load (client, real harness) | 28.98 ms | 57.29 ms | 169.65 ms | 1 RPC | — |
+| Cached navigation p50 | 0.85 ms | 1.50 ms | 3.06 ms | 0 RPC | — |
+
+Figures per row are the 10 / 100 / 300-project datasets (10, 1,000 and 3,000 tasks). "Sheet range
+reads" and "Workbook opens" are per call, counted on the mocked workbook.
+
+### What actually changed
+
+- **First paint is one read.** `bootstrap` no longer prefetches the compact task index. The index is
+  read when タスク opens (or after a project write invalidated it), so the initial page load is one
+  Apps Script execution instead of two, and a manager who never opens タスク never pays for it.
+- **One range read per table per execution.** `Database.data()` now shares the raw `getDataRange()`
+  values with the row cache for the length of one execution, so `find()` + `data()` in a write no
+  longer reads the same table twice. A write invalidates both caches, so a second operation never
+  sees values the first one changed. The environment-binding check in `Database.book()` is unchanged
+  and still runs once.
+- **Writes are batched per row.** `Database.update()` used one `setValue()` per changed field. It now
+  writes one range per contiguous run of changed columns: `taskUpdate` performs 6.3 range writes and
+  22.3 cells per call at every dataset size. Adjacent columns such as `Status` + `Priority` are now a
+  single write. Only patched cells are written, so formulas, custom columns and untouched cells keep
+  their content (covered by tests).
+- **Shared indexes in one bootstrap.** The project/member maps and the responsibility list are built
+  once per execution and passed to the overview, the area cards and the reference choices instead of
+  being rebuilt three times.
+- **Measurement envelope stays small.** Ordinary responses carry three numbers (`executionMs`,
+  `tableReads`, `payloadBytes`); the detailed envelope (workbook opens, range reads, writes, cells,
+  lock wait, binding time, serialization, per-table read time, read backend) is returned only when
+  the caller sets `diagnostics: true`.
+
+### Deterministic effect on Google Sheets calls
+
+| Path | Before | After |
+| --- | --- | --- |
+| First page load | `bootstrap` + `taskIndex` (2 executions, two Sheets read passes) | `bootstrap` only (1 execution, 10 range reads) |
+| `Database.update()` of one row | `find()` read + `data()` read + one write per field | one table read + one write per contiguous column block |
+| `bootstrap` derived maps | project/member maps rebuilt 3× | built once per execution |
+
+The local timings above are the same order of magnitude as V1.6.2 because Sheets I/O is mocked and
+costs nothing here; the *number* of service calls is the part this release controls, and that is what
+the DEV run has to confirm.
+
+### DEV-only benchmark procedure
+
+1. Open the **development** Apps Script project (never production) and confirm
+   `ENVIRONMENT=DEVELOPMENT` and `BOUND_ENVIRONMENT=DEVELOPMENT`.
+2. Run `devBenchmarkManagerWeb()` from the editor (`src/DevBenchmark.gs`). It is read-only: every
+   operation goes through a manager read (`readOnly` execution), nothing is imported, published,
+   mailed or triggered, and the report contains timings and call counts only — no spreadsheet ID,
+   e-mail address or cell value.
+3. Run it once cold (first execution after a fresh deployment) and three times warm, then record
+   cold/warm p50 and p95 per operation here and in [V1_7_3_GATE_2.md](checkgates/V1_7_3_GATE_2.md).
+4. Compare against the DEV figures in the request (bootstrap ≈ 7.74 s, requests ≈ 6.03 s, task index
+   ≈ 4.97 s) and set `liveWorkspace` to `MEASURED` only when the run really happened. Until then this
+   document stays **NOT_RUN**.
+
+### Disclosed costs
+
+- An edit now always performs one authorized detail read before it can be saved (V1.7.3 correctness
+  rule). That is one extra RPC per editor open and cannot be cached away without reintroducing the
+  stale-row save it fixes.
+- The detailed diagnostics envelope is larger than the compact one; it is only requested by 計測.
+- `taskUpdate` still writes more than one block because the domain service deliberately saves
+  supporting fields (`Assignment_Version`, `Notification_Baseline`, `Last_Updated`) in separate
+  operations; each of those remains one range write.
+- The experimental `batchGet` reader is not part of these numbers. It is DEV-only, measured
+  separately and stays off unless `DEV_SHEET_READ_BACKEND=BATCH_GET` is set in a development project.
 
 ## V1.6.2 task-filter correction
 

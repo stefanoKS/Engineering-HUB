@@ -1,6 +1,62 @@
-# Engineering-HUB
+﻿# Engineering-HUB
 
-## Current release — V1.7
+## Current release — V1.7.3
+
+**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+
+Application version **1.7.3** is a corrective release: it fixes the remaining request-validation and
+manager-editor defects and reduces the number of Google Sheets service calls the manager page makes.
+Schema **8** and employee contract **1.6** are unchanged; there is no migration, no deployment and no
+change to authorization, publication or notification policy.
+
+- **A numeric `Snapshot_Version` cell no longer breaks a decision.** Google Sheets returns a cell typed
+  as `1.5` as a number, and the whole-row re-validation before a decision failed with
+  `Invalid text: Snapshot_Version`. The two opaque request identifiers (`Snapshot_Version`,
+  `Task_Revision_At_Submission`) are now declared as text and normalized **when the row is read**;
+  nothing else is coerced, no stored request is rewritten, and `Due_Date_At_Submission` stays a date.
+- **An editor that answers late never opens.** Closing the form, navigating away or dismissing the
+  native dialog with Escape discards the state **and** invalidates a pending editor-open read, so a
+  response that arrives afterwards cannot reopen a form.
+- **An edit starts from the stored row.** The form no longer reuses the list row: every edit reads the
+  latest authorized row and its revision first (`EDIT_CONFLICT` is unchanged). Member, responsibility
+  and subproject editors use a new narrow, allowlisted `editor` read instead of a list payload.
+- **The release version is real.** One `APP_VERSION` constant (`1.7.3`) feeds the overview, the
+  publication page and システム状態; the database schema, application, publisher and snapshot-contract
+  versions remain separate values.
+- **A parent task beyond one page is findable.** The parent selector uses a bounded server-side search
+  (`parentOptions`, 200 rows + `total`/`complete`) with the same hierarchy and cycle rules, so a valid
+  parent in a large project is no longer silently missing. The browser still never receives the whole
+  task table.
+- **The first page is one read.** The compact task index is read when タスク opens instead of during the
+  first paint, so the initial load is one Apps Script execution.
+- **One range read per table per execution.** `Database.data()` shares the raw `getDataRange()` values
+  with the row cache for the length of one execution; a write invalidates them, so a write no longer
+  reads the same table twice and no execution re-opens the workbook.
+- **Writes are batched per row.** `Database.update()` writes one range per contiguous block of changed
+  columns instead of one `setValue()` per field, while still writing only the patched cells (formulas,
+  custom columns and untouched cells are preserved).
+- **Measurement without exposure.** Read/write paths report execution time, workbook opens, range
+  reads, writes, lock wait, binding time, serialization time, payload bytes and per-table read time —
+  never a spreadsheet ID, e-mail address or cell value. 計測 gains a summarized table and a read-only
+  **詳細計測を実行** run; ordinary responses keep the small measuring envelope.
+- **A safe DEV benchmark.** `devBenchmarkManagerWeb()` runs read-only manager reads in a development
+  project, with cold/warm p50/p95 and call counts. Real Workspace numbers stay **NOT_RUN** until it is
+  actually executed there.
+- **An experiment, not a default.** A DEV-only `DEV_SHEET_READ_BACKEND=BATCH_GET` reader can compare the
+  Sheets API `batchGet` path with `SpreadsheetApp`; equivalence tests cover dates, booleans, numbers,
+  blanks, formulas and request rows. `SpreadsheetApp` stays the production path and any failure falls
+  back. No server-side cache was introduced.
+
+Local verification: `npm run lint`, `npm test` (**649 tests, 649 pass, 0 fail, 0 skipped**),
+`npm run validate` (42 manager files, 3 dashboard files, 970 translation keys) and
+`BENCHMARK_OUTPUT=V1_7_3_PERFORMANCE.json node scripts/manager-web-benchmark.js` all pass. Live
+Workspace verification stays **BLOCKED**; see
+[V1_7_3_GATE_1.md](docs/checkgates/V1_7_3_GATE_1.md) through
+[V1_7_3_GATE_5.md](docs/checkgates/V1_7_3_GATE_5.md),
+[docs/MANAGER_WEB_APP_PERFORMANCE.md](docs/MANAGER_WEB_APP_PERFORMANCE.md) and
+[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md).
+
+## Historical V1.7 release record (V1.7 / V1.7.1 / V1.7.2)
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 
@@ -475,5 +531,7 @@ makes the application simpler to operate and closes the defects found in the fin
 
 Gate evidence: [docs/checkgates/V1_4_1_GATE_1.md](docs/checkgates/V1_4_1_GATE_1.md) …
 [V1_4_1_GATE_6.md](docs/checkgates/V1_4_1_GATE_6.md).
+
+
 
 

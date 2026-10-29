@@ -1,5 +1,54 @@
 # Architecture
 
+## V1.7.3 corrective architecture notes
+
+Three properties describe this release.
+
+**Reading a row is not a schema change.** A Sheets cell typed as a number is returned as a number, and
+`Database.validate()` is strict about text fields. `Schema` may therefore mark an *opaque identifier*
+field `coerceText`; `Database.declaredText()` converts only those fields, and only while building a
+record from the sheet (`read()` and the `updateMany` row build). Everything else stays strict, stored
+rows are never rewritten for a read, and a write still patches only the addressed cells.
+
+**The execution is the cache boundary.** `Database.withReadContext()` holds, for one Apps Script
+execution only: mapped rows (`tables`), the raw `getDataRange()` values (`raw`), a derived memo
+(`memo`) and the measured service-call counters. `book()` opens the workbook once and re-verifies the
+environment marker once. `withLock()` and every write clear `tables` and `raw`, so a second operation
+in the same execution never sees values the first one changed. There is no `CacheService` entry, no
+cross-user cache and no browser persistence — Google Sheets remains the only source of truth.
+
+**Measurement is an envelope, not data.** `ManagerWeb.response()` returns
+`{data, metrics}`. The compact envelope (`executionMs`, `tableReads`, `payloadBytes`) is always sent;
+the detailed one adds workbook opens, range reads, writes, cells written, lock wait, binding time,
+serialization time, the read backend and per-table read time — only when the caller passes
+`diagnostics: true` (the 計測 page). No metric ever contains a spreadsheet ID, e-mail address, cell
+value or record text.
+
+### The manager edit path
+
+```
+click 編集 → openEditor(type, id)
+           → ++drawerSequence                 (this open owns the drawer)
+           → discardEditor()                  (no sequence change: the own fetch stays valid)
+           → api.read('task' | 'project' | 'editor', {id[, type]}, fresh)
+           → response arrives → seq === drawerSequence ? renderEditor() + showModal() : discard
+close / navigate / Escape → drawerSequence++ → discardEditor()  (a late response is ignored)
+```
+
+`detail()` maps the record type to its read: task and project have their own detail operations,
+member/responsibility/subproject use the narrow allowlisted `editor` read
+(`EDITOR_TABLES`). Every save still re-checks the revision under the script lock.
+
+### The experimental read backend
+
+`SheetReadBackend` sits in front of `Database.data()`. It returns `getDataRange().getValues()` unless
+`DEV_SHEET_READ_BACKEND=BATCH_GET`, `ENVIRONMENT=DEVELOPMENT`, the advanced Sheets service exists and
+the spreadsheet timezone is `Asia/Tokyo`. In that case it calls
+`spreadsheets.values.batchGet` with `UNFORMATTED_VALUE`/`SERIAL_NUMBER`, converts serials only for
+columns whose `Schema` type is `date`/`datetime`, pads rows to the header width and falls back to
+`SpreadsheetApp` on any error. Equivalence with the production path is a test requirement; the
+production path itself is unchanged.
+
 ## V1.6.2 corrective architecture notes
 
 V1.6.2 adds no layer, table, column, endpoint scope or migration. It repairs one integrity boundary, one

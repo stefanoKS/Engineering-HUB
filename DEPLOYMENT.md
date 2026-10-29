@@ -1,6 +1,32 @@
 # Deployment and activation
 
-## V1.7 release (current)
+## V1.7.3 corrective release (current)
+
+V1.7.3 changes **no** schema (stays **8**), **no** migration (nothing to approve), **no** employee
+contract (stays **1.6**), **no** OAuth scope and **no** required Script Property. An upgrade is a code
+upload only:
+
+1. `npm ci && npm run lint && npm test && npm run validate` in the repository.
+2. Push the reviewed sources to the manager project (`rootDir: src`). `src/DevBenchmark.gs` and
+   `src/SheetReadBackend.gs` are part of that upload; nothing else is created.
+3. Do **not** run a migration, initialize anything, install a trigger, publish a snapshot or change a
+   notification setting as part of this release.
+4. Optional and DEV-only: set `DEV_SHEET_READ_BACKEND=BATCH_GET` in the **development** project to
+   measure the experimental Sheets API reader. Leave it unset everywhere else; `SpreadsheetApp` stays
+   the production path and any failure falls back automatically. Enabling the advanced Sheets service
+   is a manual DEV decision and is never done by the application.
+5. Optional and DEV-only: run `devBenchmarkManagerWeb()` from the editor to record cold/warm
+   timings, then copy the JSON into
+   [docs/MANAGER_WEB_APP_PERFORMANCE.md](docs/MANAGER_WEB_APP_PERFORMANCE.md) as measured evidence.
+6. Record PASS/FAIL/BLOCKED in [docs/checkgates/V1_7_3_GATE_1.md](docs/checkgates/V1_7_3_GATE_1.md) …
+   [V1_7_3_GATE_5.md](docs/checkgates/V1_7_3_GATE_5.md). Live Workspace verification stays **NOT_RUN**
+   until it is really executed, and [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) stays
+   **NOT APPROVED FOR PRODUCTION**.
+
+Rollback: redeploy the previous Apps Script version. Nothing in the data changed, so no restore is
+needed; never clear or re-initialize an existing workbook.
+
+## V1.7 release (historical)
 
 V1.7 adds one additive migration (`008_task_and_responsibility_members`, schema 7 → 8) and employee
 contract **1.6**. Follow [docs/V1_7_DEPLOYMENT_RUNBOOK.md](docs/V1_7_DEPLOYMENT_RUNBOOK.md) in DEV in

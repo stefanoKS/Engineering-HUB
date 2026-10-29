@@ -1,4 +1,55 @@
-# Changelog
+﻿# Changelog
+
+## V1.7.3 — corrective fixes and measured Sheets work (2026-10-29)
+
+Application version **1.7.3**. Schema **8** and employee contract **1.6** are unchanged; no migration,
+no deployment, no permission, publication or notification change.
+
+### Correctness
+
+- **`Snapshot_Version` is text.** A Sheets cell typed as `1.5` is returned as a number, and the
+  whole-row re-validation before a decision failed with `Invalid text: Snapshot_Version`.
+  `Schema` now marks `TASK_REQUESTS.Snapshot_Version` and `Task_Revision_At_Submission`
+  `coerceText`, and `Database` converts only those values — and only when a row is read. Other string
+  fields stay strict (`Invalid text: Reason` still fails), `Due_Date_At_Submission` stays a date, and
+  no request row is rewritten because it was read. Approval, rejection, return, staleness and
+  reconciliation are covered with numeric cells, and a repeated decision still applies no second
+  effect.
+- **Editor lifecycle.** `closeEditor()` invalidates a pending editor-open read, so a response arriving
+  after a close or a navigation never opens a form. A native dialog close (Escape) discards the state
+  through the same path. An edit always reads the latest authorized row and revision first; member,
+  responsibility and subproject editors use the new allowlisted `editor` read. No draft is retained.
+- **Release version.** `src/Config.gs` declares `APP_VERSION = '1.7.3'`; the overview, publication
+  page and システム状態 read it, and the schema, application, publisher and contract versions stay
+  separate (`1.6.1` is gone from the status endpoint).
+- **Parent task discovery.** `parentOptions` returns a bounded server page (200 rows, `total`,
+  `complete`) with the save path's hierarchy rules; the selector searches the server while its page is
+  incomplete, so a parent beyond 100 tasks is no longer missing.
+
+### Performance
+
+- **First paint is one read.** `bootstrap` no longer prefetches the compact task index; it is read when
+  タスク opens.
+- **One range read per table per execution.** `Database.data()` shares raw values with the row cache
+  and every write invalidates them; `find()` + `data()` no longer reads the same table twice.
+- **Write batching.** One range write per contiguous block of changed columns instead of one
+  `setValue()` per field, still writing only patched cells (formulas and custom columns survive).
+- **Shared bootstrap work.** Project/member indexes and the responsibility list are built once per
+  execution.
+- **Instrumentation.** Execution time, workbook opens, range reads, writes, cells, lock wait, binding
+  time, serialization, payload bytes, per-table read time and the read backend are measured; the
+  detailed envelope is opt-in (`diagnostics: true`) and never contains record content. 計測 shows a
+  summary plus a read-only **詳細計測を実行** run, and `devBenchmarkManagerWeb()` is the DEV-only,
+  read-only benchmark. Real Workspace figures stay **NOT_RUN**.
+- **Experiment.** A DEV-only `DEV_SHEET_READ_BACKEND=BATCH_GET` reader implements the Sheets API
+  `batchGet` comparison with `UNFORMATTED_VALUE`/`SERIAL_NUMBER`, a serial→Date conversion limited to
+  declared date columns, safe fallback and equivalence tests. `SpreadsheetApp` remains the production
+  path; no server-side cache was added.
+
+Local: `npm run lint`, `npm test` (649 tests, 649 pass, 0 fail, 0 skipped), `npm run validate` and
+`BENCHMARK_OUTPUT=V1_7_3_PERFORMANCE.json node scripts/manager-web-benchmark.js` pass. Evidence:
+[V1_7_3_GATE_1.md](docs/checkgates/V1_7_3_GATE_1.md) –
+[V1_7_3_GATE_5.md](docs/checkgates/V1_7_3_GATE_5.md).
 
 ## V1.7 — 2026-10-29
 
@@ -911,3 +962,4 @@ Repository
 
 No previous prototype, production deployment, benchmark, or live Google Workspace verification is included in this
 release record. The V1.1 scale measurement is a local mock benchmark, not a Workspace benchmark.
+

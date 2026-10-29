@@ -97,6 +97,9 @@ test('project summaries carry the owner id the browser filters on', () => {
 test('navigation between overview, projects and tasks never calls the server', async () => {
   const {h} = setup();
   await flush();
+  // V1.7.3: the compact task index is read when タスク is first opened, not during the first
+  // paint, so the first visit is one explicit read. Every later navigation stays local.
+  h.click('nav', 'タスク'); await flush();
   const afterLoad = stat(h).rpc;
   h.click('nav', '案件'); await flush();
   assert.match(content(h), /1–10 \/ 10/);
@@ -280,14 +283,19 @@ test('large datasets keep the first payload bounded and the local list complete'
  * Existing business behaviour is unchanged
  * ------------------------------------------------------------------ */
 
-test('existing writes still go through the validated domain path from cached forms', async () => {
+test('existing writes still go through the validated domain path', async () => {
   const {a, h} = setup();
   await flush();
   h.click('nav', '案件'); await flush();
-  h.click('content', '編集'); await flush();
   const rpc = stat(h).rpc;
   h.click('content', '編集'); await flush();
-  assert.equal(stat(h).rpc, rpc, 'the project form opens from the loaded detail without a read');
+  // V1.7.3: an edit always reads the latest authorized row (and its revision) before it allows
+  // changes, so a stale list row can never become an overwriting save.
+  assert.equal(stat(h).rpc, rpc + 1, 'opening the project form reads the stored record once');
+  assert.equal(h.calls.filter(c => c.operation === 'project' && !c.write).length, 1);
+  const reopened = stat(h).rpc;
+  h.click('content', '編集'); await flush();
+  assert.equal(stat(h).rpc, reopened + 1, 'reopening reads the record again instead of reusing the list row');
   h.fill('name', 'Renamed project');
   h.submit(); await flush();
   assert.equal(a.context.Database.find('PROJECTS', 'P0').Project_Name, 'Renamed project');

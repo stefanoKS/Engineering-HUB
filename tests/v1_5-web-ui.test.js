@@ -12,8 +12,10 @@ test('older startup response cannot replace newer navigation and reads retry exp
  // Entering 申請 performs exactly one authorized import; it answers before anything else.
  const sync=h.waiting.shift();assert.equal(sync.operation,'requestSync');sync.success(a.context.managerWebRead('requests',{}));await flush();
  startup.success(a.context.managerWebRead('bootstrap',{}));await flush();
- // The snapshot now fills the in-memory store, including the background task index.
- assert.equal(h.waiting.length,1);assert.equal(h.waiting[0].operation,'taskIndex');h.waiting.shift().success(a.context.managerWebRead('taskIndex'));await flush();
+ // V1.7.3: the snapshot no longer prefetches the compact task index, so inserting the snapshot
+ // leaves the queue empty and no task rows are read for a screen the manager has not opened.
+ assert.equal(h.waiting.length,0,'the first paint does not prefetch the task index');
+ assert.equal(h.calls.filter(c=>c.operation==='taskIndex').length,0);
  assert.match(h.document.getElementById('content').textContent,/申請/);assert.doesNotMatch(h.document.getElementById('content').textContent,/進行中案件/);
  h.click('nav','概要');await flush();assert.match(h.document.getElementById('content').textContent,/進行中案件/);assert.equal(h.calls.filter(c=>c.operation==='overview').length,0);
  h.click('content','再読み込み');await flush();h.waiting.shift().failure(new Error('Network failure'));await flush();assert.match(h.document.getElementById('notice').textContent,/Network failure/);

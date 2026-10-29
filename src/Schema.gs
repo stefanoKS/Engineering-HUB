@@ -114,7 +114,12 @@ var Schema = (function () {
   set('TASKS', 'Planned_Duration_Value', { type: 'number', defaultValue: '', min: 0, integer: true });
   set('TASKS', 'Planned_Start_Source', { type: 'string', defaultValue: '' });
   // The task revision is an opaque digest, not a timestamp: it must never be re-typed as a date.
-  set('TASK_REQUESTS', 'Task_Revision_At_Submission', { type: 'string', defaultValue: '' });
+  set('TASK_REQUESTS', 'Task_Revision_At_Submission', { type: 'string', defaultValue: '', coerceText: true });
+  // V1.7.3: `Snapshot_Version` is a logical text identifier, but an existing cell may hold the
+  // number 1.5 / 1.6 (Sheets typed it as a number). `Database` normalizes only fields declared
+  // `coerceText` when reading a row, so a whole-row re-validation during a decision no longer
+  // fails with `Invalid text: Snapshot_Version` and the stored row is never rewritten.
+  set('TASK_REQUESTS', 'Snapshot_Version', { type: 'string', defaultValue: '', coerceText: true });
   // V1.7.1: Google Sheets returns a date cell as a Date object, and `Database.validate` refuses a
   // non-string value for a text field. This deadline is a calendar date, so it must be validated
   // as one; otherwise every decision that rewrites the request row (approve/reject/return and the

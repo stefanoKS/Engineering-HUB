@@ -230,3 +230,38 @@
 110. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_7_GATE_<n>.md`, keep every
     earlier gate file unchanged, and keep `docs/PRODUCTION_READINESS.md` NOT APPROVED FOR PRODUCTION
     until recorded live evidence exists.
+## V1.7.3 mandatory rules (corrective fixes and measured Sheets performance)
+
+111. `Snapshot_Version` is a logical text identifier. Normalize only the fields a schema entry marks
+    `coerceText` (today `TASK_REQUESTS.Snapshot_Version` and `Task_Revision_At_Submission`) when a row
+    is read; never coerce other string fields, never rewrite a stored request row merely to normalize
+    a read, and keep `Due_Date_At_Submission` a date.
+112. A decision is applied at most once. A repeated decision must be refused (or repaired) without a
+    second task effect, second history row or second audit record, whatever the stored cell types are.
+113. Closing an editor, navigating away or dismissing the native dialog (Escape) discards the form
+    **and** invalidates a pending editor-open read. A late response must never open a form.
+114. An edit always starts from the latest authorized row and its revision. Never build an edit form
+    from a list row, never add a second concurrency scheme, and keep `EDIT_CONFLICT` as the refusal.
+    Member, responsibility and subproject editors use the narrow allowlisted `editor` read.
+115. The application version comes from one constant (`APP_VERSION`). The database schema version,
+    the application version, the publisher version and the snapshot contract stay separate values.
+116. A parent task must stay discoverable beyond one page through a bounded server search. Never load
+    the whole task table into the browser and never relax the hierarchy, cycle or permission rules.
+117. Google Sheets stays the authoritative database. Keep the execution-local read context
+    (`Database.withReadContext` / `Database.memo`): one range read per table per execution and no
+    second workbook open, but never introduce a cross-user server cache of the private workbook.
+118. A write stays a partial patch: one range write per contiguous run of changed columns, never a
+    full-row rewrite, never a formula cell, custom column or untouched cell. One logical operation is
+    still one write.
+119. Measurement must not expose data. Metrics may contain timings, service-call counts and payload
+    sizes only — never a spreadsheet ID, e-mail address, cell value or request text. Send the detailed
+    envelope only when the caller asks for it.
+120. The `batchGet` reader is an experiment: `DEV_SHEET_READ_BACKEND=BATCH_GET` plus
+    `ENVIRONMENT=DEVELOPMENT`, SpreadsheetApp stays the production path, any failure falls back, and
+    the equivalence tests stay green. Never enable an additional OAuth scope or advanced service in
+    production automatically.
+121. Never replace a local benchmark with a claim about live latency. Record the DEV measurement or
+    mark it `NOT_RUN`; keep `docs/PRODUCTION_READINESS.md` **NOT APPROVED FOR PRODUCTION**.
+122. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_7_3_GATE_<n>.md`, keep every
+    earlier gate file unchanged, and update the performance, architecture and deployment documents
+    with every behavioural change.

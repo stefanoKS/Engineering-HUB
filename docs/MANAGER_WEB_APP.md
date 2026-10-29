@@ -1,6 +1,31 @@
-# Manager Web App — V1.6.1
+# Manager Web App — V1.7.3
 
 **IMPLEMENTED — DEV MIGRATION AND WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+
+## V1.7.3 correctness and read/write work
+
+- **Every edit starts from the stored record.** `openEditor(type, id)` always reads the latest
+  authorized row and its revision; a list row is never used as the form source. Task and project have
+  their own detail reads; member, responsibility and subproject use the narrow allowlisted `editor`
+  read (`EDITOR_TABLES`, `{record, _revision}`). `EDIT_CONFLICT` behaviour is unchanged.
+- **A late response never opens a form.** `closeEditor()` increments `drawerSequence`, so a pending
+  editor-open read is invalidated by closing, navigating away or a native dialog close (Escape). The
+  editor's own initial fetch stays valid because `openEditor` takes its sequence before
+  `discardEditor()`.
+- **The application version is `APP_VERSION`.** The overview, 共有ダッシュボード公開 and システム状態
+  read `1.7.3`; the schema (8), publisher (1.7.0) and snapshot contract (1.6) versions stay separate.
+- **Parent tasks stay findable.** The selector asks `parentOptions` (bounded page of 200, `total`,
+  `complete`) while its page is known to be incomplete and repaints only the selector, so the typed
+  query survives. The server applies the same project/subproject, self/descendant and depth rules as
+  the save path.
+- **The task index is on demand.** The first paint is `bootstrap` only; opening タスク reads
+  `taskIndex` once, and a project write invalidates it. The paginated server page is the fallback when
+  the index is unavailable.
+- **計測 is richer and safe.** It shows RPC count, local reuse, stale responses, pending writes, summed
+  sheet reads and the largest payload, a per-operation table with queue p50 and server p50/p95, and a
+  read-only **詳細計測を実行** run that reports workbook opens, range reads, writes, cells, lock wait,
+  binding time, serialization and round-trip p50 per operation. No spreadsheet ID, e-mail address,
+  cell value or request text is displayed.
 
 ## V1.7.2 administration layout and editor lifecycle
 
@@ -98,9 +123,9 @@ Projects, Subprojects, Responsibilities, Tasks, Members, Skills, Planning, Progr
 
 ## Read and write contracts
 
-Read operations are explicit: bootstrap, taskIndex, overview, projects, project, tasks, task, references, members, responsibilities, skills, requests, automation, publication, status, plan. Project/task/member pages cap at 100 records (default 50); overview returns at most 20 project cards and 5 upcoming tasks. Reference choices contain no task bodies. Schema-field DTOs exclude custom columns; status excludes deployment IDs and Script Properties.
+Read operations are explicit: bootstrap, taskIndex, overview, projects, project, tasks, task, parentOptions, editor, references, members, responsibilities, skills, requests, automation, publication, status, plan. `parentOptions` returns a bounded page of possible parent tasks (`PARENT_OPTION_LIMIT = 200`, with `total` and `complete`) for one project/subproject, applying the same hierarchy rules as the save path. `editor` is the narrow allowlisted record read used by the member, responsibility and subproject forms (`EDITOR_TABLES` only, `{record, _revision}`). Project/task/member pages cap at 100 records (default 50); overview returns at most 20 project cards and 5 upcoming tasks. Reference choices contain no task bodies. Schema-field DTOs exclude custom columns; status excludes deployment IDs and Script Properties.
 
-`bootstrap` returns overview values, reference choices, every project summary and the task count in one executed read context; `taskIndex` returns compact columnar task summaries. Both report `complete: false` and carry no rows above `TASK_INDEX_LIMIT = 3000` tasks or `PROJECT_INDEX_LIMIT = 1000` projects, and the browser then uses the paginated operations below. A task summary contains only `id`, `name`, `projectId`, `project`, `subprojectId`, `ownerId`, `owner`, `responsibilityId`, `deadline`, `status`, `progress`, `priority` — never description, acceptance criteria, estimates, notes or request text.
+`bootstrap` returns overview values, reference choices, every project summary and the task count in one executed read context; `taskIndex` returns compact columnar task summaries and is requested when タスク opens (V1.7.3), not during the first paint. Both report `complete: false` and carry no rows above `TASK_INDEX_LIMIT = 3000` tasks or `PROJECT_INDEX_LIMIT = 1000` projects, and the browser then uses the paginated operations below. A task summary contains only `id`, `name`, `projectId`, `project`, `subprojectId`, `ownerId`, `owner`, `responsibilityId`, `deadline`, `status`, `progress`, `priority` — never description, acceptance criteria, estimates, notes or request text.
 
 A project card carries only allowlisted summary fields: `id`, `name`, `responsibilityId`, `responsibility`, `ownerId`, `owner`, `status`, `deadline`, `deadlineKind`, `daysRemaining`, `progress`, `health`, `healthReasons`, `totalTasks`, `doneTasks`, `overdueTasks`. `progress` and `health` are derived per request; `deadlineKind` is a neutral enum (`none`/`done`/`closed`/`today`/`overdue`/`future`) that the browser localizes. No private project field, description or acceptance criteria is included.
 
@@ -110,13 +135,13 @@ Sheets writes are not database transactions. A quota failure after a partial ext
 
 ## Browser state and errors
 
-The client limits RPC concurrency to two, deduplicates identical in-flight reads and uses response tokens so a superseded response never overwrites newer data. The authorized snapshot (projects, task summaries, references, visited details) stays in memory for the session; each dataset is revalidated in the background once it is older than 30 seconds, after tab focus/visibility, and after a relevant write. Nothing is persisted: there is no localStorage/IndexedDB record cache and no server-side cache. The 計測/Diagnostics view has an explicit ローカルデータを破棄/Clear local data action.
+The client limits RPC concurrency to two, deduplicates identical in-flight reads and uses response tokens so a superseded response never overwrites newer data. The authorized snapshot (projects, task summaries, references, visited details) stays in memory for the session; each dataset is revalidated in the background once it is older than 30 seconds, after tab focus/visibility, and after a relevant write. Nothing is persisted: there is no localStorage/IndexedDB record cache and no server-side cache. The 計測/Diagnostics view summarises queue wait, round trip, server time, sheet reads and the largest payload, and its read-only 詳細計測を実行 run reports workbook opens, range reads, writes, cells, lock wait, environment-check time and serialization per operation; it also has an explicit ローカルデータを破棄/Clear local data action.
 
 The toolbar of every list shows 最終更新 (local time of the last applied data) and 更新中… while a refresh runs; 再読み込み forces one. A failed refresh keeps the cached view visible, adds an error banner with 再試行, and never discards an open form.
 
 If the server stops authorizing the session (`MANAGER_ACCESS_DENIED` or `Insufficient role`), the client drops every cached view and the open form, stops issuing requests and shows the access-denied message. Without that response, already displayed data can remain on screen; it can never authorize a write, because every write re-checks the verified role.
 
-A record form exists only while it is open (V1.7.2). Opening it reads the latest stored record, closing it (or navigating away) discards every entered value, and reopening builds a new form from the stored data — an unfinished edit is never restored and is never written to `localStorage`. There is no autosave and no before-unload draft prompt. A save is refused when the stored revision changed after the form was loaded, and the refused form stays open with its values. Only the language preference is in localStorage. Do not add private draft persistence without an explicit privacy design.
+A record form exists only while it is open (V1.7.2). Opening it reads the latest stored record, closing it (or navigating away) discards every entered value, and reopening builds a new form from the stored data — an unfinished edit is never restored and is never written to `localStorage`. There is no autosave and no before-unload draft prompt. V1.7.3 makes the edit read authoritative (the list row is never the form source) and invalidates a pending editor-open read on close, navigation, a native dialog close (Escape) or a revoked identity, so a late response can never reopen a form. A save is refused when the stored revision changed after the form was loaded, and the refused form stays open with its values. Only the language preference is in localStorage. Do not add private draft persistence without an explicit privacy design.
 
 Repeated clicks are suppressed while the same record/action is pending. No write is automatically retried. On a transport failure the result is uncertain: reload/search/audit before a manual retry, especially for creation. This release does not promise exactly-once create delivery. A conflict error (`EDIT_CONFLICT`) keeps the open form and asks the manager to reload; nothing is merged or overwritten automatically.
 

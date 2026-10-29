@@ -1,19 +1,33 @@
 # Production readiness
 
-## Current assessment — V1.7 (2026-10-29)
+## Current assessment — V1.7.3 (2026-10-29)
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 
-Version 1.7; schema **8** (`008_task_and_responsibility_members`, additive and not applied
+Application version 1.7.3; schema **8** (`008_task_and_responsibility_members`, additive and not applied
 automatically); employee contract **1.6** published, with **1.4**, **1.5** and **1.6** readable by the
 current reader.
 
 | Field | Value |
 | --- | --- |
-| Version | 1.7 |
+| Version | 1.7.3 |
 | Schema version | 8 (`008_task_and_responsibility_members`; additive, reviewed ID, verified backup first) |
 | Employee contract | 1.6 published; 1.4, 1.5 and 1.6 readable |
 | Google Workspace verification | **UNVERIFIED** — nothing in this repository has been run against a real Workspace |
+| Real latency measurement | **NOT_RUN** — run `devBenchmarkManagerWeb()` in the DEV project |
+
+V1.7.3 fixes the remaining request-validation and manager-editor defects (numeric `Snapshot_Version`,
+late editor-open responses, Escape dismissal, stale list-row edits, the release version, parent search
+above one page) and reduces the number of Google Sheets service calls the manager page makes (no
+task-index prefetch on first paint, one range read per table per execution, one write per contiguous
+column block). It changes no schema, migration, scope, property or contract, and adds no server-side
+cache. The local evidence is recorded in
+[V1_7_3_GATE_1.md](checkgates/V1_7_3_GATE_1.md) –
+[V1_7_3_GATE_5.md](checkgates/V1_7_3_GATE_5.md) and
+[MANAGER_WEB_APP_PERFORMANCE.md](MANAGER_WEB_APP_PERFORMANCE.md); live Workspace verification remains
+**BLOCKED / NOT_RUN**.
+
+## Historical assessment — V1.7 (2026-10-29)
 
 V1.7 adds additional task assignees and additional responsibility members as normalised relationship
 tables, keeps the primary owner columns authoritative, publishes only an allowlisted display-name

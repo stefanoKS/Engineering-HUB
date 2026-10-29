@@ -3,7 +3,11 @@ var Database = (function () {
   var readContext = null;
   function withReadContext(fn, allowWrites) {
     var previous = readContext;
-    readContext = {tables: Object.create(null), memo: Object.create(null), book: null, reads: 0, dataMs: 0, allowWrites: allowWrites === true};
+    readContext = {tables: Object.create(null), raw: Object.create(null), memo: Object.create(null), book: null,
+      reads: 0, dataMs: 0, allowWrites: allowWrites === true,
+      // V1.7.3 instrumentation: real service-call counters, never record content.
+      openMs: 0, bindMs: 0, lockMs: 0, rangeReads: 0, writes: 0, cellsWritten: 0,
+      tableMs: Object.create(null), backend: ''};
     try { return fn(readContext); } finally { readContext = previous; }
   }
   /**
@@ -24,14 +28,21 @@ var Database = (function () {
   function forgetMemo() { if (readContext) readContext.memo = Object.create(null); }
   function book() {
     if (readContext && readContext.book) return readContext.book;
+    var started = Date.now();
     var config = Config.get(), spreadsheet = SpreadsheetApp.openById(config.spreadsheetId);
+    var opened = Date.now();
     var settings = spreadsheet.getSheetByName('SETTINGS');
     if (settings && settings.getLastRow() > 1) {
       var values = settings.getDataRange().getValues(), headers = values[0];
       var marker = values.slice(1).filter(function (row) { return row[headers.indexOf('Setting_ID')] === 'DATABASE_ENVIRONMENT'; });
       if (marker.length > 1 || marker.length && marker[0][headers.indexOf('Name')] !== config.environment) throw new Error('Workbook environment mismatch');
     }
-    if (readContext) readContext.book = spreadsheet;
+    if (readContext) {
+      readContext.book = spreadsheet;
+      readContext.openMs += opened - started;
+      readContext.bindMs += Date.now() - opened;
+      readContext.rangeReads++;
+    }
     return spreadsheet;
   }
   // Optional request precondition, evaluated after acquiring the existing domain lock.
@@ -46,9 +57,11 @@ var Database = (function () {
     // Nested domain calls reuse this execution's held script lock; never reacquire it.
     if (lockHeld) return fn();
     var lock = LockService.getScriptLock();
+    var waited = Date.now();
     lock.waitLock(30000);
     lockHeld = true;
-    if (readContext) readContext.tables = Object.create(null);
+    // A lock boundary invalidates every execution-local cache, including the raw range values.
+    if (readContext) { readContext.tables = Object.create(null); readContext.raw = Object.create(null); readContext.lockMs += Date.now() - waited; }
     try {
       if (mutationCheck) {
         var check = mutationCheck;
@@ -68,12 +81,24 @@ var Database = (function () {
   }
   function data(name) {
     definition(name);
+    if (readContext && readContext.raw[name]) return readContext.raw[name];
+    var started = Date.now();
     var sheet = book().getSheetByName(name);
     if (!sheet) throw new Error('Missing table: ' + name + '; run approved migration');
-    var values = sheet.getDataRange().getValues();
+    // V1.7.3: one range read per table per execution. A write invalidates the entry, so a
+    // second operation never reuses values that the first one changed.
+    var values = SheetReadBackend.values(name, sheet);
     var headers = values[0] || [];
     if (headers.some(function (h, i) { return !h || headers.indexOf(h) !== i; })) throw new Error('Invalid headers: ' + name);
-    return { sheet: sheet, values: values, headers: headers };
+    var result = { sheet: sheet, values: values, headers: headers };
+    if (readContext) {
+      readContext.raw[name] = result;
+      readContext.rangeReads++;
+      readContext.dataMs += Date.now() - started;
+      readContext.tableMs[name] = (readContext.tableMs[name] || 0) + Date.now() - started;
+      readContext.backend = SheetReadBackend.name();
+    }
+    return result;
   }
   // Google Sheets materializes an unchecked checkbox as FALSE. A row holding nothing but blank
   // cells and FALSE checkbox values is an empty preformatted row, not a record.
@@ -90,9 +115,25 @@ var Database = (function () {
       return !(boxes[i] && value === false);
     });
   }
+  /**
+   * Normalises a stored cell for a field that is declared as a logical text identifier.
+   *
+   * Google Sheets returns a cell like `1.5` as the number 1.5 even when the logical value is
+   * the text `1.5`. `Snapshot_Version` and `Task_Revision_At_Submission` are opaque identifiers,
+   * so they stay text; only fields that explicitly declare `coerceText` are converted, and no
+   * other string field is touched. That keeps a whole-row re-validation from failing with
+   * `Invalid text: Snapshot_Version` on an existing row — the row itself is never rewritten.
+   */
+  function declaredText(def, obj) {
+    def.fields.forEach(function (f) {
+      if (!f.coerceText) return;
+      var value = obj[f.name];
+      if (typeof value === 'number' || typeof value === 'boolean') obj[f.name] = String(value);
+    });
+    return obj;
+  }
   function read(name) {
     if (readContext && readContext.tables[name]) return readContext.tables[name];
-    var started = Date.now();
     var def = definition(name), d = data(name), boxes = checkboxColumns(name, d.headers);
     var idColumn = d.headers.indexOf(def.id);
     var result = d.values.slice(1).filter(function (row, i) {
@@ -104,12 +145,11 @@ var Database = (function () {
     }).map(function (row) {
       var obj = {};
       d.headers.forEach(function (h, c) { obj[h] = row[c]; });
-      return obj;
+      return declaredText(def, obj);
     });
     if (readContext) {
       readContext.tables[name] = result;
       readContext.reads++;
-      readContext.dataMs += Date.now() - started;
     }
     return result;
   }
@@ -166,6 +206,16 @@ var Database = (function () {
     }
     return d.values.length + 1;
   }
+  /** Drops the execution-local rows of one table after a write; nothing shared is cached. */
+  function invalidate(name) {
+    if (readContext) { delete readContext.tables[name]; delete readContext.raw[name]; }
+    forgetMemo();
+  }
+  function counted(cells) {
+    if (!readContext) return;
+    readContext.writes++;
+    readContext.cellsWritten += cells;
+  }
   function insert(name, values) {
     if (readContext && !readContext.allowWrites) throw new Error("Writes are forbidden in a read context");
     var def = definition(name);
@@ -182,7 +232,8 @@ var Database = (function () {
     var row = freeRow(name, d);
     ensureSize(d.sheet, row, d.headers.length);
     d.sheet.getRange(row, 1, 1, d.headers.length).setValues([d.headers.map(function (h) { return cell(obj[h] === undefined ? '' : obj[h]); })]);
-    if (readContext) { delete readContext.tables[name]; forgetMemo(); }
+    counted(d.headers.length);
+    invalidate(name);
     return obj;
   }
   function update(name, id, patch) {
@@ -196,13 +247,25 @@ var Database = (function () {
     def.fields.forEach(function (f) { known[f.name] = previous[f.name]; });
     var obj = validate(name, Object.assign(known, patch));
     var d = data(name), index = d.values.findIndex(function (row, i) { return i > 0 && row[d.headers.indexOf(def.id)] === id; });
-    Object.keys(patch).forEach(function (key) {
+    // V1.7.3: one range write per contiguous run of changed columns on this row instead of one
+    // service call per field. Only the explicitly patched cells are written, so formulas, custom
+    // columns and untouched cells keep their content.
+    var cells = Object.keys(patch).map(function (key) {
       var col = d.headers.indexOf(key);
       if (col < 0) throw new Error('Missing column: ' + key);
-    });
-    // Only explicit fields are written: formulas and manually maintained cells remain untouched.
-    Object.keys(patch).forEach(function (key) { d.sheet.getRange(index + 1, d.headers.indexOf(key) + 1).setValue(cell(obj[key])); });
-    if (readContext) { delete readContext.tables[name]; forgetMemo(); }
+      return { column: col, value: cell(obj[key] === undefined ? '' : obj[key]) };
+    }).sort(function (a, b) { return a.column - b.column; });
+    var start = 0;
+    while (start < cells.length) {
+      var end = start + 1;
+      while (end < cells.length && cells[end].column === cells[end - 1].column + 1) end++;
+      var run = cells.slice(start, end);
+      d.sheet.getRange(index + 1, run[0].column + 1, 1, run.length)
+        .setValues([run.map(function (entry) { return entry.value; })]);
+      start = end;
+    }
+    counted(cells.length);
+    invalidate(name);
     return Object.assign({}, previous, obj);
   }
   function updateMany(name, changes) {
@@ -223,7 +286,7 @@ var Database = (function () {
       var rowIndex = positions.get(change.id), obj = {};
       def.fields.forEach(function (f) { obj[f.name] = d.values[rowIndex][d.headers.indexOf(f.name)]; });
       Object.assign(obj, change.patch);
-      validate(name, obj, references);
+      validate(name, declaredText(def, obj), references);
       Object.keys(change.patch).forEach(function (key) {
         var column = d.headers.indexOf(key);
         if (column < 0) throw new Error('Missing column: ' + key);
@@ -233,6 +296,7 @@ var Database = (function () {
       return obj;
     });
     // Validate the complete batch before writing; never rewrite untouched cells.
+    var written = 0;
     Object.keys(columns).forEach(function (key) {
       var entries = columns[key].sort(function (a, b) { return a.row - b.row; });
       var start = 0;
@@ -240,11 +304,12 @@ var Database = (function () {
         var end = start + 1;
         while (end < entries.length && entries[end].row === entries[end - 1].row + 1) end++;
         d.sheet.getRange(entries[start].row, Number(key) + 1, end - start, 1).setValues(entries.slice(start, end).map(function (entry) { return [entry.value]; }));
+        written += end - start;
         start = end;
       }
     });
-    if (readContext) delete readContext.tables[name];
-    forgetMemo();
+    counted(written);
+    invalidate(name);
     return results;
   }
   function writeGenerated(name, rows) {
@@ -255,8 +320,10 @@ var Database = (function () {
     if (rows.length && rows[0].length) {
       ensureSize(sheet, rows.length, rows[0].length);
       sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows.map(function (row) { return row.map(cell); }));
+      counted(rows.length * rows[0].length);
     }
     sheet.setFrozenRows(1);
+    invalidate(name);
     return sheet;
   }
   return { withMutationCheck: withMutationCheck, withReadContext: withReadContext, book: book, read: read, find: find, insert: insert, update: update, validate: validate,

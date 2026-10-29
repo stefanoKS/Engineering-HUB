@@ -267,6 +267,7 @@ var TaskTree = (function () {
     isContainer: isContainer,
     levelOf: levelOf,
     heightOf: heightOf,
+    isAncestor: isAncestor,
     hasRecordedWork: hasRecordedWork,
     historyFor: historyFor,
     validate: validate,

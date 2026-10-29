@@ -1,3 +1,6 @@
+/** Application release version. Kept separate from the schema, publisher and snapshot contract versions. */
+var APP_VERSION = '1.7.3';
+
 var Config = (function () {
   function get() {
     var p = PropertiesService.getScriptProperties().getProperties();

@@ -1,0 +1,695 @@
+{
+  "baselineCommit": "5c1143edef3f8ba74ce92219a59ea58723847941",
+  "previousClientCommit": "adde446e856f992d16aca18b116489126b9a57c7",
+  "environment": "Windows; Node v24.21.0; Google services mocked; local execution only",
+  "liveWorkspace": "NOT_RUN",
+  "datasets": [
+    {
+      "projects": 10,
+      "tasks": 100,
+      "subprojects": 20,
+      "baseline": {
+        "coldMs": 9.88,
+        "p50Ms": 1.03,
+        "p95Ms": 1.52,
+        "rangeReadsPerCall": 26,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 13,
+        "payloadBytes": 46543,
+        "samples": 12
+      },
+      "overview": {
+        "coldMs": 16.35,
+        "p50Ms": 5.35,
+        "p95Ms": 7.73,
+        "rangeReadsPerCall": 10,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 5770,
+        "samples": 12
+      },
+      "bootstrap": {
+        "coldMs": 5.36,
+        "p50Ms": 5.46,
+        "p95Ms": 6.65,
+        "rangeReadsPerCall": 10,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 11312,
+        "samples": 6
+      },
+      "taskIndex": {
+        "coldMs": 3.09,
+        "p50Ms": 2.29,
+        "p95Ms": 4.24,
+        "rangeReadsPerCall": 6,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 19945,
+        "samples": 6
+      },
+      "projectList": {
+        "coldMs": 3.33,
+        "p50Ms": 3.28,
+        "p95Ms": 3.89,
+        "rangeReadsPerCall": 8,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 4276,
+        "samples": 12
+      },
+      "projectDetail": {
+        "coldMs": 1.09,
+        "p50Ms": 0.6,
+        "p95Ms": 1.22,
+        "rangeReadsPerCall": 5,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 1765,
+        "samples": 12
+      },
+      "taskSearch": {
+        "coldMs": 0.96,
+        "p50Ms": 0.65,
+        "p95Ms": 4.85,
+        "rangeReadsPerCall": 6,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 4287,
+        "samples": 12
+      },
+      "taskDetail": {
+        "coldMs": 0.73,
+        "p50Ms": 0.41,
+        "p95Ms": 0.6,
+        "rangeReadsPerCall": 5,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 1068,
+        "samples": 12
+      },
+      "taskUpdate": {
+        "coldMs": 4.52,
+        "p50Ms": 2.31,
+        "p95Ms": 2.55,
+        "rangeReadsPerCall": 17,
+        "writeCallsPerCall": 6.333333333333333,
+        "cellsWrittenPerCall": 22.333333333333332,
+        "workbookOpensPerCall": 2,
+        "payloadBytes": 941,
+        "samples": 6
+      },
+      "taskCreate": {
+        "coldMs": 1.98,
+        "p50Ms": 1.71,
+        "p95Ms": 2.18,
+        "rangeReadsPerCall": 13,
+        "writeCallsPerCall": 4,
+        "cellsWrittenPerCall": 51,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 998,
+        "samples": 6
+      },
+      "requestApproval": {
+        "coldMs": 5.51,
+        "p50Ms": 2.72,
+        "p95Ms": 3.64,
+        "rangeReadsPerCall": 19,
+        "writeCallsPerCall": 14,
+        "cellsWrittenPerCall": 60,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 191,
+        "samples": 6,
+        "note": "Six distinct pending deadline requests; fixture setup excluded. Inbox receipt mirroring is unavailable in this mock; authoritative decision/history measured."
+      },
+      "responsibilitySwitch": {
+        "before": {
+          "coldMs": 5.44,
+          "p50Ms": 5.05,
+          "p95Ms": 7.1,
+          "rangeReadsPerCall": 10,
+          "writeCallsPerCall": 0,
+          "cellsWrittenPerCall": 0,
+          "workbookOpensPerCall": 1,
+          "payloadBytes": 3695,
+          "samples": 12
+        },
+        "after": {
+          "coldMs": 3.88,
+          "p50Ms": 3.97,
+          "p95Ms": 6,
+          "rangeReadsPerCall": 10,
+          "writeCallsPerCall": 0,
+          "cellsWrittenPerCall": 0,
+          "workbookOpensPerCall": 1,
+          "payloadBytes": 2587,
+          "samples": 12
+        },
+        "note": "Same scoped overview, with and without the area snapshot the browser already holds. KPIs are identical; only the duplicated selector/card payload and its rollups are removed."
+      },
+      "requestReconciliation": {
+        "coldMs": 4.74,
+        "p50Ms": 4.59,
+        "p95Ms": 4.74,
+        "rangeReadsPerCall": 50,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 25,
+        "payloadBytes": 4373,
+        "samples": 12,
+        "note": "Twelve ambiguous PROCESSING requests: one bounded AUDIT_LOG pass and one request read. Read-only preview; the explicit repair is a rare administrative action and is covered by tests."
+      },
+      "auditFinalization": {
+        "coldMs": 1.69,
+        "p50Ms": 1.03,
+        "p95Ms": 1.27,
+        "rangeReadsPerCall": 8,
+        "writeCallsPerCall": 3,
+        "cellsWrittenPerCall": 14,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 188,
+        "samples": 6,
+        "note": "Six terminal requests whose REQUEST_DECIDED row is missing: the repair appends one record and never repeats the task mutation."
+      },
+      "publication": {
+        "coldMs": 5.74,
+        "p50Ms": 2.77,
+        "p95Ms": 3.64,
+        "rangeReadsPerCall": 16,
+        "writeCallsPerCall": 9,
+        "cellsWrittenPerCall": 21,
+        "workbookOpensPerCall": 2,
+        "payloadBytes": 285,
+        "samples": 6,
+        "note": "One INTERNAL project; remaining projects RESTRICTED. Range counters cover private workbook only."
+      },
+      "reportRefresh": {
+        "coldMs": 12.1,
+        "p50Ms": 9.93,
+        "p95Ms": 9.93,
+        "rangeReadsPerCall": 14,
+        "writeCallsPerCall": 13.666666666666666,
+        "cellsWrittenPerCall": 2627.6666666666665,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 1489,
+        "samples": 3
+      },
+      "ui": {
+        "firstLoadMs": 28.98,
+        "cachedNavigationMs": {
+          "p50": 0.85,
+          "p95": 1.01,
+          "samples": 12
+        },
+        "localSearchMs": {
+          "p50": 0.07,
+          "p95": 0.24,
+          "samples": 10
+        },
+        "firstDetailOpenMs": 1.37,
+        "cachedDetailOpenMs": 0.1,
+        "taskIndexLoaded": true,
+        "rpcAfterInitialLoad": 2,
+        "pendingDuringInFlightTest": 1,
+        "inFlightNavigationMs": {
+          "p50": 0.12,
+          "p95": 0.25
+        }
+      },
+      "previousUi": {
+        "client": "previous",
+        "firstLoadMs": 11.35,
+        "firstLoadRpc": 1,
+        "rpcForOverviewProjectsTasks": 4,
+        "projectsNavigationMs": 4.63,
+        "tasksNavigationMs": 3.2
+      }
+    },
+    {
+      "projects": 100,
+      "tasks": 1000,
+      "subprojects": 200,
+      "baseline": {
+        "coldMs": 8.49,
+        "p50Ms": 6.39,
+        "p95Ms": 8.69,
+        "rangeReadsPerCall": 26,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 13,
+        "payloadBytes": 180034,
+        "samples": 12
+      },
+      "overview": {
+        "coldMs": 52.9,
+        "p50Ms": 47.7,
+        "p95Ms": 57.27,
+        "rangeReadsPerCall": 10,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 9956,
+        "samples": 12
+      },
+      "bootstrap": {
+        "coldMs": 46.46,
+        "p50Ms": 47.18,
+        "p95Ms": 58.02,
+        "rangeReadsPerCall": 10,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 58070,
+        "samples": 6
+      },
+      "taskIndex": {
+        "coldMs": 28.43,
+        "p50Ms": 18.86,
+        "p95Ms": 30.44,
+        "rangeReadsPerCall": 6,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 200871,
+        "samples": 6
+      },
+      "projectList": {
+        "coldMs": 17.28,
+        "p50Ms": 17.06,
+        "p95Ms": 22.07,
+        "rangeReadsPerCall": 8,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 20959,
+        "samples": 12
+      },
+      "projectDetail": {
+        "coldMs": 4.42,
+        "p50Ms": 3.91,
+        "p95Ms": 12.92,
+        "rangeReadsPerCall": 5,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 1765,
+        "samples": 12
+      },
+      "taskSearch": {
+        "coldMs": 4.62,
+        "p50Ms": 4.23,
+        "p95Ms": 4.96,
+        "rangeReadsPerCall": 6,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 4315,
+        "samples": 12
+      },
+      "taskDetail": {
+        "coldMs": 3.49,
+        "p50Ms": 3.34,
+        "p95Ms": 3.9,
+        "rangeReadsPerCall": 5,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 1068,
+        "samples": 12
+      },
+      "taskUpdate": {
+        "coldMs": 15.61,
+        "p50Ms": 17.62,
+        "p95Ms": 17.85,
+        "rangeReadsPerCall": 17,
+        "writeCallsPerCall": 6.333333333333333,
+        "cellsWrittenPerCall": 22.333333333333332,
+        "workbookOpensPerCall": 2,
+        "payloadBytes": 942,
+        "samples": 6
+      },
+      "taskCreate": {
+        "coldMs": 9.68,
+        "p50Ms": 9.88,
+        "p95Ms": 10.24,
+        "rangeReadsPerCall": 13,
+        "writeCallsPerCall": 4,
+        "cellsWrittenPerCall": 51,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 999,
+        "samples": 6
+      },
+      "requestApproval": {
+        "coldMs": 12.89,
+        "p50Ms": 10.09,
+        "p95Ms": 10.42,
+        "rangeReadsPerCall": 19,
+        "writeCallsPerCall": 14,
+        "cellsWrittenPerCall": 60,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 192,
+        "samples": 6,
+        "note": "Six distinct pending deadline requests; fixture setup excluded. Inbox receipt mirroring is unavailable in this mock; authoritative decision/history measured."
+      },
+      "responsibilitySwitch": {
+        "before": {
+          "coldMs": 45.81,
+          "p50Ms": 45.28,
+          "p95Ms": 50.08,
+          "rangeReadsPerCall": 10,
+          "writeCallsPerCall": 0,
+          "cellsWrittenPerCall": 0,
+          "workbookOpensPerCall": 1,
+          "payloadBytes": 9966,
+          "samples": 12
+        },
+        "after": {
+          "coldMs": 36.52,
+          "p50Ms": 35.99,
+          "p95Ms": 59.37,
+          "rangeReadsPerCall": 10,
+          "writeCallsPerCall": 0,
+          "cellsWrittenPerCall": 0,
+          "workbookOpensPerCall": 1,
+          "payloadBytes": 8850,
+          "samples": 12
+        },
+        "note": "Same scoped overview, with and without the area snapshot the browser already holds. KPIs are identical; only the duplicated selector/card payload and its rollups are removed."
+      },
+      "requestReconciliation": {
+        "coldMs": 40.15,
+        "p50Ms": 39.73,
+        "p95Ms": 40.52,
+        "rangeReadsPerCall": 50,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 25,
+        "payloadBytes": 4373,
+        "samples": 12,
+        "note": "Twelve ambiguous PROCESSING requests: one bounded AUDIT_LOG pass and one request read. Read-only preview; the explicit repair is a rare administrative action and is covered by tests."
+      },
+      "auditFinalization": {
+        "coldMs": 5,
+        "p50Ms": 4.6,
+        "p95Ms": 5.33,
+        "rangeReadsPerCall": 8,
+        "writeCallsPerCall": 3,
+        "cellsWrittenPerCall": 14,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 188,
+        "samples": 6,
+        "note": "Six terminal requests whose REQUEST_DECIDED row is missing: the repair appends one record and never repeats the task mutation."
+      },
+      "publication": {
+        "coldMs": 8.27,
+        "p50Ms": 6.48,
+        "p95Ms": 6.88,
+        "rangeReadsPerCall": 16,
+        "writeCallsPerCall": 9,
+        "cellsWrittenPerCall": 21,
+        "workbookOpensPerCall": 2,
+        "payloadBytes": 288,
+        "samples": 6,
+        "note": "One INTERNAL project; remaining projects RESTRICTED. Range counters cover private workbook only."
+      },
+      "reportRefresh": {
+        "coldMs": 88.12,
+        "p50Ms": 81.55,
+        "p95Ms": 81.55,
+        "rangeReadsPerCall": 14,
+        "writeCallsPerCall": 22.666666666666668,
+        "cellsWrittenPerCall": 22628.666666666668,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 1497,
+        "samples": 3
+      },
+      "ui": {
+        "firstLoadMs": 57.29,
+        "cachedNavigationMs": {
+          "p50": 1.5,
+          "p95": 2.07,
+          "samples": 12
+        },
+        "localSearchMs": {
+          "p50": 0.45,
+          "p95": 1.29,
+          "samples": 10
+        },
+        "firstDetailOpenMs": 5,
+        "cachedDetailOpenMs": 0.09,
+        "taskIndexLoaded": true,
+        "rpcAfterInitialLoad": 2,
+        "pendingDuringInFlightTest": 1,
+        "inFlightNavigationMs": {
+          "p50": 0.15,
+          "p95": 0.29
+        }
+      },
+      "previousUi": {
+        "client": "previous",
+        "firstLoadMs": 56.81,
+        "firstLoadRpc": 1,
+        "rpcForOverviewProjectsTasks": 4,
+        "projectsNavigationMs": 19.12,
+        "tasksNavigationMs": 13.44
+      }
+    },
+    {
+      "projects": 300,
+      "tasks": 3000,
+      "subprojects": 600,
+      "baseline": {
+        "coldMs": 19.48,
+        "p50Ms": 17.5,
+        "p95Ms": 20.32,
+        "rangeReadsPerCall": 26,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 13,
+        "payloadBytes": 302215,
+        "samples": 12
+      },
+      "overview": {
+        "coldMs": 153.79,
+        "p50Ms": 142.25,
+        "p95Ms": 172.24,
+        "rangeReadsPerCall": 10,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 9968,
+        "samples": 12
+      },
+      "bootstrap": {
+        "coldMs": 136.24,
+        "p50Ms": 138.41,
+        "p95Ms": 156.1,
+        "rangeReadsPerCall": 10,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 153483,
+        "samples": 6
+      },
+      "taskIndex": {
+        "coldMs": 80.9,
+        "p50Ms": 56.87,
+        "p95Ms": 73.09,
+        "rangeReadsPerCall": 6,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 611811,
+        "samples": 6
+      },
+      "projectList": {
+        "coldMs": 25.17,
+        "p50Ms": 24.91,
+        "p95Ms": 32.14,
+        "rangeReadsPerCall": 8,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 20959,
+        "samples": 12
+      },
+      "projectDetail": {
+        "coldMs": 21.79,
+        "p50Ms": 11.76,
+        "p95Ms": 20.98,
+        "rangeReadsPerCall": 5,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 1766,
+        "samples": 12
+      },
+      "taskSearch": {
+        "coldMs": 12.28,
+        "p50Ms": 12.33,
+        "p95Ms": 13.59,
+        "rangeReadsPerCall": 6,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 4316,
+        "samples": 12
+      },
+      "taskDetail": {
+        "coldMs": 9.98,
+        "p50Ms": 10.08,
+        "p95Ms": 11.16,
+        "rangeReadsPerCall": 5,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 1069,
+        "samples": 12
+      },
+      "taskUpdate": {
+        "coldMs": 47.42,
+        "p50Ms": 47.3,
+        "p95Ms": 49.17,
+        "rangeReadsPerCall": 17,
+        "writeCallsPerCall": 6.333333333333333,
+        "cellsWrittenPerCall": 22.333333333333332,
+        "workbookOpensPerCall": 2,
+        "payloadBytes": 942,
+        "samples": 6
+      },
+      "taskCreate": {
+        "coldMs": 29.55,
+        "p50Ms": 33.54,
+        "p95Ms": 35.36,
+        "rangeReadsPerCall": 13,
+        "writeCallsPerCall": 4,
+        "cellsWrittenPerCall": 51,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 999,
+        "samples": 6
+      },
+      "requestApproval": {
+        "coldMs": 29.96,
+        "p50Ms": 27.65,
+        "p95Ms": 31.82,
+        "rangeReadsPerCall": 19,
+        "writeCallsPerCall": 14,
+        "cellsWrittenPerCall": 60,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 192,
+        "samples": 6,
+        "note": "Six distinct pending deadline requests; fixture setup excluded. Inbox receipt mirroring is unavailable in this mock; authoritative decision/history measured."
+      },
+      "responsibilitySwitch": {
+        "before": {
+          "coldMs": 141.62,
+          "p50Ms": 140.34,
+          "p95Ms": 160.1,
+          "rangeReadsPerCall": 10,
+          "writeCallsPerCall": 0,
+          "cellsWrittenPerCall": 0,
+          "workbookOpensPerCall": 1,
+          "payloadBytes": 9978,
+          "samples": 12
+        },
+        "after": {
+          "coldMs": 106.35,
+          "p50Ms": 110.75,
+          "p95Ms": 136.16,
+          "rangeReadsPerCall": 10,
+          "writeCallsPerCall": 0,
+          "cellsWrittenPerCall": 0,
+          "workbookOpensPerCall": 1,
+          "payloadBytes": 8857,
+          "samples": 12
+        },
+        "note": "Same scoped overview, with and without the area snapshot the browser already holds. KPIs are identical; only the duplicated selector/card payload and its rollups are removed."
+      },
+      "requestReconciliation": {
+        "coldMs": 120.08,
+        "p50Ms": 120.43,
+        "p95Ms": 124.18,
+        "rangeReadsPerCall": 50,
+        "writeCallsPerCall": 0,
+        "cellsWrittenPerCall": 0,
+        "workbookOpensPerCall": 25,
+        "payloadBytes": 4373,
+        "samples": 12,
+        "note": "Twelve ambiguous PROCESSING requests: one bounded AUDIT_LOG pass and one request read. Read-only preview; the explicit repair is a rare administrative action and is covered by tests."
+      },
+      "auditFinalization": {
+        "coldMs": 12.39,
+        "p50Ms": 11.8,
+        "p95Ms": 13.4,
+        "rangeReadsPerCall": 8,
+        "writeCallsPerCall": 3,
+        "cellsWrittenPerCall": 14,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 189,
+        "samples": 6,
+        "note": "Six terminal requests whose REQUEST_DECIDED row is missing: the repair appends one record and never repeats the task mutation."
+      },
+      "publication": {
+        "coldMs": 18.48,
+        "p50Ms": 16.32,
+        "p95Ms": 17.51,
+        "rangeReadsPerCall": 16,
+        "writeCallsPerCall": 9,
+        "cellsWrittenPerCall": 21,
+        "workbookOpensPerCall": 2,
+        "payloadBytes": 291,
+        "samples": 6,
+        "note": "One INTERNAL project; remaining projects RESTRICTED. Range counters cover private workbook only."
+      },
+      "reportRefresh": {
+        "coldMs": 266.16,
+        "p50Ms": 271.71,
+        "p95Ms": 271.71,
+        "rangeReadsPerCall": 14,
+        "writeCallsPerCall": 42.666666666666664,
+        "cellsWrittenPerCall": 67075.33333333333,
+        "workbookOpensPerCall": 1,
+        "payloadBytes": 1504,
+        "samples": 3
+      },
+      "ui": {
+        "firstLoadMs": 169.65,
+        "cachedNavigationMs": {
+          "p50": 3.06,
+          "p95": 3.22,
+          "samples": 12
+        },
+        "localSearchMs": {
+          "p50": 1.48,
+          "p95": 1.82,
+          "samples": 10
+        },
+        "firstDetailOpenMs": 13.14,
+        "cachedDetailOpenMs": 0.15,
+        "taskIndexLoaded": true,
+        "rpcAfterInitialLoad": 2,
+        "pendingDuringInFlightTest": 1,
+        "inFlightNavigationMs": {
+          "p50": 0.32,
+          "p95": 0.59
+        }
+      },
+      "previousUi": {
+        "client": "previous",
+        "firstLoadMs": 161.92,
+        "firstLoadRpc": 1,
+        "rpcForOverviewProjectsTasks": 4,
+        "projectsNavigationMs": 28.74,
+        "tasksNavigationMs": 34.11
+      }
+    }
+  ]
+}
