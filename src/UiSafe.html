@@ -68,6 +68,33 @@
 
     function confirmAction(message) { return window.confirm(message); }
 
+    /**
+     * Response contracts for a remote payload.
+     *
+     * A field the server always sends is required: a missing or non-array value is a broken
+     * contract, not an empty result, so it raises instead of silently showing "no records".
+     * A documented-optional list normalizes to an empty array. Callers render inside a `call`
+     * handler, which turns the error into one readable status message.
+     */
+    function contractError(detail) { return new Error('INVALID_RESPONSE: ' + detail); }
+
+    function requireArray(value, field) {
+      if (!Array.isArray(value)) throw contractError('expected array for ' + field);
+      return value;
+    }
+
+    function optionalArray(value, field) {
+      if (value === undefined || value === null) return [];
+      return requireArray(value, field);
+    }
+
+    function requireObject(value, field) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw contractError('expected object for ' + field);
+      }
+      return value;
+    }
+
     return {
       text: text,
       clear: clear,
@@ -77,7 +104,10 @@
       renderRecords: renderRecords,
       fillSelect: fillSelect,
       setStatus: setStatus,
-      confirmAction: confirmAction
+      confirmAction: confirmAction,
+      requireArray: requireArray,
+      optionalArray: optionalArray,
+      requireObject: requireObject
     };
   }());
 </script>

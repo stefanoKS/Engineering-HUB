@@ -1,5 +1,5 @@
 /** Application release version. Kept separate from the schema, publisher and snapshot contract versions. */
-var APP_VERSION = '1.7.4';
+var APP_VERSION = '1.7.5';
 
 var Config = (function () {
   function get() {

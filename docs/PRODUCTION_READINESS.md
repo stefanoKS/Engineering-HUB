@@ -1,6 +1,35 @@
 # Production readiness
 
-## Current assessment — V1.7.3 (2026-10-29)
+## Current assessment — V1.7.5 (2026-10-30)
+
+**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+
+Application version **1.7.5**; schema **8** (`008_task_and_responsibility_members`, additive and not
+applied automatically); employee contract **1.6** published, with **1.4**, **1.5** and **1.6** readable
+by the current reader.
+
+| Field | Value |
+| --- | --- |
+| Version | 1.7.5 |
+| Schema version | 8 (`008_task_and_responsibility_members`; additive, reviewed ID, verified backup first) |
+| Employee contract | 1.6 published; 1.4, 1.5 and 1.6 readable |
+| Google Workspace verification | **UNVERIFIED** — nothing in this repository has been run against a real Workspace |
+| Real latency measurement | **NOT_RUN** — run `devBenchmarkManagerWeb()` in the DEV project |
+
+V1.7.5 is a corrective release: it fixes the task-summary corruption after a save, the 申請一覧
+synchronization races, the task-index recovery and the unguarded remote-field access, and it saves the
+task parent the form displays. It changes no schema, migration, scope, property, contract,
+authorization rule or project colour, and it adds no server-side cache. Spreadsheet service calls per
+operation and payload sizes are unchanged (see
+[V1_7_3_PERFORMANCE.json](checkgates/V1_7_3_PERFORMANCE.json) and
+[V1_7_5_PERFORMANCE.json](checkgates/V1_7_5_PERFORMANCE.json)). The local evidence is recorded in
+[V1_7_5_GATE_1.md](checkgates/V1_7_5_GATE_1.md) –
+[V1_7_5_GATE_3.md](checkgates/V1_7_5_GATE_3.md), with the V1.7.4 visual evidence in
+[V1_7_4_GATE_1.md](checkgates/V1_7_4_GATE_1.md) and
+[V1_7_4_GATE_2.md](checkgates/V1_7_4_GATE_2.md). Live Workspace verification remains
+**BLOCKED / NOT_RUN**, so this release stays **NOT APPROVED FOR PRODUCTION**.
+
+## Historical assessment — V1.7.3 (2026-10-29)
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 

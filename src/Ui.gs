@@ -591,6 +591,9 @@ var Ui = (function () {
     var patch = {};
     if (payload.projectId !== undefined) patch.Project_ID = text(payload.projectId, 'プロジェクト');
     if (payload.subprojectId !== undefined) patch.Subproject_ID = String(payload.subprojectId).trim();
+    // V1.7.5: a parent chosen in the form is saved. TaskTree.validate refuses a cross-project,
+    // cross-subproject, self or circular parent and the depth limit, exactly like the UI filter.
+    if (payload.parentTaskId !== undefined) patch.Parent_Task_ID = String(payload.parentTaskId || '').trim();
     if (payload.taskName !== undefined) patch.Task_Name = text(payload.taskName, 'タスク名');
     if (payload.description !== undefined) patch.Description = String(payload.description);
     if (payload.ownerId !== undefined) patch.Owner_Member_ID = text(payload.ownerId, '担当者');
@@ -683,6 +686,9 @@ var Ui = (function () {
         };
         // An explicit start without a duration is a deliberate manual override.
         if (payload.plannedStart && durationValue === '') data.Planned_Start_Source = 'MANUAL';
+        // V1.7.5: the parent chosen in the form is part of the hierarchy. TaskTree.validate
+        // re-checks the same project/subproject, self-parent, cycle and depth rules.
+        if (payload.parentTaskId !== undefined) data.Parent_Task_ID = String(payload.parentTaskId || '').trim();
         if (payload.additionalAssigneeIds !== undefined) {
           data.Additional_Assignee_IDs = memberIdList(payload.additionalAssigneeIds, '追加担当者');
         }

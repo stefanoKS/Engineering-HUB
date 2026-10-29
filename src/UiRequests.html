@@ -155,7 +155,11 @@
             return;
           }
           setStatus('ok', T('common.done'));
-          if (onSuccess) onSuccess(result.data);
+          // A payload that violates the response contract is reported, never rendered as empty.
+          if (onSuccess) {
+            try { onSuccess(result.data); }
+            catch (error) { setStatus('error', T('common.error') + ': ' + EHLang.serverMessage(error.message)); }
+          }
         })
         .withFailureHandler(function (error) { setStatus('error', T('common.error') + ': ' + error.message); });
       if (payload === undefined) runner[fn](); else runner[fn](payload);
@@ -282,6 +286,10 @@
 
     function render() {
       var data = state.data || {requests: [], history: [], counts: {}, configured: false};
+      // `requests` is a required field of the queue payload: a missing or non-array value is a
+      // contract failure reported by the `call` handler, never a false "no requests" state.
+      var requests = EH.requireArray(data.requests, 'requests');
+      var historyRows = EH.optionalArray(data.history, 'history');
       var container = byId('requests');
       EH.clear(container);
       var counts = data.counts || {};
@@ -301,18 +309,18 @@
       } else {
         note.textContent = '';
       }
-      if (!data.requests.length) {
+      if (!requests.length) {
         EH.append(container, 'div', T('manager.requests.empty'), 'hint');
       } else {
-        data.requests.forEach(function (request) { container.appendChild(renderRequest(request)); });
+        requests.forEach(function (request) { container.appendChild(renderRequest(request)); });
       }
 
       var history = byId('history');
       EH.clear(history);
-      if (!data.history.length) {
+      if (!historyRows.length) {
         EH.append(history, 'div', T('manager.requests.historyEmpty'), 'hint');
       } else {
-        data.history.forEach(function (row) {
+        historyRows.forEach(function (row) {
           EH.append(history, 'div', row.previousDeadline + ' → ' + row.newDeadline + '  ' +
             (row.previousStart || '-') + ' → ' + (row.newStart || '-') + '  ' + row.changedAt + '  ' + (row.changedBy || ''),
             'history-row');

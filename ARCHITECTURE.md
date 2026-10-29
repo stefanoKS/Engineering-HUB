@@ -1,5 +1,59 @@
 # Architecture
 
+## V1.7.5 corrective architecture notes
+
+Three properties describe this release.
+
+**A write response is authority for one row, not for the whole view.** The browser keeps an in-memory
+snapshot of project and task summaries. A save patches only the fields the `TASKS`/`PROJECTS` row
+determines directly; everything the server derives from other rows — container status, hierarchy
+depth, the completion review state, the effective assignee list, the shared-assignment flag — keeps its
+last authoritative value until the compact index answers. A record that is not in the index yet is
+never invented locally.
+
+**A write refreshes the narrowest dataset that can be authoritative.** A task save invalidates the
+cached compact index (and the read of it that may still be in flight, `supersedeRead`), re-reads it
+once, and marks the snapshot aggregates stale so the next page that shows them re-reads the snapshot.
+A project save invalidates the area snapshot and both list scopes. No path replaces the whole snapshot
+for a task page, and every refresh carries a generation token, so an answer produced before a newer
+save is discarded instead of painted.
+
+**Remote payloads are validated where they enter, not where they are rendered.** `readContract()`
+describes the fields each operation must provide (`requireArray`/`requirePage`) and the fields that may
+be absent (`optionalArray`); the bound sidebars do the same through `EH.requireArray`, and the shared
+dashboard validates its portfolio and worker payloads. A broken contract becomes one readable
+`INVALID_RESPONSE` message with a retry, a documented-optional field keeps its default, and a valid
+empty list stays the empty state — a malformed answer can never masquerade as "no records".
+
+### The 申請一覧 synchronization lifecycle
+
+```
+navigate('requests') → enterRequests()            (generation += 1, state = idle)
+render → state === 'idle' → requestImport(key)    (key = OPEN | ALL, captured at dispatch)
+       → response → generation unchanged AND key still selected AND view === 'requests'
+                    ? paint the authoritative queue
+                    : discard (no paint, no error, no retry)
+```
+
+The import is a page lifecycle operation rather than a record edit: the server import is idempotent per
+permanent inbox request ID, an entry that follows an abandoned one is not blocked by the single-write
+guard, and exactly one automatic import happens per entry.
+
+### The compact task index
+
+```
+syncTaskIndex(force) → generation += 1 → api.read('taskIndex')
+  hydrateTasks(payload)          valid?           → replace rows, total, complete, loaded together
+                                 above the bound? → complete:false, paginated list answers the page
+                                 unusable?        → recoverTaskIndex()
+  recoverTaskIndex() → 1st failure: snapshot refresh, then one retry
+                     → 2nd failure: paginated `tasks` read
+```
+
+A record count that differs from the snapshot is expected concurrent modification (a task was created
+or deleted between the two reads), so the newer index is accepted. The failure counter resets on
+success and on a user-initiated visit, which bounds the recovery without allowing a refresh loop.
+
 ## V1.7.3 corrective architecture notes
 
 Three properties describe this release.

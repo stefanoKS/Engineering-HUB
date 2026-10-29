@@ -14,8 +14,22 @@ var pending = new Set(), queue = [], running = 0;
 var store = {actor: null, references: null, responsibilities: [], responsibilityCards: {items: [], unassigned: null}, projects: null, tasks: null, overview: null, at: {}};
 var stats = {rpc: 0, hits: 0, stale: 0, writes: 0};
 var filters = {}, currentData = null, currentEditor = null, actorRole = '', metrics = [];
-// One automatic request import per page entry; a filter change never re-imports.
-var requestSync = {state: 'idle', error: ''};
+/**
+ * 申請一覧 synchronization lifecycle.
+ *
+ * `generation` identifies one page entry: every visit to 申請一覧 starts a new generation and a
+ * response that belongs to an older visit is dropped instead of repainting this page. `key`
+ * identifies the filter the import was started for, so a filter change that happened while the
+ * import was running keeps its own newer result. One automatic import happens per entry; a
+ * filter change never re-imports.
+ */
+var requestSync = {state: 'idle', error: '', generation: 0, key: ''};
+/**
+ * Compact task-index recovery state. The failure count bounds the recovery path, so a broken
+ * index contract can never put the page into a refresh loop.
+ */
+var TASK_INDEX_MAX_FAILURES = 1;
+var taskIndexState = {generation: 0, failures: 0, retryAfterBootstrap: false};
 /**
  * Active organisation filter. It lives in this page's memory only (never localStorage) and
  * uses the stable Responsibility_ID, so renaming an area never breaks the selection.
@@ -84,6 +98,18 @@ function invalidatePrefixes(prefixes) {
     inflight.delete(key);
   });
 }
+/**
+ * Drops one cached payload and supersedes a read of it that is still in flight.
+ *
+ * A task save invalidates the compact index, and a read that started before the save must not
+ * paint its older rows afterwards — not even by being joined by the newer refresh (V1.7.5).
+ */
+function supersedeRead(operation) {
+  var key = keyOf(operation, {});
+  tokens[key] = (tokens[key] || 0) + 1;
+  cache.delete(key);
+  inflight.delete(key);
+}
 var api = {
   peek: function (operation, payload) { var found = cache.get(keyOf(operation, payload)); return found ? found.data : null; },
   read: function (operation, payload, fresh) {
@@ -127,9 +153,124 @@ function title(key, parent) { parent.appendChild(el('h1', t(key))); }
  * Moves to another screen. Leaving an unfinished form has the same result as closing it: the
  * entered values are discarded and nothing is retained.
  */
-function navigate(next, options) { closeEditor(); view = next; if (options) filters[next] = options; if (next === 'requests') requestSync = {state: 'idle', error: ''}; clearNotice(); load(false); }
+function navigate(next, options) { closeEditor(); view = next; if (options) filters[next] = options; if (next === 'requests') enterRequests(); clearNotice(); load(false); }
 /** A stored request status is displayed through the dictionary, never translated in place. */
 function requestStatusLabel(value) { var key = 'requestStatus.' + String(value || ''); return EH_I18N.has('web.' + key) ? t(key) : String(value || ''); }
+/** Every 申請一覧 entry starts a new synchronization generation. */
+function enterRequests() { requestSync = {state: 'idle', error: '', generation: (requestSync.generation || 0) + 1, key: ''}; }
+/** The filter a request import belongs to; a changed filter owns the page itself. */
+function requestSyncKey() { return filters.requests && filters.requests.includeDecided ? 'ALL' : 'OPEN'; }
+/**
+ * One authorized import plus queue read for 申請一覧.
+ *
+ * This is a page lifecycle operation, not a record edit: the server import is idempotent (keyed
+ * by the permanent inbox request ID), and a manager who leaves and returns while an import is
+ * still running must not be blocked by the single-write guard that protects record edits. Two
+ * attempts may therefore overlap, and the newest page generation decides which answer paints.
+ */
+function requestImport(key) {
+  stats.writes++;
+  return rpc(true, 'requestSync', {includeDecided: key === 'ALL'}).then(function (data) {
+    // The queue and the pending count are the only cached values the import can change.
+    invalidatePrefixes(afterWritePrefixes('requestSync'));
+    return data;
+  });
+}
+
+/* ---------------------------------------------------------------- *
+ * Response contracts
+ *
+ * Every payload here comes from `google.script.run`, so it is remote input: a missing array
+ * is a broken contract, never an empty result. The fields a view relies on are validated once,
+ * at the API boundary, before anything is painted — so a malformed answer becomes one readable
+ * error with a retry, while a valid empty list still renders as the empty state.
+ * ---------------------------------------------------------------- */
+function contractError(detail) { return new Error('INVALID_RESPONSE: ' + detail); }
+/** A field the operation always sends; anything else is a contract failure. */
+function requireArray(value, field) {
+  if (!Array.isArray(value)) throw contractError('expected array for ' + field);
+  return value;
+}
+/** A documented-optional list: absence means "none", a non-array is still a failure. */
+function optionalArray(value, field) {
+  if (value === undefined || value === null) return [];
+  return requireArray(value, field);
+}
+function requireObject(value, field) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw contractError('expected object for ' + field);
+  return value;
+}
+/** A paged payload: a required `items` list and a numeric total. */
+function requirePage(value, field) {
+  requireObject(value, field);
+  requireArray(value.items, field + '.items');
+  if (typeof value.total !== 'number' || !isFinite(value.total)) throw contractError('expected total for ' + field);
+  return value;
+}
+/** Shape of one read response; optional fields are normalized, required ones are enforced. */
+function readContract(operation, data) {
+  if (operation === 'bootstrap') {
+    requireObject(data, 'bootstrap');
+    requirePage(data.projects, 'bootstrap.projects');
+    requireObject(data.tasks, 'bootstrap.tasks');
+    if (typeof data.tasks.total !== 'number' || !isFinite(data.tasks.total)) throw contractError('expected total for bootstrap.tasks');
+    return data;
+  }
+  if (operation === 'overview') {
+    requireObject(data, 'overview');
+    data.upcoming = data.upcoming ? requirePage(data.upcoming, 'overview.upcoming') : {items: [], total: 0};
+    data.projects = data.projects ? requirePage(data.projects, 'overview.projects') : {items: [], total: 0};
+    return data;
+  }
+  if (operation === 'projects' || operation === 'tasks' || operation === 'parentOptions') return requirePage(data, operation);
+  if (operation === 'requests') {
+    requireObject(data, 'requests');
+    data.requests = requireArray(data.requests, 'requests.requests');
+    data.history = optionalArray(data.history, 'requests.history');
+    return data;
+  }
+  if (operation === 'members' || operation === 'responsibilities' || operation === 'skills') {
+    requireObject(data, operation);
+    data.items = requireArray(data.items, operation + '.items');
+    return data;
+  }
+  if (operation === 'project') {
+    requireObject(data, 'project');
+    requireObject(data.record, 'project.record');
+    requireObject(data.progress, 'project.progress');
+    data.subprojects = optionalArray(data.subprojects, 'project.subprojects');
+    return data;
+  }
+  if (operation === 'task' || operation === 'editor') {
+    requireObject(data, operation);
+    requireObject(data.record, operation + '.record');
+    data.confirmations = optionalArray(data.confirmations, operation + '.confirmations');
+    return data;
+  }
+  if (operation === 'member') {
+    requireObject(data, 'member');
+    requireObject(data.member, 'member.member');
+    data.current = optionalArray(data.current, 'member.current');
+    data.previous = optionalArray(data.previous, 'member.previous');
+    data.memberActions = optionalArray(data.memberActions, 'member.memberActions');
+    data.taskHistory = optionalArray(data.taskHistory === undefined ? data.activity : data.taskHistory, 'member.taskHistory');
+    return data;
+  }
+  if (operation === 'plan') {
+    requireObject(data, 'plan');
+    data.warnings = optionalArray(data.warnings, 'plan.warnings');
+    return data;
+  }
+  return data;
+}
+/** Reference choices: a missing list is the documented "none", never a crash in a select. */
+function normalizeReferences(value) {
+  var source = value || {};
+  return {members: optionalArray(source.members, 'references.members'),
+    projects: optionalArray(source.projects, 'references.projects'),
+    responsibilities: optionalArray(source.responsibilities, 'references.responsibilities'),
+    colors: optionalArray(source.colors, 'references.colors')};
+}
 
 /* ---------------------------------------------------------------- *
  * Local snapshot: apply, query, invalidate
@@ -165,15 +306,37 @@ function invalidateAreaSnapshot() {
   store.overview = null;
   store.at.bootstrap = 0;
 }
+/**
+ * Rebuilds the compact task index from its column/row payload.
+ *
+ * V1.7.5: an unusable payload returns null instead of half a list, so the caller recovers
+ * through the authoritative path instead of painting rows that silently lost a field. The
+ * index carries its own record count, so a task created or deleted between two reads is a
+ * normal concurrent change, not a mismatch with the snapshot.
+ */
 function hydrateTasks(data) {
-  if (!data || data.items || !data.rows) return data;
-  var columns = data.columns || [];
-  var items = data.rows.map(function (row) {
+  if (!data || typeof data !== 'object') return null;
+  var total = Number(data.total);
+  if (!isFinite(total) || total < 0) return null;
+  var limit = Number(data.limit);
+  if (!isFinite(limit) || limit <= 0) limit = PAGE;
+  // Above the compact bound the dataset is complete:false and carries no rows at all.
+  if (data.complete === false) return {items: [], total: total, complete: false, limit: limit};
+  if (!Array.isArray(data.columns) || !Array.isArray(data.rows)) return null;
+  var columns = data.columns.filter(function (column) { return typeof column === 'string' && !!column; });
+  if (!columns.length || columns.length !== data.columns.length) return null;
+  var items = [];
+  for (var index = 0; index < data.rows.length; index++) {
+    var row = data.rows[index];
+    if (!Array.isArray(row) || row.length !== columns.length) return null;
     var item = {};
-    columns.forEach(function (column, index) { item[column] = row[index]; });
-    return item;
-  });
-  return {items: items, total: data.total, complete: data.complete === true, limit: data.limit};
+    columns.forEach(function (column, position) { item[column] = row[position]; });
+    // A summary without its stable ID cannot be displayed, matched or edited.
+    if (item.id === undefined || item.id === null || item.id === '') return null;
+    items.push(item);
+  }
+  if (items.length !== total) return null;
+  return {items: items, total: total, complete: true, limit: limit};
 }
 /** Applies one authorized bootstrap response to the local snapshot. */
 function applyBootstrap(data) {
@@ -181,7 +344,7 @@ function applyBootstrap(data) {
   if (!data || !data.projects || !data.tasks) return;
   store.actor = data.actor || store.actor;
   if (data.actor) { actorRole = data.actor.role; byId('actor').textContent = data.actor.name + ' · ' + data.actor.role; }
-  store.references = data.references || null;
+  store.references = data.references ? normalizeReferences(data.references) : null;
   store.responsibilities = data.responsibilities || [];
   store.responsibilityCards = data.responsibilityCards || {items: [], unassigned: null};
   store.projects = data.projects;
@@ -200,6 +363,8 @@ function applyBootstrap(data) {
   if (store.references) cache.set(keyOf('references', {}), {at: at, data: store.references});
   // The responsibility section mirrors the snapshot, so the navigation is refreshed with it.
   if (byId('nav')) renderNav();
+  // A snapshot read made to recover a failed index gives the index one more authoritative try.
+  if (taskIndexState.retryAfterBootstrap) { taskIndexState.retryAfterBootstrap = false; syncTaskIndex(true); }
 }
 /**
  * Loads or refreshes the compact task index.
@@ -207,6 +372,10 @@ function applyBootstrap(data) {
  * V1.7.3: the index is no longer prefetched after `bootstrap`. The first paint is one RPC, and
  * the index is read when タスク is opened (or after a project write invalidated it). This removes
  * a second Apps Script execution — and its Sheets reads — from the initial page load.
+ *
+ * V1.7.5: a payload the browser cannot use is recovered instead of silently leaving the page in
+ * a loading state, a record count that changed since the snapshot is accepted as the newer
+ * authoritative one, and a refresh that is superseded by a newer save never replaces its rows.
  */
 function syncTaskIndex(force) {
   if (revoked || !store.tasks || !store.tasks.complete) return;
@@ -214,18 +383,56 @@ function syncTaskIndex(force) {
   // Each dataset has its own freshness window, so a revalidation does not re-download an index
   // that was refreshed moments ago.
   if (!force && store.tasks.loaded && store.at.tasks && Date.now() - store.at.tasks < FRESH_MS) return;
-  var hadRows = store.tasks.loaded;
-  api.read('taskIndex', {}, hadRows).then(function (data) {
+  var generation = (taskIndexState.generation += 1);
+  api.read('taskIndex', {}, true).then(function (data) {
+    // A newer refresh (or an invalidation) owns the rows from here on.
+    if (generation !== taskIndexState.generation) return;
+    // A superseded read answers null; the refresh that replaced it is already in flight.
+    if (!data) return;
     var index = hydrateTasks(data);
-    if (!index || index.total !== store.tasks.total || !index.complete) return;
+    if (!index) { recoverTaskIndex(); return; }
+    if (!index.complete) {
+      // Above the compact bound the paginated server path answers the page; nothing is
+      // truncated and no partial list is presented as the whole dataset.
+      taskIndexState.failures = 0;
+      store.tasks = {items: [], total: index.total, complete: false, limit: index.limit, loaded: false};
+      store.at.tasks = 0;
+      if (view === 'tasks') fetchView('tasks', true, true); else renderSync();
+      return;
+    }
+    taskIndexState.failures = 0;
     store.tasks = {items: index.items, total: index.total, complete: true, limit: index.limit, loaded: true};
     store.at.tasks = Date.now();
     if ((view === 'tasks' || view === 'diagnostics') && canRepaint()) { currentData = peekView(view); render(); }
     else renderSync();
-  }).catch(function () {
-    // The paginated server path stays available when the compact index cannot be read.
-    if (view === 'tasks' && !indexedTasks()) { render(); fetchView('tasks', true, true); }
+  }).catch(function (error) {
+    if (generation !== taskIndexState.generation) return;
+    if (/MANAGER_ACCESS_DENIED|Insufficient role|Access denied|権限/.test(String(error.message || ''))) { revoke(); return; }
+    recoverTaskIndex();
   });
+}
+/**
+ * Bounded recovery for a compact index the browser cannot use.
+ *
+ * The first failure refreshes the snapshot once — the record count may have changed while the
+ * index was being read — and the retried index is the authoritative answer. A second failure
+ * switches the page to the paginated server list. Neither path leaves a loading state behind,
+ * and the failure counter keeps a broken contract from turning into a refresh loop.
+ */
+function recoverTaskIndex() {
+  if (revoked) return;
+  // An unusable payload is dropped instead of staying in the cache; a read that is still in
+  // flight is not invalidated, because it belongs to a newer refresh than this failure.
+  cache.delete(keyOf('taskIndex', {}));
+  taskIndexState.failures += 1;
+  if (taskIndexState.failures <= TASK_INDEX_MAX_FAILURES) {
+    taskIndexState.retryAfterBootstrap = true;
+    bootstrapFetch();
+    return;
+  }
+  store.at.tasks = 0;
+  if (view === 'tasks') { currentData = null; fetchView('tasks', true, true); return; }
+  renderSync();
 }
 function indexedTasks() {
   return !!(store.tasks && store.tasks.loaded && store.tasks.complete === true);
@@ -1009,6 +1216,8 @@ function load(fresh, message) {
     bootstrapFetch(true); return;
   }
   if (requested === 'tasks') {
+    // A user-initiated visit starts a fresh recovery budget; an automatic refresh never does.
+    taskIndexState.failures = 0;
     syncTaskIndex(true);
     // V1.7.3: the compact index answers this view, so the paginated server page is only requested
     // when the index is unavailable. This keeps one round trip instead of two.
@@ -1019,6 +1228,9 @@ function load(fresh, message) {
   if (requested === 'tasks' || requested === 'projects') { currentData = null; render(); }
   fetchView(requested, fresh === true, true);
 }
+/** True for a payload that violates the documented response contract. */
+function isContractError(error) { return /^INVALID_RESPONSE/.test(String(error && error.message || '')); }
+
 /** Authorized snapshot read; the same in-flight request is shared by every caller. */
 function bootstrapFetch(first) {
   if (revoked) return;
@@ -1026,7 +1238,7 @@ function bootstrapFetch(first) {
   api.read('bootstrap', {}, true).then(function (data) {
     refreshing = false;
     if (!data) { renderSync(); return; }
-    applyBootstrap(data);
+    applyBootstrap(readContract('bootstrap', data));
     if (first) clearNotice();
     repaintIfAllowed();
   }).catch(function (error) { refreshing = false; handleError(error); });
@@ -1035,10 +1247,18 @@ function fetchView(name, fresh, first) {
   var seq = ++sequence, start = performance.now();
   api.read(name, viewFilters(name), fresh === true).then(function (data) {
     if (!data || seq !== sequence) return;
+    // A payload without the fields this view requires is a contract failure, not an empty list.
+    data = readContract(name, data);
     currentData = data; syncError = ''; store.at[name] = Date.now();
     if (first) clearNotice();
     render(); recordRender(name, start);
-  }).catch(function (error) { if (seq === sequence) handleError(error); });
+  }).catch(function (error) {
+    if (seq !== sequence) return;
+    // A payload that violates the contract cannot be shown at all; a transient read failure
+    // keeps the previous rows and only reports the error.
+    if (isContractError(error)) currentData = null;
+    handleError(error);
+  });
 }
 /**
  * Publication status plus the database/application versions in one paint.
@@ -1183,10 +1403,11 @@ function deleteCodeLabel(code){
   return EH_I18N.has('web.'+key)?t(key):String(code);
 }
 function loadRevision(table,id){
-  if(table==='TASKS')return api.read('task',{id:id},true).then(function(result){return result.record._revision;});
+  if(table==='TASKS')return api.read('task',{id:id},true).then(function(result){return readContract('task',result).record._revision;});
   return api.read('project',{id:id},true).then(function(result){
+    result=readContract('project',result);
     if(table==='PROJECTS')return result.record._revision;
-    var found=(result.subprojects||[]).filter(function(sub){return sub.Subproject_ID===id;})[0];
+    var found=result.subprojects.filter(function(sub){return sub.Subproject_ID===id;})[0];
     return found?found._revision:'';
   });
 }
@@ -1382,16 +1603,24 @@ function render() {
       host.appendChild(card);
     });
     // One authorized import per page entry: the cached queue paints first, then a single
-    // "import + reread" round trip refreshes it. Filter changes never re-import.
+    // "import + reread" round trip refreshes it. Filter changes never re-import. A manager who
+    // leaves and returns while an import is still running starts a new attempt; the answer of a
+    // superseded entry, and of a filter that is no longer selected, never paints this page.
     if(requestSync.state==='idle'){
-      requestSync.state='pending';
-      api.write('requestSync',{includeDecided:!!(filters.requests&&filters.requests.includeDecided)}).then(function(result){
+      var generation=requestSync.generation,syncKey=requestSyncKey();
+      requestSync.state='pending';requestSync.key=syncKey;
+      requestImport(syncKey).then(function(result){
+        // An older page entry owns nothing here: its answer is discarded without a repaint.
+        if(generation!==requestSync.generation)return;
         requestSync.state='done';
-        if(view!=='requests')return;
-        currentData=result;store.at.requests=Date.now();render();
+        // A filter change that happened while the import ran already owns a newer read.
+        if(syncKey!==requestSyncKey()||view!=='requests')return;
+        currentData=readContract('requests',result);store.at.requests=Date.now();render();
       }).catch(function(error){
+        if(generation!==requestSync.generation)return;
         requestSync.state='failed';requestSync.error=error.message;
-        if(view==='requests'){currentData=data;data.importError=data.importError||error.message;render();}
+        if(syncKey!==requestSyncKey()||view!=='requests')return;
+        data.importError=data.importError||error.message;render();
       });
     }
     host.appendChild(el('h2',t('history')));(data.history||[]).forEach(function(h){var item=el('article',undefined,'card');rowValues(item,[[t('task'),h.taskId],[t('deadline'),h.previousDeadline+' → '+h.newDeadline],[t('reason'),h.reason],[t('member'),h.changedBy]]);host.appendChild(item);});
@@ -1717,17 +1946,40 @@ function renderAutomation(data,host) {
  * Records a confirmed write: the snapshot is patched where it can be, the current view is
  * repainted from local data and only the affected aggregates are revalidated. No page reload and
  * no loss of unrelated cached views; "Saved" is shown only after the server confirmed the write.
+ *
+ * V1.7.5: a task save changes values the server derives from the whole tree (container status,
+ * depth, review state, effective assignees) and the aggregates built from every task, so those
+ * are marked stale and answered by the compact index in one narrow read — never guessed here and
+ * never paid for with a full snapshot refresh on the task page.
  */
 function settle(action, payload, result) {
   patchSummary(action, payload, result);
   // A project write can move work between areas and replaces the area data, so the previous
   // rows are cleared instead of being left on screen as the current responsibility's result.
   if (/^project/.test(action) && (view === 'tasks' || view === 'projects')) currentData = null;
+  if (/^task/.test(action)) invalidateDerivedTasks();
   repaintIfAllowed();
+  if (/^task/.test(action) && (view === 'tasks' || view === 'diagnostics') && store.tasks && store.tasks.complete) {
+    syncTaskIndex(true);
+    return;
+  }
   revalidateView(view === 'admin' || view === 'diagnostics' ? 'overview' : view);
   // The index repeats each task's project responsibility, so it is refetched after a project
   // write instead of being left empty until the next snapshot revalidation.
   if (/^project/.test(action)) syncTaskIndex(true);
+}
+/**
+ * Drops the values a task save changes indirectly: the compact index payload (whose derived
+ * fields are computed server-side) and the snapshot aggregates (KPIs, upcoming work, pending
+ * requests, project progress). The rows already on screen stay until the authoritative index
+ * arrives, so a save never blanks the list or resets a derived field to a default.
+ */
+function invalidateDerivedTasks() {
+  supersedeRead('taskIndex');
+  store.at.tasks = 0;
+  store.at.projects = 0;
+  store.overview = null;
+  store.at.bootstrap = 0;
 }
 /** Local yyyy-MM-dd text for a value that may be a Sheet date serialized as an instant. */
 function dayText(value) {
@@ -1751,30 +2003,39 @@ function patchProjectSummary(row) {
       responsibilityColor: area ? (area.color || '') : ''});
   });
 }
+/**
+ * One task summary updated from an authoritative TASKS row.
+ *
+ * Only fields the save response determines directly are copied. `container`, `depth`,
+ * `reviewState`, the effective assignee list and the shared-assignment flag are derived by the
+ * server from the whole tree, the assignee relation and the request queue; the previous values
+ * stay until `syncTaskIndex` returns the authoritative ones. A record that is not in the index
+ * yet (a new task) is not appended from this row either — the index read that follows adds it.
+ */
+function patchTaskSummary(row) {
+  var previous = store.tasks.items.filter(function (item) { return item.id === row.Task_ID; })[0];
+  if (!previous) return;
+  var projects = Object.create(null);
+  ((store.projects && store.projects.items) || []).forEach(function (p) { projects[p.id] = p; });
+  var project = projects[row.Project_ID] || null, owner = null;
+  ((store.references && store.references.members) || []).forEach(function (m) { if (m.id === row.Owner_Member_ID) owner = m; });
+  // An unknown project summary cannot prove the area, so the stored area is kept instead of
+  // being replaced by a blank that would silently move the task to 未分類.
+  var next = Object.assign({}, previous, {name: row.Task_Name, projectId: row.Project_ID,
+    subprojectId: row.Subproject_ID || '', parentId: row.Parent_Task_ID || '',
+    ownerId: row.Owner_Member_ID || '', deadline: dayText(row.Due_Date), priority: row.Priority});
+  if (project) {
+    next.project = project.name;
+    next.responsibilityId = project.responsibilityId || '';
+  }
+  if (owner) next.owner = owner.name || '';
+  store.tasks.items = store.tasks.items.map(function (item) { return item.id === next.id ? next : item; });
+}
 /** Applies the authoritative write result to the local summaries without inventing values. */
 function patchSummary(action, payload, result) {
   if (!result) return;
   var row = result.task || (result.Project_ID ? result : null);
-  if (row && row.Task_ID && indexedTasks()) {
-    var projects = Object.create(null);
-    ((store.projects && store.projects.items) || []).forEach(function (p) { projects[p.id] = p; });
-    var project = projects[row.Project_ID] || null;
-    var previous = store.tasks.items.filter(function (item) { return item.id === row.Task_ID; })[0] || {};
-    var owner = {};
-    ((store.references && store.references.members) || []).forEach(function (m) { if (m.id === row.Owner_Member_ID) owner = m; });
-    // An unknown project summary cannot prove the area, so the stored area is kept instead of
-    // being replaced by a blank that would silently move the task to 未分類.
-    var summary = {id: row.Task_ID, name: row.Task_Name, projectId: row.Project_ID, project: project ? project.name : (previous.project || ''),
-      subprojectId: row.Subproject_ID || '', parentId: row.Parent_Task_ID || '', container: false, depth: 0,
-      ownerId: row.Owner_Member_ID || '', owner: owner.name || '',
-      responsibilityId: project ? project.responsibilityId || '' : (previous.responsibilityId || ''),
-      deadline: dayText(row.Due_Date), status: row.Status,
-      progress: row.Progress_Percent, priority: row.Priority, reviewState: ''};
-    var known = store.tasks.items.some(function (item) { return item.id === summary.id; });
-    store.tasks.items = known ? store.tasks.items.map(function (item) { return item.id === summary.id ? summary : item; })
-      : store.tasks.items.concat([summary]);
-    if (!known) store.tasks.total = store.tasks.items.length;
-  }
+  if (row && row.Task_ID && indexedTasks()) patchTaskSummary(row);
   if (payload.taskId) invalidatePrefixes(['task' + JSON.stringify({id: payload.taskId})]);
   if (payload.projectId) invalidatePrefixes(['project' + JSON.stringify({id: payload.projectId})]);
   if (payload.subprojectId) invalidatePrefixes(['project']);
@@ -1864,9 +2125,9 @@ function discardEditor() {
 function detail(type,id,fresh) {
   var operation=type==='task'||type==='project'?type:'editor';
   var payload=operation==='editor'?{type:type,id:id}:{id:id};
-  return api.read(operation,payload,fresh!==false).then(function(d){var r=d.record;r._confirmations=d.confirmations||[];r._additional=(d.additionalAssigneeIds||d.additionalMemberIds||r._additionalMemberIds||[]).slice();return r;});
+  return api.read(operation,payload,fresh!==false).then(function(d){var r=readContract(operation,d).record;r._confirmations=d.confirmations||[];r._additional=(d.additionalAssigneeIds||d.additionalMemberIds||r._additionalMemberIds||[]).slice();return r;});
 }
-function loadSubprojects(projectId,draft){var seq=(draft.subSequence||0)+1;draft.subSequence=seq;api.read('project',{id:projectId}).then(function(d){if(draft.subSequence!==seq)return;draft.subprojects=d.subprojects;if(currentEditor===draft)renderEditor();}).catch(function(e){notice(e.message,'error');});}
+function loadSubprojects(projectId,draft){var seq=(draft.subSequence||0)+1;draft.subSequence=seq;api.read('project',{id:projectId}).then(function(d){if(draft.subSequence!==seq)return;draft.subprojects=readContract('project',d).subprojects;if(currentEditor===draft)renderEditor();}).catch(function(e){notice(e.message,'error');});}
 /**
  * Parent-task choices come from the compact index. When the index is not held locally (large
  * workbook) the server returns one bounded page, and its name search stays available so a parent
@@ -1880,9 +2141,10 @@ function loadParentTasks(projectId,draft){
   draft.parentTasksQuery='';
   api.read('parentOptions',parentQuery(draft)).then(function(page){
     if(currentEditor!==draft)return;
-    draft.parentTasks=(page&&page.items)||[];
-    draft.parentTasksTotal=page?page.total:0;
-    draft.parentTasksComplete=!page||page.complete!==false;
+    page=requirePage(page,'parentOptions');
+    draft.parentTasks=page.items;
+    draft.parentTasksTotal=page.total;
+    draft.parentTasksComplete=page.complete!==false;
     renderEditor();
   }).catch(function(e){notice(e.message,'error');});
 }
@@ -1898,8 +2160,9 @@ function searchParents(draft,query,paint){
   var seq=(draft.parentSearchSequence||0)+1;draft.parentSearchSequence=seq;
   api.read('parentOptions',parentQuery(draft)).then(function(page){
     if(currentEditor!==draft||draft.parentSearchSequence!==seq)return;
-    draft.parentTasks=(page&&page.items)||[];
-    draft.parentTasksTotal=page?page.total:0;
+    page=requirePage(page,'parentOptions');
+    draft.parentTasks=page.items;
+    draft.parentTasksTotal=page.total;
     paint();
   }).catch(function(){/* the shown page stays usable */});
 }
@@ -2093,7 +2356,7 @@ function renderEditor() {
   }
   var confirms=d.type==='project'?['confirmDeadlineChange','confirmResponsibilityChange','confirmRetiredResponsibility']:d.type==='subproject'?['confirmReparent']:d.type==='task'?['acknowledgeNonWorking','confirmDeadlineChange']:[];
   confirms.forEach(function(k){field(fields,k,d.values[k],null,function(v){d.values[k]=v;},'checkbox');});
-  if(d.type==='task')button('plan',function(){api.read('plan',d.values,true).then(function(p){message.textContent=t('plannedStart')+': '+p.startDate+' · '+p.warnings.map(function(w){return EH_I18N.has('web.'+w.code)?t(w.code):EH_I18N.serverMessage(lang,w.code);}).join(', ');}).catch(function(e){message.textContent=e.message;});},form);
+  if(d.type==='task')button('plan',function(){api.read('plan',d.values,true).then(function(p){p=readContract('plan',p);message.textContent=t('plannedStart')+': '+p.startDate+' · '+p.warnings.map(function(w){return EH_I18N.has('web.'+w.code)?t(w.code):EH_I18N.serverMessage(lang,w.code);}).join(', ');}).catch(function(e){message.textContent=e.message;});},form);
   var languageButton=el('button','日本語 | English');languageButton.type='button';languageButton.addEventListener('click',switchLanguage);form.appendChild(languageButton);
   var actions=el('div',undefined,'toolbar'),save=el('button',t('save'),'primary');save.type='submit';save.disabled=!!d.saving;actions.appendChild(save);
   // V1.7: closing is closing. No confirmation, no draft question and no retained values.

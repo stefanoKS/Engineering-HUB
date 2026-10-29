@@ -212,7 +212,11 @@
             return;
           }
           setStatus('ok', T('common.done'));
-          if (onSuccess) onSuccess(result.data);
+          // A payload that violates the response contract is reported, never rendered as empty.
+          if (onSuccess) {
+            try { onSuccess(result.data); }
+            catch (error) { setStatus('error', T('common.error') + ': ' + EHLang.serverMessage(error.message)); }
+          }
         })
         .withFailureHandler(function (error) { setStatus('error', T('common.error') + ': ' + error.message); });
       if (payload === undefined) runner[fn](); else runner[fn](payload);
@@ -384,21 +388,28 @@
     function publishNow() {
       if (!EH.confirmAction(T('settings.confirmPublishNow'))) return;
       call('uiPublishPublicationNow', undefined, function (result) {
+        // `warnings` is optional (absent means none); the published counts are required.
+        var counts = EH.requireObject(result.counts, 'publication.counts');
+        var excluded = EH.requireObject(result.excluded, 'publication.excluded');
+        var warnings = EH.optionalArray(result.warnings, 'publication.warnings');
         document.getElementById('publicationPreview').textContent =
-          'v' + result.version + ' / ' + result.counts.projects + ' / ' + result.counts.tasks + ' / ' +
-          result.excluded.projects + (result.warnings.length ? ' / ' + result.warnings.join(',') : '');
+          'v' + result.version + ' / ' + counts.projects + ' / ' + counts.tasks + ' / ' +
+          excluded.projects + (warnings.length ? ' / ' + warnings.join(',') : '');
         loadPublication();
       });
     }
 
     function previewPublication() {
       call('uiPublicationPreview', undefined, function (result) {
+        var counts = EH.requireObject(result.counts, 'publication.preview.counts');
+        var excluded = EH.requireObject(result.excluded, 'publication.preview.excluded');
+        var warnings = EH.optionalArray(result.warnings, 'publication.preview.warnings');
         document.getElementById('publicationPreview').textContent =
           (result.initialized ? 'v' + result.publishedVersion : T('settings.notRun')) +
-          ' / ' + result.counts.PROJECT_COUNT + ' / ' + result.counts.TASK_COUNT +
-          ' / ' + result.excluded.projects +
+          ' / ' + counts.PROJECT_COUNT + ' / ' + counts.TASK_COUNT +
+          ' / ' + excluded.projects +
           ' / ' + (result.unchanged ? '=' : '≠') +
-          (result.warnings.length ? ' / ' + result.warnings.join(',') : '');
+          (warnings.length ? ' / ' + warnings.join(',') : '');
       });
     }
 

@@ -290,3 +290,32 @@
     empty-ID colour.
 130. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_7_4_GATE_<n>.md`, keep earlier
     gate files unchanged, and keep live Workspace verification separate from local preview evidence.
+
+## V1.7.5 mandatory rules (stability, data integrity and logic corrections)
+
+131. A task summary is patched from the authoritative write response, never rebuilt. Copy only fields
+    the write determines directly; `container`, `depth`, `reviewState`, the effective assignee list and
+    the shared-assignment flag are server-derived and keep their last authoritative value until the
+    compact index answers. Never append a summary a partial row cannot describe.
+132. A save refreshes the narrowest authoritative dataset. A task save re-reads the compact index and
+    marks the snapshot aggregates stale for the page that shows them; it never replaces the whole
+    snapshot for a task page, and it never guesses an aggregate.
+133. An answer produced before a newer save is discarded. A refresh carries a generation token, and a
+    superseded read is dropped with its cached payload (`supersedeRead`) so it can neither paint nor
+    be joined by the newer refresh.
+134. 申請一覧 synchronization is identified by the page entry **and** the selected filter. A response or
+    failure from an abandoned entry or a superseded filter never paints and never sets the error state;
+    the one automatic import per entry stays, and the server import stays idempotent.
+135. A compact index whose record count differs from the snapshot is expected concurrent modification:
+    accept the newer authoritative count. An unusable payload recovers through one snapshot read, one
+    retry and then the paginated server list, and never leaves the task page loading or looping.
+136. Validate remote payloads at the API boundary (`readContract` / `EH.requireArray`). A required field
+    that is missing or of the wrong type is reported as `INVALID_RESPONSE` with a retry — never rendered
+    as an empty result and never left as an unhandled `TypeError`; a documented-optional field keeps its
+    documented default. Never blanket-replace a required array access with a defaulting fallback, which
+    would hide a real contract failure as an empty list.
+137. The task form persists the hierarchy it displays. `Parent_Task_ID` is written on create and on
+    edit, and the existing self/cross-project/cycle/depth validation stays authoritative.
+138. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_7_5_GATE_<n>.md`; keep schema 8,
+    employee contract 1.6, the migrations, the authorization rules and the project colours unchanged,
+    and keep `docs/PRODUCTION_READINESS.md` **NOT APPROVED FOR PRODUCTION** until live evidence exists.

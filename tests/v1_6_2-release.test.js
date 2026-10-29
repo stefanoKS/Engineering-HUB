@@ -27,7 +27,7 @@ test('package, publisher, README, UI and changelog agree on the current version'
   assert.match(read('CHANGELOG.md'), /## V1\.6\.1 — /);
   assert.match(read('CHANGELOG.md'), /## V1\.6 — /);
   // The overview payload, the status page and the sidebar report one application version.
-  assert.match(read('src/Config.gs'), /var APP_VERSION = '1\.7\.4'/);
+  assert.match(read('src/Config.gs'), /var APP_VERSION = '1.7.5'/);
   assert.match(read('src/ManagerWeb.gs'), /version: APP_VERSION/);
   assert.doesNotMatch(read('src/ManagerWeb.gs'), /version: '1\.6\.1'/);
 });

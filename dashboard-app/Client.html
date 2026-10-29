@@ -377,6 +377,17 @@
     });
   }
 
+  /**
+   * A required list of a server payload.
+   *
+   * The dashboard never turns a broken contract into "no records": a missing or non-array list
+   * raises, and the caller shows the error block instead of an empty portfolio.
+   */
+  function requireArray(value, field) {
+    if (!Array.isArray(value)) throw new Error('INVALID_RESPONSE: expected array for ' + field);
+    return value;
+  }
+
   // Static offline preview (screenshots and local review only). In a deployed Apps Script
   // page `google.script.run` always exists, so this branch is unreachable there. The preview
   // reports submissions as enabled only so the request form can be reviewed; the real page
@@ -510,15 +521,20 @@
         return;
       }
       applyPayload(result.data);
-    }).catch(function () {
+    }).catch(function (error) {
       if (token !== state.requestToken) return;
       setLoading(false);
-      showOverviewError(null);
+      // A response-contract failure is reported with its reason; anything else stays generic.
+      var contract = error && /^INVALID_RESPONSE/.test(String(error.message || ''));
+      showOverviewError(contract ? {error: {message: error.message}} : null);
     });
   }
 
   function applyPayload(data) {
-    state.projects = data.projects || [];
+    // The project list is required: an absent or non-array value is a contract failure that the
+    // caller reports, never a portfolio that claims there are no projects.
+    if (!data) throw new Error('INVALID_RESPONSE: expected payload for portfolio');
+    state.projects = requireArray(data.projects, 'projects');
     state.meta = data.meta || null;
     state.indicators = data.indicators || null;
     state.filterOptions = data.filters || {categories: [], owners: [], statuses: []};
@@ -858,7 +874,7 @@
     clear(dom.detailNotice);
     if (detail.truncated) {
       dom.detailNotice.appendChild(el('div', {className: 'notice notice-info'}, [
-        el('span', {text: T('dashboard.detail.truncated', {shown: detail.tasks.length, total: detail.taskTotal})})
+        el('span', {text: T('dashboard.detail.truncated', {shown: (detail.tasks || []).length, total: detail.taskTotal})})
       ]));
     }
 
@@ -1554,9 +1570,17 @@
         dom.workerErrorDetail.textContent = I18n.errorMessage(language, result && result.error);
         return;
       }
-      state.workerData = result.data;
-      renderWorkerFilters();
-      renderWorkers();
+      // The task list is required; a broken payload is reported instead of shown as "no work".
+      try {
+        var data = Object.assign({}, result.data);
+        data.tasks = requireArray(data.tasks, 'workerTasks.tasks');
+        state.workerData = data;
+        renderWorkerFilters();
+        renderWorkers();
+      } catch (error) {
+        dom.workerError.hidden = false;
+        dom.workerErrorDetail.textContent = String(error && error.message || '');
+      }
     }).catch(function () {
       if (token !== state.workerToken) return;
       dom.workerError.hidden = false;

@@ -111,18 +111,29 @@
     }
 
     function render(data) {
+      // `health`, `triggers` and their lists are required fields of the status payload: a
+      // missing one is a contract failure (reported by the loader), not "no triggers installed".
+      data = EH.requireObject(data, 'status');
+      var health = EH.requireObject(data.health, 'status.health');
+      var triggers = EH.requireObject(data.triggers, 'status.triggers');
+      triggers.installed = EH.requireArray(triggers.installed, 'status.triggers.installed');
+      triggers.missing = EH.requireArray(triggers.missing, 'status.triggers.missing');
+      triggers.obsolete = EH.requireArray(triggers.obsolete, 'status.triggers.obsolete');
+      triggers.duplicates = EH.requireArray(triggers.duplicates, 'status.triggers.duplicates');
+      data.errors = EH.optionalArray(data.errors, 'status.errors');
+      data.rowCounts = data.rowCounts && typeof data.rowCounts === 'object' ? data.rowCounts : {};
       var lines = [];
-      lines.push(T('system.environment') + ': ' + data.health.environment);
-      lines.push(T('system.emailMode') + ': ' + data.health.emailMode + ' (' + data.health.emailModeReason + ')');
-      lines.push(T('system.automationConfigured') + ': ' + (data.health.automationConfigured ? T('common.yes') : T('common.no')));
-      lines.push(T('system.notificationsActivated') + ': ' + (data.health.notificationsActivated ? T('common.yes') : T('common.no')));
-      lines.push(T('system.calendar') + ': ' + (data.health.calendarEnabled ? T('system.enabled') : T('system.disabled')));
+      lines.push(T('system.environment') + ': ' + health.environment);
+      lines.push(T('system.emailMode') + ': ' + health.emailMode + ' (' + health.emailModeReason + ')');
+      lines.push(T('system.automationConfigured') + ': ' + (health.automationConfigured ? T('common.yes') : T('common.no')));
+      lines.push(T('system.notificationsActivated') + ': ' + (health.notificationsActivated ? T('common.yes') : T('common.no')));
+      lines.push(T('system.calendar') + ': ' + (health.calendarEnabled ? T('system.enabled') : T('system.disabled')));
       lines.push(T('system.validation') + ': ' + (data.valid ? 'OK' : T('system.error') + ' ' + data.errorCount + T('common.items')));
-      lines.push(T('system.triggers') + ': ' + data.triggers.installed.join(', '));
-      lines.push(T('system.triggerMatch') + ': ' + (data.triggers.scheduleMatches ? T('system.matches') : T('system.reinstall')));
-      if (data.triggers.missing.length) lines.push(T('system.missingTriggers') + ': ' + data.triggers.missing.join(', '));
-      if (data.triggers.obsolete.length) lines.push(T('system.obsoleteTriggers') + ': ' + data.triggers.obsolete.join(', '));
-      if (data.triggers.duplicates.length) lines.push(T('system.duplicateTriggers') + ': ' + data.triggers.duplicates.length + T('common.items'));
+      lines.push(T('system.triggers') + ': ' + triggers.installed.join(', '));
+      lines.push(T('system.triggerMatch') + ': ' + (triggers.scheduleMatches ? T('system.matches') : T('system.reinstall')));
+      if (triggers.missing.length) lines.push(T('system.missingTriggers') + ': ' + triggers.missing.join(', '));
+      if (triggers.obsolete.length) lines.push(T('system.obsoleteTriggers') + ': ' + triggers.obsolete.join(', '));
+      if (triggers.duplicates.length) lines.push(T('system.duplicateTriggers') + ': ' + triggers.duplicates.length + T('common.items'));
       lines.push(T('system.rows') + ': ' + Object.keys(data.rowCounts).map(function (key) {
         return key + '=' + data.rowCounts[key];
       }).join(', '));
@@ -136,34 +147,34 @@
 
       var facts = byId('facts');
       EH.clear(facts);
-      fact(facts, T('system.environment'), String(data.health.environment || T('common.none')));
-      fact(facts, T('system.emailMode'), data.health.emailMode + ' (' + data.health.emailModeReason + ')',
-        data.health.emailMode === 'LIVE' ? 'is-error' : (data.health.emailMode === 'PREVIEW' ? 'is-warn' : ''));
-      fact(facts, T('system.automationConfigured'), data.health.automationConfigured ? T('common.yes') : T('common.no'));
-      fact(facts, T('system.notificationsActivated'), data.health.notificationsActivated ? T('common.yes') : T('common.no'));
-      fact(facts, T('system.calendar'), data.health.calendarEnabled ? T('system.enabled') : T('system.disabled'),
-        data.health.calendarEnabled ? 'is-warn' : '');
+      fact(facts, T('system.environment'), String(health.environment || T('common.none')));
+      fact(facts, T('system.emailMode'), health.emailMode + ' (' + health.emailModeReason + ')',
+        health.emailMode === 'LIVE' ? 'is-error' : (health.emailMode === 'PREVIEW' ? 'is-warn' : ''));
+      fact(facts, T('system.automationConfigured'), health.automationConfigured ? T('common.yes') : T('common.no'));
+      fact(facts, T('system.notificationsActivated'), health.notificationsActivated ? T('common.yes') : T('common.no'));
+      fact(facts, T('system.calendar'), health.calendarEnabled ? T('system.enabled') : T('system.disabled'),
+        health.calendarEnabled ? 'is-warn' : '');
       fact(facts, T('system.validation'),
         data.valid ? T('system.ok') : T('system.error') + ' ' + data.errorCount + T('common.items'),
         data.valid ? 'is-ok' : 'is-error');
 
-      var triggers = byId('triggerFacts');
-      EH.clear(triggers);
-      fact(triggers, T('system.triggerMatch'),
-        data.triggers.scheduleMatches ? T('system.matches') : T('system.reinstall'),
-        data.triggers.scheduleMatches ? 'is-ok' : 'is-warn');
-      fact(triggers, T('system.missingTriggers'), String(data.triggers.missing.length),
-        data.triggers.missing.length ? 'is-warn' : 'is-ok');
-      fact(triggers, T('system.obsoleteTriggers'), String(data.triggers.obsolete.length),
-        data.triggers.obsolete.length ? 'is-warn' : 'is-ok');
-      fact(triggers, T('system.duplicateTriggers'), String(data.triggers.duplicates.length),
-        data.triggers.duplicates.length ? 'is-warn' : 'is-ok');
+      var triggerFacts = byId('triggerFacts');
+      EH.clear(triggerFacts);
+      fact(triggerFacts, T('system.triggerMatch'),
+        triggers.scheduleMatches ? T('system.matches') : T('system.reinstall'),
+        triggers.scheduleMatches ? 'is-ok' : 'is-warn');
+      fact(triggerFacts, T('system.missingTriggers'), String(triggers.missing.length),
+        triggers.missing.length ? 'is-warn' : 'is-ok');
+      fact(triggerFacts, T('system.obsoleteTriggers'), String(triggers.obsolete.length),
+        triggers.obsolete.length ? 'is-warn' : 'is-ok');
+      fact(triggerFacts, T('system.duplicateTriggers'), String(triggers.duplicates.length),
+        triggers.duplicates.length ? 'is-warn' : 'is-ok');
 
       // The raw diagnostic detail stays available below the readable summary.
       var detail = [];
-      detail.push(T('system.triggers') + ': ' + data.triggers.installed.join(', '));
-      if (data.triggers.missing.length) detail.push(T('system.missingTriggers') + ': ' + data.triggers.missing.join(', '));
-      if (data.triggers.obsolete.length) detail.push(T('system.obsoleteTriggers') + ': ' + data.triggers.obsolete.join(', '));
+      detail.push(T('system.triggers') + ': ' + triggers.installed.join(', '));
+      if (triggers.missing.length) detail.push(T('system.missingTriggers') + ': ' + triggers.missing.join(', '));
+      if (triggers.obsolete.length) detail.push(T('system.obsoleteTriggers') + ': ' + triggers.obsolete.join(', '));
       byId('triggerDetail').textContent = detail.join('\n');
 
       byId('rows').textContent = Object.keys(data.rowCounts).map(function (key) {
@@ -188,7 +199,9 @@
             setStatus(T('common.error') + ': ' + EHLang.serverMessage((result && result.error) || T('common.unknown')));
             return;
           }
-          render(result.data);
+          // A payload that violates the response contract is reported, never rendered as "OK".
+          try { render(result.data); }
+          catch (error) { setStatus(T('common.error') + ': ' + EHLang.serverMessage(error.message)); }
         })
         .withFailureHandler(function (error) { setStatus(T('common.error') + ': ' + error.message); })
         .uiSystemStatus();

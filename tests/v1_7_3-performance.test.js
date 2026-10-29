@@ -334,7 +334,7 @@ test('the DEV benchmark is read-only, refuses production and reports real servic
     console.info = originalInfo;
   }
   assert.equal(report.environment, 'DEVELOPMENT');
-  assert.equal(report.applicationVersion, '1.7.4');
+  assert.equal(report.applicationVersion, '1.7.5');
   assert.equal(report.schemaVersion, 8);
   const operations = report.operations.map(entry => entry.operation);
   ['bootstrap', 'overview', 'taskIndex', 'projects', 'tasks', 'references'].forEach(name =>

@@ -1,6 +1,50 @@
 ﻿# Engineering-HUB
 
-## Current release — V1.7.4
+## Current release — V1.7.5
+
+**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+
+Application version **1.7.5** is a corrective release. It fixes the task-summary corruption after a
+save, the request-synchronization races, the task-index recovery and the unguarded API field access.
+Schema **8**, employee contract **1.6**, the migrations, the authorization rules, the audit and
+approval safeguards, the project colours and the deployment topology are unchanged; there is no
+migration, no initialization, no deployment and no change to notification or publication policy.
+
+- **A saved task keeps its derived values.** The task summary is patched from the write response
+  instead of being rebuilt: only fields the server response determines (`name`, project, subproject,
+  parent, owner, deadline, priority, responsibility through a known project) are copied, while
+  container status, depth, review state, effective assignees and the shared-assignment flag keep the
+  value the server last reported. A save no longer resets a parent task to a leaf, a nested task to
+  depth 0 or a shared task to a single assignee, and it never blanks a pending or stale approval.
+- **One narrow refresh instead of a snapshot reload.** A task save refreshes the compact index (one
+  read) and marks the aggregates stale for the next page that shows them. Measured RPC counts are
+  unchanged: one first paint plus two reads after the initial load, at 100/1,000/3,000 tasks.
+- **A superseded read can no longer win.** An index read that started before a newer save is
+  discarded together with its cached payload, and each refresh carries a generation token.
+- **申請一覧 has a page-entry generation.** A response is applied only when it belongs to the current
+  entry and the filter that is still selected, so an abandoned visit can no longer repaint the page
+  or overwrite its error state. The import stays idempotent and happens once per entry.
+- **A changed task count recovers.** A compact index whose record count differs from the snapshot is
+  accepted as the newer answer; an unusable payload is recovered with one snapshot read, one retry
+  and then the paginated server list, so タスク never stays in a loading state.
+- **Remote fields are validated, not assumed.** A required array that is missing or of the wrong type
+  is reported as `INVALID_RESPONSE` with a retry instead of throwing; a documented-optional field
+  keeps its default; a valid empty list is still the empty state. This applies to the manager
+  application, all four bound sidebars and the shared dashboard.
+- **The task form saves the parent it shows.** `Ui.assignTask()` now persists the chosen
+  `Parent_Task_ID` on create and on edit, with the existing hierarchy, cycle, cross-project and depth
+  validation unchanged.
+
+Local verification: `npm run lint`, `npm test` (**722 tests, 722 pass, 0 fail, 0 skipped**),
+`npm run validate` (42 manager files, 3 dashboard files, 970 translation keys) and
+`node scripts/manager-web-benchmark.js` all pass. Spreadsheet service calls per operation and payload
+sizes are unchanged. Live Workspace verification stays **BLOCKED / NOT_RUN**; see
+[V1_7_5_GATE_1.md](docs/checkgates/V1_7_5_GATE_1.md),
+[V1_7_5_GATE_2.md](docs/checkgates/V1_7_5_GATE_2.md),
+[V1_7_5_GATE_3.md](docs/checkgates/V1_7_5_GATE_3.md) and
+[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md).
+
+## Historical V1.7.4 release record
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 

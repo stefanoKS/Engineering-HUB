@@ -374,7 +374,11 @@
           }
           // A plain load is not a completed action, so it must not claim success.
           if (quiet) setStatus('', ''); else setStatus('ok', T('common.done'));
-          if (onSuccess) onSuccess(result.data);
+          // A payload that violates the response contract is reported, never rendered as empty.
+          if (onSuccess) {
+            try { onSuccess(result.data); }
+            catch (error) { setStatus('error', T('common.error') + ': ' + EHLang.serverMessage(error.message)); }
+          }
           if (onAlways) onAlways();
         })
         .withFailureHandler(function (error) {
@@ -421,6 +425,13 @@
     }
 
     function render(data) {
+      // Members, projects and skills are required lists of the menu payload: a missing one is a
+      // contract failure reported by the caller, never an empty picker or an empty directory.
+      data = EH.requireObject(data, 'menu');
+      data.actor = EH.requireObject(data.actor, 'menu.actor');
+      data.members = EH.requireArray(data.members, 'menu.members');
+      data.projects = EH.requireArray(data.projects, 'menu.projects');
+      data.skills = EH.requireArray(data.skills, 'menu.skills');
       context = data;
       document.getElementById('actor').textContent = T('manager.actor', {email: data.actor.email, role: data.actor.role});
       var activeMembers = data.members.filter(function (member) { return member.active; });
@@ -653,6 +664,8 @@
         return;
       }
       call('uiTaskOptions', {query: query}, function (data) {
+        data = EH.requireObject(data, 'taskOptions');
+        data.tasks = EH.requireArray(data.tasks, 'taskOptions.tasks');
         taskWindow = data;
         renderTaskSelects();
         renderTaskNote();

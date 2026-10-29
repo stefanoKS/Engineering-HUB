@@ -1,5 +1,103 @@
 ﻿# Changelog
 
+## V1.7.5 — stability, data integrity and logic corrections (2026-10-30)
+
+**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+
+Application version **1.7.5** is a corrective release. Schema **8**, employee publication contract
+**1.6**, the reviewed migrations, the authorization rules, the audit and approval safeguards, the
+current project colours and the deployment topology are unchanged. There is no migration, no
+initialization, no deployment and no change to notification, Calendar or publication policy.
+
+### Confirmed defects and their root causes
+
+1. **A task save reset server-derived summary fields.** `patchSummary()` rebuilt the whole task
+   summary from the `TASKS` write result and filled the fields it could not know with defaults:
+   `container: false`, `depth: 0`, `reviewState: ''`, and it dropped `assigneeIds`, `assigneeNames`
+   and `sharedAssignment` entirely. Those values are derived server-side from the whole task tree,
+   the assignee relation and the pending-request queue, so after a successful save a parent task
+   stopped looking like a container, a nested task lost its indentation, a shared task lost its
+   additional assignees and a pending approval lost its badge — until something else happened to
+   refresh the index. The task write also never invalidated the cached compact index, so the wrong
+   values could survive for the whole session.
+2. **The 申請一覧 synchronization had no page-entry identity.** The callback only checked that the
+   current view was still `requests`, so a response started by an earlier visit could repaint the
+   page, and a failure from an abandoned visit could overwrite the current visit's state.
+3. **A changed record count left タスク loading forever.** `syncTaskIndex()` returned without doing
+   anything when the compact index count differed from the count in the snapshot — which happens
+   whenever a task is created or deleted between the two reads — leaving the Task page in its
+   loading state and the interface unable to recover.
+4. **Malformed or missing API fields crashed the UI.** Array fields such as `data.requests`,
+   `data.items`, `data.history`, `data.triggers.missing` and `detail.tasks` were read with a direct
+   `.length`, so a required field that arrived missing or non-array produced an unhandled
+   `TypeError`; in the shared dashboard an absent `projects` list was silently rendered as an empty
+   portfolio.
+5. **The task form silently discarded the chosen parent task.** `Ui.assignTask()` built the patch
+   (and the new-task record) without `Parent_Task_ID`, so "move a task under another parent" and
+   "add a subtask" saved a task with no parent while the form showed the parent it had selected.
+
+### Corrections
+
+- **Task summaries are patched, not rebuilt** (`src/ManagerWebClient.html`, `patchSummary` →
+  `patchTaskSummary`). Only the fields the write response determines directly are copied (`name`,
+  `projectId`/`project`, `subprojectId`, `parentId`, `ownerId`/`owner`, `deadline`, `priority`,
+  responsibility through a known project summary). `container`, `depth`, `reviewState`, the effective
+  assignee list and the shared flag keep their previous values until the authoritative index
+  answers, and a record that is not in the index yet is never appended from a partial row.
+- **A task save refreshes one narrow dataset.** `settle()` now marks the derived task data stale
+  (`invalidateDerivedTasks`: index payload and the snapshot aggregates) and answers the task page with
+  one compact-index read instead of a whole-snapshot refresh; the aggregate figures are re-read
+  lazily when the manager next opens a page that shows them. Measured RPCs are unchanged
+  (1 first paint + 2 reads after the initial load, benchmark unchanged).
+- **A superseded read can no longer win.** `supersedeRead('taskIndex')` drops a cached payload *and*
+  the read that is still in flight, and `syncTaskIndex()` carries a generation token, so an answer
+  produced before a newer save is discarded rather than painted.
+- **The request synchronization has a page-entry generation** (`enterRequests`, `requestSyncKey`,
+  `requestImport`). A response is applied only when it belongs to the current entry *and* the filter
+  that is still selected; an abandoned visit's result or failure is dropped without a repaint. The
+  import remains idempotent server-side (permanent inbox request ID) and the page still performs
+  exactly one import per entry.
+- **An unusable or changed index recovers in a bounded way** (`hydrateTasks`, `recoverTaskIndex`).
+  The payload is validated (columns, rows, stable IDs, count consistency); a changed count is accepted
+  as the newer authoritative answer; a first failure refreshes the snapshot once and retries the
+  index, a second failure switches the page to the paginated server list. Nothing stays in a loading
+  state and no refresh loop is possible.
+- **Response contracts are validated at the API boundary** (`readContract`, `requireArray`,
+  `optionalArray`, `requireObject`, `requirePage`, `isContractError`). A required field that is
+  missing or of the wrong type becomes one readable `INVALID_RESPONSE` message with a retry; a
+  documented-optional field keeps its documented default; a valid empty list is still the empty
+  state. The bound sidebars (`UiSafe.html` + `UiRequests`/`UiSystem`/`UiSettings`/`UiMenu`) and the
+  shared dashboard validate the same way and report a contract failure instead of half-rendering.
+- **The task form saves the hierarchy it shows** (`src/Ui.gs`, `taskPatch` and the create payload).
+  `TaskTree.validate` still refuses a self parent, a cross-project or cross-subproject parent, a cycle
+  and a fourth level.
+
+### Tests
+
+`tests/v1_7_5-correctness.test.js` (25 tests) drives the real editor and page entry points against
+the real modules with test-controlled, out-of-order answers: ordinary edit, multi-assignee edit,
+owner change, additional-assignee add/remove, parent edit, nesting depth, reparent, pending and stale
+approval display, creation, superseded index answer, count growth and shrink, unusable index, index
+above the compact bound, rapid navigation, request-sync generation, filter change during an import,
+one import per entry and a failed import that keeps the queue visible.
+`tests/v1_7_5-response-guards.test.js` (20 tests) covers the required/optional field matrix in the
+manager application, all four bound sidebars and the shared dashboard, including empty lists, absent
+optional lists, non-array values and a missing `record`. `tests/v1_7_5-release.test.js` (11 tests)
+pins the release version, the unchanged schema, contract and migration list, and the presence of this
+release's gate evidence.
+
+### Verification
+
+`npm ci`, `npm run lint`, `npm test` (**722 tests, 722 pass, 0 fail, 0 skipped**),
+`npm run validate` (42 manager files, 3 dashboard files, 970 translation keys) and
+`node scripts/manager-web-benchmark.js` all pass locally. Spreadsheet service calls per operation and
+payload sizes are unchanged (task update: 17 range reads / 6.33 write calls / 22.33 cells; task
+create: 13 / 4 / 51; request approval: 19 / 14 / 60). Live Workspace verification stays
+**BLOCKED / NOT_RUN**; see [V1_7_5_GATE_1.md](docs/checkgates/V1_7_5_GATE_1.md),
+[V1_7_5_GATE_2.md](docs/checkgates/V1_7_5_GATE_2.md),
+[V1_7_5_GATE_3.md](docs/checkgates/V1_7_5_GATE_3.md) and
+[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md).
+
 ## V1.7.4 — visual refresh and project colour hierarchy (2026-10-29)
 
 Application version **1.7.4**. Visual release only: schema **8** and employee contract **1.6** are
