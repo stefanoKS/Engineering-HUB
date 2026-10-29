@@ -718,6 +718,27 @@ function deadlineText(p) {
   return EH_I18N.deadline(lang, p.deadlineKind, p.daysRemaining, false);
 }
 /* ---------------------------------------------------------------- *
+ * Project identity colours (V1.7.4)
+ * ---------------------------------------------------------------- */
+/**
+ * The accent of one project, derived by the shared `EH_PROJECT_COLORS` helper from the stable
+ * Project_ID only — never from a list position or a filter state. Only palette values come back,
+ * so a project ID is never interpolated into a CSS colour; an empty ID yields '' and the neutral
+ * `--ui-*` fallbacks apply.
+ */
+function projectStyle(projectId) {
+  return EH_PROJECT_COLORS && EH_PROJECT_COLORS.styleFor ? EH_PROJECT_COLORS.styleFor(projectId) : '';
+}
+/** Sets the accent properties and keeps any layout style the caller already needs. */
+function withProjectAccent(node, projectId, layout) {
+  var parts = [];
+  if (layout) parts.push(layout);
+  var accent = projectStyle(projectId);
+  if (accent) parts.push(accent);
+  if (parts.length) node.setAttribute('style', parts.join(';'));
+  return node;
+}
+/* ---------------------------------------------------------------- *
  * Responsibility-first organisation
  * ---------------------------------------------------------------- */
 function areaItems() { return (store.responsibilityCards && store.responsibilityCards.items) || []; }
@@ -784,7 +805,8 @@ function projectCards(data, host) {
   var grid=el('div',undefined,'cards');
   if(!data.items.length) grid.appendChild(el('p',t('empty')));
   data.items.forEach(function(p){
-    var card=el('article',undefined,'card');
+    var card=el('article',undefined,'card project-card');
+    withProjectAccent(card,p.id);
     card.appendChild(el('h2',p.name));
     progressRow(p.progress,p.name,card);
     var meta=el('div',undefined,'meta'), relative=deadlineText(p);
@@ -808,6 +830,7 @@ function tasks(data, host) {
   data.items.forEach(function(task){
     var depth=Number(task.depth)||0;
     var card=el('article',undefined,'card task-card'+(depth?' task-nested task-depth-'+Math.min(3,depth):''));
+    withProjectAccent(card,task.projectId);
     var row=el('div',undefined,'row');
     if(depth)row.appendChild(el('span','↳','task-branch'));
     row.appendChild(el('strong',task.name));
@@ -1302,7 +1325,8 @@ function render() {
     function renderSub(s,depth){
       if(rendered[s.Subproject_ID])return;rendered[s.Subproject_ID]=true;
       var card=el('article',undefined,'card tree'+(depth?' child':''));
-      if(depth)card.setAttribute('style','margin-left:'+(depth*22)+'px');
+      // Every level of the hierarchy keeps the parent project's hue; only the indent grows.
+      withProjectAccent(card,p.Project_ID,depth?'margin-left:'+(depth*24)+'px':'');
       var head=el('h3');var children=childrenOfSub[s.Subproject_ID]||[];
       if(children.length){var toggle=el('button',collapsed[s.Subproject_ID]?'▶':'▼','tree-toggle');toggle.type='button';toggle.setAttribute('aria-expanded',collapsed[s.Subproject_ID]?'false':'true');toggle.setAttribute('aria-label',t('hierarchy'));toggle.addEventListener('click',function(){collapsed[s.Subproject_ID]=!collapsed[s.Subproject_ID];render();});head.appendChild(toggle);}
       head.appendChild(el('span',s.Subproject_Name+' · '+statusLabel(s.Status)));card.appendChild(head);

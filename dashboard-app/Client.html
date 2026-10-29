@@ -280,6 +280,22 @@
 
   function byId(id) { return document.getElementById(id); }
 
+  /**
+   * V1.7.4: the accent of a project is derived by the shared `EH_PROJECT_COLORS` helper from the
+   * stable Project_ID (the published payload already carries it), never from a list position or
+   * a filter state. Only palette values are returned, so an identifier never reaches a CSS colour.
+   */
+  function projectStyle(projectId) {
+    return typeof EH_PROJECT_COLORS !== 'undefined' && EH_PROJECT_COLORS.styleFor
+      ? EH_PROJECT_COLORS.styleFor(projectId) : '';
+  }
+
+  function withProjectAccent(node, projectId) {
+    var style = projectStyle(projectId);
+    if (node && style) node.setAttribute('style', style);
+    return node;
+  }
+
   var dom = {
     sync: byId('sync-info'),
     notices: byId('notices'),
@@ -306,6 +322,7 @@
     detailBack: byId('detail-back'),
     detailTitle: byId('detail-title'),
     detailSummary: byId('detail-summary'),
+    detailHead: byId('detail-head'),
     detailFacts: byId('detail-facts'),
     detailCounts: byId('detail-counts'),
     detailNotice: byId('detail-notice'),
@@ -704,6 +721,8 @@
         'aria-label': T('dashboard.card.detailAria', {name: project.projectName})
       }
     });
+    // Health keeps its pill (text + colour); the accent strip stays the project identity.
+    withProjectAccent(button, project.projectId);
 
     button.appendChild(el('div', {className: 'card-head'}, [
       el('div', {}, [
@@ -747,6 +766,8 @@
     state.currentProjectId = projectId;
     dom.overview.hidden = true;
     dom.detail.hidden = false;
+    // The detail header carries the same identity colour as the card that opened it.
+    withProjectAccent(dom.detailHead, projectId);
     dom.detailTitle.textContent = T('common.loading');
     dom.detailSummary.textContent = '';
     clear(dom.detailFacts);
@@ -940,6 +961,8 @@
     var level = subproject && numberOr(subproject.level, 1) > 1 ? 2 : 1;
     var details = el('details', {className: 'group' + (level > 1 ? ' group-nested' : ''),
       attrs: {open: true, 'data-level': String(level)}});
+    // Every subproject block keeps the hue of the project it belongs to.
+    withProjectAccent(details, state.detail && state.detail.project ? state.detail.project.projectId : '');
     details.appendChild(el('summary', {}, [
       el('span', {className: 'group-summary-main'}, [
         el('span', {className: 'group-name', text: title}),
@@ -999,6 +1022,8 @@
     var body = el('tbody');
     tasks.forEach(function (task) {
       var row = el('tr', {attrs: {'data-task-id': task.taskId}});
+      // Tasks, including nested ones, reuse the project hue: a 3px row marker, never a new hue.
+      withProjectAccent(row, task.projectId);
 
       var nameCell = el('td', {className: 'cell-primary' + (task.depth ? ' task-nested task-depth-' + Math.min(3, task.depth) : '')}, [
         el('span', {className: 'cell-label', text: T('dashboard.table.task')})
@@ -1583,6 +1608,7 @@
     var item = el('li', {className: 'task-item'});
     item.setAttribute('data-worker-task', task.taskId);
     item.setAttribute('data-worker-project', task.projectId);
+    withProjectAccent(item, task.projectId);
     var head = el('div', {className: 'task-head'}, [
       el('span', {className: 'task-name', text: task.name}),
       el('span', {className: 'task-status', text: statusText(task.status)})

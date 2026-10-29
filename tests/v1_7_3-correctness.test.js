@@ -256,10 +256,10 @@ test('the application reports its release version, separate from schema and cont
   const a = administrator(), c = a.context;
   const status = c.managerWebRead('status');
   assert.equal(status.ok, true, status.error);
-  assert.equal(status.data.version, '1.7.3');
+  assert.equal(status.data.version, '1.7.4');
   assert.equal(status.data.schema, 8, 'the schema version stays its own value');
   const bootstrap = c.managerWebRead('bootstrap');
-  assert.equal(bootstrap.data.version, '1.7.3');
+  assert.equal(bootstrap.data.version, '1.7.4');
   assert.equal(bootstrap.data.contract, '1.6', 'the snapshot contract stays its own value');
 });
 
@@ -272,7 +272,7 @@ test('the system status page shows the same release version', async () => {
   h.click('nav', '管理'); await flush();
   h.click('content', 'システム状態'); await flush();
   const text = h.document.getElementById('content').textContent;
-  assert.match(text, /1\.7\.3/);
+  assert.match(text, /1\.7\.4/);
   assert.doesNotMatch(text, /1\.6\.1/);
 });
 

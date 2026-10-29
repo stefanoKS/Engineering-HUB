@@ -265,3 +265,28 @@
 122. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_7_3_GATE_<n>.md`, keep every
     earlier gate file unchanged, and update the performance, architecture and deployment documents
     with every behavioural change.
+
+## V1.7.4 mandatory rules (visual refresh and project colour hierarchy)
+
+123. This is a client-side visual release. Do not add a migration, a spreadsheet column, a Script
+    Property, a new backend read or a new API call for a colour, and do not change request, approval,
+    assignment, audit, notification or publication logic.
+124. A project accent comes from the stable `Project_ID` through `shared/project-colors.js`. Never
+    derive it from a list position, a filtered index, a sort order or the rendered order, so a project
+    keeps its colour across navigation, filtering, sorting and refresh.
+125. Only palette values may reach a CSS colour. A project ID or name is never interpolated into a
+    style, and the helper exposes CSS custom properties (`--project-accent`, `--project-outline`,
+    `--project-tint`) rather than raw colour input.
+126. Every subproject and every task (including a nested task) of one project carries the same hue.
+    Depth changes indentation and strength, never the hue, and the hierarchy IDs and relationships do
+    not change.
+127. A project colour is an identity marker, never a status. Warning, approval, completion and error
+    states keep the semantic palette and a readable text label, and the employee dashboard keeps its
+    health warning next to the stable identity colour.
+128. Reuse of a palette entry is acceptable and must never be documented or presented as a globally
+    unique project identity. The project name is always visible, so colour is never the only signal.
+129. The manager client and the employee dashboard keep one identical copy of the shared helper
+    (`npm run sync:colors`); `npm run validate` fails on drift, on a non-palette value or on an
+    empty-ID colour.
+130. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_7_4_GATE_<n>.md`, keep earlier
+    gate files unchanged, and keep live Workspace verification separate from local preview evidence.

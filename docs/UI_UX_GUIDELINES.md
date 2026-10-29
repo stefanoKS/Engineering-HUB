@@ -1,5 +1,83 @@
 # UI/UX guidelines
 
+## V1.7.4 visual refresh and project identity colours
+
+A restrained, light design language for both applications. This is a visual release: no migration, no
+new Script Property, no new backend read, no change to authorization, publication, notification or
+request logic.
+
+### Design tokens
+
+Both applications declare the same tokens (`--ui-*`). The historical names (`--v16-*` in the manager
+application, `--bg`/`--surface`/`--text`/`--accent` in the dashboard) stay in place and resolve to the
+shared values, so no legacy selector had to be rewritten.
+
+| Token | Value | Use |
+| --- | --- | --- |
+| `--ui-bg` | `#F6F8FB` | Page background |
+| `--ui-surface` | `#FFFFFF` | Cards, dialog, inputs |
+| `--ui-sidebar` | `#F0F4F8` | Manager navigation rail, table headers |
+| `--ui-text` | `#253449` | Primary text |
+| `--ui-text-muted` | `#607086` | Metadata, hints (and `--text-soft`/`--muted`) |
+| `--ui-border` | `#DFE6EE` | Card and section separators |
+| `--ui-primary` | `#365E80` | Primary action, active navigation, focus ring |
+| `--ui-neutral-ink` | `#55657A` | Muted text on a tinted chip/pill surface (5.2:1) |
+| `--ui-radius` | `10px` | Cards, panels, dialog |
+| `--ui-font` | Noto Sans JP → Yu Gothic UI → Hiragino Sans → Meiryo → system-ui | Every text surface |
+| `--ui-space-1…6` | 4 / 8 / 12 / 16 / 24 px | Spacing scale |
+
+Semantic colours are unchanged and never borrowed by a project accent: `--ui-done` `#287348`,
+`--ui-warn` `#8C5A15`, `--ui-danger` `#A83E3A` (with their `-soft` surfaces). Measured contrast
+(AA): `--ui-text` on white 12.60:1, `--ui-text-muted` on white 5.05:1, `--ui-text-muted` on `--ui-bg`
+4.75:1, `--ui-text-muted` on `--ui-sidebar` 4.57:1, `--ui-primary` on white 6.84:1, white on
+`--ui-primary` 6.84:1, done 5.13:1, warning 5.31:1, danger 5.34:1 on their soft surfaces, and
+`--ui-neutral-ink` 5.25:1 on the neutral chip surface (`#EEF1F4`). The control
+border (`--ui-control-border` `#7B8CA0`) stays at 3.44:1 against white, above the 3:1 non-text
+requirement, so a field boundary never depends on colour alone. Every project accent stays at or above
+3:1 against white and `--ui-bg` (lowest: ochre-gold `#949257` at 3.23:1 / 3.03:1) and is always paired
+with the project name.
+
+### Typography
+
+Body 16 px, line height 1.55–1.6; main heading 23–24 px; project title 18 px; subproject title
+16.5–17 px; task name 15.5–16 px; metadata 13–14 px. No metadata label is smaller than 13 px, buttons,
+selects and text inputs stay at least 44 px high, and the font stack is a system stack with no web-font
+request.
+
+### Project identity colours
+
+- One shared helper (`shared/project-colors.js`, copied to `src/ProjectColors.html` and
+  `dashboard-app/ProjectColors.html` by `npm run sync:colors`) derives the accent from the stable
+  `Project_ID`: a two-lane multiplicative hash, then an index into a curated 16-entry muted palette.
+  The same ID therefore produces the same accent in the manager application and the employee
+  dashboard.
+- The accent never depends on a list position, a filtered index, a sort order or a refresh. It needs no
+  spreadsheet column, no migration and no extra read.
+- Only palette values can be returned, and only as CSS custom properties
+  (`--project-accent`, `--project-outline`, `--project-tint`). A project ID or name is never
+  interpolated into a CSS colour.
+- A project card carries a 5 px top strip; every subproject of the project inherits the same hue
+  (a 3 px left accent, lighter for a nested level); every task card inherits the same hue as a 3 px
+  left accent plus a tinted 1 px outline. Depth changes indentation and strength, never the hue.
+- Reuse beyond the palette size is expected and is never presented as a globally unique identity: the
+  project name is always visible, so colour is never the only way to tell two projects apart.
+- These values are unrelated to `RESPONSIBILITIES.Color_Hex`. A responsibility colour is manager-chosen
+  data; a project accent is a derived display value, and the two palettes share no value.
+
+### Health, status and priority
+
+Project identity is not project health. The employee dashboard no longer uses a red/amber left border
+for health: the health pill keeps its text and semantic colour, the card border is tinted, and the
+project strip stays stable. Status, priority and approval keep red = urgent/overdue, amber =
+attention, green = done, neutral = inactive, always with a readable label.
+
+### Layout details
+
+The active navigation item is a soft surface with a 3 px vertical indicator; card padding is 16 px;
+hover uses a 1 px shadow and a slightly stronger neutral border (the top accent keeps its colour);
+`prefers-reduced-motion` still disables transitions. Form behaviour is unchanged: one form per record
+type, partial patches, no draft, no autosave.
+
 ## V1.7.2 administration layout
 
 - **Cards, not payload dumps.** An administration page presents each fact as a `.card.admin-card`

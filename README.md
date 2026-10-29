@@ -1,6 +1,44 @@
 ﻿# Engineering-HUB
 
-## Current release — V1.7.3
+## Current release — V1.7.4
+
+**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+
+Application version **1.7.4** is a visual release. It refreshes the manager application and the
+employee dashboard and gives every project a stable accent colour that its subprojects and tasks
+inherit. Schema **8** and employee contract **1.6** are unchanged; there is no migration, no new Script
+Property, no new backend read, no deployment and no change to authorization, publication, notification
+or request logic.
+
+- **One design language.** Both applications declare the same `--ui-*` tokens (background `#F6F8FB`,
+  surface `#FFFFFF`, sidebar `#F0F4F8`, text `#253449`, muted text `#607086`, border `#DFE6EE`, primary
+  `#365E80`, radius `10px`) with a Japanese-friendly system font stack, 16 px body text and a
+  4/8/12/16/24 px spacing scale. The historical token names stay and resolve to the new values.
+- **A stable accent per project.** `shared/project-colors.js` derives the accent from the stable
+  `Project_ID` only — never from a list position, a filter or a sort order — and is copied to both
+  projects by `npm run sync:colors`, so the manager page and the employee dashboard show the same
+  colour for the same project. No spreadsheet column, migration or extra read is involved.
+- **A project colour is not a status colour.** Warning, approval, completion and error states keep
+  their semantic palette and a readable label. The employee dashboard moved its red/amber health
+  emphasis into the health pill and a tinted card border, so the project strip stays stable.
+- **Hierarchy inheritance.** Subproject cards and task cards (including subtasks) reuse the parent
+  project's hue; depth changes indentation and strength, never the hue.
+- **Only palette values reach CSS.** The helper exposes `--project-accent`, `--project-outline` and
+  `--project-tint`; a project ID or name is never interpolated into a style.
+- **No performance change.** Accents are computed in the browser from data the client already holds,
+  so the 30-second authorized cache, request deduplication and bounded pagination are untouched.
+
+Local verification: `npm run lint`, `npm test` (**666 tests, 666 pass, 0 fail, 0 skipped**),
+`npm run validate` (42 manager files, 3 dashboard files, 970 translation keys) and
+`node scripts/sync-project-colors.js --check` all pass. Local previews were checked at 375, 768, 1366,
+1920 and 2560 px, at 125/150/200 % zoom, in Japanese and English, with no horizontal scrolling. Live
+Workspace UI verification stays **BLOCKED / NOT_RUN**; see
+[V1_7_4_GATE_1.md](docs/checkgates/V1_7_4_GATE_1.md),
+[V1_7_4_GATE_2.md](docs/checkgates/V1_7_4_GATE_2.md),
+[docs/UI_UX_GUIDELINES.md](docs/UI_UX_GUIDELINES.md) and
+[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md).
+
+## Historical V1.7.3 release record
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 

@@ -89,6 +89,7 @@ test('production readiness stays unapproved for V1.3', () => {
 test('new V1.3 sources contain no credentials, identifiers or employee addresses', () => {
   const files = [
     'shared/i18n.js',
+    'shared/project-colors.js',
     'src/Requests.gs',
     'src/Planning.gs',
     'src/UiRequests.html',

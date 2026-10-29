@@ -280,7 +280,8 @@ test('the selected colour is reused by cards, filters and project indicators', a
 
   h.click('nav', '案件');
   await flush();
-  const projectCards = h.nodes('content').filter(node => node.className === 'card');
+  // V1.7.4: project cards carry the identity accent class next to `card`.
+  const projectCards = h.nodes('content').filter(node => String(node.className).split(' ').indexOf('card') >= 0);
   assert.ok(projectCards.some(node => node.descendants().some(child =>
     String(child.className).indexOf('color-dot') >= 0 && /#8A5A7A/.test(child.getAttribute('style') || ''))),
   'the project card shows a matching colour dot');

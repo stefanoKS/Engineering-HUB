@@ -164,7 +164,8 @@ npx clasp push
 ```
 
 The manager project always uses `"rootDir": "src"`. **Never use `"rootDir": "."`**: it exposes both
-`src/` and `dashboard-app/` (each with its own `appsscript.json` and `I18n.html`), so the upload
+`src/` and `dashboard-app/` (each with its own `appsscript.json`, `I18n.html` and `ProjectColors.html`),
+so the upload
 either fails or mixes the two applications into one Apps Script project. The standalone dashboard
 always uses `"rootDir": "dashboard-app"` (§8); the two applications are never pushed into the same
 Apps Script project. `npx clasp status` prints the file list — check it before pushing.

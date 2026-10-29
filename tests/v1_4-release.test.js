@@ -74,9 +74,22 @@ test('the manager templates share one token set and Japanese-first font stack', 
     assert.match(content, /"Hiragino Sans"/, name + ' must use the Japanese-first font stack');
     assert.match(content, /prefers-reduced-motion/, name + ' must respect reduced motion');
   });
+  // V1.7.4: both applications declare the same shared token set. The manager web app and the
+  // dashboard must agree on the values; the sidebar templates keep their historical names.
+  const shared = [['--ui-bg', '#F6F8FB'], ['--ui-surface', '#FFFFFF'], ['--ui-text', '#253449'],
+    ['--ui-border', '#DFE6EE'], ['--ui-primary', '#365E80'], ['--ui-radius', '10px']];
   const dashboard = read('dashboard-app/Styles.html');
-  ['--accent: #365F7D', '--text: #27333E', '--amber: #8C5A15', '--red: #A83E3A']
-    .forEach(token => assert.ok(dashboard.indexOf(token) >= 0, 'the dashboard must define ' + token));
+  const managerWeb = read('src/ManagerWebStyles.html');
+  shared.forEach(pair => {
+    const pattern = new RegExp(pair[0].replace(/-/g, '\\-') + '\\s*:\\s*' + pair[1] + '[;}\\s]');
+    assert.match(dashboard, pattern, 'the dashboard must define ' + pair[0] + ': ' + pair[1]);
+    assert.match(managerWeb, pattern, 'the manager web app must define ' + pair[0] + ': ' + pair[1]);
+  });
+  assert.match(dashboard, /"Noto Sans JP"/, 'the dashboard must use the Japanese-first font stack');
+  assert.match(managerWeb, /"Noto Sans JP"/, 'the manager web app must use the Japanese-first font stack');
+  // The semantic colours survive the refresh: warning, error and success stay distinct tokens.
+  ['--green: #287348', '--amber: #8C5A15', '--red: #A83E3A']
+    .forEach(token => assert.ok(dashboard.indexOf(token) >= 0, 'the dashboard must keep ' + token));
 });
 
 test('production readiness stays unapproved for V1.4', () => {

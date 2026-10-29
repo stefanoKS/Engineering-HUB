@@ -103,7 +103,7 @@ if (manifest.timeZone !== 'Asia/Tokyo') throw new Error('Manifest timezone must 
  * must never reach the private management workbook.
  * ------------------------------------------------------------------ */
 
-const REQUIRED_DASHBOARD_FILES = ['App.gs', 'DataService.gs', 'RequestService.gs', 'I18n.html', 'Index.html', 'Styles.html', 'Client.html', 'appsscript.json'];
+const REQUIRED_DASHBOARD_FILES = ['App.gs', 'DataService.gs', 'RequestService.gs', 'I18n.html', 'ProjectColors.html', 'Index.html', 'Styles.html', 'Client.html', 'appsscript.json'];
 REQUIRED_DASHBOARD_FILES.forEach(name => {
   assert(fs.existsSync(path.join(dashboardDir, name)), `dashboard-app/${name} is missing`);
 });
@@ -192,6 +192,38 @@ sync.TARGETS.forEach(target => {
   const actual = fs.existsSync(target.file) ? fs.readFileSync(target.file, 'utf8') : '';
   assert(sync.matches(target, i18nSource, actual),
     `${path.relative(root, target.file)} is out of date; run "npm run sync:i18n"`);
+});
+
+/* ------------------------------------------------------------------ *
+ * Shared project colour helper (shared/project-colors.js)
+ *
+ * The manager application and the employee dashboard must derive the
+ * same accent for the same Project_ID, so both carry a generated copy
+ * of one shared module. Only palette values may be returned: a project
+ * ID never reaches a CSS colour.
+ * ------------------------------------------------------------------ */
+
+const colorSync = require('./sync-project-colors.js');
+const colorSource = fs.readFileSync(path.join(root, 'shared', 'project-colors.js'), 'utf8');
+const colorSandbox = {};
+vm.runInNewContext(colorSource + '\nthis.EH_PROJECT_COLORS = EH_PROJECT_COLORS;', colorSandbox, {filename: 'shared/project-colors.js'});
+const projectColors = colorSandbox.EH_PROJECT_COLORS;
+assert(projectColors && Array.isArray(projectColors.PALETTE), 'shared/project-colors.js must export the palette');
+assert(projectColors.PALETTE.length >= 8, 'the project palette must stay usable for a small portfolio');
+projectColors.PALETTE.forEach(color => {
+  assert(/^#[0-9A-F]{6}$/.test(color), 'palette entries must be opaque #RRGGBB values: ' + color);
+});
+['P1', 'P3', 'PROJ-001'].forEach(id => {
+  const first = projectColors.colorFor(id);
+  assert(projectColors.PALETTE.indexOf(first) >= 0, 'a project colour must come from the palette: ' + id);
+  assert(projectColors.colorFor(id) === first, 'the project colour must be deterministic: ' + id);
+});
+assert(projectColors.colorFor('') === '', 'an empty project ID has no derived colour');
+
+colorSync.TARGETS.forEach(target => {
+  const actual = fs.existsSync(target.file) ? fs.readFileSync(target.file, 'utf8') : '';
+  assert(colorSync.matches(target, colorSource, actual),
+    `${path.relative(root, target.file)} is out of date; run "npm run sync:colors"`);
 });
 
 const jaKeys = Object.keys(i18n.DICTIONARY.ja).sort();

@@ -81,6 +81,7 @@ function runClient(server, options = {}) {
   const match = /<script>([\s\S]*)<\/script>/.exec(source);
   if (!match) throw new Error('Client.html must contain the dashboard script');
   const i18nSource = fs.readFileSync(path.resolve(__dirname, '../shared/i18n.js'), 'utf8');
+  const colorSource = fs.readFileSync(path.resolve(__dirname, '../shared/project-colors.js'), 'utf8');
   const { document, registry } = createDashboardDocument();
   const buttons = (options.languages || ['ja', 'en']).map(lang => {
     const node = document.createElement('button');
@@ -112,6 +113,7 @@ function runClient(server, options = {}) {
   });
   // The dictionary and the client share one context so the browser storage shim is shared.
   new vm.Script(i18nSource, { filename: 'shared/i18n.js' }).runInContext(context);
+  new vm.Script(colorSource, { filename: 'shared/project-colors.js' }).runInContext(context);
   vm.runInContext('window.EH_I18N = EH_I18N;', context);
   new vm.Script(match[1], { filename: 'dashboard-client.js' }).runInContext(context);
   return { document, registry, context, store, buttons };

@@ -11,6 +11,8 @@
     "test": "node --test tests/*.test.js",
     "validate": "node scripts/validate-source.js",
     "sync:i18n": "node scripts/sync-i18n.js",
+    "sync:colors": "node scripts/sync-project-colors.js",
+    "sync:shared": "node scripts/sync-i18n.js && node scripts/sync-project-colors.js",
     "preview:dashboard": "node scripts/dashboard-preview.js",
     "clasp": "clasp",
     "preview:manager-web": "node scripts/manager-web-preview.js"

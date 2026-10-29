@@ -100,3 +100,96 @@ nav{background:var(--v16-surface)}
 .search-select-echo{margin:0;font-size:13px;overflow-wrap:anywhere}
 @media (max-width:640px){.admin-grid{grid-template-columns:1fr}.admin-actions button{flex:1 1 auto}}
 </style>
+<style>
+/* V1.7.4 visual refresh: one calm, light design language shared with the employee dashboard.
+   The legacy --v16-* tokens keep their names, so every existing selector still applies; they now
+   resolve to the shared --ui-* values instead of repeating the palette. Semantic colours
+   (success / warning / error / approval) are unchanged: a project identity colour is never a
+   status colour. */
+:root{
+  --ui-bg:#F6F8FB;--ui-surface:#FFFFFF;--ui-sidebar:#F0F4F8;--ui-text:#253449;--ui-text-muted:#607086;
+  --ui-border:#DFE6EE;--ui-primary:#365E80;--ui-primary-soft:#EAF0F6;--ui-control-border:#7B8CA0;
+  --ui-neutral-ink:#55657A;
+  --ui-radius:10px;--ui-radius-sm:6px;
+  --ui-font:"Noto Sans JP","Yu Gothic UI","Hiragino Sans","Meiryo",system-ui,sans-serif;
+  --ui-space-1:4px;--ui-space-2:8px;--ui-space-3:12px;--ui-space-4:16px;--ui-space-6:24px;
+  --ui-shadow:0 1px 2px rgba(16,24,40,.05);
+  --ui-done:#287348;--ui-done-soft:#EAF4ED;--ui-warn:#8C5A15;--ui-warn-soft:#FBF3E6;
+  --ui-danger:#A83E3A;--ui-danger-soft:#F9ECEB;
+  --v16-bg:var(--ui-bg);--v16-surface:var(--ui-surface);--v16-text:var(--ui-text);
+  --v16-text-soft:var(--ui-text-muted);--v16-border:var(--ui-border);--v16-nav:var(--ui-primary);
+  --v16-accent:var(--ui-primary);--v16-done:var(--ui-done);--v16-pending:var(--ui-warn);
+  --v16-critical:var(--ui-danger);--v16-font:var(--ui-font);
+}
+body{background:var(--ui-bg);color:var(--ui-text);font-family:var(--ui-font);font-size:16px;line-height:1.55}
+h1{font-size:24px;line-height:1.35;margin:0 0 var(--ui-space-4)}
+h2{font-size:20px;line-height:1.4}
+h3{font-size:17px;line-height:1.4}
+header{background:var(--ui-surface);border-bottom:1px solid var(--ui-border);min-height:72px;padding:var(--ui-space-3) var(--ui-space-6)}
+header strong{font-size:19px}
+#actor{color:var(--ui-text-muted);font-size:14px}
+.version{font-size:13px;color:var(--ui-text-muted)}
+button{border-color:var(--ui-control-border);border-radius:var(--ui-radius-sm)}
+button:hover{background:var(--ui-primary-soft)}
+button.primary{background:var(--ui-primary);border-color:var(--ui-primary);color:#fff}
+button.primary:hover{background:#2C4E6B}
+input,select,textarea{border-color:var(--ui-control-border);border-radius:var(--ui-radius-sm);font-size:15px}
+/* Navigation: a subtle active surface plus a clear vertical indicator, structure unchanged. */
+nav{background:var(--ui-sidebar);border-right:1px solid var(--ui-border);padding:var(--ui-space-4) var(--ui-space-2)}
+nav button{background:transparent;border:1px solid transparent;border-radius:8px;padding:10px 12px;margin:0 0 var(--ui-space-1);font-size:14px;color:var(--ui-text)}
+nav button:hover{background:#E4EBF3}
+nav button[aria-current=page]{background:var(--ui-primary-soft);color:var(--ui-primary);border-color:transparent;box-shadow:inset 3px 0 0 var(--ui-primary);font-weight:700}
+main{padding:var(--ui-space-6)}
+.card,.kpi{background:var(--ui-surface);border:1px solid var(--ui-border);border-radius:var(--ui-radius);padding:var(--ui-space-4);margin-bottom:var(--ui-space-3)}
+.card h2{font-size:18px;line-height:1.4;margin:0 0 var(--ui-space-2)}
+.kpi{border-radius:var(--ui-radius)}
+.cards{gap:var(--ui-space-3)}
+.muted{color:var(--ui-text-muted)}
+.section-title{margin:var(--ui-space-6) 0 var(--ui-space-3)}
+.toolbar{gap:var(--ui-space-3);margin:var(--ui-space-4) 0}
+.meta{gap:var(--ui-space-2) var(--ui-space-4)}
+.meta-label{font-size:13px;color:var(--ui-text-muted)}
+.meta-value{font-size:14px}
+.pill{font-size:13px;padding:3px 10px}
+.pill-green{background:var(--ui-done-soft);color:var(--ui-done);border-color:#CFE6D5}
+.pill-amber{background:var(--ui-warn-soft);color:var(--ui-warn);border-color:#F0DCB8}
+.pill-red{background:var(--ui-danger-soft);color:var(--ui-danger);border-color:#F6CFCB}
+.pill-gray{background:#EEF1F4;color:var(--ui-neutral-ink);border-color:var(--ui-border)}
+.chip{font-size:13px;color:var(--ui-neutral-ink)}
+/* Semantic chips stay semantic: the neutral text above must not swallow a review or container state. */
+.chip-review{background:var(--ui-warn-soft);color:var(--ui-warn);border-color:#F0DCB8}
+.chip-review.is-stale{background:var(--ui-danger-soft);color:var(--ui-danger);border-color:#F6CFCB}
+.chip-container{background:var(--ui-done-soft);color:var(--ui-done);border-color:#CFE6D5}
+.is-overdue{color:var(--ui-danger)}
+.is-soon{color:var(--ui-warn)}
+.progress{background:#E6EBF0}
+.progress-fill{background:var(--ui-primary)}
+.progress-value{font-size:13px;color:var(--ui-text-muted)}
+.area-card{border-radius:var(--ui-radius)}
+.area-card .area-meta{font-size:13px}
+/* Project identity: a 5px accent strip. The name stays plain text, so colour is never the only
+   way to tell two projects apart. Hover only lightens the three neutral sides, so the strip
+   keeps its project colour. */
+.project-card{border-top:5px solid var(--project-accent,var(--ui-primary));transition:border-color 120ms ease,box-shadow 120ms ease}
+.project-card:hover{border-left-color:#C9D5E2;border-right-color:#C9D5E2;border-bottom-color:#C9D5E2;box-shadow:var(--ui-shadow)}
+.project-card .progress-fill{background:var(--project-accent,var(--ui-primary))}
+/* Subprojects inherit the parent project hue at one strength per level; no independent colours. */
+.card.tree{border-left:3px solid var(--project-accent,var(--ui-border))}
+.card.tree.child{border-left-color:var(--project-outline,var(--ui-border))}
+.tree-toggle{min-width:44px;min-height:44px;padding:0 var(--ui-space-2);margin-right:var(--ui-space-1)}
+/* Tasks inherit the same project hue: one thin left accent plus a tinted 1px outline. */
+.card.task-card{border:1px solid var(--project-outline,var(--ui-border));border-left:3px solid var(--project-accent,var(--ui-primary));padding:var(--ui-space-3) var(--ui-space-4)}
+.card.task-card:hover{box-shadow:var(--ui-shadow)}
+.task-card .row>strong{font-size:16px}
+.task-card .row>span:not(.chip){font-size:14px;color:var(--ui-text-muted)}
+.task-branch{color:var(--ui-text-muted)}
+label>span{font-size:14px;font-weight:600;margin-bottom:var(--ui-space-1)}
+.fields{gap:var(--ui-space-4)}
+dialog{border:1px solid var(--ui-border);border-radius:var(--ui-radius);padding:var(--ui-space-6)}
+table.metrics th,table.metrics td{border-bottom:1px solid var(--ui-border);padding:var(--ui-space-2)}
+table.metrics th{background:#EEF3F7;color:var(--ui-text)}
+:focus-visible{outline:3px solid var(--ui-primary);outline-offset:3px}
+@media(max-width:900px){nav{border-right:0;border-bottom:1px solid var(--ui-border);background:var(--ui-sidebar)}}
+@media(max-width:480px){h1{font-size:22px}.card h2{font-size:17px}}
+@media(prefers-reduced-motion:reduce){.project-card{transition:none}}
+</style>

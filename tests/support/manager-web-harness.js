@@ -12,6 +12,7 @@ function harness(server,options={}){
  function call(write,operation,payload){const item={write,operation,payload,success,failure};calls.push(item);if(options.manual)waiting.push(item);else Promise.resolve().then(()=>success(server(write,operation,payload))).catch(failure);}}}};
  const context=vm.createContext({document,window,google,performance:{now:()=>Date.now()},Promise,Map,Set,console,localStorage:{getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,v)}});
  const root=path.resolve(__dirname,'../..');vm.runInContext(fs.readFileSync(path.join(root,'shared/i18n.js'),'utf8'),context);
+ vm.runInContext(fs.readFileSync(path.join(root,'shared/project-colors.js'),'utf8'),context);
  const client=options.clientSource||fs.readFileSync(path.join(root,'src/ManagerWebClient.html'),'utf8');
  vm.runInContext(client.match(/<script>([\s\S]*)<\/script>/)[1],context);
  const nodes=id=>document.getElementById(id).descendants();

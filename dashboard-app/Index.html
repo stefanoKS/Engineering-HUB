@@ -8,6 +8,7 @@
 </head>
 <body>
   <?!= include('I18n') ?>
+  <?!= include('ProjectColors') ?>
   <a class="skip-link" href="#main" data-i18n="dashboard.skip">本文へ移動</a>
 
   <header class="topbar">
@@ -118,7 +119,7 @@
 
       <section id="detail" aria-labelledby="detail-title" hidden>
         <button class="back-button" id="detail-back" type="button" data-i18n="dashboard.detail.back">← 案件一覧へ戻る</button>
-        <div class="detail-head">
+        <div class="detail-head" id="detail-head">
           <h2 class="detail-title" id="detail-title"></h2>
           <p class="detail-summary" id="detail-summary"></p>
           <div class="detail-facts" id="detail-facts"></div>

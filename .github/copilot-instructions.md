@@ -58,6 +58,10 @@ Follow `/AGENTS.md` rules 35–48 in addition to the rules above.
 - Translation lives in `shared/i18n.js` (copied by `npm run sync:i18n`). Never translate
   stored text, identifiers or enum values. Japanese is the default; keep the
   `日本語 | English` switch on every listed screen and keep the language in `localStorage`.
+- A project accent lives in `shared/project-colors.js` (copied by `npm run sync:colors`). Derive it
+  from the stable `Project_ID` only, never from a list position or a filter, and never put a
+  browser-supplied value into a CSS colour. Subprojects and tasks inherit the project hue; a
+  project colour is not a status colour.
 - Run `npm ci`, `npm run lint`, `npm test` and `npm run validate` before opening a PR, and
   record the V1.3 check gates.
 

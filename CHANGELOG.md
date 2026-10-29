@@ -1,5 +1,57 @@
 ﻿# Changelog
 
+## V1.7.4 — visual refresh and project colour hierarchy (2026-10-29)
+
+Application version **1.7.4**. Visual release only: schema **8** and employee contract **1.6** are
+unchanged, there is no migration, no new Script Property, no new backend read, no deployment and no
+change to authorization, publication, notification or request logic.
+
+### Design language
+
+- **One shared token set.** Both applications declare `--ui-bg` `#F6F8FB`, `--ui-surface` `#FFFFFF`,
+  `--ui-sidebar` `#F0F4F8`, `--ui-text` `#253449`, `--ui-text-muted` `#607086`, `--ui-border`
+  `#DFE6EE`, `--ui-primary` `#365E80` and `--ui-radius` `10px`; the historical `--v16-*` and dashboard
+  names stay and resolve to them, so no legacy selector was rewritten.
+- **Japanese-friendly typography.** `Noto Sans JP → Yu Gothic UI → Hiragino Sans → Meiryo → system-ui`,
+  16 px body text at 1.55–1.6 line height, 23–24 px main headings, 18 px project titles, 16.5–17 px
+  subproject titles, 15.5–16 px task names and no metadata label below 13 px. No web font, no new
+  network request.
+- **Navigation.** The active item uses a soft surface plus a 3 px vertical indicator instead of a
+  bordered box; the structure and behaviour are unchanged.
+- **Semantic colours are untouched** (done `#287348`, warning `#8C5A15`, danger `#A83E3A`) and every
+  state still carries a text label.
+
+### Project identity colours
+
+- **One shared helper.** `shared/project-colors.js` derives a project accent from the stable
+  `Project_ID` with a two-lane multiplicative hash and a curated 16-entry muted palette, and is copied
+  to `src/ProjectColors.html` and `dashboard-app/ProjectColors.html` by `npm run sync:colors`
+  (`npm run validate` fails on drift). Manager and employee therefore compute the same colour for the
+  same project.
+- **Never positional.** No list index, filter state, sort order or refresh can change a colour, and no
+  spreadsheet column, migration or additional read is involved.
+- **Never user-supplied CSS.** Only palette values are returned, exposed as `--project-accent`,
+  `--project-outline` and `--project-tint` custom properties; a project ID is never interpolated into a
+  style.
+- **Manager cards and hierarchy.** Project cards gained a 5 px accent strip (with the progress fill in
+  the same hue), subprojects inherit the parent hue (3 px left accent, lighter for a nested level) and
+  task cards, including subtasks, use the same hue with a tinted outline.
+- **Employee dashboard.** Project cards, the detail header, subproject group blocks, desktop task rows
+  (3 px row marker instead of coloured boxes) and worker task cards carry the same accent. Health is
+  no longer a red/amber left border: the health pill keeps its text and colour, the card border is
+  tinted, and the accent strip stays stable.
+
+### Verification
+
+- `npm run lint`, `npm test` (**666 tests, 666 pass**), `npm run validate` (42 manager files,
+  3 dashboard files, 970 translation keys) and `node scripts/sync-project-colors.js --check` pass.
+- Local preview evidence covers 375 / 768 / 1366 / 1920 / 2560 px, 125 / 150 / 200 % zoom, Japanese and
+  English labels, and no horizontal scrolling on either application. Live Workspace UI verification
+  stays **BLOCKED / NOT_RUN**.
+- New tests: colour determinism, stability across filtering and sorting, subproject and task
+  inheritance, manager/employee equality, responsibility-colour independence, unchanged semantic
+  indicators, no additional backend call, unaffected project/task operations.
+
 ## V1.7.3 — corrective fixes and measured Sheets work (2026-10-29)
 
 Application version **1.7.3**. Schema **8** and employee contract **1.6** are unchanged; no migration,

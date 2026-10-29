@@ -359,7 +359,7 @@ var ManagerWeb = (function () {
     var window = taskScope.upcoming(today, endDate, mine);
     var upcoming = window.slice(0, 5).map(function (t) {
       var view = TaskTree.viewIn(t, taskScope.tree);
-      return {id: t.Task_ID, name: t.Task_Name, project: (projectIndex[t.Project_ID] || {}).Project_Name || '',
+      return {id: t.Task_ID, name: t.Task_Name, projectId: t.Project_ID, project: (projectIndex[t.Project_ID] || {}).Project_Name || '',
         owner: (memberIndex[t.Owner_Member_ID] || {}).Name || '', deadline: Domain.date(t.Due_Date),
         status: view.status, progress: view.progress, responsibilityId: (projectIndex[t.Project_ID] || {}).Responsibility_ID || ''};
     });

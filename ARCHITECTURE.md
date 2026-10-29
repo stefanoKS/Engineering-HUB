@@ -404,6 +404,28 @@ shared/i18n.js       canonical dictionary (one source of truth for both projects
   `TASK_REQUESTS` and `TASK_DEADLINE_HISTORY`. Generated sheets remain the only replaceable
   output.
 
+## V1.7.4 — project identity colours
+
+One deterministic, shared helper gives every project a stable accent, and both clients carry an
+identical generated copy of it:
+
+```
+shared/project-colors.js   palette + hash of the stable Project_ID (no spreadsheet data)
+src/ProjectColors.html     generated copy (manager application, included by ManagerWebIndex)
+dashboard-app/ProjectColors.html   generated copy (shared dashboard, included by Index)
+```
+
+* `EH_PROJECT_COLORS.colorFor(id)` returns a palette value; `styleFor(id)` returns the
+  `--project-accent` / `--project-outline` / `--project-tint` custom properties. An empty ID yields
+  `''`, so the CSS falls back to the neutral `--ui-*` tokens.
+* The derivation uses the stable `Project_ID` only. A list position, a filter state or a sort order
+  never influences it, so the colour survives navigation, filtering, sorting and refresh, and the
+  manager application and the dashboard agree for the same project.
+* `npm run sync:colors` regenerates both copies and `npm run validate` fails on drift, on a value
+  outside the palette or on a colour derived from an empty ID.
+* Nothing is read from or written to the workbook: the identifier the client already holds is enough,
+  so the 30-second authorized cache, request deduplication and pagination are unchanged.
+
 ## V1.3.1 — create/edit symmetry and implicit import
 
 V1.3.1 keeps the same modules and adds no schema. It closes four usability gaps without
