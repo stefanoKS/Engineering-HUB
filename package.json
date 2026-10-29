@@ -1,6 +1,6 @@
 {
   "name": "engineering-hub",
-  "version": "1.7.0",
+  "version": "1.7.6",
   "private": true,
   "description": "Safe Google Apps Script engineering operations workspace",
   "engines": {

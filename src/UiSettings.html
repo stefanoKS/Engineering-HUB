@@ -237,20 +237,25 @@
     }
 
     function render(data) {
+      // `settings` and `status` are required fields of the settings payload: a missing one is a
+      // contract failure reported by `call`, never a TypeError or a silently empty form.
+      data = EH.requireObject(data, 'settings');
+      var settings = EH.requireArray(data.settings, 'settings.settings');
+      var status = EH.requireObject(data.status, 'settings.status');
       current = data;
       var values = {};
-      data.settings.forEach(function (item) { values[item.key] = item.value; });
+      settings.forEach(function (item) { values[item.key] = item.value; });
       var effective = document.getElementById('effective');
-      effective.textContent = data.status.mode +
-        (data.status.reason ? ' [' + data.status.reason + ']' : '');
+      effective.textContent = status.mode +
+        (status.reason ? ' [' + status.reason + ']' : '');
       // Colour is never the only signal: the mode text is always shown next to the badge.
-      effective.className = 'value badge ' + (data.status.mode === 'LIVE' ? 'is-live'
-        : (data.status.mode === 'PREVIEW' ? 'is-preview' : 'is-off'));
+      effective.className = 'value badge ' + (status.mode === 'LIVE' ? 'is-live'
+        : (status.mode === 'PREVIEW' ? 'is-preview' : 'is-off'));
       var stop = document.getElementById('emergencyStopState');
-      stop.textContent = data.status.emergencyStop ? T('settings.on') : T('settings.off');
-      stop.className = 'value badge ' + (data.status.emergencyStop ? 'is-live' : 'is-ok');
-      document.getElementById('reason').textContent = data.status.configured ? '' : T('settings.unconfigured');
-      setValue('emailMode', values.EMAIL_MODE === 'LIVE' && !data.status.activated ? 'OFF' : values.EMAIL_MODE);
+      stop.textContent = status.emergencyStop ? T('settings.on') : T('settings.off');
+      stop.className = 'value badge ' + (status.emergencyStop ? 'is-live' : 'is-ok');
+      document.getElementById('reason').textContent = status.configured ? '' : T('settings.unconfigured');
+      setValue('emailMode', values.EMAIL_MODE === 'LIVE' && !status.activated ? 'OFF' : values.EMAIL_MODE);
       setChecked('emergencyStop', values.EMERGENCY_STOP);
       setChecked('assignmentEnabled', values.ASSIGNMENT_EMAIL_ENABLED);
       setChecked('reassignmentEnabled', values.REASSIGNMENT_EMAIL_ENABLED);
@@ -276,7 +281,7 @@
       setChecked('autoWorkload', values.AUTO_WORKLOAD_REFRESH_ENABLED);
       setChecked('staleAlert', values.PROJECT_STALE_ALERT_ENABLED);
       setValue('staleDays', values.PROJECT_STALE_DAYS);
-      renderHistory(data.history);
+      renderHistory(EH.optionalArray(data.history, 'settings.history'));
     }
 
     function renderHistory(rows) {

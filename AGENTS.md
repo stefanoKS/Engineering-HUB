@@ -319,3 +319,30 @@
 138. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_7_5_GATE_<n>.md`; keep schema 8,
     employee contract 1.6, the migrations, the authorization rules and the project colours unchanged,
     and keep `docs/PRODUCTION_READINESS.md` **NOT APPROVED FOR PRODUCTION** until live evidence exists.
+
+## V1.7.6 mandatory rules (request consistency and asynchronous-state safety)
+
+139. A request decision is a task write for invalidation purposes. Approving, rejecting, returning or a
+    stale outcome invalidates the compact index, the task and project pages, the scoped overview
+    payloads and the snapshot aggregates, and the derived values are re-read from the server. Never
+    rebuild a task summary, deadline, progress or review badge from a guessed value, and never reload the
+    whole snapshot for a decision.
+140. An import is measured by what it changed. Only `imported > 0` invalidates derived data and re-reads
+    an index the page already holds; an import that created nothing costs no extra call. The rule applies
+    to `requestSync` and to the ordinary queue read, which also imports server-side.
+141. Revocation advances every asynchronous generation. `revoke()` invalidates the page, editor, compact
+    index and request-sync generations, drops the private caches and the open form, and supersedes every
+    in-flight read. Every asynchronous entry point verifies `revoked` (or its generation) before it
+    paints, caches, notifies or reopens a form. Never cancel or replay a server mutation because a
+    response was discarded; server-side authorization stays authoritative.
+142. Invalidation supersedes the in-flight read, not only the cached payload. `invalidatePrefixes()`
+    considers the union of cached and in-flight keys so a read started before a newer write can neither
+    paint nor be joined by the newer refresh, and a superseded view read is re-read once instead of
+    leaving a loading state.
+143. A required response field is validated at the API boundary in the manager application **and** in the
+    bound sidebars. `automation.status` and `automation.settings` are required; a missing field is one
+    readable `INVALID_RESPONSE`, never a `TypeError` from inside an error handler and never a silently
+    empty form.
+144. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_7_6_GATE_<n>.md`; keep schema 8,
+    employee contract 1.6, the migrations, the authorization rules and the project colours unchanged,
+    and keep `docs/PRODUCTION_READINESS.md` **NOT APPROVED FOR PRODUCTION** until live evidence exists.

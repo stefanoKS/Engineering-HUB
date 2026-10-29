@@ -1,5 +1,57 @@
 # Architecture
 
+## V1.7.6 corrective architecture notes
+
+Three properties describe this release.
+
+**A request decision is a task write for invalidation purposes.** `requestDecide` changes authoritative
+task data — `Status`/`Progress_Percent` for a completion approval, `Due_Date` for a deadline approval,
+the pending-review indicator for any decision — so `afterWritePrefixes('requestDecide')` drops the
+snapshot, the queue, the task index and the task pages, the project pages and the scoped overview
+payloads, and `invalidateRequestDerived()` drops the store aggregates. `settle()` then re-reads the
+narrowest authoritative dataset: the queue, plus one compact-index read only when the page already
+holds the index (`refreshLoadedTaskIndex`). Nothing is rebuilt from a guessed summary, and no path
+reloads the whole snapshot for a request decision.
+
+**An import is measured by what it changed.** The server answer of `requests`/`requestSync` carries
+`imported.imported`; `importedCount()` turns that into a number, and only a positive count calls
+`requestChangedDerived()` — invalidation plus one index read for a page that already holds the index.
+An import that confirmed "nothing new" costs no extra call, and the ordinary queue read (which also
+imports server-side) follows the same rule.
+
+**Invalidation supersedes the in-flight read, not only the cached payload.** `invalidatePrefixes()`
+iterates the union of `cache` and `inflight`, so a read that started before a newer write cannot be
+applied, cached, or joined by the refresh that replaced it. `fetchView()` re-reads once when its answer
+was superseded instead of leaving a loading state, and the snapshot/query helpers return `null` for a
+discarded answer so no caller builds a record from an older generation.
+
+### Revocation
+
+```
+revoke() → revoked = true
+         → sequence++                     (page/view generation)
+         → drawerSequence++                (editor-open generation)
+         → taskIndexState.generation += 1  (compact index)
+         → requestSync.generation += 1     (申請一覧)
+         → api.clear()                     (every cached payload and in-flight token)
+         → store cleared, discardEditor(), content cleared, access-denied notice
+```
+
+Every asynchronous entry point verifies `revoked` (or a generation that the revocation advanced)
+before it paints, caches, notifies or reopens a form: `render`, `repaintIfAllowed`, `success`,
+`settle`, `act`, `fetchView`, `bootstrapFetch`, `fetchPublication`, `syncTaskIndex`, the request-sync
+callbacks, the editor reads (`openEditor`, `loadSubprojects`, `loadParentTasks`) and the admin write
+handlers. A server mutation already in flight is never cancelled and never replayed; only its answer is
+discarded. Server-side authorization stays authoritative — the client guard prevents a repaint, not a
+write.
+
+### Response contracts added in this release
+
+`readContract('automation')` requires `settings` (array) and `status` (object) and normalizes
+`history`; the bound settings sidebar does the same with `EH.requireObject`/`EH.requireArray`. Both used
+to read `data.settings.forEach` and `data.status.mode` directly, which turned a missing field into a
+`TypeError` instead of one readable `INVALID_RESPONSE`.
+
 ## V1.7.5 corrective architecture notes
 
 Three properties describe this release.

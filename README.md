@@ -1,6 +1,47 @@
-﻿# Engineering-HUB
+# Engineering-HUB
 
-## Current release — V1.7.5
+## Current release — V1.7.6
+
+**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+
+Application version **1.7.6** is a corrective release. It fixes the stale task state after a request
+decision, the unmeasured request import, the asynchronous answers that survived an access revocation
+and the in-flight read that could overwrite a newer save. Schema **8**, employee contract **1.6**, the
+migrations, the authorization rules, the audit and approval safeguards, the project colours and the
+deployment topology are unchanged; there is no migration, no initialization, no deployment and no
+change to notification or publication policy.
+
+- **A decision no longer leaves stale task state.** Approving a completion request, a deadline change,
+  rejecting, returning or a stale outcome now drops the compact index, the task and project pages, the
+  scoped overview payloads and the snapshot aggregates, and re-reads the narrowest authoritative data:
+  the queue plus one index read when the page already holds the index. The task shows the approved
+  status, progress or deadline and loses its pending-review badge; nothing is rebuilt from a guess and
+  the whole snapshot is never reloaded.
+- **An import is judged by what it changed.** A new completion or deadline request invalidates the
+  derived data and refreshes a loaded index; an import that confirmed "nothing new" costs no extra
+  call. The queue read itself also imports, so it follows the same rule.
+- **Revocation now invalidates every pending answer.** `revoke()` advances the page, editor, index and
+  request-sync generations, drops the private caches and the open form and supersedes every in-flight
+  read. A delayed import, snapshot, index, detail read or admin answer can no longer restore data,
+  repaint the page, replace the access-denied message or reopen an editor. A server mutation already in
+  flight is never cancelled and never replayed.
+- **A read started before a save can no longer win.** Cache invalidation supersedes the in-flight read
+  as well as the cached payload, so an older snapshot answer is discarded instead of being applied and
+  cached over the newer state, and the newer refresh re-reads instead of joining the old read.
+- **The last unguarded response fields have contracts.** The automation settings payload now requires
+  `settings` and `status` in both the manager application and the bound settings sidebar, reporting one
+  readable `INVALID_RESPONSE` instead of a `TypeError`.
+
+Local verification: `npm run lint`, `npm test` (**752 tests, 752 pass, 0 fail, 0 skipped**),
+`npm run validate` (42 manager files, 3 dashboard files, 970 translation keys) and
+`node scripts/manager-web-benchmark.js` all pass. Spreadsheet service calls per operation and payload
+sizes are identical to V1.7.5. Live Workspace verification stays **BLOCKED / NOT_RUN**; see
+[V1_7_6_GATE_1.md](docs/checkgates/V1_7_6_GATE_1.md),
+[V1_7_6_GATE_2.md](docs/checkgates/V1_7_6_GATE_2.md),
+[V1_7_6_GATE_3.md](docs/checkgates/V1_7_6_GATE_3.md) and
+[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md).
+
+## Historical V1.7.5 release record
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 
@@ -45,7 +86,6 @@ sizes are unchanged. Live Workspace verification stays **BLOCKED / NOT_RUN**; se
 [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md).
 
 ## Historical V1.7.4 release record
-
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 
 Application version **1.7.4** is a visual release. It refreshes the manager application and the

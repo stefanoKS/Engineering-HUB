@@ -1,4 +1,102 @@
-﻿# Changelog
+# Changelog
+
+## V1.7.6 — request consistency and asynchronous-state safety (2026-10-30)
+
+**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+
+Application version **1.7.6** is a corrective release. Schema **8**, employee publication contract
+**1.6**, the reviewed migrations, the authorization rules, the audit and approval safeguards, the
+project colours and the deployment topology are unchanged. There is no migration, no initialization,
+no deployment and no change to notification, Calendar or publication policy.
+
+### Confirmed defects and their root causes
+
+1. **A request decision left stale task state on screen.** `requestDecide` invalidated only
+   `['bootstrap', 'requests']`, while an approval writes authoritative task data (`Status`/`Progress`
+   for a completion report, `Due_Date` for a deadline change) and every decision changes a
+   pending-review indicator. The compact index, the task and project pages and the aggregates were
+   never dropped, and the snapshot revalidation that followed could not repair the rows either: the
+   index keeps its rows while its count is unchanged, so an approved completion stayed `Assigned`,
+   an approved deadline stayed at the old date and a cleared approval badge stayed visible.
+2. **An import that created a request never invalidated the derived data.** Opening 申請一覧 writes
+   new inbox rows into `TASK_REQUESTS`, which changes `reviewState` and the pending count, but the
+   client invalidated only the queue payload. `requestImport` also ignored the server's own answer,
+   so it could not tell "one request was imported" from "nothing changed".
+3. **Revocation did not invalidate the request synchronization.** `revoke()` cleared the caches and
+   the open form but left `requestSync.generation` and `taskIndexState.generation` untouched, and the
+   request-sync callback checked only the page generation. A delayed successful import therefore
+   repainted private rows and replaced the access-denied message after access had already been lost.
+4. **Cache invalidation only superseded cached payloads.** `invalidatePrefixes()` iterated
+   `cache.keys()`, so a read that started before a save and had no cached entry yet — normal after a
+   previous save dropped that entry — stayed valid. Its answer was then applied and cached over the
+   newer authoritative state, and the newer refresh joined the old in-flight read instead of
+   re-reading.
+5. **Two response fields were still read without a contract.** `renderAutomation` read
+   `data.status`, `data.settings` and `data.revision` with no validation, so a payload without
+   `status` threw a `TypeError` from inside `handleError` itself; the bound settings sidebar
+   (`UiSettings.html`) read `data.settings.forEach` and `data.status.mode` the same way.
+
+### Corrections
+
+- **A decision invalidates every derived value** (`src/ManagerWebClient.html`, `afterWritePrefixes`
+  → `requestDecide`, `invalidateRequestDerived`, `settle`). A decision drops the compact index, the
+  task/project pages, the scoped overview payloads and the snapshot aggregates, then re-reads the
+  narrowest authoritative dataset: the queue plus — only when the page already holds the compact
+  index — one index read. Nothing is rebuilt from a guessed summary and no whole-snapshot refresh is
+  triggered.
+- **An import is measured by what it changed** (`requestImport`, `importedCount`,
+  `requestChangedDerived`). Only `imported > 0` invalidates the derived data and re-reads a loaded
+  index; an import that confirmed "nothing new" costs no extra call. The same rule applies to the
+  ordinary queue read, which imports server-side too.
+- **Revocation advances every generation** (`revoke`). The page generation, the editor sequence, the
+  task-index generation and the request-sync generation are all advanced, the private caches and
+  snapshot are dropped, the open editor is discarded and `api.clear()` supersedes every in-flight
+  read. Before applying an asynchronous answer, `render`, `repaintIfAllowed`, `success`, `settle`,
+  `act`, `fetchView`, `bootstrapFetch`, `fetchPublication`, `syncTaskIndex`, the request-sync
+  callbacks, the editor reads and the admin catch handlers verify that the client is still
+  authorized. A server mutation already in flight is never cancelled and never replayed.
+- **Invalidation supersedes in-flight reads** (`invalidatePrefixes`). The superseded key set is the
+  union of the cached and the in-flight keys, so a read started before a newer write can neither
+  paint nor be joined by the refresh that replaced it; the current generation is read again.
+  `fetchView` re-reads once when its answer was superseded instead of leaving a loading state.
+- **The remaining unguarded fields have contracts** (`readContract` → `automation`,
+  `src/UiSettings.html` → `EH.requireObject`/`requireArray`). A payload without `settings` or
+  `status` is now one readable `INVALID_RESPONSE` instead of a `TypeError`, and the documented
+  optional lists keep their documented default.
+
+### Behaviour that deliberately changed
+
+- A snapshot read that started **before** an import or a decision is discarded instead of being
+  applied. The next snapshot view reads the snapshot again (one extra read in that narrow case)
+  rather than presenting a pending count or an aggregate from before the write.
+- A request decision answers with **one extra compact-index read** when the page already holds the
+  index (the same policy a task save already uses); when the index is not loaded the next タスク
+  visit reads it, exactly as before.
+
+### Tests
+
+`tests/v1_7_6-consistency.test.js` (17 tests) drives the real client against the real modules with
+test-controlled answer ordering: approve completion, approve deadline, reject, return, stale,
+repeat, ambiguous transport, import with and without a change, delayed import and delayed snapshot
+after revocation, an older snapshot after a newer save, overlapping imports, leaving the page during
+a decision, bounded index recovery and two contract failures. Eleven of them fail on `75ff25c`
+(v1.7.5) and all pass afterwards. `tests/v1_7_6-release.test.js` (13 tests) pins the release version
+across `APP_VERSION`, the header badge, `package.json` and `package-lock.json`, the unchanged schema,
+contract and migration list, the invalidation and revocation boundaries, and the presence of this
+release's gate evidence.
+
+### Verification
+
+`npm ci`, `npm run lint`, `npm test` (**752 tests, 752 pass, 0 fail, 0 skipped**),
+`npm run validate` (42 manager files, 3 dashboard files, 970 translation keys) and
+`node scripts/manager-web-benchmark.js` all pass locally. Spreadsheet service calls per operation and
+payload sizes are identical to v1.7.5 at 100 / 1,000 / 3,000 tasks (task update 17 range reads /
+6.33 write calls / 22.33 cells; task create 13 / 4 / 51; request approval 19 / 14 / 60; bootstrap 10
+reads; compact index 6 reads). Live Workspace verification stays **BLOCKED / NOT_RUN**; see
+[V1_7_6_GATE_1.md](docs/checkgates/V1_7_6_GATE_1.md),
+[V1_7_6_GATE_2.md](docs/checkgates/V1_7_6_GATE_2.md),
+[V1_7_6_GATE_3.md](docs/checkgates/V1_7_6_GATE_3.md) and
+[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md).
 
 ## V1.7.5 — stability, data integrity and logic corrections (2026-10-30)
 

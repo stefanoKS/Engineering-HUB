@@ -12,12 +12,17 @@ test('older startup response cannot replace newer navigation and reads retry exp
  // Entering 申請 performs exactly one authorized import; it answers before anything else.
  const sync=h.waiting.shift();assert.equal(sync.operation,'requestSync');sync.success(a.context.managerWebRead('requests',{}));await flush();
  startup.success(a.context.managerWebRead('bootstrap',{}));await flush();
- // V1.7.3: the snapshot no longer prefetches the compact task index, so inserting the snapshot
- // leaves the queue empty and no task rows are read for a screen the manager has not opened.
- assert.equal(h.waiting.length,0,'the first paint does not prefetch the task index');
+ // V1.7.6: the startup snapshot started before the import, so its answer is discarded instead of
+ // becoming the snapshot the newer queue already replaced.
+ assert.equal(h.waiting.length,0,'the discarded snapshot starts no read of its own');
  assert.equal(h.calls.filter(c=>c.operation==='taskIndex').length,0);
  assert.match(h.document.getElementById('content').textContent,/申請/);assert.doesNotMatch(h.document.getElementById('content').textContent,/進行中案件/);
- h.click('nav','概要');await flush();assert.match(h.document.getElementById('content').textContent,/進行中案件/);assert.equal(h.calls.filter(c=>c.operation==='overview').length,0);
+ h.click('nav','概要');await flush();
+ // V1.7.3: the snapshot no longer prefetches the compact task index, so no task rows are read
+ // for a screen the manager has not opened; V1.7.6 re-reads the snapshot the import superseded.
+ assert.equal(h.waiting.length,1);assert.equal(h.waiting[0].operation,'bootstrap');
+ h.waiting.shift().success(a.context.managerWebRead('bootstrap',{}));await flush();
+ assert.match(h.document.getElementById('content').textContent,/進行中案件/);assert.equal(h.calls.filter(c=>c.operation==='overview').length,0);
  h.click('content','再読み込み');await flush();h.waiting.shift().failure(new Error('Network failure'));await flush();assert.match(h.document.getElementById('notice').textContent,/Network failure/);
  h.click('content','再試行');await flush();assert.equal(h.waiting.length,1);assert.equal(h.waiting[0].operation,'bootstrap');});
 test('duplicate API writes are refused until acknowledgement and writes are never retried automatically',async()=>{const a=fixture(),h=harness(null,{manual:true});await flush();h.waiting.shift().success(a.context.managerWebRead('overview'));await flush();const api=h.window.ManagerWebClient.api;const first=api.write('taskSave',{taskId:'T0'});await assert.rejects(api.write('taskSave',{taskId:'T0'}),/保存中/);h.waiting.shift().failure(new Error('Uncertain network outcome'));await assert.rejects(first,/Uncertain/);assert.equal(h.calls.filter(c=>c.write).length,1);});
