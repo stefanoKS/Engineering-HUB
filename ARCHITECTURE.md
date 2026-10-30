@@ -1,5 +1,50 @@
 # Architecture
 
+## V1.7.7 corrective architecture notes
+
+Two properties describe this release.
+
+**A refused authorization is one classification and one revocation, at the transport boundary.** The
+server raises a denial through `Roles.denied()`, which attaches the stable `AUTHORIZATION_DENIED` code;
+`ManagerWeb.response()` copies it to the error envelope as `code`, so the browser never has to read
+wording. The client's `isAuthorizationDenied(error, result)` consults the code first and keeps the
+application's own message pattern only as a fallback for a re-wrapped or transport-level answer. The
+single call site is `rpc()`, which is shared by every authorized read and write, so a denial from any
+operation reaches the existing `revoke()` before the operation's own error handler runs.
+
+```
+managerWebRead / managerWebWrite
+  → ManagerWeb.response()          catch → {ok:false, error, code:'AUTHORIZATION_DENIED'}
+  → rpc() done()                   isAuthorizationDenied(error, result) → revoke()
+  → caller .catch()                revoked === true → paint nothing
+```
+
+Only a genuine denial takes that path. Transport failures, `EDIT_CONFLICT`, validation errors, missing
+optional records, an unconfigured or broken request inbox, notification failures and ambiguous writes
+carry no code and keep their previous handling. Every remaining handler that could paint after a
+revocation — the deletion panel, the editor save, the plan preview, the approve/confirm re-read, the
+settings save, the reconciliation button and the diagnostics table — verifies `revoked` first, so the
+access-denied message is never replaced and no private row is restored.
+
+**An import that created rows refreshes the filter the manager is looking at.** `requestImport()`
+reads the authoritative `imported.imported` count and, before invalidating, asks whether a request-list
+read for the *currently selected* filter is still in flight. The import invalidates every
+`requests*` payload either way, so a read that was running is superseded and `fetchView()` re-reads its
+own filter once. The page-entry callback therefore only has to act when its own filter is no longer
+current: if the import created at least one request and no read of the current filter was running, the
+current filter is read once more (`refreshRequestList`), and `fetchView()` applies that answer only
+while its page generation and filter are still current.
+
+```
+requestSync(OPEN) ──┐                      filter → ALL: fetchView('requests')  (one read)
+                    └─ imported.imported>0 ─ listPending? ─ yes → the running ALL read re-reads itself
+                                                          └ no  → refreshRequestList()  (one read)
+                                                          imported.imported=0 → no call at all
+```
+
+No second import is ever issued for a refresh, an older filter answer is never allowed to paint, and the
+selected filter, the page generation and the navigation state are preserved.
+
 ## V1.7.6 corrective architecture notes
 
 Three properties describe this release.

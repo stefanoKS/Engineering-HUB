@@ -1,6 +1,44 @@
 # Engineering-HUB
 
-## Current release — V1.7.6
+## Current release — V1.7.7
+
+**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+
+Application version **1.7.7** is a narrowly scoped corrective release. It makes a refused
+authorization end the page on every operation instead of only on reads, classifies a denial by a stable
+server code instead of English wording, and refreshes 申請一覧 when an import created a request after the
+selected filter had already answered. Schema **8**, employee contract **1.6**, the migrations, the
+authorization rules, the audit and approval safeguards, the project colours and the deployment topology
+are unchanged; there is no migration, no initialization, no deployment and no change to notification or
+publication policy.
+
+- **A refused operation now always ends the page.** A denied task, project, member, responsibility or
+  administration save, a denied request approval, rejection or return, a denied request import, a denied
+  editor detail read and a denied background revalidation all reach the same revocation: the private
+  snapshot and every cached payload are dropped, the open form and its unsaved input are discarded, and
+  the access-denied message replaces the page. Nothing is retained and no later callback can repaint it.
+- **A denial is recognized by a code, not by phrasing.** The server marks a refused authorization with
+  `AUTHORIZATION_DENIED` in the response envelope, and the browser classifies through one function.
+  A timeout, a network failure, `EDIT_CONFLICT`, an invalid form value, a missing optional record, an
+  unavailable request inbox, a failed notification and an ambiguous write keep their existing handling
+  and never revoke the manager.
+- **Newly imported requests appear under the current filter.** When an import created a request after a
+  filter change had already answered, 申請一覧 now re-reads the selected filter once. The authoritative
+  `imported.imported` count decides it, an import that created nothing adds no call, a running read is
+  superseded instead of duplicated, and no import is ever repeated.
+- **Nothing else changed.** The v1.7.6 behaviour (task-summary preservation, multiple assignees, nested
+  hierarchy, `Parent_Task_ID`, decision idempotency, stale-response generations, response contracts, the
+  no-draft editor, project filtering and colours, and the measured Sheets optimisations) is preserved.
+
+Local verification: `npm run lint`, `npm test` (**765 tests, 765 pass, 0 fail, 0 skipped**),
+`npm run validate` and `node scripts/manager-web-benchmark.js` all pass. Spreadsheet service calls per
+operation and payload sizes are identical to V1.7.6. Live Workspace verification stays
+**BLOCKED / NOT_RUN**; see [V1_7_7_GATE_1.md](docs/checkgates/V1_7_7_GATE_1.md),
+[V1_7_7_GATE_2.md](docs/checkgates/V1_7_7_GATE_2.md),
+[V1_7_7_GATE_3.md](docs/checkgates/V1_7_7_GATE_3.md) and
+[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md).
+
+## Historical V1.7.6 release record
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 

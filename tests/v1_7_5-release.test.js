@@ -19,22 +19,22 @@ const MANAGER_WEB = { MANAGER_WEB_ALLOWED_DOMAINS: 'example.test' };
 const read = relative => fs.readFileSync(path.join(ROOT, relative), 'utf8');
 const exists = relative => fs.existsSync(path.join(ROOT, relative));
 
-test('the application reports release 1.7.6 while schema 8 and contract 1.6 stay unchanged', () => {
+test('the application reports release 1.7.7 while schema 8 and contract 1.6 stay unchanged', () => {
   const app = fixtures.base({ actor: 'manager@example.test', properties: MANAGER_WEB });
   const status = app.context.managerWebRead('status', {});
   assert.equal(status.ok, true, status.error);
-  assert.equal(status.data.version, '1.7.6');
+  assert.equal(status.data.version, '1.7.7');
   assert.equal(status.data.schema, 8, 'no schema change in a corrective release');
   const bootstrap = app.context.managerWebRead('bootstrap', {});
   assert.equal(bootstrap.ok, true, bootstrap.error);
   assert.equal(bootstrap.data.contract, '1.6', 'the employee publication contract is unchanged');
-  assert.equal(bootstrap.data.version, '1.7.6');
+  assert.equal(bootstrap.data.version, '1.7.7');
 });
 
 test('the header badge shows the same release version', () => {
   const index = read('src/ManagerWebIndex.html');
-  assert.match(index, /class="version">V1\.7\.6</);
-  assert.match(read('src/Config.gs'), /var APP_VERSION = '1\.7\.6'/);
+  assert.match(index, /class="version">V1\.7\.7</);
+  assert.match(read('src/Config.gs'), /var APP_VERSION = '1\.7\.7'/);
 });
 
 test('the migration list is untouched by this release', () => {
@@ -68,11 +68,11 @@ test('the corrective release documents every confirmed defect', () => {
 
 test('the overviews describe the current release', () => {
   const readme = read('README.md');
-  assert.match(readme, /## Current release — V1\.7\.6/);
-  assert.match(readme, /## Historical V1\.7\.5 release record/);
+  assert.match(readme, /## Current release — V1\.7\.7/);
+  assert.match(readme, /## Historical V1\.7\.6 release record/);
   const japanese = read('README_JP.md');
-  assert.match(japanese, /## 現行リリース — V1\.7\.6/);
-  assert.match(japanese, /## 過去のリリース記録（V1\.7\.5）/);
+  assert.match(japanese, /## 現行リリース — V1\.7\.7/);
+  assert.match(japanese, /## 過去のリリース記録（V1\.7\.6）/);
 });
 
 test('the architecture notes describe the write, refresh and validation boundaries', () => {

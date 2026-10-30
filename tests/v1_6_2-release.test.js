@@ -14,7 +14,7 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const exists = file => fs.existsSync(path.join(root, file));
 
 test('package, publisher, README, UI and changelog agree on the current version', () => {
-  assert.match(read('package.json'), /"version": "1\.7\.6"/);
+  assert.match(read('package.json'), /"version": "1\.7\.7"/);
   assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.7\.0'/);
   assert.match(read('README.md'), /## Current release — V1\.7/);
   assert.match(read('README_JP.md'), /## 現行リリース — V1\.7/);
@@ -27,7 +27,7 @@ test('package, publisher, README, UI and changelog agree on the current version'
   assert.match(read('CHANGELOG.md'), /## V1\.6\.1 — /);
   assert.match(read('CHANGELOG.md'), /## V1\.6 — /);
   // The overview payload, the status page and the sidebar report one application version.
-  assert.match(read('src/Config.gs'), /var APP_VERSION = '1.7.6'/);
+  assert.match(read('src/Config.gs'), /var APP_VERSION = '1.7.7'/);
   assert.match(read('src/ManagerWeb.gs'), /version: APP_VERSION/);
   assert.doesNotMatch(read('src/ManagerWeb.gs'), /version: '1\.6\.1'/);
 });

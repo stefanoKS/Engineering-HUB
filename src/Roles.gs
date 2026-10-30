@@ -9,6 +9,29 @@
 var Roles = (function () {
   var ORDER = {VIEWER: 0, MEMBER: 1, MANAGER: 2, ADMIN: 3};
   var NAMES = ['ADMIN', 'MANAGER', 'MEMBER', 'VIEWER'];
+  /**
+   * Stable marker for a refused authorization (V1.7.7).
+   *
+   * The browser classifies an answer by this code instead of guessing from wording, so a timeout,
+   * a validation error or an ambiguous write is never mistaken for a lost permission.
+   */
+  var DENIED = 'AUTHORIZATION_DENIED';
+  // A message a guard (or an older layer) re-wrapped loses the property, so the wording the
+  // application itself raises stays a fallback.
+  var DENIAL_PATTERN = /MANAGER_ACCESS_DENIED|Insufficient role:|A verified (active )?(member )?account is required|権限がありません/;
+
+  function denied(message) {
+    var error = new Error(message);
+    error.code = DENIED;
+    return error;
+  }
+
+  /** True for an authorization refusal, whether it kept its code or was re-wrapped. */
+  function isDenied(value) {
+    var error = value instanceof Error ? value : null;
+    if (error && error.code === DENIED) return true;
+    return DENIAL_PATTERN.test(String(error && error.message || value || ''));
+  }
 
   function normalize(value) {
     var role = String(value || '').trim().toUpperCase();
@@ -45,9 +68,9 @@ var Roles = (function () {
     var level = ORDER[String(minimum || '').toUpperCase()];
     if (level === undefined) throw new Error('Unknown role requirement: ' + minimum);
     var identity = describe(actorEmail);
-    if (!identity.verified) throw new Error('A verified active account is required');
-    if (!identity.active) throw new Error('A verified active member account is required');
-    if (ORDER[identity.role] < level) throw new Error('Insufficient role: ' + String(minimum).toUpperCase() + ' required');
+    if (!identity.verified) throw denied('A verified active account is required');
+    if (!identity.active) throw denied('A verified active member account is required');
+    if (ORDER[identity.role] < level) throw denied('Insufficient role: ' + String(minimum).toUpperCase() + ' required');
     return identity;
   }
 
@@ -75,7 +98,8 @@ var Roles = (function () {
     return role;
   }
 
-  return {ORDER: ORDER, NAMES: NAMES, normalize: normalize, describe: describe, requireAtLeast: requireAtLeast,
+  return {ORDER: ORDER, NAMES: NAMES, DENIED: DENIED, denied: denied, isDenied: isDenied,
+    normalize: normalize, describe: describe, requireAtLeast: requireAtLeast,
     can: can, verifiedEmail: verifiedEmail, isAdmin: isAdmin, isManager: isManager,
     activeAdministrators: activeAdministrators, requireValidRole: requireValidRole};
 }());

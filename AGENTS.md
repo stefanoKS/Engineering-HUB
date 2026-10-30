@@ -346,3 +346,23 @@
 144. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_7_6_GATE_<n>.md`; keep schema 8,
     employee contract 1.6, the migrations, the authorization rules and the project colours unchanged,
     and keep `docs/PRODUCTION_READINESS.md` **NOT APPROVED FOR PRODUCTION** until live evidence exists.
+
+## V1.7.7 mandatory rules (authorization denial and request synchronization)
+
+145. A refused authorization is recognized by a stable code, not by wording. `Roles.denied` marks the
+    refusal, `ManagerWeb.response` returns `code: 'AUTHORIZATION_DENIED'`, and the browser classifies an
+    answer through one classifier and revokes through one path. Never add a second revocation mechanism
+    and never infer a denial from arbitrary English text when the code is available.
+146. Only a genuine denial revokes the client. A timeout, a network failure, `EDIT_CONFLICT`, an invalid
+    form value, a missing optional record, an unavailable request inbox, a failed notification and an
+    ambiguous write keep their existing safe error handling and must never drop the page.
+147. After a revocation no callback may repaint, re-cache, notify, reopen a form or replace the
+    access-denied message. Every asynchronous entry point — read, write, request decision or import,
+    editor detail, administration and diagnostics — verifies `revoked` or its generation first.
+148. An import that created requests refreshes the filter the manager is looking at. The server's
+    `imported.imported` decides it, the current filter is re-read at most once, the answer is applied only
+    while its page generation and filter are current, a read already running is superseded instead of
+    duplicated, and an import that created nothing adds no call. Never re-import to refresh a list.
+149. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_7_7_GATE_<n>.md`; keep schema 8,
+    employee contract 1.6, the migrations, the authorization rules and the project colours unchanged,
+    and keep `docs/PRODUCTION_READINESS.md` **NOT APPROVED FOR PRODUCTION** until live evidence exists.

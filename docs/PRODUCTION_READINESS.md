@@ -1,6 +1,37 @@
 # Production readiness
 
-## Current assessment — V1.7.6 (2026-10-30)
+## Current assessment — V1.7.7 (2026-10-30)
+
+**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+
+Application version **1.7.7**; schema **8** (`008_task_and_responsibility_members`, additive and not
+applied automatically); employee contract **1.6** published, with **1.4**, **1.5** and **1.6** readable
+by the current reader.
+
+| Field | Value |
+| --- | --- |
+| Version | 1.7.7 |
+| Schema version | 8 (`008_task_and_responsibility_members`; additive, reviewed ID, verified backup first) |
+| Employee contract | 1.6 published; 1.4, 1.5 and 1.6 readable |
+| Google Workspace verification | **UNVERIFIED** — nothing in this repository has been run against a real Workspace |
+| Real latency measurement | **NOT_RUN** — run `devBenchmarkManagerWeb()` in the DEV project |
+
+V1.7.7 is a narrowly scoped corrective release: a refused authorization now ends the page on every
+operation instead of only on reads, it is classified by a stable server code instead of English wording,
+and 申請一覧 re-reads the selected filter once when an import created a request after that filter had
+already answered. It changes no schema, migration, scope, property, contract, authorization rule or
+project colour, and it adds no server-side cache. Spreadsheet service calls per operation and payload
+sizes are unchanged; the only added client round trip is one request-list read in the specific overlap
+case (see [V1_7_7_PERFORMANCE.json](checkgates/V1_7_7_PERFORMANCE.json),
+[V1_7_6_PERFORMANCE.json](checkgates/V1_7_6_PERFORMANCE.json) and
+[V1_7_3_PERFORMANCE.json](checkgates/V1_7_3_PERFORMANCE.json)). The local evidence is recorded in
+[V1_7_7_GATE_1.md](checkgates/V1_7_7_GATE_1.md) –
+[V1_7_7_GATE_3.md](checkgates/V1_7_7_GATE_3.md), with the V1.7.6 evidence in
+[V1_7_6_GATE_1.md](checkgates/V1_7_6_GATE_1.md) –
+[V1_7_6_GATE_3.md](checkgates/V1_7_6_GATE_3.md). Live Workspace verification remains
+**BLOCKED / NOT_RUN**, so this release stays **NOT APPROVED FOR PRODUCTION**.
+
+## Historical assessment — V1.7.6 (2026-10-30)
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
 

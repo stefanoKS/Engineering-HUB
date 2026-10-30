@@ -10,6 +10,21 @@ results: [V1_6_2_PERFORMANCE.json](checkgates/V1_6_2_PERFORMANCE.json) (V1.6.2 s
 Reproduce with `BENCHMARK_OUTPUT=V1_7_3_PERFORMANCE.json node scripts/manager-web-benchmark.js` (V1.7.3);
 earlier runs used `V1_6_2_PERFORMANCE.json`.
 
+## V1.7.7 — client round trips unchanged except one overlap case
+
+V1.7.7 changes client control flow only: a refused authorization revokes the page from the single RPC
+boundary, and 申請一覧 re-reads the selected filter when an import created a request after that filter had
+already answered. No Google Sheets work is added, removed or reordered. Raw results:
+[V1_7_7_PERFORMANCE.json](checkgates/V1_7_7_PERFORMANCE.json) — every server-side figure (range reads,
+write calls, cells written, workbook opens) is identical to
+[V1_7_6_PERFORMANCE.json](checkgates/V1_7_6_PERFORMANCE.json).
+
+Client round trips measured through the real client (task index loaded): initial bootstrap 1; task
+navigation 1; 申請一覧 entry 2 (3 when the import created a request and refreshes the loaded index);
+request approval or rejection 3; a filter change that overlaps a pending import 1 extra read — 5 instead
+of 4 — and **only** when that import actually created at least one request. An import that created
+nothing adds no call, and a refusal adds none because the page is revoked.
+
 ## V1.7.3 — corrective fixes and real Sheets work
 
 Local, mocked Google services (Windows, Node v24.21.0). **Real Workspace timings: NOT_RUN** — see the

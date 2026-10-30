@@ -165,4 +165,21 @@ Until these are recorded, the six V1.6.1 gates remain **BLOCKED** for live verif
 59. **Narrow viewport.** At 375 and 768 CSS pixels, the navigation must stack above the content, the administration
     cards must render in one column, and no horizontal scrolling may appear.
 
+## V1.7.7 authorization and request synchronization (DEV, NOT_RUN)
+
+60. **Denied save.** Open a task, change the name, then remove the signed-in manager's MANAGER role in
+    一覧/`MEMBERS`, and press 保存. Expect the access-denied message, a closed form with the entered value gone, an
+    empty content area, and no write in `TASKS` or `AUDIT_LOG`.
+61. **Denied approval and import.** With a pending 申請 open, revoke the role and press 承認 (and, in a second run,
+    reload 申請一覧 so its import is refused). Expect the same access-denied end state and no request decision or
+    import audit row.
+62. **Ordinary failures do not revoke.** With the role intact, force a transport failure (offline for the request)
+    and, separately, provoke `EDIT_CONFLICT` by saving a task another manager already changed. Expect a plain error
+    message (and, for the conflict, the open form with its values) and no access-denied message.
+63. **Import during a filter change.** With one new uninterrupted inbox row waiting, open 申請一覧 with 未処理 only
+    selected, switch to 決定済みを含む while the import is still running, and wait. Expect the new request to appear
+    in the 決定済みを含む list after one extra queue read, one import only, and no duplicated `TASK_REQUESTS` row.
+64. **No change costs nothing.** Open 申請一覧 again with an empty inbox and switch the filter. Expect no additional
+    queue read in the devtools network panel and no second import.
+
 These are **NOT_RUN**: the repository tests and the local preview are not Workspace evidence.

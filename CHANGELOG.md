@@ -1,5 +1,78 @@
 # Changelog
 
+## V1.7.7 — authorization denial handling and request synchronization (2026-10-30)
+
+**IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**
+
+Application version **1.7.7** is a narrowly scoped corrective release. Schema **8**, employee
+publication contract **1.6**, the reviewed migrations, the authorization rules, the audit and approval
+safeguards, the project colours, the notification and Calendar settings and the deployment topology are
+unchanged. There is no migration, no initialization, no deployment and no change to production data.
+
+### Confirmed defects and their root causes
+
+1. **A refused write left private data on screen.** `handleError()` recognized a permission denial and
+   called `revoke()`, but that function was only reached from the read paths (`bootstrapFetch`,
+   `fetchView`, `fetchPublication`). A denied task/project/member save, request decision, request
+   import, administration write, editor detail read or plan preview reported the error through its own
+   `catch` and kept the snapshot, the cached payloads and the open form, so an operation the server had
+   just refused could leave private records visible.
+2. **The denial was recognized by English wording.** The classifier was a regular expression over
+   `MANAGER_ACCESS_DENIED|Insufficient role|Access denied|権限` applied to the error text, so it depended
+   on message copy and could not tell a refusal from an unrelated message that happened to contain a
+   matching fragment. The server had no stable denial marker to classify against.
+3. **A late import answer never refreshed the list.** Opening 申請一覧 imports new inbox rows and paints
+   the queue, and a filter change reads the queue again. When the import created a request *after* that
+   filtered read had already answered, the callback dropped its own answer (`syncKey !==
+   requestSyncKey()`) and nothing replaced the older list, which stayed incomplete until a manual
+   reload. The import knew exactly what it had created (`imported.imported`) but that number was only
+   used to invalidate derived task data.
+
+### Corrections
+
+- **One classifier and one revocation path** (`src/Roles.gs`, `src/ManagerWeb.gs`,
+  `src/ManagerWebClient.html`). `Roles.denied()` marks a refusal with the stable
+  `AUTHORIZATION_DENIED` code, `ManagerWeb.response()` returns it as `code` in the error envelope, and
+  the browser classifies every read and write through `isAuthorizationDenied()`. The RPC boundary calls
+  the existing `revoke()` — which already advanced the page, editor, task-index and request-sync
+  generations, dropped the private caches, discarded the open form and superseded every in-flight read
+   — as soon as a denial arrives, whatever operation produced it.
+- **Only a genuine denial revokes.** `isAuthorizationDenied()` matches the code first; the message
+  pattern remains only as a fallback for a re-wrapped message or a transport-level answer. Timeouts,
+  `EDIT_CONFLICT`, validation errors, missing records, an unconfigured or broken request inbox, a failed
+  notification and ambiguous writes keep their previous handling, verified by regression tests.
+- **Every handler now respects a revocation.** The deletion panel, the editor save, the plan preview,
+  the approve/confirm re-read, the settings save, the reconciliation button and the diagnostics table
+  verify `revoked` before they paint, so no callback can replace the access-denied message or repaint
+  private rows after the page has been revoked.
+- **An import that created rows refreshes the current filter once** (`requestImport`,
+  `refreshRequestList`, the 申請一覧 import callback). The authoritative `imported.imported` count decides
+  it, the current filter is read — never re-imported — and the answer is applied only while its page
+  generation and filter are still current. A read that is still running was dispatched before the import
+  committed, is superseded by the existing invalidation and re-reads itself, so it is not duplicated.
+
+### Behaviour that deliberately changed
+
+- A denied **write** now ends the page, exactly like a denied read: the snapshot, the cached payloads,
+  the open form and the unsaved input are dropped and the access-denied message is shown.
+- A filter change that overlaps an import which **created** a request costs **one** extra read of the
+  selected filter. An import that created nothing adds no call, and an import whose filter is still the
+  selected one reuses its own answer (no extra read).
+
+### Verification
+
+`npm ci`, `npm run lint`, `npm test` (**765 tests, 765 pass, 0 fail, 0 skipped**),
+`npm run validate` and `node scripts/manager-web-benchmark.js` pass locally. Spreadsheet service calls
+per operation and payload sizes are identical to V1.7.6 (bootstrap 10 reads; compact index 6 reads; task
+update 17 range reads / 6.33 write calls / 22.33 cells; request approval 19 reads / 14 write calls).
+Client round trips are unchanged for initial bootstrap (1), task navigation (1), 申請一覧 with no new
+import (2), 申請一覧 with one import (3) and a request decision (3); a filter change that overlaps an
+import which created a request costs 5 instead of 4. Live Workspace verification stays
+**BLOCKED / NOT_RUN**; see [V1_7_7_GATE_1.md](docs/checkgates/V1_7_7_GATE_1.md),
+[V1_7_7_GATE_2.md](docs/checkgates/V1_7_7_GATE_2.md),
+[V1_7_7_GATE_3.md](docs/checkgates/V1_7_7_GATE_3.md) and
+[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md).
+
 ## V1.7.6 — request consistency and asynchronous-state safety (2026-10-30)
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**

@@ -15,7 +15,7 @@ var ManagerWeb = (function () {
     var email = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
     var domains = String(PropertiesService.getScriptProperties().getProperty('MANAGER_WEB_ALLOWED_DOMAINS') || '')
       .toLowerCase().split(',').map(function (x) { return x.trim(); }).filter(Boolean);
-    if (!email || domains.indexOf(email.split('@')[1]) < 0) throw new Error('MANAGER_ACCESS_DENIED');
+    if (!email || domains.indexOf(email.split('@')[1]) < 0) throw Roles.denied('MANAGER_ACCESS_DENIED');
     return Access.requireManager();
   }
   function unwrap(result) {
@@ -51,7 +51,11 @@ var ManagerWeb = (function () {
       metrics.totalMs = Date.now() - started;
       return {ok: true, data: JSON.parse(payload), metrics: detail === true ? metrics : compact(metrics)};
     } catch (error) {
-      return {ok: false, error: String(error.message || error), metrics: {executionMs: Date.now() - started}};
+      var failure = {ok: false, error: String(error.message || error), metrics: {executionMs: Date.now() - started}};
+      // V1.7.7: a refused authorization carries its stable code, so the browser revokes the page
+      // on a denial and never on a timeout, a validation error or an ambiguous write.
+      if (Roles.isDenied(error)) failure.code = Roles.DENIED;
+      return failure;
     }
   }
   /**

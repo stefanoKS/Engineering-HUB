@@ -13,7 +13,7 @@ const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
 test('package, publisher, README and the manager page agree on V1.6', () => {
-  assert.match(read('package.json'), /"version": "1\.7\.6"/);
+  assert.match(read('package.json'), /"version": "1\.7\.7"/);
   assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.7\.0'/);
   assert.match(read('README.md'), /## Current release — V1\.7/);
   assert.match(read('README_JP.md'), /## 現行リリース — V1\.7/);

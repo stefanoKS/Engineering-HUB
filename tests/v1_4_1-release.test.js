@@ -71,7 +71,7 @@ test('the release notes describe the V1.4.1 behaviour', () => {
 });
 
 test('the package, publisher and README agree on the release version', () => {
-  assert.match(read('package.json'), /"version": "1\.7\.6"/);
+  assert.match(read('package.json'), /"version": "1\.7\.7"/);
   assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.7\.0'/);
   assert.match(read('README.md'), /328 passing/);
   assert.match(read('README_JP.md'), /328件すべて成功/);

@@ -50,6 +50,23 @@ function button(key, fn, parent) { var b = el('button', t(key)); b.type = 'butto
 function notice(text, kind) { byId('notice').textContent = text; byId('notice').className = kind || ''; }
 function success(text) { if (revoked) return; notice(text, 'success'); }
 function clearNotice() { notice(''); }
+/**
+ * Authorization denial classification (V1.7.7).
+ *
+ * The server marks a refused authorization with the stable `AUTHORIZATION_DENIED` code, so a
+ * denial is never inferred from arbitrary wording. The message pattern stays as a fallback for a
+ * transport-level answer and for a message a server-side guard re-wrapped before it reached the
+ * response envelope. Every other outcome — a timeout, `EDIT_CONFLICT`, an invalid form value, a
+ * missing optional record, an unavailable request inbox, a failed notification or an ambiguous
+ * write — is an ordinary error and never revokes the page.
+ */
+var AUTHORIZATION_DENIED = 'AUTHORIZATION_DENIED';
+var DENIAL_PATTERN = /MANAGER_ACCESS_DENIED|Insufficient role|Access denied|A verified (active )?(member )?account is required|権限/;
+function isAuthorizationDenied(error, result) {
+  var code = String((result && result.code) || (error && error.code) || '');
+  if (code === AUTHORIZATION_DENIED) return true;
+  return DENIAL_PATTERN.test(String((error && error.message) || (result && result.error) || ''));
+}
 function pump() { while (running < 2 && queue.length) { running++; queue.shift()(); } }
 function rpc(write, operation, payload) {
   var queued = performance.now();
@@ -67,8 +84,15 @@ function rpc(write, operation, payload) {
           roundTripMs: finished - queued, server: server,
           payloadBytes: server && typeof server.payloadBytes === 'number' ? server.payloadBytes : 0});
         if (metrics.length > 300) metrics.shift();
-        if (error || !result || result.ok !== true) reject(new Error(error && (write ? t('unknownSave')+' '+error.message : error.message) || result && result.error || 'Request failed'));
-        else resolve(result.data);
+        if (error || !result || result.ok !== true) {
+          // V1.7.7: every authorized read and write is refused through this one classifier and
+          // this one revocation path, so no callback of any operation can keep private data or an
+          // open form alive after the server stopped authorizing this user.
+          if (isAuthorizationDenied(error, result)) revoke();
+          reject(new Error(error && (write ? t('unknownSave')+' '+error.message : error.message) || result && result.error || 'Request failed'));
+          return;
+        }
+        resolve(result.data);
       }
       var runner = google.script.run.withSuccessHandler(function (result) { done(result); }).withFailureHandler(function (error) { done(null, error); });
       if (write) runner.managerWebWrite(operation, payload || {}); else runner.managerWebRead(operation, payload || {});
@@ -175,13 +199,30 @@ function requestSyncKey() { return filters.requests && filters.requests.includeD
 function requestImport(key) {
   stats.writes++;
   return rpc(true, 'requestSync', {includeDecided: key === 'ALL'}).then(function (data) {
+    var imported = importedCount(data && data.imported);
+    // V1.7.7: asked before the invalidation below drops the in-flight entry. A request-list read
+    // that is still running was dispatched before this import committed, so the import supersedes
+    // it and that read re-reads its own filter; the page must not pay for a second read.
+    var listPending = imported > 0 && inflight.has(keyOf('requests', viewFilters('requests')));
     // The queue and the pending count are the only cached values the import can change.
     invalidatePrefixes(afterWritePrefixes('requestSync'));
     // An import that created no request leaves every derived task value valid, so it pays for no
     // index read; an import that did create one changes a pending-review indicator (V1.7.6).
-    if (importedCount(data && data.imported)) requestChangedDerived();
-    return data;
+    if (imported) requestChangedDerived();
+    return {payload: data, imported: imported, listPending: listPending};
   });
+}
+/**
+ * One read-only re-read of the currently selected request filter (V1.7.7).
+ *
+ * An import that created rows invalidates every request-list payload, but a list that already
+ * answered before the import committed can never contain those rows. The current filter is
+ * therefore read once more — never re-imported, never guessed from a list length — and the answer
+ * is applied only while its page generation and filter are still the current ones.
+ */
+function refreshRequestList(listPending) {
+  if (revoked || view !== 'requests' || listPending === true) return;
+  fetchView('requests', true, false);
 }
 /** New requests an import actually created; 0 when the queue did not change. */
 function importedCount(value) {
@@ -462,7 +503,7 @@ function syncTaskIndex(force) {
   }).catch(function (error) {
     if (revoked) return;
     if (generation !== taskIndexState.generation) return;
-    if (/MANAGER_ACCESS_DENIED|Insufficient role|Access denied|権限/.test(String(error.message || ''))) { revoke(); return; }
+    if (isAuthorizationDenied(error)) { revoke(); return; }
     recoverTaskIndex();
   });
 }
@@ -1202,6 +1243,7 @@ function runDiagnostics(host) {
       .then(function () { return {operation: entry.operation}; })
       .catch(function (error) { return {operation: entry.operation, error: error.message}; });
   })).then(function (results) {
+    if (revoked) return;
     function detailOf(operation) {
       var samples = metrics.filter(function (sample) { return sample.operation === operation; });
       return samples.length ? samples[samples.length - 1].server : null;
@@ -1388,7 +1430,9 @@ function repaintIfAllowed() {
 }
 function handleError(error) {
   if (revoked) return;
-  if (/MANAGER_ACCESS_DENIED|Insufficient role|Access denied|権限/.test(String(error.message || ''))) { revoke(); return; }
+  // The same classifier as the RPC boundary. A denial is normally revoked there already; this
+  // keeps a denial that reached the handler some other way on the one revocation path (V1.7.7).
+  if (isAuthorizationDenied(error)) { revoke(); return; }
   syncError = error.message;
   notice(error.message, 'error');
   if (!currentData) { byId('content').replaceChildren(); button('retry', function () { load(true); }, byId('content')); return; }
@@ -1521,7 +1565,7 @@ function deletionPanel(container,table,id,name,revision){
     feedback.textContent=t('saving');
     api.write(deletionAction(table),Object.assign({confirmed:true,reason:state.reason,confirmation:'DELETE '+id}, (function(){var p={};p[deletionKey(table)]=id;p.revision=state.revision;return p;}())))
       .then(function(result){detach(panel);success(t('deleted')+' · '+t('needsPublication'));settle(deletionAction(table),{projectId:table==='PROJECTS'?id:undefined,taskId:table==='TASKS'?id:undefined},result);})
-      .catch(function(error){execute.disabled=false;feedback.className='error';feedback.textContent=error.message;notice(error.message,'error');});
+      .catch(function(error){if(revoked)return;execute.disabled=false;feedback.className='error';feedback.textContent=error.message;notice(error.message,'error');});
   }
   execute.addEventListener('click',function(){
     if(execute.disabled)return;
@@ -1546,7 +1590,7 @@ function deletionPanel(container,table,id,name,revision){
       return;
     }
     execute.disabled=!rev;
-  }).catch(function(error){summary.replaceChildren(el('p',error.message,'error'));});
+  }).catch(function(error){if(revoked)return;summary.replaceChildren(el('p',error.message,'error'));});
 }
 function openDeletionFor(table,id,name,revision,container){
   deletionPanel(container||byId('content'),table,id,name,revision);
@@ -1685,14 +1729,19 @@ function render() {
     if(requestSync.state==='idle'){
       var generation=requestSync.generation,syncKey=requestSyncKey();
       requestSync.state='pending';requestSync.key=syncKey;
-      requestImport(syncKey).then(function(result){
+      requestImport(syncKey).then(function(imported){
         // A revoked identity or an older page entry owns nothing here: the answer is discarded
         // without a repaint and without restoring any private data (V1.7.6).
         if(revoked||generation!==requestSync.generation)return;
         requestSync.state='done';
-        // A filter change that happened while the import ran already owns a newer read.
-        if(syncKey!==requestSyncKey()||view!=='requests')return;
-        currentData=readContract('requests',result);store.at.requests=Date.now();render();
+        // A filter change that happened while the import ran already owns a newer read, and that
+        // read can never contain the rows this import created afterwards: the current filter is
+        // read once more, and never re-imported (V1.7.7).
+        if(syncKey!==requestSyncKey()||view!=='requests'){
+          if(imported.imported)refreshRequestList(imported.listPending);
+          return;
+        }
+        currentData=readContract('requests',imported.payload);store.at.requests=Date.now();render();
       }).catch(function(error){
         if(revoked||generation!==requestSync.generation)return;
         requestSync.state='failed';requestSync.error=error.message;
@@ -2442,12 +2491,12 @@ function renderEditor() {
   }
   var confirms=d.type==='project'?['confirmDeadlineChange','confirmResponsibilityChange','confirmRetiredResponsibility']:d.type==='subproject'?['confirmReparent']:d.type==='task'?['acknowledgeNonWorking','confirmDeadlineChange']:[];
   confirms.forEach(function(k){field(fields,k,d.values[k],null,function(v){d.values[k]=v;},'checkbox');});
-  if(d.type==='task')button('plan',function(){api.read('plan',d.values,true).then(function(p){p=readContract('plan',p);message.textContent=t('plannedStart')+': '+p.startDate+' · '+p.warnings.map(function(w){return EH_I18N.has('web.'+w.code)?t(w.code):EH_I18N.serverMessage(lang,w.code);}).join(', ');}).catch(function(e){message.textContent=e.message;});},form);
+  if(d.type==='task')button('plan',function(){api.read('plan',d.values,true).then(function(p){if(revoked)return;p=readContract('plan',p);message.textContent=t('plannedStart')+': '+p.startDate+' · '+p.warnings.map(function(w){return EH_I18N.has('web.'+w.code)?t(w.code):EH_I18N.serverMessage(lang,w.code);}).join(', ');}).catch(function(e){if(revoked)return;message.textContent=e.message;});},form);
   var languageButton=el('button','日本語 | English');languageButton.type='button';languageButton.addEventListener('click',switchLanguage);form.appendChild(languageButton);
   var actions=el('div',undefined,'toolbar'),save=el('button',t('save'),'primary');save.type='submit';save.disabled=!!d.saving;actions.appendChild(save);
   // V1.7: closing is closing. No confirmation, no draft question and no retained values.
   button('close',function(){closeEditor();},actions);
-  if(d.type==='task'&&d.id)['taskApprove','taskConfirm'].forEach(function(a){button(a,function(){act(a,{taskId:d.id,revision:d.original._revision},true).then(function(ok){if(ok)api.read('task',{id:d.id},true).then(function(r){if(currentEditor!==d)return;d.original=r.record;d.original._confirmations=r.confirmations;renderEditor();});});},actions);});
+  if(d.type==='task'&&d.id)['taskApprove','taskConfirm'].forEach(function(a){button(a,function(){act(a,{taskId:d.id,revision:d.original._revision},true).then(function(ok){if(ok)api.read('task',{id:d.id},true).then(function(r){if(revoked||currentEditor!==d)return;d.original=r.record;d.original._confirmations=r.confirmations;renderEditor();}).catch(function(){/* a revoked or superseded read paints nothing */});});},actions);});
   form.appendChild(actions);form.addEventListener('submit',function(e){e.preventDefault();if(d.saving)return;var payload={};Object.keys(schema.fields).forEach(function(k){if(k==='role'&&actorRole!=='ADMIN')return;if(d.id&&String(d.values[k])===String(d.base[k]))return;var target=k==='statusField'?'status':k==='enabled'?'active':k;payload[target]=d.values[k];});confirms.forEach(function(k){payload[k]=d.values[k]===true;});if(d.id){payload[schema.key]=d.id;payload.revision=d.original._revision;}if(d.type==='task'){payload.deadline=d.values.deadline;payload.durationValue=d.values.durationValue;payload.durationUnit=d.values.durationUnit;payload.durationBasis=d.values.durationBasis;}
     // A membership list is only sent when the manager actually changed it, so an untouched
     // form can never rewrite an assignment.
@@ -2456,7 +2505,7 @@ function renderEditor() {
     }
     d.saving=true;save.disabled=true;message.textContent=t('saving');
     // One write per save: a second click is refused above, and a confirmed save closes the form.
-    api.write(d.id?schema.save:schema.create,payload).then(function(result){if(currentEditor===d)closeEditor();settle(d.id?schema.save:schema.create,payload,result);success(t('saved'));}).catch(function(error){message.textContent=error.message;message.className='error';}).finally(function(){d.saving=false;save.disabled=false;});
+    api.write(d.id?schema.save:schema.create,payload).then(function(result){if(revoked)return;if(currentEditor===d)closeEditor();settle(d.id?schema.save:schema.create,payload,result);success(t('saved'));}).catch(function(error){if(revoked)return;message.textContent=error.message;message.className='error';}).finally(function(){d.saving=false;save.disabled=false;});
   });host.appendChild(form);
 }
 function switchLanguage(){lang=EH_I18N.write(lang==='ja'?'en':'ja');renderNav();render();if(currentEditor)renderEditor();}
