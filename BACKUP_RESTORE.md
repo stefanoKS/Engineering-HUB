@@ -109,3 +109,26 @@ A restored ledger may predate mail that was actually sent, and mail sent after t
 | Approved to resume triggers | yes / no + date |
 
 Until this record is complete, continue with automation disabled.
+
+## V2 backup and restore (PostgreSQL)
+
+The V1 backup procedure above (a restricted Drive copy of the workbook, `createDatabaseBackup`,
+verified before a migration) is unchanged and remains the protection for the deployed system.
+
+V2 backs up PostgreSQL instead:
+
+* the worker writes an AES-256-GCM encrypted container (`EHBAK1` magic, random nonce, auth tag) of
+  either a `pg_dump` custom archive or the portable `eh-logical-v1` JSON archive, records it in
+  `backup_log` with its checksum and manifest, and uploads it to `DRIVE_BACKUP_FOLDER_ID`;
+* `DAILY_BACKUP_ENABLED` (default **false**) schedules one run per business day, and
+  `backup-now` creates one on demand — run it before any risky operation;
+* `verify-restore` restores the archive into a scratch database, compares every table's row count
+  and prints `PASS`/`FAIL`; it refuses a populated target and drops only the scratch database it
+  created;
+* retention is reported (an audit row), never enforced: this codebase deletes no backup file;
+* a restore is always an explicit operator action into a new database — there is no unattended
+  restore and no WAL/continuous archiving, so the RPO is the last successful backup.
+
+The full procedure, the failure table and the stated limitations (no second-level RPO, the
+`pg_dump` path `NOT_RUN` locally because the embedded test distribution has no client tools) are in
+[docs/v2/BACKUP_RESTORE.md](docs/v2/BACKUP_RESTORE.md).

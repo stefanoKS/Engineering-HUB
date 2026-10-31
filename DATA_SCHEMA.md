@@ -518,3 +518,33 @@ assignment history is preserved.
 `PENDING_REQUEST_REMINDER_ENABLED` default to `false`, plus the status keys
 `LAST_REQUEST_IMPORT_AT` and `LAST_PENDING_REQUEST_REMINDER_AT`.
 
+## V2 data model (separate from the V1 workbook)
+
+The schema described above is the **V1 Apps Script workbook** (current schema version **8**).
+V2 does not migrate, extend or replace it; it uses its own PostgreSQL schema, versioned by
+`packages/db/src/migrations/0001_core` … `0005_calendar` and recorded in `schema_migrations`.
+
+| V1 sheet | V2 table |
+| --- | --- |
+| `MEMBERS` | `members` |
+| `RESPONSIBILITIES` | `responsibilities` (+ `responsibility_members`) |
+| `PROJECTS` | `projects` |
+| `SUBPROJECTS` | `subprojects` |
+| `TASKS` | `tasks` (+ `task_dependencies`, `task_assignees`) |
+| `TASK_REQUESTS` | `task_requests` (+ `task_deadline_history`) |
+| `SCHEDULE_CONFIRMATIONS` | `schedule_confirmations` |
+| `AUDIT_LOG` | `audit_log` (append-only by trigger) |
+| `NOTIFICATION_LOG` | `notification_ledger` |
+| `AUTOMATION_SETTINGS` | `app_settings` |
+| — (new) | `outbox_jobs`, `calendar_links`, `record_deletions`, `import_runs`, `published_snapshots`, `published_meta`, `sessions`, `idempotency_keys` |
+
+Requirements that the database itself enforces in V2: subproject depth ≤ 4 and task depth ≤ 3
+with no cycles or cross-project/cross-subproject parents, a container task can never be `Done`,
+`audit_log` and `task_deadline_history` are append-only, and a primary key is a stable identifier
+(never a row number). Business counting, progress weighting and eligibility remain in
+`packages/domain` so exactly one implementation exists.
+
+The publication contract (employee-facing) is contract **1.6** with 18 allowlisted headers, the
+same `INTERNAL`-only rule and the same privacy boundary as the V1 snapshot. The full detail is in
+[docs/v2/ARCHITECTURE.md](docs/v2/ARCHITECTURE.md) and
+[docs/v2/MIGRATION.md](docs/v2/MIGRATION.md).

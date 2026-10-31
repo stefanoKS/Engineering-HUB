@@ -1,0 +1,11 @@
+# Cloudflare Tunnel example. Replace the tunnel UUID and the host name, then start the
+# `tunnel` compose profile. Access is enforced by Cloudflare Access; the application still
+# verifies the Google identity token and its own role checks.
+
+tunnel: 00000000-0000-0000-0000-000000000000
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: engineering-hub.example.co.jp
+    service: http://api:8080
+  - service: http_status:404

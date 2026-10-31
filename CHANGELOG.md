@@ -1,5 +1,59 @@
 # Changelog
 
+## V2.0.0 — PostgreSQL platform (2026-10-31)
+
+**IMPLEMENTED AND VERIFIED LOCALLY. NOT DEPLOYED. NOT APPROVED FOR PRODUCTION.**
+
+V2 replaces the spreadsheet-backed runtime with a self-hosted PostgreSQL platform while keeping
+every V1 business rule, identifier, permission, workflow, localisation and transparency guarantee.
+The V1 Apps Script project above is unchanged, remains the deployed system, and is the migration
+source and rollback path. This entry records implementation evidence only; no production data was
+migrated, no Google resource was created or modified, and no notification was sent.
+
+### Added
+
+* `apps/api` — Fastify API: verified Google sign-in with a hashed session token and a per-session
+  CSRF token, origin allowlist, server-side authorization on every entry point, bounded paginated
+  reads, one transaction per command, audit and outbox rows.
+* `apps/worker` — outbox worker: notification gating and ledger, reminder scan, Calendar sync,
+  encrypted backup with verification, A/B publication, Sheets export, session maintenance, and an
+  operator CLI (`backup-now`, `verify-restore`, `run-once`).
+* `apps/web` — React 19 + Vite application: manager screens and the employee view, Japanese
+  default with the `日本語 | English` switch, project accents from the stable `Project_ID`, and a
+  bounded snapshot cache with generation-guarded, superseding invalidation.
+* `packages/contracts` — enums, DTOs, strict mutation schemas, one error vocabulary, published
+  contract 1.6 with an 18-header allowlist, and the single `APP_VERSION`.
+* `packages/domain` — one implementation of counting, progress weighting, hierarchy limits,
+  eligibility, planning, request decisions, completion, lifecycle/deletion, notifications,
+  publication and project colours.
+* `packages/db` — PostgreSQL layer: pool with Asia/Tokyo sessions, plain SQL migrations with
+  checksums and an advisory lock, integrity triggers, repositories with revision-checked patches
+  and soft relationships.
+* `packages/i18n` — the 970-key V1 dictionary, identical in Japanese and English, generated from
+  the V1 source.
+* `tools/migration` — inventory, validation, dry-run, import and reconciliation for the V1 → V2
+  cut-over, with identifiers preserved and automation forced off.
+* `tools/benchmark` — local measurement harness (three dataset sizes, latency percentiles, database
+  calls, payload bytes).
+* `deploy/` — Compose topology (PostgreSQL private, API/worker/Caddy, optional Cloudflare Tunnel),
+  images, and `.env.example` placeholders only.
+* `docs/v2/` — parity, architecture, API, security, migration, Workspace, self-hosting, remote
+  access, backup/restore, operations, performance and acceptance documents.
+
+### Verification (local)
+
+`npm run typecheck` PASS · `npm run lint` PASS · `npm test` V1 776/776 and V2 101/101 PASS against
+a real PostgreSQL 18.6 · `npm run validate` PASS · `npm run build` PASS · local benchmark recorded
+in `docs/v2/PERFORMANCE.md` (10 000 tasks: worst manager read p95 227 ms, employee snapshot p95
+198 ms / 808 KB).
+
+### Not done (explicit)
+
+Live Google sign-in, Gmail, Calendar, Drive and Sheets are **BLOCKED** (no credentials or
+Workspace); public TLS and external access are **BLOCKED** (no DNS or host); the production data
+migration and cut-over are **NOT_RUN**. `docs/PRODUCTION_READINESS.md` stays
+**NOT APPROVED FOR PRODUCTION**.
+
 ## V1.7.7 — authorization denial handling and request synchronization (2026-10-30)
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**

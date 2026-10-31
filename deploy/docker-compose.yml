@@ -1,0 +1,128 @@
+# Engineering-HUB V2 deployment (self-hosted).
+#
+# PostgreSQL is never published to the host: only the reverse proxy is reachable. Every value
+# that differs between environments lives in deploy/.env (never committed).
+
+name: engineering-hub
+
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ehub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-engineering_hub}
+      TZ: Asia/Tokyo
+      PGTZ: Asia/Tokyo
+    command:
+      - postgres
+      - -c
+      - fsync=on
+      - -c
+      - synchronous_commit=on
+      - -c
+      - timezone=Asia/Tokyo
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-ehub} -d ${POSTGRES_DB:-engineering_hub}']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 2g
+    cpus: 2
+
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/api.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8080
+      NODE_ENV: production
+      APP_ENV: ${APP_ENV:-PRODUCTION}
+      WEB_ROOT: /app/apps/web/dist
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ehub}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-engineering_hub}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - '127.0.0.1:8080:8080'
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    mem_limit: 1g
+    cpus: 2
+
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/worker.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      APP_ENV: ${APP_ENV:-PRODUCTION}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ehub}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-engineering_hub}
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 1g
+    cpus: 1
+
+  # One-shot schema migration. Run deliberately, never automatically at boot:
+  #   docker compose --profile tools run --rm migrate
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/api.Dockerfile
+    profiles: ['tools']
+    restart: 'no'
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ehub}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-engineering_hub}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ['node', 'apps/api/dist/migrate.js']
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN in deploy/.env}
+
+  # Optional remote-access connector. Start with:
+  #   docker compose --profile tunnel up -d
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    profiles: ['tunnel']
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
+    depends_on:
+      - api
+
+volumes:
+  db-data:
+  caddy-data:
+  caddy-config:

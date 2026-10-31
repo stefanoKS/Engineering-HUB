@@ -2,14 +2,35 @@
   "name": "engineering-hub",
   "version": "1.7.7",
   "private": true,
-  "description": "Safe Google Apps Script engineering operations workspace",
+  "description": "Engineering-HUB: V1 Apps Script application (archived, version 1.7.7) plus the V2 PostgreSQL monorepo under apps/ and packages/",
   "engines": {
     "node": ">=22.13.0"
   },
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "tools/*"
+  ],
   "scripts": {
-    "lint": "eslint .",
-    "test": "node --test tests/*.test.js",
-    "validate": "node scripts/validate-source.js",
+    "lint": "npm run lint:v1 && npm run lint:v2",
+    "lint:v1": "eslint src dashboard-app shared scripts tests",
+    "lint:v2": "eslint apps packages tools --ext .ts,.tsx",
+    "test": "npm run test:v1 && npm run test:v2",
+    "test:v1": "node --test tests/*.test.js",
+    "test:v2": "vitest run",
+    "test:v2:watch": "vitest",
+    "validate": "npm run validate:v1 && npm run validate:v2",
+    "validate:v1": "node scripts/validate-source.js",
+    "validate:v2": "node scripts/validate-v2.js",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "db:migrate": "npm run migrate --workspace @eh/db",
+    "db:seed:demo": "npm run seed:demo --workspace @eh/db",
+    "dev:api": "npm run dev --workspace @eh/api",
+    "dev:web": "npm run dev --workspace @eh/web",
+    "dev:worker": "npm run dev --workspace @eh/worker",
+    "migration": "npm run start --workspace @eh/migration --",
+    "benchmark": "npm run bench --workspace @eh/benchmark --",
     "sync:i18n": "node scripts/sync-i18n.js",
     "sync:colors": "node scripts/sync-project-colors.js",
     "sync:shared": "node scripts/sync-i18n.js && node scripts/sync-project-colors.js",
@@ -18,10 +39,19 @@
     "preview:manager-web": "node scripts/manager-web-preview.js"
   },
   "devDependencies": {
+    "@embedded-postgres/windows-x64": "18.6.0-beta.19",
     "@google/clasp": "3.4.1",
-    "eslint": "10.13.0"
+    "@types/node": "26.6.6",
+    "eslint": "10.14.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.0.5"
   },
   "overrides": {
     "zod": "4.6.7"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "@embedded-postgres/windows-x64@18.6.0-beta.19": true
   }
 }

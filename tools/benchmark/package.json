@@ -1,0 +1,18 @@
+{
+  "name": "@eh/benchmark",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local measurement harness: seeded PostgreSQL datasets against the real API routes",
+  "scripts": {
+    "bench": "tsx src/main.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@eh/db": "2.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "tsx": "4.23.15"
+  }
+}

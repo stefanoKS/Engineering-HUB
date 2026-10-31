@@ -1,0 +1,23 @@
+{
+  "name": "@eh/migration",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/cli.ts",
+  "scripts": {
+    "start": "tsx src/cli.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@eh/contracts": "2.0.0",
+    "@eh/db": "2.0.0",
+    "@eh/domain": "2.0.0",
+    "google-auth-library": "11.3.2",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "tsx": "4.23.15"
+  }
+}

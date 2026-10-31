@@ -1,5 +1,64 @@
 # Engineering-HUB
 
+## V2 platform — PostgreSQL, self-hosted (implemented locally, not deployed)
+
+**IMPLEMENTED AND VERIFIED LOCALLY. NOT DEPLOYED. NOT APPROVED FOR PRODUCTION.**
+
+V2 keeps every V1 business rule, identifier, permission and workflow but moves the runtime off
+Google Sheets: projects, subprojects, tasks, requests, approvals, audit and notifications live in
+PostgreSQL, and a TypeScript API, a background worker and a React application replace the Apps
+Script sidebar. The V1 Apps Script project described below is untouched and remains the only
+deployed system; the workbook is the migration source and the rollback path.
+
+| Area | Location |
+| --- | --- |
+| HTTP API (Fastify, sessions, authorization, services) | `apps/api/` |
+| Background worker (outbox, Gmail, Calendar, Drive backup, publication, export) | `apps/worker/` |
+| Web application (React + Vite, Japanese default, project colours) | `apps/web/` |
+| Contracts, domain rules, database layer, translations | `packages/contracts`, `packages/domain`, `packages/db`, `packages/i18n` |
+| V1 → V2 migration tool and local benchmark | `tools/migration`, `tools/benchmark` |
+| Self-hosting (Compose, Caddy, Cloudflare Tunnel) | `deploy/` |
+
+### V2 quick start (local)
+
+```bash
+npm ci
+npm run typecheck
+npm run lint:v2
+npm test                    # V1 regression suite + V2 suites against real PostgreSQL
+npm run validate
+npm run db:migrate          # apply the reviewed SQL migrations (needs DATABASE_URL)
+npm run benchmark           # local measurement, see docs/v2/PERFORMANCE.md
+```
+
+### V2 documentation
+
+[Feature parity](docs/v2/FEATURE_PARITY.md) · [Architecture](docs/v2/ARCHITECTURE.md) ·
+[API](docs/v2/API.md) · [Security](docs/v2/SECURITY.md) ·
+[Migration](docs/v2/MIGRATION.md) · [Self-hosting](docs/v2/SELF_HOSTING.md) ·
+[Remote access](docs/v2/REMOTE_ACCESS.md) · [Google Workspace](docs/v2/GOOGLE_WORKSPACE.md) ·
+[Backup and restore](docs/v2/BACKUP_RESTORE.md) · [Operations](docs/v2/OPERATIONS.md) ·
+[Performance](docs/v2/PERFORMANCE.md) · [Acceptance](docs/v2/ACCEPTANCE.md)
+
+### V2 verification at a glance
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` (all workspaces) | PASS |
+| `npm run lint` (V1 + V2) | PASS |
+| `npm test` | V1 776/776 and V2 101/101 PASS |
+| `npm run validate` (V1 + V2 governance) | PASS |
+| PostgreSQL schema, triggers, revision checks | PASS (real PostgreSQL 18.6, integration tests) |
+| Migration dry run, import and reconciliation on a fixture snapshot | PASS |
+| Backup encryption and logical restore verification | PASS |
+| Measured API latency on 10 000 tasks | PASS locally, see `docs/v2/PERFORMANCE.md` |
+| Live Google sign-in, Gmail, Calendar, Drive, Sheets | BLOCKED (needs credentials and a Workspace) |
+| Public TLS / tunnel / external access | BLOCKED (needs DNS and a host) |
+| Production cut-over and production data migration | NOT_RUN |
+
+The root `package.json` keeps the V1 release version (`1.7.7`) because the V1 release tests read
+it; the V2 application version lives in one constant, `APP_VERSION` in `packages/contracts`.
+
 ## Current release — V1.7.7
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**

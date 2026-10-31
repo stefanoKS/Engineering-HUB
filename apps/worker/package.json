@@ -1,0 +1,26 @@
+{
+  "name": "@eh/worker",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/main.ts",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "build": "tsup src/main.ts src/cli.ts --format esm --target node22 --out-dir dist --clean",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@eh/contracts": "2.0.0",
+    "@eh/db": "2.0.0",
+    "@eh/domain": "2.0.0",
+    "google-auth-library": "11.3.2",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "tsup": "9.0.0",
+    "tsx": "4.23.15"
+  }
+}

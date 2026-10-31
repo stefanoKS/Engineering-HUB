@@ -366,3 +366,62 @@
 149. Record PASS, FAIL or BLOCKED with evidence in `docs/checkgates/V1_7_7_GATE_<n>.md`; keep schema 8,
     employee contract 1.6, the migrations, the authorization rules and the project colours unchanged,
     and keep `docs/PRODUCTION_READINESS.md` **NOT APPROVED FOR PRODUCTION** until live evidence exists.
+
+## V2 mandatory rules (PostgreSQL platform)
+
+These rules apply to the V2 runtime (`apps/`, `packages/`, `tools/`, `deploy/`, `docs/v2/`).
+The rules above stay in force for the V1 Apps Script project (`src/`, `dashboard-app/`,
+`shared/`, `scripts/`); V2 does not modify, deploy or migrate that project automatically.
+
+150. **Google Sheets is not the V2 database.** PostgreSQL is authoritative for projects,
+     subprojects, tasks, requests, approvals, audit and notifications. The workbook is read-only
+     for migration and is a one-way report/output target. Never add a spreadsheet write path to
+     the manager application, and never present a Sheets editor as an authorization boundary.
+151. **V1 rules carry over unchanged in meaning.** Counting (`TaskScope`), progress weights,
+     hierarchy limits (4 subproject levels, 3 task levels), container tasks, completion workflow,
+     request decisions, staleness, soft relationships, audit and notification gating exist once in
+     `packages/domain`. Never duplicate a rule in a route, a component or a trigger without the
+     domain function, and never introduce a second definition of "open", "overdue" or "progress".
+152. **Identity is server-verified.** Google ID token signature, issuer, audience, expiry,
+     `email_verified` and the company domain, then a database member row. A browser-supplied role,
+     member ID, owner or confirmation is data, never authority. A missing or unverified identity
+     fails closed; never substitute the deployer or a default user.
+153. **A write is one logical operation and one transaction.** Validate inputs, the revision, the
+     hierarchy and the confirmations before the first mutation. Create commands require an
+     idempotency key. A mutation carries the revision the editor loaded and a mismatch is
+     `EDIT_CONFLICT`, never a silent overwrite.
+154. **Nothing destructive is automatic.** Only the reviewed ADMIN deletion path may remove a row,
+     and only for a demonstrably empty record, after the preflight, the typed phrase, a reason and
+     the tombstone. Deadline history, schedule decisions, requests, notifications, recorded effort,
+     approvals and published records always block removal. Retention is reported, never enforced.
+155. **`MailApp`, `GmailApp`, `CalendarApp`, `ScriptApp`, `UrlFetchApp` and `DriveApp` are V1
+     names.** V2 reaches Google only from the worker through its REST transports. Off is the
+     default (`EMAIL_MODE=OFF`, `EMERGENCY_STOP=true`), an unconfigured mailbox fails closed, LIVE
+     requires ADMIN, the exact phrase and a passing preflight, and an ambiguous delivery becomes
+     `DELIVERY_UNCERTAIN` and is never retried automatically.
+156. **Publication stays one allowlisted contract.** Only `packages/contracts/src/published.ts`
+     defines the headers; only `INTERNAL` projects are published; the snapshot is written A/B and
+     verified before a single metadata commit; an older contract fails closed. Never publish an
+     e-mail address, member identifier, role, skill, capacity figure, private description,
+     acceptance criterion, note or request text.
+157. **Browser text is untrusted output.** React text rendering only; `innerHTML`, `outerHTML`,
+     `insertAdjacentHTML` and `document.write` are rejected by `npm run validate`. Never persist
+     manager data in `localStorage`, `sessionStorage` or IndexedDB; the only browser keys are the
+     language and non-sensitive request receipts.
+158. **Measure, never claim.** The benchmark harness produces timings, call counts and payload
+     sizes only. Local numbers are not production latency, live Workspace behaviour stays
+     BLOCKED/NOT_RUN until recorded evidence exists, and `docs/PRODUCTION_READINESS.md` stays
+     **NOT APPROVED FOR PRODUCTION**.
+159. **Migrations are additive, ordered and checksummed.** An applied file is immutable; a change
+     requires a new migration. Verify a backup before a migration, apply it as an explicit
+     one-shot step, verify preservation afterwards, and never let a service migrate at boot.
+160. **Deployment is separate.** `deploy/` targets a self-hosted stack with the database private,
+     TLS at the proxy, secrets only in the environment and the service account only in the worker.
+     Nothing in this repository deploys, initializes a workbook, installs a trigger or activates
+     mail, Calendar, backup or publication on its own.
+161. **Documentation and gates move with the behaviour.** Every behavioural change updates
+     `docs/v2/*` and the operating docs, and records PASS, FAIL, BLOCKED or NOT_RUN with evidence
+     in `docs/v2/ACCEPTANCE.md` (or the release's gate file). Keep earlier gate records unchanged.
+162. **Keep the two applications separate.** `dashboard-app/` remains a standalone Apps Script
+     web app for as long as V1 is deployed. Never push V2 code into it, never reuse its clasp
+     target, and never make V2 depend on a V1 Script Property.

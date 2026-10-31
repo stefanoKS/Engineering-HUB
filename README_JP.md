@@ -1,5 +1,64 @@
 # Engineering-HUB
 
+## V2 プラットフォーム — PostgreSQL・セルフホスト（ローカル実装済み、未配備）
+
+**ローカルで実装・検証済み。未配備。本番承認なし。**
+
+V2 は V1 の業務ルール、識別子、権限、ワークフローをすべて維持したまま、実行基盤を Google
+スプレッドシートから PostgreSQL へ移します。案件・サブプロジェクト・タスク・申請・承認・監査・
+通知は PostgreSQL に保存し、TypeScript の API、バックグラウンドワーカー、React アプリケーションが
+Apps Script のサイドバーを置き換えます。下記の V1 Apps Script プロジェクトは変更せず、唯一の
+稼働システムとして残ります。ワークブックは移行元かつ切り戻し手段です。
+
+| 領域 | 場所 |
+| --- | --- |
+| HTTP API（Fastify、セッション、認可、サービス） | `apps/api/` |
+| ワーカー（アウトボックス、Gmail、Calendar、Drive バックアップ、公開、エクスポート） | `apps/worker/` |
+| Web アプリ（React + Vite、日本語既定、プロジェクト色） | `apps/web/` |
+| 契約・ドメイン規則・データベース層・翻訳 | `packages/contracts`、`packages/domain`、`packages/db`、`packages/i18n` |
+| V1 → V2 移行ツールとローカル計測 | `tools/migration`、`tools/benchmark` |
+| セルフホスト構成（Compose、Caddy、Cloudflare Tunnel） | `deploy/` |
+
+### V2 クイックスタート（ローカル）
+
+```bash
+npm ci
+npm run typecheck
+npm run lint:v2
+npm test                    # V1 回帰テスト + 実 PostgreSQL に対する V2 テスト
+npm run validate
+npm run db:migrate          # レビュー済み SQL マイグレーション（DATABASE_URL が必要）
+npm run benchmark           # ローカル計測（docs/v2/PERFORMANCE.md）
+```
+
+### V2 ドキュメント
+
+[機能同等性](docs/v2/FEATURE_PARITY.md) ・ [アーキテクチャ](docs/v2/ARCHITECTURE.md) ・
+[API](docs/v2/API.md) ・ [セキュリティ](docs/v2/SECURITY.md) ・
+[移行](docs/v2/MIGRATION.md) ・ [セルフホスト](docs/v2/SELF_HOSTING.md) ・
+[リモートアクセス](docs/v2/REMOTE_ACCESS.md) ・ [Google Workspace](docs/v2/GOOGLE_WORKSPACE.md) ・
+[バックアップと復元](docs/v2/BACKUP_RESTORE.md) ・ [運用](docs/v2/OPERATIONS.md) ・
+[性能](docs/v2/PERFORMANCE.md) ・ [受け入れ確認](docs/v2/ACCEPTANCE.md)
+
+### V2 検証状況
+
+| ゲート | 結果 |
+| --- | --- |
+| `npm run typecheck`（全ワークスペース） | 成功 |
+| `npm run lint`（V1 + V2） | 成功 |
+| `npm test` | V1 776/776、V2 101/101 成功 |
+| `npm run validate`（V1 + V2 ガバナンス） | 成功 |
+| PostgreSQL スキーマ・トリガー・リビジョン検査 | 成功（実 PostgreSQL 18.6 の統合テスト） |
+| 移行のドライラン・取り込み・突合（フィクスチャ） | 成功 |
+| バックアップ暗号化と論理復元検証 | 成功 |
+| 10,000 タスクでの API 実測 | ローカルで成功（`docs/v2/PERFORMANCE.md`） |
+| Google サインイン・Gmail・Calendar・Drive・Sheets の実環境 | BLOCKED（認証情報と Workspace が必要） |
+| 公開 TLS・トンネル・社外アクセス | BLOCKED（DNS とホストが必要） |
+| 本番切り替え・本番データ移行 | NOT_RUN |
+
+ルート `package.json` は V1 のリリース版（`1.7.7`）を維持します（V1 のリリーステストが参照する
+ため）。V2 のアプリケーション版は `packages/contracts` の単一定数 `APP_VERSION` です。
+
 ## 現行リリース — V1.7.7
 
 **実装済み・DEV Workspace 検証待ち。本番未承認（NOT APPROVED FOR PRODUCTION）。**

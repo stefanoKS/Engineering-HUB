@@ -664,3 +664,31 @@ ignores the new table and columns. Do not delete the `RESPONSIBILITIES` sheet or
 verified pre-migration backup exactly as described in
 [BACKUP_RESTORE.md](BACKUP_RESTORE.md); restoration is always a deliberate, manual operation.
 
+## V2 deployment (self-hosted, separate from the Apps Script deployment)
+
+The deployment procedure above is the **V1 Apps Script** procedure and stays unchanged. V2 is
+deployed from `deploy/` and never touches the V1 project, its Script Properties, its triggers or
+its workbook.
+
+1. **Build and verify:** `npm ci`, `npm run lint`, `npm test`, `npm run validate`, `npm run build`.
+2. **Configure:** copy `deploy/.env.example` to `deploy/.env` and fill in the database password,
+   domain/origin, allowed domains, the Google client ID (API and build-time), the service-account
+   JSON, the backup key and the Drive/Calendar identifiers. The file is never committed.
+3. **Backup first:** `docker compose exec worker node apps/worker/dist/cli.js backup-now`, then
+   `... verify-restore` and require `result: PASS`.
+4. **Migrate as one explicit step:**
+   `docker compose --profile tools run --rm migrate`. The API and worker never migrate at boot.
+5. **Start:** `docker compose up -d`.
+6. **Verify:** `/healthz`, `/readyz`, sign-in, 状態 screen, and a `PREVIEW` notification.
+7. **Activate automation deliberately:** e-mail LIVE, Calendar, daily backup and publication each
+   require ADMIN, the exact confirmation and a passing preflight, and each change is audited.
+
+Environment binding: the API refuses to start without a database URL, the allowed-domain list and
+(in production) the Google client ID; the worker refuses to send without a configured mailbox and
+records `NOT_CONFIGURED` instead of falling back. Configuration is validated by zod at boot.
+
+No automatic deployment, initialization, migration, trigger installation or mail/Calendar
+activation exists in this repository. Step 3–7 detail is in
+[docs/v2/SELF_HOSTING.md](docs/v2/SELF_HOSTING.md), with remote access in
+[docs/v2/REMOTE_ACCESS.md](docs/v2/REMOTE_ACCESS.md) and Workspace setup in
+[docs/v2/GOOGLE_WORKSPACE.md](docs/v2/GOOGLE_WORKSPACE.md).

@@ -701,3 +701,41 @@ Details: [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md),
 [docs/checkgates/V1_4_1_GATE_1.md](docs/checkgates/V1_4_1_GATE_1.md) …
 [V1_4_1_GATE_6.md](docs/checkgates/V1_4_1_GATE_6.md).
 
+## V2 architecture (separate runtime)
+
+The sections above describe the deployed V1 Apps Script system and remain accurate for it. V2 is
+a separate, self-hosted runtime in the same repository; the two share only the domain rules, the
+translation dictionary and the project-colour helper.
+
+```
+browser ──TLS──► reverse proxy (Caddy | Cloudflare Tunnel) ──► apps/api (Fastify)
+                                                                  │
+                                                                  ├──► PostgreSQL  (authoritative)
+                                                                  └──► outbox ──► apps/worker ──► Gmail / Calendar / Drive / Sheets
+```
+
+| Layer | Path | Responsibility |
+| --- | --- | --- |
+| Contracts | `packages/contracts` | enums, DTOs, mutation schemas, error codes, published contract 1.6, `APP_VERSION` |
+| Domain | `packages/domain` | the single implementation of counting, progress, hierarchy, eligibility, planning, requests, completion, lifecycle, notifications, publication, colours |
+| Data | `packages/db` | pool and per-request read context, plain SQL migrations with checksums and advisory lock, row mapping, repositories with revision-checked patches |
+| API | `apps/api` | sessions, CSRF/origin, authorization, bounded reads, one transaction per command, audit and outbox rows |
+| Worker | `apps/worker` | notification gating and ledger, reminder scan, Calendar sync, encrypted backup, A/B publication, Sheets export, session maintenance |
+| Web | `apps/web` | React screens, i18n (V1 dictionary), bounded snapshot cache with superseding invalidation, project accents |
+| Tools | `tools/migration`, `tools/benchmark` | V1 → V2 staged migration and the local measurement harness |
+| Deployment | `deploy/` | Compose topology, API/worker images, Caddy, Cloudflare Tunnel example |
+
+Key invariants:
+
+* Every rule lives once. A route validates shape, checks the role and delegates to a domain
+  function; a trigger re-checks only what would be destructive if it went wrong (hierarchy depth,
+  container completion, append-only audit/deadline history).
+* A read resolves a scope on the server before paging; a page is capped and the scope total is
+  reported next to it.
+* A write carries the revision the editor loaded, is applied as a partial patch of the changed
+  columns, and commits its audit and outbox rows in the same transaction.
+* Google is reachable only from the worker, from an outbox job, with the settings gate re-read
+  inside the job.
+
+See [docs/v2/ARCHITECTURE.md](docs/v2/ARCHITECTURE.md) for the data model, the counted-scope
+policy, the notification state machine and the publication protocol.
