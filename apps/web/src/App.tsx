@@ -54,7 +54,7 @@ export function App(): JSX.Element {
   useEffect(() => {
     let cancelled = false;
     api
-      .get<Session>('/api/session')
+      .get<Session>('/api/session', { expectUnauthenticated: true })
       .then((value) => {
         if (cancelled) return;
         setCsrfToken(value.csrfToken);

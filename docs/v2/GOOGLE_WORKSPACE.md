@@ -26,8 +26,9 @@ process cannot send mail or read a spreadsheet.
 1. Google Cloud console → **APIs & Services → Credentials → Create credentials → OAuth client
    ID → Web application**.
 2. Authorised JavaScript origins: `https://<APP_DOMAIN>` (no trailing slash).
-3. Copy the client ID into `GOOGLE_CLIENT_ID` (API) and `VITE_GOOGLE_CLIENT_ID` (build-time for
-   the web bundle). Both must be the **same** client ID; the API verifies `aud`.
+3. Copy the client ID into `GOOGLE_CLIENT_ID` in `deploy/.env`. The browser reads it at runtime
+   from `GET /api/public-config`, so the same client ID serves the UI and the audience check; no
+   rebuild is needed and there is no `VITE_*` login variable.
 4. No client secret is used and none may be stored.
 
 The API verifies signature, issuer, audience, expiry, `email_verified` and the e-mail domain.

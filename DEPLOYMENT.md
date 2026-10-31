@@ -670,18 +670,29 @@ The deployment procedure above is the **V1 Apps Script** procedure and stays unc
 deployed from `deploy/` and never touches the V1 project, its Script Properties, its triggers or
 its workbook.
 
-1. **Build and verify:** `npm ci`, `npm run lint`, `npm test`, `npm run validate`, `npm run build`.
+1. **Build and verify:** `npm ci`, `npm run typecheck`, `npm run lint`, `npm test`,
+   `npm run validate`, `npm run build` and `npm run smoke:prod` (the built API starts, serves,
+   authenticates a fixture, reads, mutates and stops).
 2. **Configure:** copy `deploy/.env.example` to `deploy/.env` and fill in the database password,
-   domain/origin, allowed domains, the Google client ID (API and build-time), the service-account
-   JSON, the backup key and the Drive/Calendar identifiers. The file is never committed.
+   domain/origin, allowed domains, the Google client ID (`GOOGLE_CLIENT_ID` only — the browser reads
+   it from `GET /api/public-config` at runtime), the service-account JSON, the backup key and the
+   Drive/Calendar identifiers. Set `TRUST_PROXY` to the container network. The file is never
+   committed.
 3. **Backup first:** `docker compose exec worker node apps/worker/dist/cli.js backup-now`, then
-   `... verify-restore` and require `result: PASS`.
+   `... verify-restore` and require `result: PASS`. Do not continue on a failed backup.
 4. **Migrate as one explicit step:**
    `docker compose --profile tools run --rm migrate`. The API and worker never migrate at boot.
-5. **Start:** `docker compose up -d`.
-6. **Verify:** `/healthz`, `/readyz`, sign-in, 状態 screen, and a `PREVIEW` notification.
-7. **Activate automation deliberately:** e-mail LIVE, Calendar, daily backup and publication each
-   require ADMIN, the exact confirmation and a passing preflight, and each change is audited.
+   Verify `schema version 6`.
+5. **Start:** `docker compose up -d`. Confirm the PostgreSQL volume is mounted at
+   `/var/lib/postgresql` (PostgreSQL 18 layout) and the API is bound to `127.0.0.1:8080`.
+6. **Verify:** `/healthz`, `/readyz`, `/api/public-config`, sign-in, 状態 screen, and a `PREVIEW`
+   notification.
+7. **Activate automation deliberately:** e-mail LIVE, Calendar, scheduled backup and publication
+   each require ADMIN, the exact confirmation and a passing preflight, and each change is audited.
+
+`npm run validate:deploy` checks the Compose topology, the top-level Caddy site block, the tunnel
+example and the image definitions before a deployment. It is static evidence only; it does not
+start the stack.
 
 Environment binding: the API refuses to start without a database URL, the allowed-domain list and
 (in production) the Google client ID; the worker refuses to send without a configured mailbox and

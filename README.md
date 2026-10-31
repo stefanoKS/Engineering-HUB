@@ -26,7 +26,9 @@ npm ci
 npm run typecheck
 npm run lint:v2
 npm test                    # V1 regression suite + V2 suites against real PostgreSQL
-npm run validate
+npm run validate            # V1 + V2 governance + deployment templates
+npm run build               # self-contained API, web, worker, migration artifacts
+npm run smoke:prod          # built artifacts: migrate, start, read, mutate, stop
 npm run db:migrate          # apply the reviewed SQL migrations (needs DATABASE_URL)
 npm run benchmark           # local measurement, see docs/v2/PERFORMANCE.md
 ```
@@ -38,7 +40,8 @@ npm run benchmark           # local measurement, see docs/v2/PERFORMANCE.md
 [Migration](docs/v2/MIGRATION.md) · [Self-hosting](docs/v2/SELF_HOSTING.md) ·
 [Remote access](docs/v2/REMOTE_ACCESS.md) · [Google Workspace](docs/v2/GOOGLE_WORKSPACE.md) ·
 [Backup and restore](docs/v2/BACKUP_RESTORE.md) · [Operations](docs/v2/OPERATIONS.md) ·
-[Performance](docs/v2/PERFORMANCE.md) · [Acceptance](docs/v2/ACCEPTANCE.md)
+[Performance](docs/v2/PERFORMANCE.md) · [Acceptance](docs/v2/ACCEPTANCE.md) ·
+[**Stabilization record**](docs/v2/STABILIZATION.md)
 
 ### V2 verification at a glance
 
@@ -46,14 +49,18 @@ npm run benchmark           # local measurement, see docs/v2/PERFORMANCE.md
 | --- | --- |
 | `npm run typecheck` (all workspaces) | PASS |
 | `npm run lint` (V1 + V2) | PASS |
-| `npm test` | V1 776/776 and V2 101/101 PASS |
-| `npm run validate` (V1 + V2 governance) | PASS |
+| `npm test` | V1 776/776 and V2 128/128 PASS |
+| `npm run validate` (V1 + V2 governance + deployment templates) | PASS |
+| `npm run smoke:prod` (built API: health, readiness, session, read, mutation, stop) | PASS |
 | PostgreSQL schema, triggers, revision checks | PASS (real PostgreSQL 18.6, integration tests) |
 | Migration dry run, import and reconciliation on a fixture snapshot | PASS |
-| Backup encryption and logical restore verification | PASS |
-| Measured API latency on 10 000 tasks | PASS locally, see `docs/v2/PERFORMANCE.md` |
+| Crash-safe delivery attempts and lease ownership | PASS |
+| Backup encryption and logical restore verification | PASS (logical path); `pg_dump`/`pg_restore` round trip NOT_RUN |
+| Container build and start, `docker compose config`, `caddy validate` | BLOCKED on the review host (no container runtime); CI runs them |
+| Measured API latency, small dataset | PASS locally, see `docs/v2/PERFORMANCE.md` |
 | Live Google sign-in, Gmail, Calendar, Drive, Sheets | BLOCKED (needs credentials and a Workspace) |
 | Public TLS / tunnel / external access | BLOCKED (needs DNS and a host) |
+| Browser workflow automation | NOT_RUN |
 | Production cut-over and production data migration | NOT_RUN |
 
 The root `package.json` keeps the V1 release version (`1.7.7`) because the V1 release tests read

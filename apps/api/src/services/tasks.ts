@@ -219,6 +219,14 @@ export async function createTask(
         action: 'TASK_CREATED',
         newValue: task
       });
+      // The calendar handler needs a producer: a created task with a deadline is synchronised.
+      if (task.dueDate) {
+        await enqueueJob(tx, ctx, {
+          kind: 'calendar.task',
+          dedupeKey: `calendar:${task.taskId}:${task.revision}`,
+          payload: { taskId: task.taskId }
+        });
+      }
       return task;
     }
   );
@@ -352,6 +360,13 @@ export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<t
       previousValue: task,
       newValue: next
     });
+    if (deadlineChanged || next.plannedStart !== task.plannedStart) {
+      await enqueueJob(tx, ctx, {
+        kind: 'calendar.task',
+        dedupeKey: `calendar:${taskId}:${next.revision}`,
+        payload: { taskId }
+      });
+    }
     return next;
   });
   return updated;

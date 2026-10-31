@@ -30,8 +30,12 @@ const Schema = z
     COOKIE_NAME: z.string().default('eh_session'),
     DEV_AUTH_ENABLED: z.enum(['true', 'false']).default('false'),
     DEV_AUTH_EMAILS: z.string().default(''),
-    TRUST_PROXY: z.enum(['true', 'false']).default('false'),
-    TRUSTED_PROXY_HEADER: z.string().default(''),
+    TRUST_PROXY: z
+      .string()
+      .default('false')
+      .refine((value) => value === 'true' || value === 'false' || /^[\d./:a-fA-F,\s]+$/.test(value), {
+        message: 'TRUST_PROXY must be true, false or a comma-separated list of trusted proxies'
+      }),
     RATE_LIMIT_MAX: z.coerce.number().int().min(10).max(100000).default(300),
     BODY_LIMIT_BYTES: z.coerce.number().int().min(1024).max(5_000_000).default(262_144),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
@@ -94,8 +98,7 @@ export type AppConfig = {
   cookieName: string;
   devAuthEnabled: boolean;
   devAuthEmails: string[];
-  trustProxy: boolean;
-  trustedProxyHeader: string;
+  trustProxy: boolean | string;
   rateLimitMax: number;
   bodyLimitBytes: number;
   logLevel: string;
@@ -142,8 +145,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     cookieName: value.COOKIE_NAME,
     devAuthEnabled: value.DEV_AUTH_ENABLED === 'true',
     devAuthEmails: parseDomains(value.DEV_AUTH_EMAILS),
-    trustProxy: value.TRUST_PROXY === 'true',
-    trustedProxyHeader: value.TRUSTED_PROXY_HEADER,
+    trustProxy:
+      value.TRUST_PROXY === 'true'
+        ? true
+        : value.TRUST_PROXY === 'false'
+          ? false
+          : value.TRUST_PROXY.split(',')
+              .map((entry) => entry.trim())
+              .filter(Boolean)
+              .join(','),
     rateLimitMax: value.RATE_LIMIT_MAX,
     bodyLimitBytes: value.BODY_LIMIT_BYTES,
     logLevel: value.LOG_LEVEL,

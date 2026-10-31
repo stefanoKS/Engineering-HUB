@@ -17,7 +17,7 @@ import type { AppConfig } from '../config';
 import { domainAllowed } from '../config';
 import type { Database } from '@eh/db';
 import { createSession, findSession, revokeMemberSessions, revokeSession, touchSession } from '@eh/db';
-import { newToken } from '@eh/db';
+import { newToken, insertAudit } from '@eh/db';
 
 export type SessionContext = {
   identity: Identity;
@@ -30,7 +30,7 @@ export function hashToken(token: string): string {
   return createHash('sha256').update(token, 'utf8').digest('hex');
 }
 
-export type VerifiedClaims = { email: string; name: string; hostedDomain: string };
+export type VerifiedClaims = { subject: string | null; email: string; name: string; hostedDomain: string };
 
 export class AuthService {
   readonly config: AppConfig;
@@ -56,6 +56,9 @@ export class AuthService {
     if (!payload || !payload.email) {
       throw new DomainError('UNAUTHENTICATED', 'The identity token carries no verified address');
     }
+    if (!payload.sub) {
+      throw new DomainError('UNAUTHENTICATED', 'The identity token carries no stable subject');
+    }
     if (payload.email_verified !== true) {
       throw new DomainError('UNAUTHENTICATED', 'The Google account address is not verified');
     }
@@ -69,7 +72,7 @@ export class AuthService {
     if (hostedDomain && !domainAllowed(this.config, `x@${hostedDomain}`)) {
       throw new DomainError('AUTHORIZATION_DENIED', 'This Workspace domain is not allowlisted');
     }
-    return { email: payload.email, name: payload.name ?? '', hostedDomain };
+    return { subject: String(payload.sub), email: payload.email, name: payload.name ?? '', hostedDomain };
   }
 
   /**
@@ -85,7 +88,7 @@ export class AuthService {
     if (!address || !this.config.devAuthEmails.includes(address)) {
       throw new DomainError('UNAUTHENTICATED', 'This address is not in the development fixture allowlist');
     }
-    return { email: address, name: address.split('@')[0] ?? address, hostedDomain: '' };
+    return { subject: `dev:${address}`, email: address, name: address.split('@')[0] ?? address, hostedDomain: '' };
   }
 
   async startSession(claims: VerifiedClaims, userAgent: string): Promise<{
@@ -94,15 +97,51 @@ export class AuthService {
     expiresAt: string;
     identity: Identity;
   }> {
-    const member = await this.db.one<{
+    type MemberRow = {
       member_id: string;
       name: string;
       email: string;
       active: boolean;
       role: string | null;
-    }>('SELECT member_id, name, email, active, role FROM members WHERE lower(email) = lower($1)', [
-      claims.email
-    ]);
+      google_subject: string | null;
+    };
+    let member: MemberRow | null = null;
+    if (claims.subject) {
+      member = await this.db.one<MemberRow>(
+        'SELECT member_id, name, email, active, role, google_subject FROM members WHERE google_subject = $1',
+        [claims.subject]
+      );
+    }
+    if (!member) {
+      const byEmail = await this.db.one<MemberRow>(
+        'SELECT member_id, name, email, active, role, google_subject FROM members WHERE lower(email) = lower($1)',
+        [claims.email]
+      );
+      if (byEmail) {
+        if (byEmail.google_subject && byEmail.google_subject !== claims.subject) {
+          throw new DomainError(
+            'AUTHORIZATION_DENIED',
+            'This address is already linked to a different Google identity'
+          );
+        }
+        if (!byEmail.google_subject && claims.subject) {
+          // Link once, on the first verified sign-in. A linked member is never re-linked.
+          await this.db.query(
+            'UPDATE members SET google_subject = $2, updated_at = now() WHERE member_id = $1 AND google_subject IS NULL',
+            [byEmail.member_id, claims.subject]
+          );
+          await insertAudit(this.db, {
+            entityType: 'MEMBER',
+            entityId: byEmail.member_id,
+            action: 'IDENTITY_LINKED',
+            newValue: { subject: claims.subject },
+            actorEmail: byEmail.email,
+            actorMemberId: byEmail.member_id
+          });
+        }
+        member = byEmail;
+      }
+    }
     if (!member) {
       throw new DomainError(
         'AUTHORIZATION_DENIED',

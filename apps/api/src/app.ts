@@ -60,8 +60,8 @@ export async function buildApp(options: BuildOptions): Promise<FastifyInstance> 
       directives: {
         defaultSrc: ["'none'"],
         scriptSrc: ["'self'", 'https://accounts.google.com'],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://accounts.google.com'],
+        imgSrc: ["'self'", 'data:', 'https://accounts.google.com'],
         fontSrc: ["'self'"],
         connectSrc: ["'self'", 'https://accounts.google.com'],
         frameSrc: ['https://accounts.google.com'],

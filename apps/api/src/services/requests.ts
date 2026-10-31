@@ -311,7 +311,7 @@ export async function submitRequest(
       await enqueueJob(tx, ctx, {
         kind: 'notification.request',
         dedupeKey: `request-submitted:${created.requestId}`,
-        payload: { requestId: created.requestId, taskId: task.taskId }
+        payload: { requestId: created.requestId, taskId: task.taskId, requestType: created.requestType }
       });
       return {
         requestId: created.requestId,
@@ -512,6 +512,19 @@ export async function decideRequest(ctx: ServiceCtx, body: z.infer<typeof Decisi
       dedupeKey: `request-decision:${body.requestId}`,
       payload: { requestId: body.requestId, taskId: task.taskId, decision: outcome.requestStatus }
     });
+    if (outcome.taskEffect === 'DEADLINE_CHANGED') {
+      // The deadline switch is independent of the decision notice; the worker enforces it.
+      await enqueueJob(tx, ctx, {
+        kind: 'notification.task',
+        dedupeKey: `deadline-change:${body.requestId}`,
+        payload: {
+          taskId: task.taskId,
+          notificationKind: 'DEADLINE_CHANGE',
+          bucket: `request:${body.requestId}`,
+          requestId: body.requestId
+        }
+      });
+    }
 
     const after = await getRequest(tx, body.requestId);
     return {

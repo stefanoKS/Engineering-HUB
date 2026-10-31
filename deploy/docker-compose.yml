@@ -24,7 +24,9 @@ services:
       - -c
       - timezone=Asia/Tokyo
     volumes:
-      - db-data:/var/lib/postgresql/data
+      # PostgreSQL 18 keeps PGDATA in /var/lib/postgresql/18/docker, so the volume covers the
+      # parent directory. Mounting /var/lib/postgresql/data would silently lose data on recreate.
+      - db-data:/var/lib/postgresql
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-ehub} -d ${POSTGRES_DB:-engineering_hub}']
       interval: 10s
@@ -47,6 +49,9 @@ services:
       APP_ENV: ${APP_ENV:-PRODUCTION}
       WEB_ROOT: /app/apps/web/dist
       DATABASE_URL: postgresql://${POSTGRES_USER:-ehub}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-engineering_hub}
+      # Only the container network is trusted to set X-Forwarded-For. The API port is bound to
+      # loopback, so a browser can never reach it without the proxy in front.
+      TRUST_PROXY: ${TRUST_PROXY:-172.16.0.0/12}
     depends_on:
       db:
         condition: service_healthy
@@ -71,9 +76,11 @@ services:
       NODE_ENV: production
       APP_ENV: ${APP_ENV:-PRODUCTION}
       DATABASE_URL: postgresql://${POSTGRES_USER:-ehub}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-engineering_hub}
+      BACKUP_INTERVAL_MINUTES: ${BACKUP_INTERVAL_MINUTES:-60}
     depends_on:
       db:
         condition: service_healthy
+    stop_grace_period: 30s
     mem_limit: 1g
     cpus: 1
 

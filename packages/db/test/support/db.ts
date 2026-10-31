@@ -52,6 +52,11 @@ export async function freshDatabase(): Promise<{ db: Database; pool: pg.Pool }> 
 
 export function expectDatabase(t: { skip: (condition: boolean, reason?: string) => void }): void {
   const available = !!databaseUrl();
+  if (!available && process.env.REQUIRE_DATABASE === '1') {
+    throw new Error(
+      'REQUIRE_DATABASE=1 but the PostgreSQL test server is unavailable; a release gate must not pass without it'
+    );
+  }
   t.skip(!available, 'PostgreSQL test server unavailable');
   expect(available).toBe(true);
 }

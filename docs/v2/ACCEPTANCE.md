@@ -15,27 +15,35 @@ system, Google resource or real mailbox was touched. `docs/PRODUCTION_READINESS.
 | `npm ci` | PASS | workspace install, lockfile in sync |
 | `npm run typecheck` (all workspaces) | PASS | `tsc -p` clean for contracts, domain, db, i18n, api, web, worker, migration, benchmark |
 | `npm run lint` (V1 + V2) | PASS | `eslint src dashboard-app shared scripts tests` and `eslint apps packages tools` clean |
-| `npm test` | PASS | V1: **776 pass, 0 fail**; V2: **101 pass, 0 fail** across 8 files (real PostgreSQL 18.6) |
-| `npm run validate` | PASS | V1 source validation (42 manager files, 3 dashboard files, manifests, 970 keys) and V2 governance (Apps Script ban, HTML sinks, secrets, one allowlist, destructive SQL, `SELECT *`, storage keys, i18n parity, required docs, Compose, migration order) |
-| `npm run build` | PASS | `@eh/api`, `@eh/web` (515 KB JS bundle), `@eh/worker` |
-| `npm run benchmark` | PASS | measured, recorded in [PERFORMANCE.md](./PERFORMANCE.md) |
+| `npm test` | PASS | V1: **776 pass, 0 fail**; V2: **128 pass, 0 fail** across 10 files (real PostgreSQL 18.6) |
+| `npm run validate` | PASS | V1 source validation (42 manager files, 3 dashboard files, manifests, 970 keys), V2 governance (108 files) and deployment templates (`validate:deploy`) |
+| `npm run build` | PASS | `@eh/api`, `@eh/web`, `@eh/worker`, `@eh/migration` |
+| `npm run smoke:prod` | PASS | built migration CLI + built API: health, readiness, session fixture, authorized read, authorized mutation, clean stop |
+| `npm run benchmark` | PASS (small dataset) | measured, recorded in [PERFORMANCE.md](./PERFORMANCE.md) and [STABILIZATION.md](./STABILIZATION.md) |
 | `npm run migration -- …` on the fixture snapshot | PASS | see §5 |
+| Container build / `docker compose config` / `caddy validate` | BLOCKED (local) | no container runtime on the review host; CI runs the compose and Caddy validation and the image build |
+
+The detailed defect-by-defect record of the stabilization pass (fix locations, regression tests and
+the remaining PARTIAL/BLOCKED items) is [STABILIZATION.md](./STABILIZATION.md). A passing build was
+previously mistaken for a working artifact; that specific gap is now closed and proven by
+`npm run smoke:prod`.
 
 ## 2. Product requirements
 
 | Requirement | Status | Evidence |
 | --- | --- | --- |
-| Every V1 manager feature exists in V2 | PASS | [FEATURE_PARITY.md](./FEATURE_PARITY.md) — each row names the V1 entry point, the V2 location and the test |
+| Every V1 manager feature exists in V2 | PARTIAL | [FEATURE_PARITY.md](./FEATURE_PARITY.md) — the per-workflow audit is incomplete; see [STABILIZATION.md](./STABILIZATION.md) §7. A table or a domain function alone is not accepted as a feature. |
 | Every V1 employee feature exists (list, filter, deadline request, completion report, submission states, switch) | PASS | `apps/web/src/screens/Overview.tsx`, `POST /api/employee/requests`, `api.test.ts` |
 | Identifiers, enum values and Japanese terms unchanged | PASS | migration preserves IDs; `packages/domain` enums match V1; 廃止/再有効化 and 退職/復職 kept |
 | Permission model preserved (ADMIN/MANAGER/MEMBER/VIEWER, no self-change, last admin) | PASS | `packages/domain/src/roles.ts` + `api.test.ts` role tests |
 | Counting, progress, hierarchy, planning and request rules preserved | PASS | `packages/domain/test/domain.test.ts` (39 tests) |
-| Data model complete in PostgreSQL | PASS | `packages/db/src/migrations/0001…0005`, `integration.test.ts` (14 tests) |
-| V1 → V2 migration tool with dry run, reconciliation, preservation | PASS (fixture) | `tools/migration/test/migration.test.ts` (8 tests) |
+| Data model complete in PostgreSQL | PASS | `packages/db/src/migrations/0001…0006`, `integration.test.ts` (19 tests) |
+| V1 → V2 migration tool with dry run, reconciliation, preservation | PASS (fixture) | `tools/migration/test/migration.test.ts` (10 tests); every mapped table and the relationship tables are reconciled |
 | Employee publication allowlist and privacy boundary | PASS | `packages/contracts/test/contracts.test.ts`, `api.test.ts` |
-| Notifications gated, logged, deduplicated, uncertain never retried | PASS (transport doubles) | `apps/worker/src/jobs.ts`, `apps/worker/test/backup.test.ts`, `domain.test.ts` policy tests |
-| Backups encrypted and restorable | PASS (logical path) | `apps/worker/test/backup.test.ts` (4 tests) |
-| Response time targets | PASS locally | [PERFORMANCE.md](./PERFORMANCE.md): worst manager read p95 227 ms, employee snapshot p95 198 ms / 808 KB at 10 000 tasks |
+| Notifications gated, logged, deduplicated, uncertain never retried | PASS (transport doubles) | `apps/worker/src/jobs.ts`, `apps/worker/test/delivery.test.ts`, `domain.test.ts` policy tests |
+| Crash-safe delivery attempts and worker leases | PASS | `packages/db/test/integration.test.ts` (lease ownership, attempt ownership, reconciliation, explicit retry) |
+| Backups encrypted and restorable | PARTIAL | `apps/worker/test/backup.test.ts` (4 tests, logical path); `pg_dump`/`pg_restore` round trip and Drive upload/restore are NOT_RUN |
+| Response time targets | PASS locally (small dataset) | [PERFORMANCE.md](./PERFORMANCE.md) and [STABILIZATION.md](./STABILIZATION.md) §6; office-LAN, remote and proxy measurements are NOT_RUN |
 | Responsive, Japanese-first UI with the language switch | PASS | `apps/web`, `apps/web/test/ui.test.tsx` |
 | Self-hosting and remote access configuration | PASS (templates) / BLOCKED (live) | `deploy/`, `npm run validate`; live TLS and tunnel are BLOCKED |
 | Documentation complete | PASS | twelve `docs/v2` documents plus root README/README_JP/AGENTS/ARCHITECTURE/DATA_SCHEMA/DEPLOYMENT/BACKUP_RESTORE/CHANGELOG updates |
@@ -44,7 +52,8 @@ system, Google resource or real mailbox was touched. `docs/PRODUCTION_READINESS.
 
 | Requirement | Status | Evidence |
 | --- | --- | --- |
-| Identity from a verified Google ID token, then a database role | PASS (local verification logic, dev fixture) | `apps/api/src/auth/auth.ts`; live Google exchange BLOCKED |
+| Identity from a verified Google ID token, then a database role | PASS (local verification logic, dev fixture) | `apps/api/src/auth/auth.ts` verifies signature, issuer, audience, expiry, verified address and hosted domain; live Google exchange BLOCKED |
+| Stable identity binding | PASS | `members.google_subject` (migration `0006`); a first verified sign-in links once with `IDENTITY_LINKED`, a different subject is refused (`api.test.ts`) |
 | Authorization re-checked server-side on every entry point | PASS | `api.test.ts`: unauthenticated 401, MEMBER refused on a manager read, role change effective immediately |
 | CSRF header and origin check on every mutation | PASS | `api.test.ts` |
 | Revision-checked partial patch, `EDIT_CONFLICT` | PASS | `integration.test.ts`, `api.test.ts` |
@@ -52,7 +61,7 @@ system, Google resource or real mailbox was touched. `docs/PRODUCTION_READINESS.
 | No browser-supplied authority | PASS | request schemas reject actor/role/owner; `validate-v2` scans persistence keys |
 | Container completion refused in domain, import and trigger | PASS | `domain.test.ts`, `integration.test.ts`, `api.test.ts` |
 | Append-only audit and deadline history | PASS | `integration.test.ts` (trigger refusal) |
-| Deletion limited to empty records with tombstone | PASS | `domain.test.ts` (preflight blockers incl. deadline/schedule history), `services/deletion.ts` |
+| Deletion limited to empty records with tombstone | PASS | `domain.test.ts` (preflight blockers incl. deadline/schedule history), `services/deletion.ts`; the target row is locked and re-evaluated inside the deleting transaction |
 | No stored text rendered as HTML | PASS | React only; `validate-v2` HTML-sink rule |
 | Secrets never committed | PASS | `validate-v2` secret scan, `.env.example` placeholders, `.gitignore` |
 | Mail OFF by default, emergency stop, LIVE preflight, uncertain never retried | PASS (policy) | `domain.test.ts` OFF/PREVIEW/LIVE matrix, ledger states |

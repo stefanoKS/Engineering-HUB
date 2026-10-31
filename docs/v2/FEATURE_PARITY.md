@@ -8,6 +8,25 @@ Every V1 entry point was read from `src/`, `dashboard-app/` and `shared/`. The V
 scripts are unchanged; V2 is a separate codebase that keeps the identifiers, rules and visible
 workflows.
 
+## 0. Stabilization review (2026-10-31) — read this before the tables
+
+The tables below describe what was implemented. They are **not** a complete reachable-workflow
+audit. The stabilization pass downgraded or qualified these rows; see
+[STABILIZATION.md](./STABILIZATION.md) for the evidence:
+
+| Area | Revised status | Why |
+| --- | --- | --- |
+| Notification reminder stages and preview | PASS (fixed) | Every configured stage is sent, identities are per stage/request, and a preview no longer blocks a live send |
+| Notification switches | PASS for assignment, reassignment, deadline change, deadline/overdue reminder and request type; PARTIAL for a separate recurring pending-request reminder | The switches now have producers and consumers; the pending-request reminder is represented by the request-submission notification |
+| Calendar synchronisation | PARTIAL | A task deadline change is enqueued and handled; **milestones have no producer** |
+| Weekly report | PARTIAL | Producer and handler exist and are switch-gated; only unit-level delivery evidence |
+| Backup/restore | PARTIAL | Interval scheduling and the logical restore test exist; `pg_dump`/`pg_restore` round trip and Drive upload/restore are NOT_RUN |
+| Browser workflows (save → list update, conflict recovery, unknown outcome, rapid navigation) | NOT_RUN | No browser automation in this pass; jsdom and API injection only |
+| Project/task editor open guards | PARTIAL | The query layer drops superseded reads; the per-form open/detail generation guard was not implemented or tested |
+
+Treat every remaining **PASS** below as "implemented and covered by the named local test", not as
+"exercised in a browser against a live tenant".
+
 ## 1. Manager features
 
 | Feature | V1 implementation / entry points | V1 authorization | Invariants and tests | V2 location | Migration | Status |

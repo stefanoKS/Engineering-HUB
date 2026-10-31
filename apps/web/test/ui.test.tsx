@@ -1,12 +1,21 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { I18nProvider, useI18n } from '../src/i18n';
 import { LanguageSwitch } from '../src/components/ui';
+import { LoginScreen } from '../src/screens/Login';
 import { APP_NAME, dictionarySize, t } from '@eh/i18n';
+
+function configResponse(config: Record<string, unknown>): Response {
+  return new Response(JSON.stringify({ ok: true, data: config }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' }
+  });
+}
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   window.localStorage.clear();
 });
 
@@ -46,5 +55,63 @@ describe('localization', () => {
   it('returns the key for a missing entry instead of a silent blank', () => {
     expect(t('ja', 'nonexistent.key')).toBe('nonexistent.key');
     expect(t('ja', 'app.name')).not.toBe('app.name');
+  });
+});
+
+describe('sign-in configuration', () => {
+  it('shows an actionable error when no sign-in method is configured', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        configResponse({
+          appVersion: '2.0.0',
+          environment: 'PRODUCTION',
+          googleClientId: '',
+          authConfigured: false,
+          devSignInEnabled: false
+        })
+      )
+    );
+    render(
+      <I18nProvider>
+        <LoginScreen notice="" onSignedIn={() => undefined} />
+      </I18nProvider>
+    );
+    expect(await screen.findByText(/Google サインインが未設定/)).toBeTruthy();
+    expect(screen.queryByText('開発用サインイン（この環境のみ）')).toBeNull();
+  });
+
+  it('shows the development fixture only when the server enables it', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        configResponse({
+          appVersion: '2.0.0',
+          environment: 'DEVELOPMENT',
+          googleClientId: 'public-client-id.apps.googleusercontent.com',
+          authConfigured: true,
+          devSignInEnabled: true
+        })
+      )
+    );
+    render(
+      <I18nProvider>
+        <LoginScreen notice="" onSignedIn={() => undefined} />
+      </I18nProvider>
+    );
+    expect(await screen.findByText('開発用サインイン（この環境のみ）')).toBeTruthy();
+  });
+
+  it('reports an unreadable configuration instead of showing an empty login', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('not json', { status: 200, headers: { 'content-type': 'text/plain' } }))
+    );
+    render(
+      <I18nProvider>
+        <LoginScreen notice="" onSignedIn={() => undefined} />
+      </I18nProvider>
+    );
+    expect(await screen.findByText(/サインイン設定を読み込めませんでした/)).toBeTruthy();
   });
 });

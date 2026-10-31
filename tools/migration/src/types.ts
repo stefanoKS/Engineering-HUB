@@ -33,15 +33,38 @@ export type InventoryReport = {
   unsupported: { table: string; header: string; reason: string }[];
 };
 
+export type ReconcileTableEntry = {
+  table: string;
+  sourceRows: number;
+  importedRows: number;
+  matchedFields: number;
+  /** Blank cells whose destination default is volatile and therefore unverifiable. */
+  skippedFields: number;
+  mismatchedFields: { recordId: string; field: string; source: string; stored: string }[];
+  destinationChecksum: string;
+};
+
+export type ReconcileRelation = {
+  table: string;
+  expectedRows: number;
+  importedRows: number;
+  missing: string[];
+  unexpected: string[];
+};
+
 export type ReconcileReport = {
   runId: string;
-  tables: {
+  tables: ReconcileTableEntry[];
+  relations: ReconcileRelation[];
+  settings: {
     table: string;
-    sourceRows: number;
-    importedRows: number;
-    matchedFields: number;
-    mismatchedFields: { recordId: string; field: string; source: string; stored: string }[];
-  }[];
+    expected: number;
+    imported: number;
+    mismatched: { recordId: string; field: string; source: string; stored: string }[];
+  };
+  /** Checksum of the source snapshot (what was exported). */
   checksum: string;
+  /** Checksum of the verified destination rows (what was actually stored). */
+  destinationChecksum: string;
   ok: boolean;
 };

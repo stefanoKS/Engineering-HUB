@@ -21,7 +21,15 @@ What Caddy does (`deploy/caddy/Caddyfile`):
   `Permissions-Policy`, and removes the `Server` header,
 * proxies `/api/*` and the web bundle to `api:8080`.
 
+The site block must be **top level**. A site block nested inside an anonymous global-options block
+(`{ … }`) is accepted by the parser but serves nothing; `npm run validate:deploy` and the CI
+`caddy validate` step reject that shape.
+
 The API additionally sets its own CSP and `no-store` headers; the proxy does not weaken them.
+
+Set `TRUST_PROXY` to the container network only (Compose defaults to `172.16.0.0/12`). The API
+trusts `X-Forwarded-For` only from those addresses, so a direct client cannot choose its own
+rate-limit identity.
 
 ## 2. Option B — Cloudflare Tunnel (no inbound port, no public IP)
 
@@ -44,7 +52,12 @@ docker compose --profile tunnel up -d cloudflared
 
 The tunnel connects **outbound** to Cloudflare; the host needs no open inbound port. Requests
 arrive at `http://api:8080` inside the Compose network, so TLS terminates at Cloudflare and the
-API sees the forwarded address only when `TRUST_PROXY` is enabled.
+API sees the forwarded address only from the container network. This path **bypasses Caddy**: the
+Access policy on the hostname is the only edge control, so it must cover `/api/*` as well as the
+web application, and the API's own sign-in and role checks stay mandatory.
+
+Note honestly: the tunnel does not provide availability. If the office host, its power or its
+internet connection is down, the published host name fails even though Cloudflare is reachable.
 
 Then enforce access in Cloudflare:
 1. **Access → Applications → Add an application → Self-hosted**, hostname `APP_DOMAIN`.
@@ -64,7 +77,7 @@ role. A request that reaches the API without those fails closed.
   identity source for role checks.
 * Do not add a shared password, a personal token or a login form; the product rules forbid it.
 * Do not enable `TRUST_PROXY` without a proxy in front of the API, or the rate limiter and the
-  logged client address become forgeable.
+  logged client address become forgeable. Prefer an address list over `true`.
 * Do not run the tunnel and a public port 80/443 at the same time unless you intend both.
 
 ## 4. Configuration reference

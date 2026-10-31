@@ -125,3 +125,27 @@ aggregate if the dataset grows by an order of magnitude.
    remains to be measured with a real client.
 
 Raw results: `docs/v2/bench/results-<timestamp>.json` (written by the harness).
+
+## Stabilization re-measurement (2026-10-31)
+
+Run after the stabilization pass, with the same harness and the `small` dataset (20 projects,
+200 tasks, 20 members, 10 samples per endpoint). File:
+`docs/v2/bench/results-2026-10-31T11-35-51-989Z.json`.
+
+| Endpoint | p50 ms | p95 ms | max ms | DB calls | bytes |
+| --- | --- | --- | --- | --- | --- |
+| manager overview | 5.39 | 12.5 | 12.5 | 9 | 16 349 |
+| projects page (50) | 3.11 | 3.43 | 3.43 | 9 | 8 178 |
+| tasks page (50) | 3.32 | 5.03 | 5.03 | 2 | 24 343 |
+| task detail | 2.61 | 4.60 | 4.60 | 5 | 1 224 |
+| requests | 0.96 | 1.15 | 1.15 | 1 | 6 035 |
+| workload report | 2.70 | 4.79 | 4.79 | 5 | 17 798 |
+| employee snapshot | 4.76 | 5.28 | 5.28 | 2 | 80 454 |
+| task create (write) | 4.12 | 7.06 | 7.06 | 10 | 913 |
+
+These numbers are server-side processing only: in-process injection, no TLS, no proxy, no network.
+The large dataset, a production-built frontend behind Caddy, office-LAN acknowledgement, remote
+acknowledgement and initial usable page were **NOT_RUN** in this pass. The stated user-facing targets
+(100 ms interaction feedback, 100 ms cached navigation, 100 ms read p95, 200 ms mutation p95, 300 ms
+office-LAN save, provisional 1 s remote save, provisional 2 s initial page) therefore remain
+unverified. They were not relaxed.

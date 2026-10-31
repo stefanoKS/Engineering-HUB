@@ -13,7 +13,9 @@ Status: implemented locally. Live Workspace verification is **NOT RUN** (see
 | Migrations | Ordered `.sql` files + checksummed runner with an advisory lock | Additive, reviewable, fail-closed on a changed applied file |
 | API | Fastify 5, JSON envelope, zod validation | Small surface, structured errors, strict bodies |
 | Web | React 19 + Vite 8 | In-memory snapshot, targeted invalidation, no browser persistence of private data |
-| Background work | Worker process + PostgreSQL outbox table | No Redis/broker; a crashed worker's lease is reclaimed |
+| Background work | Worker process + PostgreSQL outbox table | No Redis/broker; every job is claimed with a lease token, and a crashed worker's lease is reclaimed without letting it overwrite a newer owner |
+| Production artifacts | `tsup` bundles each application, internal `@eh/*` workspaces included | One self-contained artifact; the runtime image needs no TypeScript sources and the documented `node dist/…` command actually starts |
+| Public browser configuration | `GET /api/public-config` | One built web artifact per environment; the OAuth client ID is not compiled in |
 | Email / Calendar / Drive / Sheets | Google REST APIs through adapter interfaces | Testable doubles; nothing external runs in automated tests |
 | Remote access | Company VPN **or** Cloudflare Tunnel + Access | Two documented paths; no automatic DNS or tunnel creation |
 

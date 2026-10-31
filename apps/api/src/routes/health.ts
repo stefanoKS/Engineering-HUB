@@ -29,4 +29,20 @@ export function registerHealthRoutes(app: FastifyInstance, deps: AppDependencies
       contractVersion: '1.6'
     })
   );
+
+  /**
+   * Public, non-secret runtime configuration. One built web artifact can therefore be deployed to
+   * several environments; the OAuth client ID is not compiled into the bundle.
+   */
+  app.get('/api/public-config', async (request, reply) => {
+    reply.header('cache-control', 'no-store');
+    reply.header('x-content-type-options', 'nosniff');
+    return ok(reply, request, {
+      appVersion: deps.config.version,
+      environment: deps.config.appEnv,
+      googleClientId: deps.config.googleClientId,
+      authConfigured: !!deps.config.googleClientId,
+      devSignInEnabled: deps.config.devAuthEnabled && !deps.config.production
+    });
+  });
 }

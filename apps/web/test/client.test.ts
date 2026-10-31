@@ -71,6 +71,34 @@ describe('api client', () => {
     vi.unstubAllGlobals();
   });
 
+  it('does not treat the first session probe as a lost session', async () => {
+    const listener = vi.fn();
+    sessionEvents.addEventListener('session-lost', listener);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse(
+          {
+            ok: false,
+            error: {
+              code: 'UNAUTHENTICATED',
+              message: 'No active session',
+              retryable: false,
+              correlationId: 'c-3'
+            }
+          },
+          401
+        )
+      )
+    );
+    await expect(
+      api.get('/api/session', { expectUnauthenticated: true })
+    ).rejects.toMatchObject({ code: 'UNAUTHENTICATED' });
+    expect(listener).not.toHaveBeenCalled();
+    sessionEvents.removeEventListener('session-lost', listener);
+    vi.unstubAllGlobals();
+  });
+
   it('keeps an edit conflict distinct from a denial', async () => {
     const listener = vi.fn();
     sessionEvents.addEventListener('session-lost', listener);

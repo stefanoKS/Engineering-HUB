@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts",
-    "build": "tsup src/main.ts src/cli.ts --format esm --target node22 --out-dir dist --clean",
+    "start:prod": "node dist/main.js",
+    "build": "tsup",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"
   },

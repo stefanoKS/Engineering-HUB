@@ -22,6 +22,7 @@ import {
   LIVE_CONFIRMATION,
   maxEmailsPerRun,
   notificationKey,
+  reminderOffsets,
   planDecision,
   planFromDuration,
   planningWarnings,
@@ -462,10 +463,44 @@ describe('notification policy', () => {
 
   it('keys a notification by what it announces', () => {
     const key = notificationKey({ kind: 'ASSIGNMENT', taskId: 'T1', recipient: 'A@Example.co.jp', dueDate: '2026-02-01', assignmentVersion: 2 });
-    expect(key).toBe('ASSIGNMENT|T1|a@example.co.jp|2026-02-01|2');
+    expect(key).toBe('ASSIGNMENT|T1|a@example.co.jp|2026-02-01|-|2');
     expect(
       notificationKey({ kind: 'ASSIGNMENT', taskId: 'T1', recipient: 'a@example.co.jp', dueDate: '2026-03-01', assignmentVersion: 2 })
     ).not.toBe(key);
+  });
+
+  it('gives every reminder stage and every request its own identity', () => {
+    const sevenDay = notificationKey({
+      kind: 'DEADLINE_REMINDER',
+      taskId: 'T1',
+      recipient: 'a@example.co.jp',
+      dueDate: '2026-02-01',
+      bucket: 'offset:7'
+    });
+    const twoDay = notificationKey({
+      kind: 'DEADLINE_REMINDER',
+      taskId: 'T1',
+      recipient: 'a@example.co.jp',
+      dueDate: '2026-02-01',
+      bucket: 'offset:2'
+    });
+    expect(sevenDay).not.toBe(twoDay);
+
+    const firstRequest = notificationKey({
+      kind: 'REQUEST_DECISION',
+      taskId: 'T1',
+      recipient: 'a@example.co.jp',
+      bucket: 'request:REQ-1'
+    });
+    const secondRequest = notificationKey({
+      kind: 'REQUEST_DECISION',
+      taskId: 'T1',
+      recipient: 'a@example.co.jp',
+      bucket: 'request:REQ-2'
+    });
+    expect(firstRequest).not.toBe(secondRequest);
+    expect(reminderOffsets({ REMINDER_OFFSETS: '7, 2,3' })).toEqual([7, 3, 2]);
+    expect(reminderOffsets({})).toEqual([7, 2]);
   });
 
   it('backs off with a bounded delay', () => {

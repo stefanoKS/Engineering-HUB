@@ -425,3 +425,40 @@ The rules above stay in force for the V1 Apps Script project (`src/`, `dashboard
 162. **Keep the two applications separate.** `dashboard-app/` remains a standalone Apps Script
      web app for as long as V1 is deployed. Never push V2 code into it, never reuse its clasp
      target, and never make V2 depend on a V1 Script Property.
+
+## V2 stabilization rules (2026-10-31)
+
+163. **A build that cannot start is not a build.** The API, worker and migration CLI artifacts must
+     start from their documented `node dist/…` command. Internal `@eh/*` workspaces are bundled
+     into the artifact; a runtime image must not need source directories. `npm run smoke:prod` is
+     the gate for a production artifact and must keep working.
+164. **A job outcome belongs to the lease that produced it.** Every claim carries a lease token;
+     completion, failure and renewal require it. Never complete or fail a job by `job_id` alone.
+165. **An external send is claimed before it happens.** Persist the delivery attempt, record the
+     outcome only for that attempt, treat an interrupted attempt as `DELIVERY_UNCERTAIN`, and keep
+     `authorize-delivery-retry` as the only path back. Never auto-retry an ambiguous delivery and
+     never claim exactly-once Gmail delivery.
+166. **Notification identity names the event.** Reminder stage and request id are part of the
+     ledger key. A preview never consumes a live send, and a capped run reports the deferred
+     recipients instead of silently dropping them.
+167. **A destructive check and the removal share one transaction.** The target row is locked and
+     the blockers and revision are re-evaluated inside the deleting transaction.
+168. **Reconciliation compares the destination, not the source.** Every mapped table, blank cells
+     against destination defaults, relationship tables as sets, settings against their documented
+     safe overrides, plus a destination checksum. Report volatile defaults as skipped, never as a
+     match.
+169. **Public browser configuration is runtime, never build-time.** `GET /api/public-config` may
+     expose only the OAuth client ID, the release marker and whether the development fixture is
+     available. Never compile a `VITE_*` login secret and never expose a database URL, token,
+     spreadsheet id or service-account value.
+170. **A verified Google subject is the identity binding.** Link it once, audit `IDENTITY_LINKED`,
+     and refuse a different subject for an already-linked address.
+171. **A read owns its cache key.** An older completion may not replace, recreate or clear a newer
+     entry; invalidation refetches mounted queries; sign-out rejects late completions.
+172. **Tests must fail when the database is absent.** CI runs a real PostgreSQL service with
+     `REQUIRE_DATABASE=1`. A skipped database suite is not a passing gate.
+173. **Deployment templates are validated, not assumed.** `npm run validate:deploy` checks the
+     Compose topology (private database, PostgreSQL 18 volume path, explicit migrate profile),
+     the top-level Caddy site block, the tunnel example and the container build definitions. A
+     static pass is not a live deployment.
+

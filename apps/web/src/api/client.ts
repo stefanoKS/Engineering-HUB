@@ -74,7 +74,17 @@ const FailureSchema = z.object({
 
 type Method = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
 
-async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
+type RequestOptions = {
+  /** The caller expects "not signed in" (the session probe) and must not trigger a revocation. */
+  expectUnauthenticated?: boolean;
+};
+
+async function request<T>(
+  method: Method,
+  path: string,
+  body?: unknown,
+  options: RequestOptions = {}
+): Promise<T> {
   const headers: Record<string, string> = {
     accept: 'application/json',
     'x-correlation-id': correlationFactory()
@@ -145,7 +155,7 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
     retryable: error.retryable,
     correlationId: error.correlationId
   });
-  if (apiError.isDenied) {
+  if (apiError.isDenied && !options.expectUnauthenticated) {
     csrfToken = '';
     sessionEvents.dispatchEvent(new CustomEvent('session-lost', { detail: apiError }));
   }
@@ -153,7 +163,7 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  get: <T>(path: string): Promise<T> => request<T>('GET', path),
+  get: <T>(path: string, options?: RequestOptions): Promise<T> => request<T>('GET', path, undefined, options),
   post: <T>(path: string, body?: unknown): Promise<T> => request<T>('POST', path, body),
   patch: <T>(path: string, body?: unknown): Promise<T> => request<T>('PATCH', path, body),
   put: <T>(path: string, body?: unknown): Promise<T> => request<T>('PUT', path, body),

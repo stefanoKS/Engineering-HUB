@@ -30,6 +30,8 @@ export const SETTING_KEYS = {
   WEEKLY_REPORT_TIME: 'WEEKLY_REPORT_TIME',
   CALENDAR_SYNC_ENABLED: 'CALENDAR_SYNC_ENABLED',
   DAILY_BACKUP_ENABLED: 'DAILY_BACKUP_ENABLED',
+  BACKUP_INTERVAL_MINUTES: 'BACKUP_INTERVAL_MINUTES',
+  EXPORT_SHEETS_ENABLED: 'EXPORT_SHEETS_ENABLED',
   AUTO_DASHBOARD_REFRESH_ENABLED: 'AUTO_DASHBOARD_REFRESH_ENABLED',
   AUTO_WORKLOAD_REFRESH_ENABLED: 'AUTO_WORKLOAD_REFRESH_ENABLED',
   PROJECT_STALE_ALERT_ENABLED: 'PROJECT_STALE_ALERT_ENABLED',
@@ -122,6 +124,7 @@ export type NotificationKind =
   | 'ASSIGNMENT'
   | 'DEADLINE_REMINDER'
   | 'OVERDUE_REMINDER'
+  | 'DEADLINE_CHANGE'
   | 'COMPLETION'
   | 'REQUEST_DECISION'
   | 'REPORT';
@@ -137,14 +140,16 @@ export type NotificationIdentity = {
 
 /**
  * A logical notification is identified by what it announces, never by when it ran, so a retry
- * of the same job cannot send a second mail for the same event.
+ * of the same job cannot send a second mail for the same event. The reminder stage is part of the
+ * identity: the seven-day and the two-day reminder of one task are different notifications.
  */
 export function notificationKey(identity: NotificationIdentity): string {
   const parts = [
     identity.kind,
     identity.taskId || '-',
     (identity.recipient || '-').trim().toLowerCase(),
-    identity.dueDate || identity.bucket || '-',
+    identity.dueDate || '-',
+    identity.bucket || '-',
     identity.assignmentVersion === null || identity.assignmentVersion === undefined
       ? '-'
       : String(identity.assignmentVersion)
@@ -164,12 +169,14 @@ export function assignmentApprovalValid(
 export type LedgerState = NotificationResult;
 
 const LEDGER_TRANSITIONS: Readonly<Record<LedgerState, readonly LedgerState[]>> = {
-  PENDING: ['SENT', 'PREVIEW', 'DELIVERY_UNCERTAIN', 'FAILED', 'SKIPPED'],
-  PREVIEW: [],
+  PENDING: ['SENDING', 'SENT', 'PREVIEW', 'DELIVERY_UNCERTAIN', 'FAILED', 'SKIPPED'],
+  // A preview never blocks a later legitimate live send.
+  SENDING: ['SENT', 'PREVIEW', 'DELIVERY_UNCERTAIN', 'FAILED'],
+  PREVIEW: ['SENDING'],
   SENT: [],
   DELIVERY_UNCERTAIN: [],
-  FAILED: ['PENDING'],
-  SKIPPED: []
+  FAILED: ['PENDING', 'SENDING'],
+  SKIPPED: ['PENDING']
 };
 
 export function canMoveLedger(from: LedgerState, to: LedgerState): boolean {
@@ -198,6 +205,32 @@ export function maxEmailsPerRun(settings: SettingsMap): number {
   const value = Number(setting(settings, SETTING_KEYS.MAX_EMAILS_PER_RUN, '50'));
   if (!Number.isFinite(value) || value <= 0) return 0;
   return Math.min(500, Math.floor(value));
+}
+
+/** Every configured reminder stage, earliest first. A bare "7,2" is what the manager set. */
+export function reminderOffsets(settings: SettingsMap): number[] {
+  const raw = setting(settings, SETTING_KEYS.REMINDER_OFFSETS, '7,2');
+  const values = raw
+    .split(',')
+    .map((entry) => Number(entry.trim()))
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .map((value) => Math.floor(value));
+  const unique = [...new Set(values)].sort((left, right) => right - left);
+  return unique.length ? unique : [7, 2];
+}
+
+/** How many days a missed reminder window may still be caught up. */
+export function reminderCatchupDays(settings: SettingsMap): number {
+  const value = Number(setting(settings, SETTING_KEYS.REMINDER_CATCHUP_DAYS, '1'));
+  if (!Number.isFinite(value) || value < 0) return 1;
+  return Math.min(14, Math.floor(value));
+}
+
+/** Overdue reminders repeat at most once per configured number of days. */
+export function overdueFrequencyDays(settings: SettingsMap): number {
+  const value = Number(setting(settings, SETTING_KEYS.OVERDUE_FREQUENCY_DAYS, '1'));
+  if (!Number.isFinite(value) || value <= 0) return 1;
+  return Math.min(30, Math.floor(value));
 }
 
 export function calendarEnabled(settings: SettingsMap): boolean {

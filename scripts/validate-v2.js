@@ -162,7 +162,8 @@ const requiredDocs = [
   'docs/v2/REMOTE_ACCESS.md',
   'docs/v2/BACKUP_RESTORE.md',
   'docs/v2/OPERATIONS.md',
-  'docs/v2/ACCEPTANCE.md'
+  'docs/v2/ACCEPTANCE.md',
+  'docs/v2/STABILIZATION.md'
 ];
 for (const doc of requiredDocs) {
   if (!fs.existsSync(path.join(root, doc))) fail(`Missing ${doc}`);

@@ -1,5 +1,6 @@
 /** Sign-in: company Google identity, with an explicitly development-only fixture form. */
 import { useEffect, useRef, useState } from 'react';
+import { PublicConfig } from '@eh/contracts';
 import { api, ApiFailure, setCsrfToken } from '../api/client';
 import { useI18n } from '../i18n';
 import type { Session } from '../App';
@@ -15,9 +16,6 @@ declare global {
   }
 }
 
-const CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? '';
-const DEV_SIGN_IN = (import.meta.env.VITE_DEV_SIGN_IN as string | undefined) === 'true';
-
 export function LoginScreen({
   notice,
   onSignedIn
@@ -27,18 +25,45 @@ export function LoginScreen({
 }): JSX.Element {
   const { t, language } = useI18n();
   const buttonRef = useRef<HTMLDivElement>(null);
+  const [config, setConfig] = useState<PublicConfig | null>(null);
+  const [configError, setConfigError] = useState('');
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const clientId = config?.googleClientId ?? '';
 
   useEffect(() => {
-    if (!CLIENT_ID) return undefined;
+    let cancelled = false;
+    api
+      .get<unknown>('/api/public-config')
+      .then((value) => {
+        const parsed = PublicConfig.safeParse(value);
+        if (cancelled) return;
+        if (!parsed.success) {
+          setConfigError(t('login.configError'));
+          return;
+        }
+        setConfig(parsed.data);
+      })
+      .catch((failure: unknown) => {
+        if (cancelled) return;
+        setConfigError(
+          failure instanceof ApiFailure && failure.code === 'NETWORK' ? failure.message : t('login.configError')
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
+
+  useEffect(() => {
+    if (!clientId) return undefined;
     const existing = document.getElementById('gsi-script');
     const setup = (): void => {
       const identity = window.google?.accounts?.id;
       if (!identity || !buttonRef.current) return;
       identity.initialize({
-        client_id: CLIENT_ID,
+        client_id: clientId,
         callback: (response) => {
           if (!response.credential) return;
           void signIn({ idToken: response.credential });
@@ -58,7 +83,7 @@ export function LoginScreen({
     script.onload = setup;
     document.head.appendChild(script);
     return undefined;
-  }, [language]);
+  }, [language, clientId]);
 
   async function signIn(body: { idToken?: string; devEmail?: string }): Promise<void> {
     setBusy(true);
@@ -80,8 +105,12 @@ export function LoginScreen({
         <h1>{t('app.name')}</h1>
         <p className="muted">{t('login.domain')}</p>
         {notice ? <div className="banner warning">{notice}</div> : null}
-        {CLIENT_ID ? <div ref={buttonRef} className="gsi-button" /> : null}
-        {DEV_SIGN_IN ? (
+        {configError ? <div className="banner danger">{configError}</div> : null}
+        {config && !config.authConfigured && !config.devSignInEnabled ? (
+          <div className="banner danger">{t('login.unconfigured')}</div>
+        ) : null}
+        {clientId ? <div ref={buttonRef} className="gsi-button" /> : null}
+        {config?.devSignInEnabled ? (
           <form
             className="stack"
             onSubmit={(event) => {

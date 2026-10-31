@@ -36,8 +36,12 @@ material, and a restore must not resurrect a signed-in browser.
 
 ## 2. When it runs
 
-* `DAILY_BACKUP_ENABLED = true` enqueues one `backup.database` job per business day (dedupe key
-  `backup:<date>`). The default is **false**, like every other automation.
+* `DAILY_BACKUP_ENABLED = true` enables the scheduled backup. The cadence is
+  `BACKUP_INTERVAL_MINUTES` (setting, default **60** — the agreed hourly cadence), bucketed from the
+  epoch so one interval can never enqueue two backups. The default is **false**, like every other
+  automation. The setting name is historical; it now schedules an interval, not a day.
+* A run that overlaps an in-flight backup is prevented by the same interval dedupe key; the backup
+  itself is not re-entrant.
 * `npm run --workspace @eh/worker tsx src/cli.ts backup-now` runs one backup immediately
   (uploading when Drive is configured).
 * Before a risky operation (schema change, migration, bulk correction) run `backup-now` and

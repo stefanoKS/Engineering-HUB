@@ -26,7 +26,9 @@ npm ci
 npm run typecheck
 npm run lint:v2
 npm test                    # V1 回帰テスト + 実 PostgreSQL に対する V2 テスト
-npm run validate
+npm run validate            # V1 + V2 ガバナンス + デプロイ設定
+npm run build               # 自己完結した API・web・worker・移行の成果物
+npm run smoke:prod          # 成果物で移行・起動・読み取り・更新・停止を確認
 npm run db:migrate          # レビュー済み SQL マイグレーション（DATABASE_URL が必要）
 npm run benchmark           # ローカル計測（docs/v2/PERFORMANCE.md）
 ```
@@ -38,7 +40,8 @@ npm run benchmark           # ローカル計測（docs/v2/PERFORMANCE.md）
 [移行](docs/v2/MIGRATION.md) ・ [セルフホスト](docs/v2/SELF_HOSTING.md) ・
 [リモートアクセス](docs/v2/REMOTE_ACCESS.md) ・ [Google Workspace](docs/v2/GOOGLE_WORKSPACE.md) ・
 [バックアップと復元](docs/v2/BACKUP_RESTORE.md) ・ [運用](docs/v2/OPERATIONS.md) ・
-[性能](docs/v2/PERFORMANCE.md) ・ [受け入れ確認](docs/v2/ACCEPTANCE.md)
+[性能](docs/v2/PERFORMANCE.md) ・ [受け入れ確認](docs/v2/ACCEPTANCE.md) ・
+[**安定化の記録**](docs/v2/STABILIZATION.md)
 
 ### V2 検証状況
 
@@ -46,14 +49,18 @@ npm run benchmark           # ローカル計測（docs/v2/PERFORMANCE.md）
 | --- | --- |
 | `npm run typecheck`（全ワークスペース） | 成功 |
 | `npm run lint`（V1 + V2） | 成功 |
-| `npm test` | V1 776/776、V2 101/101 成功 |
-| `npm run validate`（V1 + V2 ガバナンス） | 成功 |
+| `npm test` | V1 776/776、V2 128/128 成功 |
+| `npm run validate`（V1 + V2 ガバナンス + デプロイ設定） | 成功 |
+| `npm run smoke:prod`（成果物の API：ヘルス・準備・セッション・読み取り・更新・停止） | 成功 |
 | PostgreSQL スキーマ・トリガー・リビジョン検査 | 成功（実 PostgreSQL 18.6 の統合テスト） |
 | 移行のドライラン・取り込み・突合（フィクスチャ） | 成功 |
-| バックアップ暗号化と論理復元検証 | 成功 |
-| 10,000 タスクでの API 実測 | ローカルで成功（`docs/v2/PERFORMANCE.md`） |
+| 配信試行とリース所有権のクラッシュ安全性 | 成功 |
+| バックアップ暗号化と論理復元検証 | 成功（論理経路）。`pg_dump`/`pg_restore` の往復は NOT_RUN |
+| コンテナのビルドと起動、`docker compose config`、`caddy validate` | レビュー環境では BLOCKED（コンテナ実行環境なし）。CI で実行 |
+| API 実測（小規模データセット） | ローカルで成功（`docs/v2/PERFORMANCE.md`） |
 | Google サインイン・Gmail・Calendar・Drive・Sheets の実環境 | BLOCKED（認証情報と Workspace が必要） |
 | 公開 TLS・トンネル・社外アクセス | BLOCKED（DNS とホストが必要） |
+| ブラウザ操作の自動試験 | NOT_RUN |
 | 本番切り替え・本番データ移行 | NOT_RUN |
 
 ルート `package.json` は V1 のリリース版（`1.7.7`）を維持します（V1 のリリーステストが参照する

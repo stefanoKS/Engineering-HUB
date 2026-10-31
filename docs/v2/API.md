@@ -139,13 +139,31 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | POST | `/api/employee/requests` | `clientRequestId`, `taskId`, `requestType`, `requestedDueDate?`, `reason?`, `explanation?`, `completionNote?`; idempotent |
 | GET | `/api/employee/requests/:id` | Receipt state only |
 
-## 6. Health
+## 6. Health and public configuration
 
 | Method | Path | Notes |
 | --- | --- | --- |
 | GET | `/healthz` | Liveness |
 | GET | `/readyz` | Database and schema version |
 | GET | `/api/version` | Application/API/contract versions |
+| GET | `/api/public-config` | Public, non-secret runtime configuration (no authentication) |
+
+`/api/public-config` exists so one built web artifact can be deployed to several environments. It
+returns exactly:
+
+```json
+{
+  "appVersion": "2.0.0",
+  "environment": "PRODUCTION",
+  "googleClientId": "…apps.googleusercontent.com",
+  "authConfigured": true,
+  "devSignInEnabled": false
+}
+```
+
+`googleClientId` is public by definition. The endpoint never returns a database URL, a session,
+a service-account value, a spreadsheet identifier or any other secret. `devSignInEnabled` is
+`DEV_AUTH_ENABLED && !production`, so the browser and the server agree.
 
 ## 7. Limits and privacy
 

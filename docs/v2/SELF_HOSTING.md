@@ -12,6 +12,7 @@ its own — only an OAuth client and a service account for Workspace.
 | OS | any Linux with Docker Engine 24+ and Compose v2 | Windows/macOS are development only |
 | DNS | one host name pointing at the host | `APP_DOMAIN`, for example `engineering-hub.example.co.jp` |
 | Ports | 80 and 443 inbound | only the proxy is exposed; the API binds `127.0.0.1:8080` on the host |
+| Database volume | mounted at `/var/lib/postgresql` | PostgreSQL 18 keeps `PGDATA` in `/var/lib/postgresql/18/docker`; mounting `/var/lib/postgresql/data` would silently lose data on container recreation. `npm run validate:deploy` checks this against the image major version |
 | Time zone | Asia/Tokyo for the database | set in Compose; business dates use the same zone |
 | Backups | a Drive folder shared with the worker's service account | see [BACKUP_RESTORE.md](./BACKUP_RESTORE.md) |
 
@@ -27,12 +28,13 @@ npm run build                  # @eh/api, @eh/web, @eh/worker
 
 cp deploy/.env.example deploy/.env
 # fill in: POSTGRES_PASSWORD, APP_DOMAIN, PUBLIC_ORIGIN, MANAGER_WEB_ALLOWED_DOMAINS,
-#          GOOGLE_CLIENT_ID, VITE_GOOGLE_CLIENT_ID, BACKUP_ENCRYPTION_KEY,
+#          GOOGLE_CLIENT_ID, BACKUP_ENCRYPTION_KEY,
 #          GOOGLE_SERVICE_ACCOUNT_JSON, GMAIL_SENDER, CALENDAR_ID, DRIVE_BACKUP_FOLDER_ID
 ```
 
-The web bundle takes `VITE_*` values at **build** time, so rebuild the image after changing the
-client ID:
+Public configuration is served at **runtime** by `GET /api/public-config`, so the web artifact is
+built once and the OAuth client ID comes from the environment. There is no `VITE_*` login setting to
+rebuild.
 
 ```bash
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env build
@@ -48,6 +50,21 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile too
 The `migrate` service applies the reviewed SQL migrations in order inside an advisory lock and
 records the checksums. It never seeds, resets or clears data. It is a deliberate one-shot
 service: the API and worker never migrate at boot.
+
+### Runtime images
+
+The API, web and worker bundles are self-contained: the internal `@eh/*` workspaces are compiled
+into `dist` at build time. Each runtime stage installs **production** dependencies from the
+lockfile and copies only the built artifacts, the reviewed SQL (API image) and `package.json`. It
+does not copy `apps/` or `packages/` sources, so a missing build fails loudly instead of being
+masked by source files that exist only on the build host. Both images run as the `node` user.
+
+### Trusted proxy
+
+`TRUST_PROXY` accepts `true`, `false` or a comma-separated list of trusted proxy addresses. Compose
+defaults it to `172.16.0.0/12` (the container network) because the API port is bound to loopback:
+a browser cannot reach the API without the proxy. Do not set `TRUST_PROXY=true` on a port reachable
+from the office network, or a client can spoof `X-Forwarded-For` and the rate-limit identity.
 
 ## 3. The first administrator
 

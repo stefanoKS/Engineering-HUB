@@ -116,6 +116,39 @@ describe('session and CSRF', () => {
     expect(body.data.actor.role).toBe('MANAGER');
     expect(JSON.stringify(body)).not.toContain(auth.cookie);
   });
+
+  it('serves only public runtime configuration before sign-in', async () => {
+    const response = await app.inject({ method: 'GET', url: '/api/public-config' });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    const body = response.json() as {
+      data: { appVersion: string; devSignInEnabled: boolean; googleClientId: string; authConfigured: boolean };
+    };
+    expect(body.data.appVersion).toBeTruthy();
+    // The development fixture is available in this deployment, and no secret is exposed.
+    expect(body.data.devSignInEnabled).toBe(true);
+    expect(body.data.authConfigured).toBe(false);
+    const text = response.body;
+    expect(text).not.toMatch(/database|password|serviceAccount|private_key/i);
+  });
+
+  it('binds a member to the verified subject and refuses a different one', async () => {
+    await signIn(ADMIN);
+    const bound = await db.one<{ google_subject: string }>(
+      'SELECT google_subject FROM members WHERE email = $1',
+      [ADMIN]
+    );
+    expect(bound?.google_subject).toBe(`dev:${ADMIN}`);
+    const audit = await db.one<{ count: string }>(
+      "SELECT count(*)::text AS count FROM audit_log WHERE action = 'IDENTITY_LINKED' AND entity_id = 'MEM-ADMIN'"
+    );
+    expect(Number(audit?.count)).toBe(1);
+
+    await db.query("UPDATE members SET google_subject = 'different-google-subject' WHERE email = $1", [ADMIN]);
+    const refused = await app.inject({ method: 'POST', url: '/api/session', payload: { devEmail: ADMIN } });
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json().error.code).toBe('AUTHORIZATION_DENIED');
+  });
 });
 
 describe('authorization and privacy boundaries', () => {

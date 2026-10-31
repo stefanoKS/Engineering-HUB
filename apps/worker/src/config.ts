@@ -27,6 +27,7 @@ const Schema = z.object({
   PG_RESTORE_PATH: z.string().default('pg_restore'),
   EXPORT_SPREADSHEET_ID: z.string().optional(),
   EXPORT_SHEET_NAME: z.string().default('SNAPSHOT'),
+  BACKUP_INTERVAL_MINUTES: z.coerce.number().int().min(15).max(1440).default(60),
   SCHEDULE_ENABLED: z.enum(['true', 'false']).default('true')
 });
 

@@ -188,7 +188,9 @@ async function measureDataset(
           idempotencyKey: `bench-${size}-${writeCounter}-0001`,
           projectId: 'P-000001',
           taskName: `Benchmark task ${writeCounter}`,
-          deadline: new Date(Date.now() + 86_400_000 * 7).toISOString().slice(0, 10)
+          deadline: new Date(Date.now() + 86_400_000 * 7).toISOString().slice(0, 10),
+          // The measured write must not depend on whether the chosen deadline lands on a weekend.
+          acknowledgeNonWorking: true
         };
       }
     }

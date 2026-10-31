@@ -100,10 +100,16 @@ record of what a manager must decide. The tool refuses to guess.
 3. **One transaction per run.** Every insert, the `import_runs` row and the
    `MIGRATION_IMPORTED` audit row commit together. A failure rolls the whole run back, so no
    partial import and no misleading `COMPLETED` run row can exist.
-4. **Reconciliation.** `reconcile --run <id>` compares, per table, the source row count, the
-   imported row count, the unchanged identifiers, and a field-by-field checksum of the mapped
-   columns. It exits non-zero on any mismatch. Blank source cells are excluded from the field
-   comparison because they were deliberately not written.
+4. **Reconciliation.** `reconcile --run <id>` compares **every mapped table** (not only tasks and
+   projects): source row count, imported row count, every mapped column of every row, and a
+   deterministic destination checksum of the stored rows. A blank source cell is compared against
+   the destination column default (read from `information_schema`), so a blank-vs-default
+   divergence is a mismatch; a volatile default (`now()`, a sequence) is reported as
+   `skippedFields` instead of being counted as a match. The relationship tables
+   (`task_assignees`, `responsibility_members`, `task_dependencies`) are compared as sets, and
+   the settings are compared against their documented safe overrides (`EMAIL_MODE=OFF`,
+   `EMERGENCY_STOP=true`, publication/Calendar/backup OFF). The report carries both the source
+   checksum and the destination checksum and exits non-zero on any mismatch.
 5. **The workbook is untouched.** The source adapter issues `values.get` only. There is no
    write path, and Drive backups of the workbook are never modified.
 
@@ -127,7 +133,7 @@ before a rollback (`pg_dump`), because V1 cannot read it.
 
 | Criterion | Status | Evidence |
 | --- | --- | --- |
-| Mapping, validation, dry-run, real import, reconciliation on a fixture snapshot | **PASS** | `tools/migration/test/migration.test.ts` (8 tests, real PostgreSQL): full import of `fixtures/v1-snapshot.json`, identifier preservation, dependency rows, automation forced OFF, dry run leaves no rows, duplicate/unknown-reference/cycle errors, reconciliation mismatch detection |
+| Mapping, validation, dry-run, real import, reconciliation on a fixture snapshot | **PASS** | `tools/migration/test/migration.test.ts` (10 tests, real PostgreSQL): full import of `fixtures/v1-snapshot.json`, identifier preservation, dependency rows, automation forced OFF, dry run leaves no rows, duplicate/unknown-reference/cycle errors, reconciliation mismatch detection for a task, a member, the notification ledger, a setting, and a missing relationship row |
 | Reading the **real** V1 workbook | **BLOCKED** | Needs a service account with `spreadsheets.readonly` on the production workbook; not available in this environment |
 | Importing the production dataset | **BLOCKED** | Same credential, plus an approved change window |
 | Field-by-field reconciliation against production | **BLOCKED** | Depends on the production import |

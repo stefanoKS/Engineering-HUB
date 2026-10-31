@@ -6,6 +6,8 @@
   "main": "src/cli.ts",
   "scripts": {
     "start": "tsx src/cli.ts",
+    "start:prod": "node dist/cli.js",
+    "build": "tsup",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"
   },

@@ -105,16 +105,36 @@ member row (`role`, `active`) in the database and the `audit_log` entry for the 
 
 | Job | Trigger | Setting |
 | --- | --- | --- |
-| `backup.database` | daily when enabled | `DAILY_BACKUP_ENABLED` |
-| `notification.reminder-scan` | daily | `DEADLINE_REMINDER_ENABLED`, `OVERDUE_REMINDER_ENABLED`, `REMINDER_OFFSETS` |
-| `publication.run` | hourly while enabled | `SHARED_DASHBOARD_PUBLISH_ENABLED`, `SHARED_DASHBOARD_PUBLISH_INTERVAL_MINUTES` |
-| `calendar.task` | on a task change | `CALENDAR_SYNC_ENABLED` |
-| `maintenance.sessions` | daily | — (expired session cleanup) |
-| `export.sheets` | on demand | `EXPORT_SPREADSHEET_ID` |
+| `backup.database` | every `BACKUP_INTERVAL_MINUTES` (default 60) when enabled | `DAILY_BACKUP_ENABLED`, `BACKUP_INTERVAL_MINUTES` |
+| `notification.reminder-scan` | hourly (sending window and catch-up need several attempts a day) | `DEADLINE_REMINDER_ENABLED`, `OVERDUE_REMINDER_ENABLED`, `REMINDER_OFFSETS`, `REMINDER_CATCHUP_DAYS`, `OVERDUE_FREQUENCY_DAYS`, `WEEKDAY_ONLY_SENDING`, `EXECUTION_WINDOW_START/END` |
+| `notification.request` | on a submitted request | `DEADLINE_REQUEST_EMAIL_ENABLED` / `COMPLETION_REPORT_EMAIL_ENABLED` |
+| `notification.request-decision` | on a decision | master mode and the ledger |
+| `publication.run` | every `SHARED_DASHBOARD_PUBLISH_INTERVAL_MINUTES` while enabled | `SHARED_DASHBOARD_PUBLISH_ENABLED` |
+| `calendar.task` | on a task create or a deadline/planned-start change | `CALENDAR_SYNC_ENABLED` |
+| `report.weekly` | configured day and hour | `WEEKLY_MANAGER_REPORT_ENABLED`, `WEEKLY_REPORT_DAY`, `WEEKLY_REPORT_TIME`, `MANAGEMENT_REPORT_RECIPIENTS` |
+| `export.sheets` | daily when enabled | `EXPORT_SHEETS_ENABLED`, `EXPORT_SPREADSHEET_ID` |
+| `maintenance.sessions` | daily | — (expired session cleanup and interrupted-delivery reconciliation) |
 
-Dedupe keys make a duplicate enqueue harmless. A crashed worker's lease expires and the job is
-claimed again; a notification is never sent twice because the ledger key is checked inside the
-job.
+Milestone calendar synchronisation has **no producer yet**; only task deadlines are synchronised.
+
+Dedupe keys make a duplicate enqueue harmless. Every job is claimed with a lease **token**; only
+the worker holding that token can complete it, fail it or renew it, and a long job renews the lease
+while it runs. An expired worker's outcome is discarded (`LEASE_LOST`), never applied over the newer
+owner.
+
+### Uncertain email delivery
+
+1. A `SENDING` attempt row is written before Gmail is contacted.
+2. A definite success records `SENT`; a definite transient failure returns the row to `PENDING` for
+   a bounded retry (at most three attempts).
+3. An interrupted or ambiguous attempt is reconciled to `DELIVERY_UNCERTAIN` by the worker loop and
+   by `maintenance.sessions`. It is **never** retried automatically.
+4. An operator who verifies that the message was not delivered authorizes a retry explicitly:
+   `node apps/worker/dist/cli.js authorize-delivery-retry <notificationId> <actorEmail>`.
+   That command is the only path from `DELIVERY_UNCERTAIN` back to a claimable attempt.
+
+Do not claim exactly-once Gmail delivery. The guarantee is "no automatic duplicate after an
+ambiguous outcome".
 
 ## 8. What this runbook does not cover
 

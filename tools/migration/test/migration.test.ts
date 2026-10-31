@@ -144,12 +144,43 @@ describe('import and reconciliation', () => {
     const result = await importSnapshot(db, snapshot, { runId: 'RUN-2' });
     const clean = await reconcileSnapshot(db, snapshot, result.runId);
     expect(clean.ok, JSON.stringify(clean.tables.filter((table) => table.mismatchedFields.length))).toBe(true);
+    // Every mapped table is compared, not just tasks and projects.
+    expect(clean.tables.length).toBeGreaterThan(10);
+    expect(clean.destinationChecksum).toHaveLength(64);
+    expect(clean.relations.map((relation) => relation.table)).toEqual([
+      'task_assignees',
+      'responsibility_members',
+      'task_dependencies'
+    ]);
 
     await db.query("UPDATE tasks SET task_name = 'Tampered' WHERE task_id = 'TSK-1'");
     const dirty = await reconcileSnapshot(db, snapshot, result.runId);
     expect(dirty.ok).toBe(false);
     const tasks = dirty.tables.find((table) => table.table === 'tasks');
     expect(tasks?.mismatchedFields.some((field) => field.field === 'task_name')).toBe(true);
+  });
+
+  it('detects tampering in members, history and settings, not only in tasks', async () => {
+    await importSnapshot(db, snapshot, { runId: 'RUN-5' });
+    await db.query("UPDATE members SET role = 'VIEWER' WHERE member_id = 'MEM-ADMIN'");
+    await db.query("UPDATE notification_ledger SET result = 'FAILED' WHERE notification_id = 'NTF-1'");
+    await db.query("UPDATE app_settings SET value = 'LIVE' WHERE setting_id = 'EMAIL_MODE'");
+    const report = await reconcileSnapshot(db, snapshot, 'RUN-5');
+    expect(report.ok).toBe(false);
+    expect(report.tables.find((table) => table.table === 'members')?.mismatchedFields.length).toBeGreaterThan(0);
+    expect(
+      report.tables.find((table) => table.table === 'notification_ledger')?.mismatchedFields.length
+    ).toBeGreaterThan(0);
+    expect(report.settings.mismatched.some((entry) => entry.recordId === 'EMAIL_MODE')).toBe(true);
+  });
+
+  it('detects a missing relationship row', async () => {
+    await importSnapshot(db, snapshot, { runId: 'RUN-6' });
+    await db.query('DELETE FROM task_assignees');
+    const report = await reconcileSnapshot(db, snapshot, 'RUN-6');
+    expect(report.ok).toBe(false);
+    const relation = report.relations.find((entry) => entry.table === 'task_assignees');
+    expect(relation?.missing.length).toBeGreaterThan(0);
   });
 
   it('refuses a second import into a populated database', async () => {

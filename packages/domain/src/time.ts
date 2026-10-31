@@ -20,6 +20,26 @@ export function businessDate(instant: Date = new Date()): string {
   return formatter.format(instant);
 }
 
+const timeFormatter = new Intl.DateTimeFormat('en-GB', {
+  timeZone: BUSINESS_TIME_ZONE,
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false
+});
+
+/** Minutes since midnight in the business time zone (for a configured sending window). */
+export function businessMinutes(instant: Date = new Date()): number {
+  const parts = timeFormatter.formatToParts(instant);
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? '0');
+  const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? '0');
+  return hour * 60 + minute;
+}
+
+/** Weekday of an instant in the business time zone: 0 = Sunday ... 6 = Saturday. */
+export function businessWeekday(instant: Date = new Date()): number {
+  return weekday(businessDate(instant));
+}
+
 export function isIsoDate(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   const match = ISO_DATE.exec(value);

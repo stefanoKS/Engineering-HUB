@@ -1,5 +1,30 @@
 # Production readiness
 
+## V2 platform — stabilization pass (2026-10-31)
+
+**NOT APPROVED FOR PRODUCTION.**
+
+The V2 PostgreSQL platform was stabilized from commit `d369af9`. The built API now starts and passes
+a production smoke test, delivery attempts and worker leases are crash-safe, the client cache races
+have deterministic tests, and migration reconciliation covers every mapped table. None of that is
+production approval.
+
+| Field | Value |
+| --- | --- |
+| V2 status | **NOT APPROVED FOR PRODUCTION** |
+| Local gates | `npm ci`, `typecheck`, `lint`, `test` (V1 776, V2 128), `validate`, `build`, `smoke:prod`, `benchmark` (small) — PASS |
+| Container build/start | **BLOCKED** on the review host (no container runtime); CI validates compose and Caddy |
+| Real Google tenant | **BLOCKED** |
+| Real dataset migration | **BLOCKED** |
+| Backup restore drill (`pg_dump`/`pg_restore`) | **NOT_RUN** |
+| Browser workflow automation | **NOT_RUN** |
+| Office / remote latency and load | **NOT_RUN** |
+
+The full defect list, evidence and remaining PARTIAL items are in
+[docs/v2/STABILIZATION.md](v2/STABILIZATION.md) and [docs/v2/ACCEPTANCE.md](v2/ACCEPTANCE.md). The
+deployment-candidate checklist in that document is the gate for the next step; nothing in the
+repository performs a deployment, a migration, a restore or an activation automatically.
+
 ## Current assessment — V1.7.7 (2026-10-30)
 
 **IMPLEMENTED — DEV WORKSPACE VERIFICATION PENDING. NOT APPROVED FOR PRODUCTION.**

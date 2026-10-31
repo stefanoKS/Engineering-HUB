@@ -1,20 +1,19 @@
-{
-  # Replace with the company host name before deployment. HTTPS is issued automatically.
-  {$APP_DOMAIN} {
-    encode zstd gzip
+# Replace with the company host name before deployment. HTTPS is issued automatically.
+# The site block must be top level: a block nested inside global options never serves traffic.
+{$APP_DOMAIN} {
+	encode zstd gzip
 
-    header {
-      Strict-Transport-Security "max-age=31536000; includeSubDomains"
-      X-Content-Type-Options "nosniff"
-      X-Frame-Options "DENY"
-      Referrer-Policy "strict-origin-when-cross-origin"
-      Permissions-Policy "geolocation=(), microphone=(), camera=()"
-      -Server
-    }
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		-Server
+	}
 
-    @api path /api/*
-    reverse_proxy @api api:8080
-
-    reverse_proxy api:8080
-  }
+	# The API is the only backend: it serves the built web application and /api routes.
+	@api path /api/*
+	reverse_proxy @api api:8080
+	reverse_proxy api:8080
 }

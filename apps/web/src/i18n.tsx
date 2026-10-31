@@ -25,6 +25,14 @@ export const V2_LABELS = {
   'login.dev': { ja: '開発用サインイン（この環境のみ）', en: 'Development sign-in (this environment only)' },
   'login.email': { ja: '会社のメールアドレス', en: 'Company e-mail address' },
   'login.failed': { ja: 'サインインできませんでした。', en: 'Sign-in failed.' },
+  'login.unconfigured': {
+    ja: 'この環境では Google サインインが未設定です。管理者に GOOGLE_CLIENT_ID の設定を依頼してください。',
+    en: 'Google sign-in is not configured for this deployment. Ask an administrator to set GOOGLE_CLIENT_ID.'
+  },
+  'login.configError': {
+    ja: 'サインイン設定を読み込めませんでした。再読み込みしてください。',
+    en: 'The sign-in configuration could not be loaded. Reload the page.'
+  },
   'login.domain': { ja: '会社の Google アカウントでサインインしてください。', en: 'Sign in with your company Google account.' },
   'overview.openWork': { ja: '未完了の作業', en: 'Open work' },
   'overview.overdue': { ja: '期限超過', en: 'Overdue' },

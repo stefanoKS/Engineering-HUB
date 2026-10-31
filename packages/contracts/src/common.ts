@@ -152,3 +152,21 @@ export const IdempotencyKey = z
   .regex(/^[A-Za-z0-9:_-]{8,120}$/, 'Idempotency-Key must be 8-120 safe characters');
 
 export const Confirm = z.literal(true);
+
+/**
+ * Public configuration the browser may see before it is signed in.
+ *
+ * It is deliberately tiny: one OAuth client ID (already public), the release marker and whether
+ * the development fixture is available. Credentials, database URLs, service-account JSON and
+ * snapshots never appear here.
+ */
+export const PublicConfig = z
+  .object({
+    appVersion: z.string().min(1),
+    environment: z.enum(['DEVELOPMENT', 'STAGING', 'PRODUCTION']),
+    googleClientId: z.string().default(''),
+    authConfigured: z.boolean(),
+    devSignInEnabled: z.boolean()
+  })
+  .strict();
+export type PublicConfig = z.infer<typeof PublicConfig>;

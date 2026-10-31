@@ -1,5 +1,56 @@
 # Changelog
 
+## V2 stabilization (2026-10-31) — production candidate work
+
+**IMPLEMENTED AND VERIFIED LOCALLY. NOT DEPLOYED. NOT APPROVED FOR PRODUCTION.**
+Starting commit `d369af9`. Details, evidence and remaining PARTIAL/BLOCKED items:
+[docs/v2/STABILIZATION.md](docs/v2/STABILIZATION.md).
+
+### Fixed
+
+* **Production artifacts actually start.** `tsup` now bundles the internal `@eh/*` workspaces into
+  the API, worker and new migration CLI builds; the documented `node apps/api/dist/main.js`
+  previously failed with `ERR_MODULE_NOT_FOUND`. Added `start:prod` scripts and
+  `npm run smoke:prod`, which migrates, starts, reads, mutates and stops the built API.
+* **Runtime images.** The API/worker images install production dependencies from manifests only and
+  copy `dist` (plus the reviewed SQL for the API) instead of workspace sources; both run as `node`
+  and the API declares a health check. Added `npm run validate:deploy`.
+* **Crash-safe email.** A durable `SENDING` attempt is claimed before Gmail is contacted; an
+  interrupted attempt becomes `DELIVERY_UNCERTAIN` and is never retried automatically; an explicit
+  `authorize-delivery-retry` operator command is the only way back.
+* **Worker leases.** Every claim carries a lease token; completion, failure and renewal require it,
+  long jobs renew, and an expired worker's outcome is discarded.
+* **Notification semantics.** Every configured reminder stage is sent with its own identity;
+  overdue reminders repeat at the configured interval; a preview no longer blocks a live send;
+  requests have per-request identities; the assignment/reassignment/deadline-change/request-type
+  switches have producers and consumers; a capped run reports the deferred recipients.
+* **Deletion race.** The delete preflight locks the target row and re-evaluates every blocker and
+  the revision inside the deleting transaction.
+* **Migration reconciliation.** Every mapped table is compared, blank cells are compared against
+  destination defaults, relationship tables are compared as sets, settings are compared against
+  their safe overrides, and the report carries a destination checksum.
+* **Hourly backups.** `BACKUP_INTERVAL_MINUTES` (default 60) drives an interval-bucketed schedule.
+* **Reverse proxy.** The Caddy site block is top level (it was nested inside a global-options block
+  and served nothing); the PostgreSQL 18 volume is mounted at `/var/lib/postgresql`; `TRUST_PROXY`
+  accepts an explicit trusted-proxy list.
+* **Runtime sign-in configuration.** `GET /api/public-config` replaces the build-time `VITE_*`
+  values; a missing client ID produces an actionable message; the Google subject is the stable
+  identity binding (`members.google_subject`, linked once with `IDENTITY_LINKED`).
+* **Client cache races.** Per-key read ownership, mounted-query refetch on invalidation, and
+  late-callback rejection after sign-out, with deterministic tests.
+* **Portable tests/CI.** Embedded PostgreSQL is an optional per-platform dependency; CI runs a real
+  `postgres:18-alpine` service and `REQUIRE_DATABASE=1` makes a missing database fail the gate.
+* Source maps are no longer published by the production web build.
+* **Sign-in screen correctness.** The first signed-out `/api/session` probe no longer reports a lost
+  session, and the CSP now allows the Google Identity stylesheet and button image so the built
+  login screen renders correctly.
+
+### Added
+
+* `docs/v2/STABILIZATION.md` (the defect table, evidence and honest blockers).
+* `scripts/production-smoke.mjs`, `scripts/validate-deploy.mjs`.
+* Migration `0006_identity_and_delivery.sql` (identity binding, lease token, delivery attempts).
+
 ## V2.0.0 — PostgreSQL platform (2026-10-31)
 
 **IMPLEMENTED AND VERIFIED LOCALLY. NOT DEPLOYED. NOT APPROVED FOR PRODUCTION.**

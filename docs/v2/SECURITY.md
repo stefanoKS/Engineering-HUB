@@ -28,6 +28,11 @@ browser ──TLS──► reverse proxy ──► API (stateless, same origin) 
   (mandatory, fails closed when unset).
 * The verified e-mail is mapped to exactly one `members` row. An unknown, inactive or
   role-less identity is refused with `AUTHORIZATION_DENIED`; no record is created implicitly.
+* The Google **subject** (`sub`) is the stable binding: a member is matched by
+  `members.google_subject` first. On the first verified sign-in an unlinked member is linked once
+  and `IDENTITY_LINKED` is written to `AUDIT_LOG`; a token whose subject differs from the stored
+  one is refused rather than silently re-bound. This survives an address change without trusting
+  a recycled address.
 * The role comes from the database at session start **and** is re-read on every request
   (`loadActorRole`), so a role change or deactivation takes effect without a new sign-in;
   deactivation also revokes the sessions.
@@ -88,7 +93,10 @@ dependency graph.
   validated before the first write.
 * The delete path (ADMIN only) requires an empty dependency preflight, a typed
   `DELETE <id>`, a reason, a verified backup, and it writes `RECORD_DELETE_PREPARED` before the
-  row disappears and `RECORD_DELETED` after, so a crash is detectable and reconcilable.
+  row disappears and `RECORD_DELETED` after, so a crash is detectable and reconcilable. The
+  preflight is repeated **inside** the deleting transaction after `SELECT … FOR UPDATE` on the
+  target row, so a concurrent relationship, revision bump or publication cannot be missed between
+  the check and the removal.
 
 ## 6. Employee boundary and privacy
 
@@ -113,9 +121,13 @@ dependency graph.
   is honoured.
 * LIVE requires ADMIN, the exact typed phrase and a passing preflight; the change is audited.
 * Recipients are limited to `ALLOWED_RECIPIENT_DOMAINS` and `MAX_EMAILS_PER_RUN` per run.
-* Every send is a ledger row: `PENDING`/`PREVIEW`/`SENT`/`DELIVERY_UNCERTAIN`/`FAILED`/`SKIPPED`.
-  A dedupe key prevents a second send for the same event. `DELIVERY_UNCERTAIN` is never
-  retried automatically and is surfaced for a human decision.
+* Every send is a ledger row: `PENDING`/`SENDING`/`PREVIEW`/`SENT`/`DELIVERY_UNCERTAIN`/`FAILED`/
+  `SKIPPED`. A dedupe key (including the reminder stage or the request id) prevents a second send
+  for the same event. The attempt is claimed durably **before** Gmail is contacted; an interrupted
+  or ambiguous attempt is reconciled to `DELIVERY_UNCERTAIN`, is never retried automatically, and
+  only an explicit operator command (`authorize-delivery-retry`) can make it sendable again.
+* A preview never consumes the live-send identity, and a capped run reports the deferred
+  recipients instead of silently dropping them.
 * Bodies are rendered from a fixed template from allowlisted fields; no stored text is
   interpolated as HTML and no spreadsheet content is used as a sender.
 

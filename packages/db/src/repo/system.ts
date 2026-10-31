@@ -1,4 +1,5 @@
 /** System repositories: settings, outbox, sessions, idempotency, publication and health. */
+import { randomUUID } from 'node:crypto';
 import type { Queryable } from '../pool';
 import { newToken } from '../ids';
 
@@ -75,6 +76,8 @@ export const KNOWN_SETTINGS: Record<string, { defaultValue: string; description:
   WEEKLY_REPORT_TIME: { defaultValue: '08:30', description: 'Weekly report time', adminOnly: false },
   CALENDAR_SYNC_ENABLED: { defaultValue: 'false', description: 'Milestone calendar synchronisation', adminOnly: false },
   DAILY_BACKUP_ENABLED: { defaultValue: 'false', description: 'Scheduled database backup', adminOnly: true },
+  BACKUP_INTERVAL_MINUTES: { defaultValue: '60', description: 'Minutes between scheduled backups', adminOnly: true },
+  EXPORT_SHEETS_ENABLED: { defaultValue: 'false', description: 'Scheduled Sheets snapshot export', adminOnly: false },
   AUTO_DASHBOARD_REFRESH_ENABLED: { defaultValue: 'false', description: 'Automatic dashboard refresh', adminOnly: false },
   AUTO_WORKLOAD_REFRESH_ENABLED: { defaultValue: 'false', description: 'Automatic workload refresh', adminOnly: false },
   PROJECT_STALE_ALERT_ENABLED: { defaultValue: 'true', description: 'Alert on a stale project', adminOnly: false },
@@ -100,6 +103,8 @@ export type OutboxJob = {
   attempts: number;
   max_attempts: number;
   correlation_id: string;
+  /** Unexpired proof that this worker owns the lease; completion requires it. */
+  lease_token: string;
 };
 
 export async function enqueue(
@@ -132,6 +137,7 @@ export async function enqueue(
  * `reapExpiredLeases`.
  */
 export async function claimNext(db: Db, workerId: string, leaseSeconds = 120): Promise<OutboxJob | null> {
+  const leaseToken = randomUUID();
   const row = await db.one<{
     job_id: string;
     kind: string;
@@ -139,63 +145,195 @@ export async function claimNext(db: Db, workerId: string, leaseSeconds = 120): P
     attempts: number;
     max_attempts: number;
     correlation_id: string;
+    lease_token: string;
   }>(
     `UPDATE outbox_jobs
-        SET status = 'LEASED', lease_owner = $1, lease_expires_at = now() + ($2 || ' seconds')::interval,
-            attempts = attempts + 1
+       SET status = 'LEASED', lease_owner = $1, lease_token = $3,
+           lease_expires_at = now() + ($2 || ' seconds')::interval,
+           attempts = attempts + 1
       WHERE job_id = (
-        SELECT job_id FROM outbox_jobs
-         WHERE status = 'PENDING' AND available_at <= now()
-         ORDER BY available_at, job_id
-         FOR UPDATE SKIP LOCKED
-         LIMIT 1
+       SELECT job_id FROM outbox_jobs
+        WHERE status = 'PENDING' AND available_at <= now()
+        ORDER BY available_at, job_id
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
       )
-      RETURNING job_id::text, kind, payload, attempts, max_attempts, correlation_id`,
-    [workerId, String(leaseSeconds)]
+      RETURNING job_id::text, kind, payload, attempts, max_attempts, correlation_id, lease_token`,
+    [workerId, String(leaseSeconds), leaseToken]
   );
   return row ?? null;
 }
 
-export async function completeJob(db: Db, jobId: string): Promise<void> {
-  await db.query(
-    `UPDATE outbox_jobs SET status = 'DONE', completed_at = now(), lease_owner = '', lease_expires_at = NULL
-      WHERE job_id = $1`,
-    [jobId]
+/** Completes the job only while the caller still owns the lease. Returns false otherwise. */
+export async function completeJob(db: Db, jobId: string, leaseToken: string): Promise<boolean> {
+  const result = await db.query(
+    `UPDATE outbox_jobs
+       SET status = 'DONE', completed_at = now(), lease_owner = '', lease_token = '',
+           lease_expires_at = NULL
+      WHERE job_id = $1 AND lease_token = $2 AND status = 'LEASED'`,
+    [jobId, leaseToken]
   );
+  return (result.rowCount ?? 0) > 0;
 }
 
 export async function failJob(
   db: Db,
   jobId: string,
+  leaseToken: string,
   error: string,
   options: { retryAt?: Date | null } = {}
-): Promise<'PENDING' | 'FAILED'> {
-  const row = await db.one<{ attempts: number; max_attempts: number }>(
-    'SELECT attempts, max_attempts FROM outbox_jobs WHERE job_id = $1',
-    [jobId]
-  );
-  if (!row) return 'FAILED';
-  const exhausted = row.attempts >= row.max_attempts || !options.retryAt;
-  await db.query(
+): Promise<'PENDING' | 'FAILED' | 'LEASE_LOST'> {
+  const retryAt = options.retryAt ?? null;
+  const row = await db.one<{ status: 'PENDING' | 'FAILED' }>(
     `UPDATE outbox_jobs
-        SET status = $2, last_error = $3, lease_owner = '', lease_expires_at = NULL,
-            available_at = COALESCE($4, available_at),
-            completed_at = CASE WHEN $2 = 'FAILED' THEN now() ELSE NULL END
-      WHERE job_id = $1`,
-    [jobId, exhausted ? 'FAILED' : 'PENDING', error.slice(0, 2000), options.retryAt ?? null]
+       SET status = CASE
+             WHEN attempts >= max_attempts OR $3::timestamptz IS NULL THEN 'FAILED'
+             ELSE 'PENDING'
+           END,
+           last_error = $4,
+           lease_owner = '',
+           lease_token = '',
+           lease_expires_at = NULL,
+           available_at = COALESCE($3::timestamptz, available_at),
+           completed_at = CASE
+             WHEN attempts >= max_attempts OR $3::timestamptz IS NULL THEN now()
+             ELSE NULL
+           END
+      WHERE job_id = $1 AND lease_token = $2 AND status = 'LEASED'
+      RETURNING status`,
+    [jobId, leaseToken, retryAt, error.slice(0, 2000)]
   );
-  return exhausted ? 'FAILED' : 'PENDING';
+  return row?.status ?? 'LEASE_LOST';
+}
+
+/**
+ * Extends the lease of a long-running job. A worker that lost its lease gets false and must stop
+ * writing outcomes; the newer owner is authoritative.
+ */
+export async function renewLease(
+  db: Db,
+  jobId: string,
+  leaseToken: string,
+  leaseSeconds: number
+): Promise<boolean> {
+  const result = await db.query(
+    `UPDATE outbox_jobs
+       SET lease_expires_at = now() + ($3 || ' seconds')::interval
+      WHERE job_id = $1 AND lease_token = $2 AND status = 'LEASED'`,
+    [jobId, leaseToken, String(leaseSeconds)]
+  );
+  return (result.rowCount ?? 0) > 0;
 }
 
 export async function reapExpiredLeases(db: Db): Promise<number> {
   const result = await db.query(
     `UPDATE outbox_jobs
-        SET status = CASE WHEN attempts >= max_attempts THEN 'FAILED' ELSE 'PENDING' END,
-            lease_owner = '', lease_expires_at = NULL,
-            last_error = CASE WHEN attempts >= max_attempts THEN 'LEASE_EXPIRED' ELSE last_error END
+       SET status = CASE WHEN attempts >= max_attempts THEN 'FAILED' ELSE 'PENDING' END,
+           lease_owner = '', lease_token = '', lease_expires_at = NULL,
+           last_error = CASE WHEN attempts >= max_attempts THEN 'LEASE_EXPIRED' ELSE last_error END
       WHERE status = 'LEASED' AND lease_expires_at < now()`
   );
   return result.rowCount ?? 0;
+}
+
+/* --------------------------- delivery attempts --------------------------- */
+
+/**
+ * Atomically claims one delivery attempt before Gmail is contacted. Exactly one worker can move a
+ * row from a sendable state to SENDING; the returned attempt id is the only way to record the
+ * outcome, so a crashed or superseded attempt can never overwrite a newer result.
+ */
+export async function claimDeliveryAttempt(db: Db, notificationId: string, owner: string): Promise<string | null> {
+  const attemptId = randomUUID();
+  const row = await db.one<{ attempt_id: string }>(
+    `UPDATE notification_ledger
+       SET result = 'SENDING',
+           attempt_id = $2,
+           attempt_started_at = now(),
+           attempt_owner = $3,
+           attempts = attempts + 1,
+           error_details = ''
+      WHERE notification_id = $1
+       AND result IN ('PENDING','PREVIEW','FAILED')
+      RETURNING attempt_id`,
+    [notificationId, attemptId, owner]
+  );
+  return row?.attempt_id ?? null;
+}
+
+export type DeliveryOutcome = 'SENT' | 'PREVIEW' | 'DELIVERY_UNCERTAIN' | 'FAILED';
+
+export async function finishDeliveryAttempt(
+  db: Db,
+  notificationId: string,
+  attemptId: string,
+  outcome: DeliveryOutcome,
+  error = ''
+): Promise<boolean> {
+  const result = await db.query(
+    `UPDATE notification_ledger
+       SET result = $3,
+           error_details = $4,
+           attempt_owner = '',
+           sent_at = CASE WHEN $3 = 'SENT' THEN now() ELSE sent_at END,
+           uncertain_at = CASE WHEN $3 = 'DELIVERY_UNCERTAIN' THEN now() ELSE uncertain_at END
+      WHERE notification_id = $1 AND attempt_id = $2 AND result = 'SENDING'`,
+    [notificationId, attemptId, outcome, error.slice(0, 1000)]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+/** A definitely-not-sent, retryable failure returns the row to a claimable state. */
+export async function releaseDeliveryAttempt(
+  db: Db,
+  notificationId: string,
+  attemptId: string,
+  error = ''
+): Promise<boolean> {
+  const result = await db.query(
+    `UPDATE notification_ledger
+       SET result = 'PENDING', attempt_owner = '', error_details = $3
+      WHERE notification_id = $1 AND attempt_id = $2 AND result = 'SENDING'`,
+    [notificationId, attemptId, error.slice(0, 1000)]
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+/**
+ * An attempt whose worker disappeared is uncertain, never retryable on its own: the provider may
+ * already have accepted the message. Only an operator may authorize a retry.
+ */
+export async function reconcileInterruptedDeliveries(db: Db, olderThanMinutes = 10): Promise<number> {
+  const result = await db.query(
+    `UPDATE notification_ledger
+       SET result = 'DELIVERY_UNCERTAIN',
+           uncertain_at = now(),
+           attempt_owner = '',
+           error_details = CASE
+             WHEN error_details = '' THEN 'WORKER_INTERRUPTED'
+             ELSE error_details
+           END
+      WHERE result = 'SENDING'
+       AND attempt_started_at < now() - ($1 || ' minutes')::interval`,
+    [String(Math.max(1, olderThanMinutes))]
+  );
+  return result.rowCount ?? 0;
+}
+
+/** Explicit operator action: the only path that makes an uncertain delivery sendable again. */
+export async function authorizeDeliveryRetry(
+  db: Db,
+  notificationId: string,
+  actorEmail: string
+): Promise<boolean> {
+  const result = await db.query(
+    `UPDATE notification_ledger
+       SET result = 'PENDING', attempts = 0, attempt_id = '', attempt_started_at = NULL,
+           attempt_owner = '', reconciled_at = now(), reconciled_by = $2, uncertain_at = NULL
+      WHERE notification_id = $1 AND result = 'DELIVERY_UNCERTAIN'`,
+    [notificationId, actorEmail]
+  );
+  return (result.rowCount ?? 0) > 0;
 }
 
 export async function outboxStats(db: Db) {

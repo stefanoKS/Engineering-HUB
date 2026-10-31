@@ -19,10 +19,19 @@ async function main(): Promise<void> {
     webRoot: process.env.WEB_ROOT ?? join(process.cwd(), 'apps', 'web', 'dist')
   });
 
+  let stopping = false;
   const shutdown = async (signal: string): Promise<void> => {
+    if (stopping) return;
+    stopping = true;
     app.log.info({ signal }, 'shutting down');
-    await app.close();
-    await db.close();
+    try {
+      await app.close();
+      await db.close();
+    } finally {
+      // A closed server can still be held by an idle keep-alive socket; exiting explicitly makes
+      // the documented production stop deterministic.
+      process.exit(0);
+    }
   };
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));

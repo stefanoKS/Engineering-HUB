@@ -3,12 +3,17 @@ import type pg from 'pg';
 import {
   Database,
   approveAssignment,
+  authorizeDeliveryRetry,
   beginIdempotency,
+  claimDeliveryAttempt,
   claimNext,
   collectPublishedSourceRows,
   commitSnapshot,
   completeIdempotency,
+  completeJob,
   enqueue,
+  failJob,
+  finishDeliveryAttempt,
   getPublicationMeta,
   getTask,
   getProject,
@@ -19,6 +24,10 @@ import {
   insertTask,
   listTaskSummaries,
   readActiveSnapshot,
+  reconcileInterruptedDeliveries,
+  releaseDeliveryAttempt,
+  renewLease,
+  reapExpiredLeases,
   schemaVersion,
   updateProject,
   updateTask,
@@ -284,5 +293,100 @@ describe('assignment approval invalidation', () => {
     const summaries = await listTaskSummaries(db, {}, 1, 10);
     expect(summaries.items[0]?.taskName).toBe('Task');
     expect((await getTask(db, 'T1'))?.assignmentVersion).toBe(2);
+  });
+});
+
+describe('lease ownership', () => {
+  it('refuses an outcome from a worker whose lease was reclaimed', async () => {
+    expectDatabase({ skip: () => undefined });
+    await enqueue(db, { kind: 'slow', payload: {}, dedupeKey: 'lease-ownership' });
+    const first = await claimNext(db, 'w1', 60);
+    expect(first?.lease_token).toBeTruthy();
+    await db.query("UPDATE outbox_jobs SET lease_expires_at = now() - interval '1 minute' WHERE job_id = $1", [
+      first?.job_id
+    ]);
+    const reaped = await reapExpiredLeases(db);
+    expect(reaped).toBe(1);
+    const second = await claimNext(db, 'w2', 60);
+    expect(second?.job_id).toBe(first?.job_id);
+    expect(second?.lease_token).not.toBe(first?.lease_token);
+
+    // The expired worker cannot complete or fail the job any more.
+    expect(await completeJob(db, first?.job_id ?? '', first?.lease_token ?? '')).toBe(false);
+    expect(await failJob(db, first?.job_id ?? '', first?.lease_token ?? '', 'late', { retryAt: new Date() })).toBe(
+      'LEASE_LOST'
+    );
+    expect(await completeJob(db, second?.job_id ?? '', second?.lease_token ?? '')).toBe(true);
+  });
+
+  it('renews only a lease the caller still owns', async () => {
+    expectDatabase({ skip: () => undefined });
+    await enqueue(db, { kind: 'slow', payload: {}, dedupeKey: 'lease-renew' });
+    const job = await claimNext(db, 'w1', 60);
+    expect(await renewLease(db, job?.job_id ?? '', job?.lease_token ?? '', 120)).toBe(true);
+    expect(await renewLease(db, job?.job_id ?? '', 'not-the-token', 120)).toBe(false);
+    await completeJob(db, job?.job_id ?? '', job?.lease_token ?? '');
+  });
+});
+
+describe('delivery attempts', () => {
+  async function ledgerRow(): Promise<string> {
+    await db.query(
+      `INSERT INTO notification_ledger (notification_id, notification_key, recipient, notification_type)
+       VALUES ('NTF-1', 'attempt-key', 'a@example.co.jp', 'ASSIGNMENT')`
+    );
+    return 'NTF-1';
+  }
+
+  it('claims exactly one attempt and only its owner can record the outcome', async () => {
+    expectDatabase({ skip: () => undefined });
+    const id = await ledgerRow();
+    const attempt = await claimDeliveryAttempt(db, id, 'worker-1');
+    expect(attempt).toBeTruthy();
+    expect(await claimDeliveryAttempt(db, id, 'worker-2')).toBeNull();
+    expect(await finishDeliveryAttempt(db, id, 'wrong-attempt', 'SENT')).toBe(false);
+    expect(await finishDeliveryAttempt(db, id, attempt ?? '', 'SENT')).toBe(true);
+    const row = await db.one<{ result: string; attempts: number; sent_at: string | null }>(
+      'SELECT result, attempts, sent_at FROM notification_ledger WHERE notification_id = $1',
+      [id]
+    );
+    expect(row?.result).toBe('SENT');
+    expect(row?.attempts).toBe(1);
+    expect(row?.sent_at).not.toBeNull();
+  });
+
+  it('reconciles an interrupted attempt to uncertain and requires explicit authorization', async () => {
+    expectDatabase({ skip: () => undefined });
+    const id = await ledgerRow();
+    const attempt = await claimDeliveryAttempt(db, id, 'worker-1');
+    expect(attempt).toBeTruthy();
+    // Simulate a worker that disappeared mid-send.
+    await db.query(
+      "UPDATE notification_ledger SET attempt_started_at = now() - interval '30 minutes' WHERE notification_id = $1",
+      [id]
+    );
+    expect(await reconcileInterruptedDeliveries(db)).toBe(1);
+    const uncertain = await db.one<{ result: string }>(
+      'SELECT result FROM notification_ledger WHERE notification_id = $1',
+      [id]
+    );
+    expect(uncertain?.result).toBe('DELIVERY_UNCERTAIN');
+    expect(await claimDeliveryAttempt(db, id, 'worker-2')).toBeNull();
+    expect(await authorizeDeliveryRetry(db, id, 'ops@example.co.jp')).toBe(true);
+    expect(await claimDeliveryAttempt(db, id, 'worker-2')).toBeTruthy();
+  });
+
+  it('releases a definitely-not-sent failure for a bounded retry', async () => {
+    expectDatabase({ skip: () => undefined });
+    const id = await ledgerRow();
+    const attempt = await claimDeliveryAttempt(db, id, 'worker-1');
+    expect(await releaseDeliveryAttempt(db, id, attempt ?? '', 'TRANSIENT')).toBe(true);
+    const row = await db.one<{ result: string; attempts: number }>(
+      'SELECT result, attempts FROM notification_ledger WHERE notification_id = $1',
+      [id]
+    );
+    expect(row?.result).toBe('PENDING');
+    // The attempt counter is not reset by a release: retries stay bounded.
+    expect(row?.attempts).toBe(1);
   });
 });

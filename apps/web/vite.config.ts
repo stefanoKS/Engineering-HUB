@@ -11,7 +11,9 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
-    sourcemap: true
+    // Source maps are a debugging aid, not a production artifact. Set VITE_SOURCEMAP=true for a
+    // deliberate diagnostic build in a non-public environment.
+    sourcemap: process.env.VITE_SOURCEMAP === 'true'
   },
   test: {
     environment: 'jsdom'

@@ -81,6 +81,7 @@ export type NotificationMode = z.infer<typeof NotificationMode>;
 
 export const NOTIFICATION_RESULTS = [
   'PENDING',
+  'SENDING',
   'SENT',
   'PREVIEW',
   'DELIVERY_UNCERTAIN',

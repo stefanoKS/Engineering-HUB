@@ -1,28 +1,37 @@
-﻿import { createHash } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { Database } from '@eh/db';
 import {
+  claimDeliveryAttempt,
   collectPublishedSourceRows,
   commitSnapshot,
   completeJob,
   enqueue,
+  finishDeliveryAttempt,
   getProject,
   getSettings,
   getPublicationMeta,
   insertAudit,
   listHolidays,
   recordPublicationFailure,
+  reconcileInterruptedDeliveries,
+  releaseDeliveryAttempt,
   writeSnapshotSlot,
   type OutboxJob
 } from '@eh/db';
 import {
   businessDate,
+  businessMinutes,
   canonicalJson,
   createCalendar,
+  diffDays,
   effectiveEmailMode,
   inactiveSlot,
   maxEmailsPerRun,
   notificationKey,
+  overdueFrequencyDays,
   recipientDomainAllowed,
+  reminderCatchupDays,
+  reminderOffsets,
   setting,
   settingFlag,
   SETTING_KEYS,
@@ -104,7 +113,7 @@ async function ledgerRecord(
   db: Database,
   input: {
     key: string;
-    taskId: string;
+    taskId: string | null;
     recipient: string;
     kind: string;
     assignmentVersion: number | null;
@@ -128,21 +137,104 @@ async function ledgerRecord(
     : { id: '', result: 'SKIPPED', attempts: 0 };
 }
 
-async function setLedger(
-  db: Database,
-  id: string,
-  result: string,
-  error = '',
-  sent = false
-): Promise<void> {
-  if (!id) return;
-  await db.query(
-    `UPDATE notification_ledger
-        SET result = $2, error_details = $3, attempts = attempts + 1,
-            sent_at = CASE WHEN $4 THEN now() ELSE sent_at END
-      WHERE notification_id = $1`,
-    [id, result, error.slice(0, 1000), sent]
-  );
+
+/** A logical notification is attempted at most this many times before an operator must look. */
+const MAX_DELIVERY_ATTEMPTS = 3;
+
+type DeliveryResult = 'SENT' | 'PREVIEW' | 'UNCERTAIN' | 'FAILED' | 'SKIPPED';
+
+/**
+ * Whether the outbox job should be retried. A definite transient failure is retried with bounded
+ * backoff; an exhausted, final or uncertain ledger row is not retried again.
+ */
+function deliveryNeedsRetry(result: DeliveryResult, ledgerResult: string): boolean {
+  if (result === 'FAILED') return true;
+  if (result === 'SKIPPED') return ledgerResult === 'PENDING' || ledgerResult === 'PREVIEW';
+  return false;
+}
+
+/**
+ * One recipient, one durable attempt.
+ *
+ * The attempt row is written before the provider is contacted. A transport failure that may have
+ * reached Gmail is recorded as uncertain and is never retried automatically; a definitely-not-sent
+ * transient failure is released for a bounded retry.
+ */
+async function deliver(
+  ctx: JobContext,
+  input: {
+    ledgerId: string;
+    dedupeKey: string;
+    result: string;
+    attempts: number;
+    to: string;
+    subject: string;
+    text: string;
+    mode: 'OFF' | 'PREVIEW' | 'LIVE';
+  }
+): Promise<DeliveryResult> {
+  if (!input.ledgerId) return 'SKIPPED';
+  if (input.result === 'SENT' || input.result === 'DELIVERY_UNCERTAIN' || input.result === 'SENDING') {
+    return 'SKIPPED';
+  }
+  if (input.mode === 'OFF') return 'SKIPPED';
+  if (input.mode === 'PREVIEW') {
+    await ctx.db.query(
+      `UPDATE notification_ledger SET result = 'PREVIEW', error_details = ''
+        WHERE notification_id = $1 AND result IN ('PENDING','FAILED','SKIPPED')`,
+      [input.ledgerId]
+    );
+    return 'PREVIEW';
+  }
+  if (input.attempts >= MAX_DELIVERY_ATTEMPTS) {
+    // Permanent from this worker's point of view: visible in the ledger, not retried again.
+    ctx.log('delivery attempts exhausted', { notificationId: input.ledgerId });
+    return 'SKIPPED';
+  }
+  const attemptId = await claimDeliveryAttempt(ctx.db, input.ledgerId, ctx.config.WORKER_ID);
+  if (!attemptId) return 'SKIPPED';
+  let outcome: DeliveryResult = 'FAILED';
+  let error = '';
+  let retryable = false;
+  try {
+    const sent = await ctx.mail.send({
+      to: input.to,
+      subject: input.subject,
+      text: input.text,
+      dedupeKey: input.dedupeKey
+    });
+    if (sent.status === 'SENT') outcome = 'SENT';
+    else if (sent.status === 'PREVIEW') outcome = 'PREVIEW';
+    else if (sent.status === 'UNCERTAIN') {
+      outcome = 'UNCERTAIN';
+      error = sent.error;
+    } else {
+      outcome = 'FAILED';
+      error = sent.error;
+      retryable = sent.retryable;
+    }
+  } catch (failure) {
+    // An exception after the call started is ambiguous, not a definite failure.
+    outcome = 'UNCERTAIN';
+    error = (failure as Error).message;
+  }
+  const recorded =
+    outcome === 'FAILED' && retryable
+      ? await releaseDeliveryAttempt(ctx.db, input.ledgerId, attemptId, error || 'SEND_FAILED')
+      : await finishDeliveryAttempt(
+          ctx.db,
+          input.ledgerId,
+          attemptId,
+          outcome === 'UNCERTAIN' ? 'DELIVERY_UNCERTAIN' : outcome,
+          error
+        );
+  if (!recorded) {
+    // The attempt was superseded (lease lost, reconciliation or another worker). The newer truth
+    // wins; never claim success for an outcome this worker could not persist.
+    ctx.log('delivery outcome not recorded', { notificationId: input.ledgerId });
+    return 'UNCERTAIN';
+  }
+  return outcome;
 }
 
 const MESSAGE: Record<NotificationKind, { subject: (task: TaskRow) => string; body: (task: TaskRow, extra: string) => string }> = {
@@ -154,6 +246,11 @@ const MESSAGE: Record<NotificationKind, { subject: (task: TaskRow) => string; bo
   DEADLINE_REMINDER: {
     subject: (task) => `【期限間近】${task.task_name}`,
     body: (task) => `タスク「${task.task_name}」の期限が近づいています。\n期限: ${task.due_date ?? '未設定'}`
+  },
+  DEADLINE_CHANGE: {
+    subject: (task) => `【期限変更】${task.task_name}`,
+    body: (task, extra) =>
+      `タスク「${task.task_name}」の期限が変更されました。\n新しい期限: ${task.due_date ?? '未設定'}${extra ? `\n${extra}` : ''}`
   },
   OVERDUE_REMINDER: {
     subject: (task) => `【期限超過】${task.task_name}`,
@@ -175,7 +272,14 @@ const MESSAGE: Record<NotificationKind, { subject: (task: TaskRow) => string; bo
 
 async function sendNotification(
   ctx: JobContext,
-  input: { kind: NotificationKind; taskId: string; assignmentVersion?: number | null; extra?: string }
+  input: {
+    kind: NotificationKind;
+    taskId: string;
+    assignmentVersion?: number | null;
+    extra?: string;
+    /** The reminder stage (or event identity) that makes this notification distinct. */
+    bucket?: string;
+  }
 ): Promise<JobOutcome> {
   const task = await loadTask(ctx.db, input.taskId);
   if (!task) return { state: 'DONE' };
@@ -189,10 +293,20 @@ async function sendNotification(
   if (input.kind === 'ASSIGNMENT') {
     if (!task.notification_enabled) return { state: 'DONE' };
     if (project.notificationEnabled === false) return { state: 'DONE' };
-    if (!settingFlag(settings, SETTING_KEYS.ASSIGNMENT_EMAIL_ENABLED, false)) return { state: 'DONE' };
+    // A reassignment is a different decision from the first assignment and has its own switch.
+    const gate =
+      task.assignment_version > 1
+        ? SETTING_KEYS.REASSIGNMENT_EMAIL_ENABLED
+        : SETTING_KEYS.ASSIGNMENT_EMAIL_ENABLED;
+    if (!settingFlag(settings, gate, false)) return { state: 'DONE' };
     // An assignment notification requires an approval of the current assignment version.
     if (!task.assignment_approved_at) return { state: 'DONE' };
     if (input.assignmentVersion && input.assignmentVersion !== task.assignment_version) return { state: 'DONE' };
+  }
+  if (input.kind === 'DEADLINE_CHANGE') {
+    if (!task.notification_enabled) return { state: 'DONE' };
+    if (project.notificationEnabled === false) return { state: 'DONE' };
+    if (!settingFlag(settings, SETTING_KEYS.DEADLINE_CHANGE_EMAIL_ENABLED, false)) return { state: 'DONE' };
   }
   if (input.kind === 'DEADLINE_REMINDER' || input.kind === 'OVERDUE_REMINDER') {
     if (!task.notification_enabled) return { state: 'DONE' };
@@ -216,14 +330,20 @@ async function sendNotification(
   if (!recipients.length) return { state: 'DONE' };
 
   const cap = maxEmailsPerRun(settings);
+  if (cap <= 0) {
+    ctx.log('per-run email cap is zero; nothing is sent', { taskId: task.task_id });
+    return { state: 'DONE' };
+  }
   const limited = recipients.slice(0, cap);
-  let retry = false;
+  const overflow = recipients.length - limited.length;
+  let retry = overflow > 0;
   for (const recipient of limited) {
     const key = notificationKey({
       kind: input.kind,
       taskId: task.task_id,
       recipient: recipient.email,
       dueDate: task.due_date,
+      bucket: input.bucket ?? null,
       assignmentVersion: input.kind === 'ASSIGNMENT' ? task.assignment_version : null
     });
     const ledger = await ledgerRecord(ctx.db, {
@@ -233,74 +353,122 @@ async function sendNotification(
       kind: input.kind,
       assignmentVersion: input.kind === 'ASSIGNMENT' ? task.assignment_version : null
     });
-    if (['SENT', 'PREVIEW', 'DELIVERY_UNCERTAIN'].includes(ledger.result)) continue;
-    if (ledger.attempts >= ctx.config.LEASE_SECONDS) continue;
-
-    if (mode === 'PREVIEW') {
-      await setLedger(ctx.db, ledger.id, 'PREVIEW');
-      continue;
-    }
     const message = MESSAGE[input.kind];
-    const outcome = await ctx.mail.send({
+    const result = await deliver(ctx, {
+      ledgerId: ledger.id,
+      dedupeKey: key,
+      result: ledger.result,
+      attempts: ledger.attempts,
       to: recipient.email,
       subject: message.subject(task),
       text: message.body(task, input.extra ?? ''),
-      dedupeKey: key
+      mode
     });
-    if (outcome.status === 'SENT') {
-      await setLedger(ctx.db, ledger.id, 'SENT', '', true);
-      continue;
+    if (deliveryNeedsRetry(result, ledger.result)) {
+      retry = true;
     }
-    if (outcome.status === 'PREVIEW') {
-      await setLedger(ctx.db, ledger.id, 'PREVIEW');
-      continue;
-    }
-    if (outcome.status === 'UNCERTAIN') {
-      // Never auto-retried: a duplicate mail is worse than an uncertain one.
-      await setLedger(ctx.db, ledger.id, 'DELIVERY_UNCERTAIN', outcome.error);
-      continue;
-    }
-    await setLedger(ctx.db, ledger.id, 'FAILED', outcome.error);
-    if (outcome.retryable) retry = true;
   }
-  return retry ? { state: 'RETRY', error: 'RETRYABLE_SEND_FAILURE' } : { state: 'DONE' };
+  if (overflow > 0) {
+    ctx.log('email cap reached; the remaining recipients are deferred', {
+      taskId: task.task_id,
+      sent: limited.length,
+      deferred: overflow
+    });
+  }
+  return retry ? { state: 'RETRY', error: 'DELIVERY_INCOMPLETE' } : { state: 'DONE' };
+}
+
+/** Asia/Tokyo minutes since midnight, used for the configured sending window. */
+
+function parseClock(value: string): number | null {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+/** A configured sending window is honoured; an unset window means "any time". */
+function withinExecutionWindow(settings: Record<string, string | undefined>): boolean {
+  const start = parseClock(setting(settings, SETTING_KEYS.EXECUTION_WINDOW_START, ''));
+  const end = parseClock(setting(settings, SETTING_KEYS.EXECUTION_WINDOW_END, ''));
+  if (start === null || end === null) return true;
+  const now = businessMinutes();
+  return start <= end ? now >= start && now < end : now >= start || now < end;
 }
 
 async function reminderScan(ctx: JobContext): Promise<JobOutcome> {
   const settings = await getSettings(ctx.db);
   if (effectiveEmailMode(settings) === 'OFF') return { state: 'DONE' };
   const today = businessDate();
-  const offsetText = setting(settings, SETTING_KEYS.REMINDER_OFFSETS, '7,2');
-  const firstOffset = Number(offsetText.split(',')[0]);
-  const daysBefore = Number.isFinite(firstOffset) && firstOffset > 0 ? firstOffset : 3;
+  const offsets = reminderOffsets(settings);
+  const catchup = reminderCatchupDays(settings);
+  const overdueEvery = overdueFrequencyDays(settings);
   const overdueEnabled = settingFlag(settings, SETTING_KEYS.OVERDUE_REMINDER_ENABLED, false);
   const holidays = await listHolidays(ctx.db);
   const calendar = createCalendar(holidays);
-  if (!calendar.isWorkingDay(today) && settingFlag(settings, SETTING_KEYS.WEEKDAY_ONLY_SENDING, true)) {
+  if (settingFlag(settings, SETTING_KEYS.WEEKDAY_ONLY_SENDING, true) && !calendar.isWorkingDay(today)) {
     return { state: 'DONE' };
   }
+  if (!withinExecutionWindow(settings)) {
+    ctx.log('outside the configured sending window');
+    return { state: 'DONE' };
+  }
+  const horizon = offsets[0] ?? 0;
   const candidates = await ctx.db.many<{ task_id: string; due_date: string | null }>(
     `SELECT task_id, due_date FROM tasks
       WHERE deleted_at IS NULL AND notification_enabled
         AND status IN ('Not Started','Assigned','In Progress','Blocked')
         AND due_date IS NOT NULL
         AND due_date <= $1::date + $2::int
-      ORDER BY due_date LIMIT 500`,
-    [today, daysBefore]
+      ORDER BY due_date LIMIT 1000`,
+    [today, horizon]
   );
   let enqueued = 0;
   for (const candidate of candidates) {
     const due = candidate.due_date ?? '';
-    const kind: NotificationKind = due < today ? 'OVERDUE_REMINDER' : 'DEADLINE_REMINDER';
-    if (kind === 'OVERDUE_REMINDER' && !overdueEnabled) continue;
+    if (!due) continue;
+    const daysUntil = diffDays(today, due);
+    if (daysUntil >= 0) {
+      // Every configured stage is eligible; a stage whose exact day was missed by up to
+      // REMINDER_CATCHUP_DAYS is sent once, after which its dedupe key keeps it single.
+      for (const offset of offsets) {
+        const missedBy = offset - daysUntil;
+        if (missedBy < 0 || missedBy > catchup) continue;
+        await enqueue(ctx.db, {
+          kind: 'notification.task',
+          dedupeKey: `reminder:${candidate.task_id}:${due}:${offset}`,
+          payload: {
+            taskId: candidate.task_id,
+            notificationKind: 'DEADLINE_REMINDER',
+            bucket: `offset:${offset}`,
+            dueDate: due
+          }
+        });
+        enqueued += 1;
+        break;
+      }
+      continue;
+    }
+    if (!overdueEnabled) continue;
+    const daysOverdue = -daysUntil;
+    // An overdue reminder repeats at the configured interval, and a missed interval day is
+    // caught up within the same bounded allowance.
+    if (daysOverdue % overdueEvery > catchup) continue;
     await enqueue(ctx.db, {
       kind: 'notification.task',
-      dedupeKey: `reminder:${candidate.task_id}:${today}:${kind}`,
-      payload: { taskId: candidate.task_id, notificationKind: kind }
+      dedupeKey: `overdue:${candidate.task_id}:${due}:${daysOverdue}`,
+      payload: {
+        taskId: candidate.task_id,
+        notificationKind: 'OVERDUE_REMINDER',
+        bucket: `overdue:${daysOverdue}`,
+        dueDate: due
+      }
     });
     enqueued += 1;
   }
-  ctx.log('reminder scan complete', { enqueued });
+  ctx.log('reminder scan complete', { enqueued, stages: offsets.length, candidates: candidates.length });
   return { state: 'DONE' };
 }
 
@@ -540,8 +708,83 @@ async function exportSheets(ctx: JobContext): Promise<JobOutcome> {
 
 async function maintenance(ctx: JobContext): Promise<JobOutcome> {
   const purged = await ctx.db.query("DELETE FROM sessions WHERE expires_at < now() - interval '7 days'");
-  ctx.log('session purge', { purged: purged.rowCount });
+  const reconciled = await reconcileInterruptedDeliveries(ctx.db);
+  ctx.log('session purge', { purged: purged.rowCount, reconciledDeliveries: reconciled });
   return { state: 'DONE' };
+}
+
+/** The weekly manager report: one message per recipient per business week. */
+async function weeklyReport(ctx: JobContext): Promise<JobOutcome> {
+  const settings = await getSettings(ctx.db);
+  const mode = effectiveEmailMode(settings);
+  if (mode === 'OFF') return { state: 'DONE' };
+  if (!settingFlag(settings, SETTING_KEYS.WEEKLY_MANAGER_REPORT_ENABLED, false)) {
+    return { state: 'DONE' };
+  }
+  const today = businessDate();
+  const counts = await ctx.db.one<{
+    open: string;
+    overdue: string;
+    upcoming: string;
+    completed_week: string;
+    pending_requests: string;
+  }>(
+    `SELECT
+       (SELECT count(*) FROM tasks t WHERE t.deleted_at IS NULL
+          AND t.status NOT IN ('Done','Cancelled')
+          AND NOT EXISTS (SELECT 1 FROM tasks c WHERE c.parent_task_id = t.task_id AND c.deleted_at IS NULL))::text AS open,
+       (SELECT count(*) FROM tasks t WHERE t.deleted_at IS NULL
+          AND t.status NOT IN ('Done','Cancelled') AND t.due_date < $1::date)::text AS overdue,
+       (SELECT count(*) FROM tasks t WHERE t.deleted_at IS NULL
+          AND t.status NOT IN ('Done','Cancelled') AND t.due_date >= $1::date
+          AND t.due_date <= $1::date + 7)::text AS upcoming,
+       (SELECT count(*) FROM tasks WHERE deleted_at IS NULL AND status = 'Done'
+          AND completed_at >= date_trunc('week', now()))::text AS completed_week,
+       (SELECT count(*) FROM task_requests WHERE status = 'PENDING')::text AS pending_requests`,
+    [today]
+  );
+  const text = [
+    `週次レポート (${today})`,
+    `未完了の作業: ${counts?.open ?? '0'}`,
+    `期限超過: ${counts?.overdue ?? '0'}`,
+    `今後7日の期限: ${counts?.upcoming ?? '0'}`,
+    `今週の完了: ${counts?.completed_week ?? '0'}`,
+    `未処理の申請: ${counts?.pending_requests ?? '0'}`
+  ].join('\n');
+  const configured = setting(settings, SETTING_KEYS.MANAGEMENT_REPORT_RECIPIENTS)
+    .split(/[,;\s]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const managers = configured.length
+    ? configured
+    : (await ctx.db.many<{ email: string }>(
+        "SELECT email FROM members WHERE active AND role IN ('ADMIN','MANAGER') ORDER BY email"
+      )).map((row) => row.email);
+  const cap = maxEmailsPerRun(settings);
+  const recipients = managers.filter((email) => recipientDomainAllowed(email, settings)).slice(0, cap);
+  let retry = managers.length > recipients.length && cap > 0;
+  for (const email of recipients) {
+    const key = notificationKey({ kind: 'REPORT', taskId: '', recipient: email, bucket: `week:${today}` });
+    const ledger = await ledgerRecord(ctx.db, {
+      key,
+      taskId: null,
+      recipient: email,
+      kind: 'REPORT',
+      assignmentVersion: null
+    });
+    const result = await deliver(ctx, {
+      ledgerId: ledger.id,
+      dedupeKey: key,
+      result: ledger.result,
+      attempts: ledger.attempts,
+      to: email,
+      subject: `【週次レポート】設計・開発課 管理 (${today})`,
+      text,
+      mode
+    });
+    if (deliveryNeedsRetry(result, ledger.result)) retry = true;
+  }
+  return retry ? { state: 'RETRY', error: 'REPORT_INCOMPLETE' } : { state: 'DONE' };
 }
 
 export async function handleJob(ctx: JobContext, job: OutboxJob): Promise<JobOutcome> {
@@ -552,10 +795,12 @@ export async function handleJob(ctx: JobContext, job: OutboxJob): Promise<JobOut
     case 'notification.task':
       return sendNotification(ctx, {
         kind: (payload.notificationKind as NotificationKind) ?? 'DEADLINE_REMINDER',
-        taskId: String(payload.taskId)
+        taskId: String(payload.taskId),
+        bucket: payload.bucket === undefined ? undefined : String(payload.bucket)
       });
     case 'notification.request': {
       const taskId = String(payload.taskId);
+      const requestId = String(payload.requestId ?? '');
       const managers = await ctx.db.many<{ email: string }>(
         "SELECT email FROM members WHERE active AND role IN ('ADMIN','MANAGER') ORDER BY email"
       );
@@ -563,9 +808,25 @@ export async function handleJob(ctx: JobContext, job: OutboxJob): Promise<JobOut
       if (!task || !managers.length) return { state: 'DONE' };
       const settings = await getSettings(ctx.db);
       const mode = effectiveEmailMode(settings);
+      // The switch matches the request type: a completion report and a deadline request are
+      // different notifications that a manager enables independently.
+      const requestType = String(payload.requestType ?? '');
+      const gate =
+        requestType === 'COMPLETION_REPORT'
+          ? SETTING_KEYS.COMPLETION_REPORT_EMAIL_ENABLED
+          : SETTING_KEYS.DEADLINE_REQUEST_EMAIL_ENABLED;
+      if (!settingFlag(settings, gate, false)) {
+        return { state: 'DONE' };
+      }
       for (const manager of managers) {
         if (!recipientDomainAllowed(manager.email, settings)) continue;
-        const key = notificationKey({ kind: 'REQUEST_DECISION', taskId, recipient: manager.email, bucket: 'request' });
+        // One request is one notification: two requests on the same task never share an identity.
+        const key = notificationKey({
+          kind: 'REQUEST_DECISION',
+          taskId,
+          recipient: manager.email,
+          bucket: `request:${requestId || 'unknown'}`
+        });
         const ledger = await ledgerRecord(ctx.db, {
           key,
           taskId,
@@ -573,22 +834,16 @@ export async function handleJob(ctx: JobContext, job: OutboxJob): Promise<JobOut
           kind: 'REQUEST_DECISION',
           assignmentVersion: null
         });
-        if (['SENT', 'PREVIEW', 'DELIVERY_UNCERTAIN'].includes(ledger.result)) continue;
-        if (mode === 'OFF') continue;
-        if (mode === 'PREVIEW') {
-          await setLedger(ctx.db, ledger.id, 'PREVIEW');
-          continue;
-        }
-        const outcome = await ctx.mail.send({
+        await deliver(ctx, {
+          ledgerId: ledger.id,
+          dedupeKey: key,
+          result: ledger.result,
+          attempts: ledger.attempts,
           to: manager.email,
           subject: `【申請】${task.task_name}`,
           text: `タスク「${task.task_name}」に新しい申請が届きました。申請一覧を確認してください。`,
-          dedupeKey: key
+          mode
         });
-        if (outcome.status === 'SENT') await setLedger(ctx.db, ledger.id, 'SENT', '', true);
-        else if (outcome.status === 'UNCERTAIN') await setLedger(ctx.db, ledger.id, 'DELIVERY_UNCERTAIN', outcome.error);
-        else if (outcome.status === 'PREVIEW') await setLedger(ctx.db, ledger.id, 'PREVIEW');
-        else await setLedger(ctx.db, ledger.id, 'FAILED', outcome.error);
       }
       return { state: 'DONE' };
     }
@@ -596,7 +851,8 @@ export async function handleJob(ctx: JobContext, job: OutboxJob): Promise<JobOut
       return sendNotification(ctx, {
         kind: 'REQUEST_DECISION',
         taskId: String(payload.taskId),
-        extra: String(payload.decision ?? '')
+        extra: String(payload.decision ?? ''),
+        bucket: `decision:${String(payload.requestId ?? '')}`
       });
     case 'notification.reminder-scan':
       return reminderScan(ctx);
@@ -608,6 +864,8 @@ export async function handleJob(ctx: JobContext, job: OutboxJob): Promise<JobOut
       return publish(ctx);
     case 'export.sheets':
       return exportSheets(ctx);
+    case 'report.weekly':
+      return weeklyReport(ctx);
     case 'maintenance.sessions':
       return maintenance(ctx);
     default:

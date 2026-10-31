@@ -5,12 +5,23 @@
  *   tsx src/cli.ts backup-now        create and verify one backup (upload when configured)
  *   tsx src/cli.ts verify-restore    prove a logical archive restores into a scratch database
  *   tsx src/cli.ts run-once          drain the outbox once and exit (cron-friendly)
+ *   tsx src/cli.ts authorize-delivery-retry <notificationId> <actorEmail>
+ *                                    the only way an uncertain delivery becomes sendable again
  *
  * Nothing here activates automation, sends mail or deploys anything.
  */
 import { createHash } from 'node:crypto';
 import pg from 'pg';
-import { createPool, Database, claimNext, completeJob, failJob, runMigrations, toDatabaseConfig } from '@eh/db';
+import {
+  authorizeDeliveryRetry,
+  claimNext,
+  completeJob,
+  createPool,
+  Database,
+  failJob,
+  runMigrations,
+  toDatabaseConfig
+} from '@eh/db';
 import { createBackupArtifact, createLogicalBackup, encrypt, parseEncryptionKey, restoreLogicalBackup } from './backup';
 import { loadWorkerConfig } from './config';
 import { handleJob } from './jobs';
@@ -154,12 +165,14 @@ async function runOnce(config: ReturnType<typeof loadWorkerConfig>, db: Database
     const job = await claimNext(db, config.WORKER_ID, config.LEASE_SECONDS);
     if (!job) break;
     const outcome = await handleJob(context, job);
-    if (outcome.state === 'DONE') await completeJob(db, job.job_id);
-    else if (outcome.state === 'RETRY')
-      await failJob(db, job.job_id, outcome.error ?? 'RETRY', {
+    if (outcome.state === 'DONE') {
+      const owned = await completeJob(db, job.job_id, job.lease_token);
+      if (!owned) process.stdout.write(`${job.kind} -> LEASE_LOST\n`);
+    } else if (outcome.state === 'RETRY')
+      await failJob(db, job.job_id, job.lease_token, outcome.error ?? 'RETRY', {
         retryAt: new Date(Date.now() + retryDelaySeconds(job.attempts) * 1000)
       });
-    else await failJob(db, job.job_id, outcome.error ?? 'FAILED', { retryAt: null });
+    else await failJob(db, job.job_id, job.lease_token, outcome.error ?? 'FAILED', { retryAt: null });
     process.stdout.write(`${job.kind} -> ${outcome.state}\n`);
   }
 }
@@ -173,7 +186,16 @@ async function main(): Promise<void> {
     if (command === 'backup-now') await backupNow(config, db);
     else if (command === 'verify-restore') await verifyRestore(config, db);
     else if (command === 'run-once') await runOnce(config, db);
-    else throw new Error(`Unknown command: ${command || '(none)'}`);
+    else if (command === 'authorize-delivery-retry') {
+      const notificationId = process.argv[3] ?? '';
+      const actor = process.argv[4] ?? '';
+      if (!notificationId || !actor) {
+        throw new Error('Usage: authorize-delivery-retry <notificationId> <actorEmail>');
+      }
+      const authorized = await authorizeDeliveryRetry(db, notificationId, actor);
+      process.stdout.write(`${authorized ? 'AUTHORIZED' : 'NOT_UNCERTAIN'} ${notificationId}\n`);
+      if (!authorized) process.exitCode = 1;
+    } else throw new Error(`Unknown command: ${command || '(none)'}`);
   } finally {
     await db.close();
   }
