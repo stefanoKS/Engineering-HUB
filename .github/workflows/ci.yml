@@ -42,6 +42,13 @@ jobs:
         run: npm run smoke:prod
         env:
           TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/eh_test
+      - name: Container image build
+        run: |
+          cp deploy/.env.example deploy/.env
+          docker compose --project-directory deploy build api worker
+        env:
+          POSTGRES_PASSWORD: example
+          APP_DOMAIN: engineering-hub.example.co.jp
       - name: Container configuration validation
         run: |
           cp deploy/.env.example deploy/.env
