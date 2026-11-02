@@ -8,9 +8,9 @@
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import pg from 'pg';
-import { Database } from '@eh/db';
+import { Database, Transaction } from '@eh/db';
 import {
   createBackupArtifact,
   createLogicalBackup,
@@ -44,10 +44,32 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await pool.end();
 });
 
 describe('backup container', () => {
+  it('uses one snapshot while another connection commits a project and task mid-backup', async () => {
+    const original = Transaction.prototype.one;
+    let wrote = false;
+    vi.spyOn(Transaction.prototype, 'one').mockImplementation(async function (this: Transaction, sql, params) {
+      const result = await original.call(this, sql, params);
+      if (sql.includes('FROM projects t') && !wrote) {
+        wrote = true;
+        await db.transaction(async writer => {
+          await writer.query("INSERT INTO projects (project_id, project_name) VALUES ('PRJ-CONCURRENT', 'Concurrent')");
+          await writer.query("INSERT INTO tasks (task_id, project_id, task_name) VALUES ('TSK-CONCURRENT', 'PRJ-CONCURRENT', 'Concurrent')");
+        });
+      }
+      return result;
+    });
+    const { backup } = await createLogicalBackup(db);
+    expect(wrote).toBe(true);
+    expect(backup.tables.projects).toHaveLength(1);
+    expect(backup.tables.tasks).toHaveLength(1);
+    expect(await db.one("SELECT task_id FROM tasks WHERE task_id = 'TSK-CONCURRENT'")).toBeTruthy();
+  });
+
   it('encrypts with AES-256-GCM and refuses a wrong key', () => {
     const plain = Buffer.from('engineering-hub');
     const container = encrypt(plain, KEY);
@@ -81,12 +103,12 @@ describe('backup container', () => {
     await expect(restoreLogicalBackup(db, archive)).rejects.toThrow(/not empty/);
   });
 
-  it('produces a custom-format dump only when the client tools exist', async () => {
+  it('produces a custom-format dump only when the client tools exist', async (context) => {
     const binDir = pgBinDir();
-    const pgDump = binDir ? join(binDir, 'pg_dump.exe') : '';
+    const pgDump = binDir ? join(binDir, process.platform === 'win32' ? 'pg_dump.exe' : 'pg_dump') : '';
     if (!pgDump || !existsSync(pgDump)) {
       // Reported as not run: the embedded server ships without client tools.
-      expect(true).toBe(true);
+      context.skip();
       return;
     }
     const artifact = await createBackupArtifact({

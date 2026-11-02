@@ -195,13 +195,14 @@ export function Field({
   );
 }
 
-export function SaveState({ state }: { state: 'idle' | 'saving' | 'saved' | 'failed' | 'conflict' }): JSX.Element {
+export function SaveState({ state }: { state: 'idle' | 'saving' | 'saved' | 'failed' | 'conflict' | 'unknown' }): JSX.Element {
   const { t } = useI18n();
   if (state === 'idle') return <span />;
   const text = {
     saving: t('state.saving'),
     saved: t('state.saved'),
     failed: t('state.failed'),
+    unknown: t('state.unknown'),
     conflict: t('state.conflict'),
     idle: ''
   }[state];

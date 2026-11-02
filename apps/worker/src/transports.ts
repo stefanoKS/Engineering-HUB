@@ -5,6 +5,7 @@
  * double. Nothing here runs during automated tests, and a worker without credentials reports a
  * configuration failure instead of pretending a message was delivered.
  */
+import { createHash } from 'node:crypto';
 import { JWT } from 'google-auth-library';
 
 export type MailMessage = {
@@ -26,19 +27,23 @@ export interface MailTransport {
   send(message: MailMessage): Promise<SendOutcome>;
 }
 
+export type CalendarEventInput = {
+  eventId: string | null;
+  identityKey: string;
+  summary: string;
+  description: string;
+  startDate: string;
+  /** Inclusive business end date; the transport converts it to Calendar's exclusive date. */
+  endDate: string;
+};
 export interface CalendarTransport {
   configured: boolean;
-  upsertEvent(input: {
-    eventId: string | null;
-    summary: string;
-    description: string;
-    startDate: string;
-    endDate: string;
-  }): Promise<{ eventId: string }>;
+  upsertEvent(input: CalendarEventInput): Promise<{ eventId: string }>;
 }
 
 export interface DriveTransport {
   configured: boolean;
+  findBackup?: (folderId: string, backupId: string) => Promise<{fileId:string;webViewLink:string}|null>;
   upload(input: {
     name: string;
     content: Buffer;
@@ -149,46 +154,64 @@ export class GoogleCalendarTransport implements CalendarTransport {
     this.configured = !!this.auth && !!this.calendarId;
   }
 
-  async upsertEvent(input: {
-    eventId: string | null;
-    summary: string;
-    description: string;
-    startDate: string;
-    endDate: string;
-  }): Promise<{ eventId: string }> {
+  async upsertEvent(input: CalendarEventInput): Promise<{ eventId: string }> {
     if (!this.auth || !this.calendarId) throw new Error('CALENDAR_NOT_CONFIGURED');
     const accessToken = await this.auth.token(['https://www.googleapis.com/auth/calendar.events']);
-    const body = {
-      summary: input.summary,
-      description: input.description,
-      start: { date: input.startDate },
-      end: { date: input.endDate }
-    };
-    const base = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(this.calendarId)}/events`;
-    const url = input.eventId ? `${base}/${encodeURIComponent(input.eventId)}` : base;
-    const response = await fetch(url, {
-      method: input.eventId ? 'PATCH' : 'POST',
-      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-    if (!response.ok) throw new Error(`Calendar ${response.status}`);
-    const result = (await response.json()) as { id: string };
-    return { eventId: result.id };
+    const headers = { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' };
+    const base = 'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(this.calendarId) + '/events';
+    const id = input.eventId ?? 'eh' + createHash('sha256').update(this.calendarId + ':' + input.identityKey).digest('hex');
+    const url = base + '/' + encodeURIComponent(id);
+    const end = new Date(input.endDate + 'T00:00:00Z');
+    end.setUTCDate(end.getUTCDate() + 1);
+    const body = { summary: input.summary, description: input.description,
+      start: { date: input.startDate }, end: { date: end.toISOString().slice(0, 10) },
+      extendedProperties: { private: { engineeringHubIdentity: input.identityKey } } };
+    const get = () => fetch(url, { headers, signal: AbortSignal.timeout(15000) });
+    let existing = await get();
+    if (existing.status === 404 && !input.eventId) {
+      const created = await fetch(base, { method: 'POST', headers, body: JSON.stringify({ ...body, id }), signal: AbortSignal.timeout(15000) });
+      if (created.ok) return { eventId: id };
+      if (created.status !== 409) throw new Error('Calendar create ' + created.status);
+      // The previous insertion may have succeeded before its response was lost.
+      existing = await get();
+    }
+    if (!existing.ok) throw new Error('CALENDAR_LINK_UNAVAILABLE:' + existing.status);
+    const current = await existing.json() as { etag?: string; status?: string; extendedProperties?: { private?: Record<string, string> } };
+    if (current.extendedProperties?.private?.engineeringHubIdentity !== input.identityKey || current.status === 'cancelled') {
+      throw new Error('CALENDAR_OWNERSHIP_REFUSED');
+    }
+    if (!current.etag) throw new Error('CALENDAR_ETAG_MISSING');
+    const patched = await fetch(url, { method: 'PATCH', headers: { ...headers, 'If-Match': current.etag }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
+    if (!patched.ok) throw new Error('Calendar update ' + patched.status);
+    return { eventId: id };
   }
+
 }
 
 export class GoogleDriveTransport implements DriveTransport {
   configured: boolean;
   private readonly auth: GoogleAuth | null;
 
-  constructor(input: { credentialsJson?: string }) {
+  private readonly delegatedUser: string | undefined;
+  constructor(input: { credentialsJson?: string; delegatedUser?: string }) {
+    this.delegatedUser = input.delegatedUser;
     this.auth = input.credentialsJson ? new GoogleAuth(input.credentialsJson) : null;
     this.configured = !!this.auth;
   }
 
   private async token(): Promise<string> {
     if (!this.auth) throw new Error('DRIVE_NOT_CONFIGURED');
-    return this.auth.token(['https://www.googleapis.com/auth/drive.file']);
+    return this.auth.token(['https://www.googleapis.com/auth/drive.file'], this.delegatedUser);
+  }
+
+  async findBackup(folderId: string, backupId: string): Promise<{fileId:string;webViewLink:string}|null> {
+    if(!/^[A-Za-z0-9_-]+$/.test(folderId)||!/^BAK-[a-f0-9]+$/.test(backupId))throw new Error('Invalid backup destination or identity');
+    const token=await this.token();
+    const q=encodeURIComponent("'"+folderId+"' in parents and trashed=false and appProperties has { key='backupId' and value='"+backupId+"' }");
+    const response=await fetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,webViewLink)&supportsAllDrives=true&includeItemsFromAllDrives=true',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(30000)});
+    if(!response.ok)throw new Error('Drive backup lookup '+response.status);
+    const result=await response.json() as {files?:{id:string;webViewLink?:string}[]};
+    const file=result.files?.[0];return file?{fileId:file.id,webViewLink:file.webViewLink??''}:null;
   }
 
   async upload(input: {
@@ -213,9 +236,10 @@ export class GoogleDriveTransport implements DriveTransport {
       Buffer.from(`\r\n--${boundary}--`)
     ]);
     const response = await fetch(
-      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink',
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink',
       {
         method: 'POST',
+        signal: AbortSignal.timeout(120000),
         headers: {
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': `multipart/related; boundary=${boundary}`
@@ -233,7 +257,7 @@ export class GoogleDriveTransport implements DriveTransport {
     const cutoff = new Date(Date.now() - olderThanDays * 86_400_000).toISOString();
     const query = encodeURIComponent(`'${folderId}' in parents and createdTime < '${cutoff}' and trashed = false`);
     const response = await fetch(
-      `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)&pageSize=100`,
+      `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)&pageSize=100&supportsAllDrives=true&includeItemsFromAllDrives=true`,
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
     if (!response.ok) throw new Error(`Drive list ${response.status}`);
@@ -243,7 +267,7 @@ export class GoogleDriveTransport implements DriveTransport {
 
   async remove(fileId: string): Promise<void> {
     const accessToken = await this.token();
-    const response = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`, {
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?supportsAllDrives=true`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${accessToken}` }
     });

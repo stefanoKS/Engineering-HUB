@@ -124,6 +124,48 @@ function assignmentJob() {
 }
 
 describe('notification delivery', () => {
+  it('weekly report counts exclude archived work and respect recipient caps across retries', async () => {
+    await seedTask();
+    await db.query("UPDATE projects SET status = 'Archived', archived_at = now() WHERE project_id = 'PRJ-1'");
+    await saveSettings(db, { EMAIL_MODE: 'LIVE', WEEKLY_MANAGER_REPORT_ENABLED: 'true', MAX_EMAILS_PER_RUN: '1', MANAGEMENT_REPORT_RECIPIENTS: 'manager@example.co.jp,other@example.co.jp' }, 'test');
+    const job = { ...assignmentJob(), kind: 'report.weekly', payload: {} };
+    const ctx = context();
+    expect((await handleJob(ctx, job)).state).toBe('RETRY');
+    expect(ctx.mail.sent[0]?.text).toContain('未完了の作業: 0');
+    expect((await handleJob(ctx, job)).state).toBe('DONE');
+    expect(ctx.mail.sent).toHaveLength(2);
+    expect(new Set(ctx.mail.sent.map(message => message.to)).size).toBe(2);
+  });
+
+  it('projects milestones into Calendar once and respects the default-off switch', async () => {
+    await seedTask();
+    await db.query("INSERT INTO milestones (milestone_id, project_id, milestone_name, target_date) VALUES ('MIL-1', 'PRJ-1', 'Review', '2026-11-05')");
+    const ctx = context();
+    const calls: string[] = [];
+    ctx.calendar = { configured: true, upsertEvent: async input => { calls.push(input.identityKey); return { eventId: 'owned-event' }; } };
+    const job = { ...assignmentJob(), kind: 'calendar.milestone', payload: { entityId: 'MIL-1' } };
+    await handleJob(ctx, job);
+    expect(calls).toHaveLength(0);
+    await saveSettings(db, { CALENDAR_SYNC_ENABLED: 'true' }, 'test');
+    await handleJob(ctx, job); await handleJob(ctx, job);
+    expect(calls).toEqual(['DEVELOPMENT:MILESTONE:MIL-1']);
+  });
+
+  it('pending reminders have their own switch and stop after a request is decided', async () => {
+    await seedTask();
+    await db.query("INSERT INTO task_requests (request_id, task_id, request_type) VALUES ('REQ-P', 'TSK-1', 'COMPLETION_REPORT')");
+    await saveSettings(db, { EMAIL_MODE: 'LIVE', PENDING_REQUEST_REMINDER_ENABLED: 'true', COMPLETION_REPORT_EMAIL_ENABLED: 'false' }, 'test');
+    const job = { ...assignmentJob(), kind: 'notification.request', payload: { taskId: 'TSK-1', requestId: 'REQ-P', requestType: 'COMPLETION_REPORT', pendingReminder: true, bucket: '2026-11-01' } };
+    const ctx = context();
+    await handleJob(ctx, job);
+    expect(ctx.mail.sent).toHaveLength(1);
+    await handleJob(ctx, job);
+    expect(ctx.mail.sent).toHaveLength(1);
+    await db.query("UPDATE task_requests SET status = 'REJECTED' WHERE request_id = 'REQ-P'");
+    await handleJob(ctx, { ...job, payload: { ...job.payload, bucket: '2026-11-02' } });
+    expect(ctx.mail.sent).toHaveLength(1);
+  });
+
   it('lets a later live send proceed after a preview', async () => {
     await seedTask();
     const preview = context();
@@ -162,6 +204,10 @@ describe('notification delivery', () => {
     expect(ctx.mail.sent).toHaveLength(1);
     expect(outcome.state).toBe('RETRY');
     expect(outcome.error).toBe('DELIVERY_INCOMPLETE');
+    const resumed = context();
+    expect((await handleJob(resumed, assignmentJob())).state).toBe('DONE');
+    expect(resumed.mail.sent).toHaveLength(1);
+    expect(resumed.mail.sent[0]?.to).not.toBe(ctx.mail.sent[0]?.to);
   });
 
   it('records a definite transient failure for a bounded retry', async () => {

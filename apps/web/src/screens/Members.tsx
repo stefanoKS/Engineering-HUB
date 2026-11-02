@@ -139,7 +139,7 @@ function MemberForm({
           </label>
           <label className="field">
             <span className="field-label">{t('members.email')}</span>
-            <TextInput type="email" value={email} onChange={setEmail} required />
+            <TextInput type="email" value={email} onChange={setEmail} required={!member} />
           </label>
           <div className="field-row">
             <label className="field">
@@ -181,13 +181,13 @@ function MemberForm({
             <button
               type="button"
               className="button"
-              disabled={!name || !email || save.state === 'saving'}
+              disabled={!name || (!member && !email) || save.state === 'saving'}
               onClick={() =>
                 void save.run(
                   async () => {
                     const payload: Record<string, unknown> = {
                       name,
-                      email,
+                      ...(email ? {email} : {}),
                       department,
                       position,
                       weeklyCapacityHours: capacity === '' ? null : Number(capacity)

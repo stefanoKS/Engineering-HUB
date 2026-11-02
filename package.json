@@ -38,10 +38,14 @@
     "sync:shared": "node scripts/sync-i18n.js && node scripts/sync-project-colors.js",
     "preview:dashboard": "node scripts/dashboard-preview.js",
     "clasp": "clasp",
-    "preview:manager-web": "node scripts/manager-web-preview.js"
+    "preview:manager-web": "node scripts/manager-web-preview.js",
+    "test:browser": "node scripts/production-smoke.mjs --browser",
+    "test:lan": "node scripts/production-smoke.mjs --browser --local",
+    "start:lan": "node scripts/lan-host.mjs"
   },
   "devDependencies": {
     "@google/clasp": "3.4.1",
+    "@playwright/test": "1.64.1",
     "@types/node": "26.6.6",
     "eslint": "10.14.0",
     "typescript": "5.9.3",

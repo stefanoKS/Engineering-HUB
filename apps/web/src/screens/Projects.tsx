@@ -1,3 +1,4 @@
+import { useEditorState } from '../state/editor';
 /** Project list, create/edit form, archive and the guarded permanent removal. */
 import { useState } from 'react';
 import type { Actor, Project, ProjectSummary, Reference } from '@eh/contracts';
@@ -23,7 +24,7 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
   const [status, setStatus] = useState('');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
-  const [editing, setEditing] = useState<{ mode: 'create' } | { mode: 'edit'; project: Project } | null>(null);
+  const [editing, setEditing, loadEditor, editorError, editorLoading] = useEditorState<{ mode: 'create' } | { mode: 'edit'; project: Project } | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<ProjectRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ summary: ProjectRow; confirmation: string; blockers: string[] } | null>(null);
 
@@ -35,8 +36,10 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
   const canManage = actor.role === 'ADMIN' || actor.role === 'MANAGER';
 
   async function openEditor(summary: ProjectRow): Promise<void> {
-    const detail = await api.get<{ record: Project }>(`/api/manager/projects/${summary.projectId}`);
-    setEditing({ mode: 'edit', project: detail.record });
+    await loadEditor(async () => {
+      const detail = await api.get<{ record: Project }>(`/api/manager/projects/${summary.projectId}`);
+      return { mode: 'edit', project: detail.record };
+    });
   }
 
   async function startDelete(summary: ProjectRow): Promise<void> {
@@ -91,6 +94,8 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
         </div>
       </div>
 
+      {editorLoading && <p role="status">{t('state.loading')}</p>}
+      <ErrorBox error={editorError} />
       <ErrorBox error={list.error} onRetry={() => list.refresh()} />
 
       {!list.data ? (
@@ -225,7 +230,7 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
   );
 }
 
-function ProjectForm({
+export function ProjectForm({
   mode,
   project,
   references,
@@ -336,7 +341,7 @@ function ProjectForm({
             </label>
           </div>
           <button type="button" className="link-button" onClick={() => void checkPlan()}>
-            {t('nav.status')}: {t('common.retry')}
+            {t('plan.check')}
           </button>
           {planWarnings.length ? (
             <div className="banner warning">

@@ -6,7 +6,7 @@ import { defineConfig } from 'tsup';
  * runtime image does not contain.
  */
 export default defineConfig({
-  entry: ['src/main.ts', 'src/migrate.ts'],
+  entry: ['src/main.ts', 'src/migrate.ts', 'src/bootstrap-local.ts'],
   format: ['esm'],
   target: 'node22',
   platform: 'node',

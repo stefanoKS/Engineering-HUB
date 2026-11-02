@@ -1,5 +1,6 @@
 /** Responsibility areas: list, create/edit, ordering and retirement. */
 import { useState } from 'react';
+import { ColorPicker } from '../components/ColorPicker';
 import type { Actor, Responsibility } from '@eh/contracts';
 import { api } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
@@ -191,10 +192,7 @@ function ResponsibilityForm({
             </select>
           </label>
           <div className="field-row">
-            <label className="field">
-              <span className="field-label">{t('responsibilities.color')}</span>
-              <TextInput value={colorHex} onChange={setColorHex} placeholder="#2563EB" />
-            </label>
+            <div className="field"><ColorPicker value={colorHex} onChange={setColorHex} /></div>
             <label className="field">
               <span className="field-label">{t('responsibilities.order')}</span>
               <TextInput type="number" min={0} value={sortOrder} onChange={setSortOrder} />

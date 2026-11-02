@@ -1,5 +1,9 @@
 # V2 Architecture
 
+## Local LAN update — 2026-11-02
+
+[LOCAL_LAN.md](LOCAL_LAN.md) specifies the employee-ID/password mode, schema 7, optional email, first-login change, administrator reset, employee-owned progress editing, Windows launcher, durable local backup and optional Shared Drive upload. It supersedes Google-only or Linux-only assumptions below for this mode. [Verification record](LOCAL_LAN_ACCEPTANCE.md).
+
 Status: implemented locally. Live Workspace verification is **NOT RUN** (see
 [ACCEPTANCE.md](./ACCEPTANCE.md)).
 

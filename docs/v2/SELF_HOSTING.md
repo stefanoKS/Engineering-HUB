@@ -1,5 +1,9 @@
 # Self-Hosting V2
 
+## Local LAN update — 2026-11-02
+
+[LOCAL_LAN.md](LOCAL_LAN.md) specifies the employee-ID/password mode, schema 7, optional email, first-login change, administrator reset, employee-owned progress editing, Windows launcher, durable local backup and optional Shared Drive upload. It supersedes Google-only or Linux-only assumptions below for this mode. [Verification record](LOCAL_LAN_ACCEPTANCE.md).
+
 V2 is one Docker Compose stack: PostgreSQL, the API (which also serves the built web app), the
 worker and a reverse proxy. It runs on a single Linux host and needs no Google Cloud resource of
 its own — only an OAuth client and a service account for Workspace.

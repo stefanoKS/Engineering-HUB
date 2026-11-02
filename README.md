@@ -1,10 +1,18 @@
 # Engineering-HUB
 
+
+## Employee-ID LAN mode — 2026-11-02
+
+The user-selected deployment now supports local employee ID/password accounts, a Windows LAN host, and local-first encrypted PostgreSQL backups with optional Google Drive upload. Google sign-in/email is not required in this mode. See [setup and operating guide](docs/v2/LOCAL_LAN.md) and its acceptance record. Existing V1 documentation below remains historical.
+
+Latest V2 implementation and measured performance: [release hardening](docs/v2/RELEASE_HARDENING.md). Feature parity and deployment validation remain incomplete.
+
+
 ## V2 platform — PostgreSQL, self-hosted (implemented locally, not deployed)
 
 **IMPLEMENTED AND VERIFIED LOCALLY. NOT DEPLOYED. NOT APPROVED FOR PRODUCTION.**
 
-V2 keeps every V1 business rule, identifier, permission and workflow but moves the runtime off
+V2 aims to preserve V1 business rules, identifiers, permissions and workflows while moving the runtime off
 Google Sheets: projects, subprojects, tasks, requests, approvals, audit and notifications live in
 PostgreSQL, and a TypeScript API, a background worker and a React application replace the Apps
 Script sidebar. The V1 Apps Script project described below is untouched and remains the only

@@ -4,20 +4,21 @@ import type { Actor, RequestQueue, TaskRequest } from '@eh/contracts';
 import { api } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
-import { Badge, EmptyState, ErrorBox, Section, statusTone } from '../components/ui';
+import { Badge, EmptyState, ErrorBox, Pagination, Section, statusTone } from '../components/ui';
 import { ConfirmDialog } from '../components/forms';
 
 export function RequestsScreen({ actor }: { actor: Actor }): JSX.Element {
   const { t, label } = useI18n();
   void actor;
+  const [page, setPage] = useState(1);
   const [includeDecided, setIncludeDecided] = useState(false);
   const [importMessage, setImportMessage] = useState('');
   const [syncOnce, setSyncOnce] = useState(false);
   const [decision, setDecision] = useState<{ request: TaskRequest; kind: 'APPROVE' | 'REJECT' | 'RETURN' } | null>(null);
 
-  const key = `${keys.requests}${includeDecided ? ':decided' : ''}`;
+  const key = `${keys.requests}:${includeDecided}:${page}`;
   const queue = useQuery<RequestQueue>(key, () =>
-    api.get<RequestQueue>(`/api/manager/requests?includeDecided=${includeDecided}`)
+    api.get<RequestQueue>(`/api/manager/requests?includeDecided=${includeDecided}&page=${page}&pageSize=25`)
   );
 
   // Exactly one import per page entry; a filter or language change never re-imports.
@@ -29,7 +30,7 @@ export function RequestsScreen({ actor }: { actor: Actor }): JSX.Element {
       .post<RequestQueue>('/api/manager/requests/sync', { includeDecided })
       .then((result) => {
         if (cancelled) return;
-        queryCache.invalidate([keys.requests]);
+        if (result.imported.imported > 0) queryCache.invalidate([keys.requests, keys.tasks, keys.taskIndex, keys.overview]);
         setImportMessage(
           result.imported.configured
             ? result.imported.failed > 0
@@ -59,10 +60,11 @@ export function RequestsScreen({ actor }: { actor: Actor }): JSX.Element {
               checked={includeDecided}
               onChange={(event) => {
                 setIncludeDecided(event.target.checked);
+                setPage(1);
                 queryCache.invalidate([keys.requests]);
               }}
             />
-            {t('common.done')}
+            {t('requests.includeDecided')}
           </label>
           <button
             type="button"
@@ -163,6 +165,7 @@ export function RequestsScreen({ actor }: { actor: Actor }): JSX.Element {
             </tbody>
           </table>
         )}
+        {queue.data && <Pagination page={queue.data.page} totalPages={queue.data.totalPages} total={queue.data.total} onChange={setPage} />}
       </Section>
 
       {decision ? (

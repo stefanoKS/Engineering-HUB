@@ -1,5 +1,9 @@
 # Google Workspace Integration
 
+## Local LAN update — 2026-11-02
+
+[LOCAL_LAN.md](LOCAL_LAN.md) specifies the employee-ID/password mode, schema 7, optional email, first-login change, administrator reset, employee-owned progress editing, Windows launcher, durable local backup and optional Shared Drive upload. It supersedes Google-only or Linux-only assumptions below for this mode. [Verification record](LOCAL_LAN_ACCEPTANCE.md).
+
 V2 talks to Google over REST with a **service account** (worker only) and to sign-in with a
 **Google ID token** (browser → API). There is no Apps Script, no `MailApp`, no
 `SpreadsheetApp`.

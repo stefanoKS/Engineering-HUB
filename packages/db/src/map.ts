@@ -35,7 +35,7 @@ export function toMember(row: MemberRow): Member {
   return {
     memberId: row.member_id,
     name: row.name,
-    email: row.email,
+    email: row.email ?? undefined,
     department: row.department,
     position: row.position,
     active: row.active,

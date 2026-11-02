@@ -13,6 +13,8 @@
  * otherwise a temporary embedded PostgreSQL cluster that is destroyed afterwards. A missing
  * database is a failure, never a silent skip.
  */
+import { randomBytes, scrypt } from 'node:crypto';
+import { promisify } from 'node:util';
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
@@ -22,6 +24,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import pg from 'pg';
 
 const root = process.cwd();
+const localMode = process.argv.includes('--local');
+const localPassword = 'Smoke-local-password-123';
 const ADMIN_EMAIL = 'smoke-admin@example.co.jp';
 
 function log(message) {
@@ -143,17 +147,13 @@ async function waitFor(url, timeoutMs = 30_000) {
 }
 
 async function seed(client) {
-  await client.query(
-    `INSERT INTO members (member_id, name, email, role, active)
-     VALUES ('MEM-SMOKE', 'Smoke Admin', $1, 'ADMIN', true)
-     ON CONFLICT (email) DO UPDATE SET role = 'ADMIN', active = true`,
-    [ADMIN_EMAIL]
-  );
-  await client.query(
-    `INSERT INTO responsibilities (responsibility_id, name, owner_member_id)
-     VALUES ('RSP-SMOKE', 'Smoke area', 'MEM-SMOKE')
-     ON CONFLICT (responsibility_id) DO NOTHING`
-  );
+ await client.query("INSERT INTO members(member_id,name,email,role,active) VALUES('MEM-SMOKE','Smoke Admin',$1,'ADMIN',true) ON CONFLICT(email) DO UPDATE SET role='ADMIN',active=true",[ADMIN_EMAIL]);
+ if(localMode){
+  const salt=randomBytes(16).toString('hex');
+  const hash=await promisify(scrypt)(localPassword,salt,64,{N:131072,r:8,p:1,maxmem:160*1024*1024});
+  await client.query("INSERT INTO local_accounts(member_id,employee_id,password_hash,must_change_password) VALUES('MEM-SMOKE','0001',$1,false) ON CONFLICT(member_id) DO UPDATE SET password_hash=EXCLUDED.password_hash,must_change_password=false",[['scrypt',salt,hash.toString('hex')].join('$')]);
+ }
+ await client.query("INSERT INTO responsibilities(responsibility_id,name,owner_member_id) VALUES('RSP-SMOKE','Smoke area','MEM-SMOKE') ON CONFLICT(responsibility_id) DO NOTHING");
 }
 
 async function main() {
@@ -168,9 +168,17 @@ async function main() {
 
   const external = process.env.TEST_DATABASE_URL;
   const server = external ? null : await startEmbedded();
-  const databaseUrl = external ?? server.url;
+  let databaseUrl = external ?? server.url;
+  let externalAdmin = null;
+  const isolatedName = 'eh_smoke_' + Date.now();
+  if(external){
+    externalAdmin=new pg.Client({connectionString:external});await externalAdmin.connect();
+    await externalAdmin.query('CREATE DATABASE '+isolatedName);
+    const isolatedUrl=new URL(external);isolatedUrl.pathname='/'+isolatedName;databaseUrl=isolatedUrl.toString();
+  }
   const client = new pg.Client({ connectionString: databaseUrl });
   let api = null;
+  let worker = null;
   try {
     await client.connect();
     log('PASS  isolated PostgreSQL is reachable');
@@ -191,13 +199,15 @@ async function main() {
       cwd: root,
       env: {
         ...process.env,
-        NODE_ENV: 'development',
-        APP_ENV: 'DEVELOPMENT',
+        NODE_ENV: localMode ? 'production' : 'development',
+        APP_ENV: localMode ? 'PRODUCTION' : 'DEVELOPMENT',
+        AUTH_MODE: localMode ? 'local' : 'google',
+        ALLOW_INSECURE_LAN_HTTP: localMode ? 'true' : 'false',
         HOST: '127.0.0.1',
         PORT: String(port),
         DATABASE_URL: databaseUrl,
         MANAGER_WEB_ALLOWED_DOMAINS: 'example.co.jp',
-        DEV_AUTH_ENABLED: 'true',
+        DEV_AUTH_ENABLED: localMode ? 'false' : 'true',
         DEV_AUTH_EMAILS: ADMIN_EMAIL,
         PUBLIC_ORIGIN: origin,
         WEB_ROOT: join(root, 'apps', 'web', 'dist'),
@@ -221,7 +231,7 @@ async function main() {
     const sessionResponse = await fetch(`${origin}/api/session`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', origin },
-      body: JSON.stringify({ devEmail: ADMIN_EMAIL })
+      body: JSON.stringify(localMode ? {employeeId:'0001',password:localPassword} : { devEmail: ADMIN_EMAIL })
     });
     if (sessionResponse.status !== 200) {
       throw new Error(`session fixture failed (${sessionResponse.status}): ${await sessionResponse.text()}`);
@@ -229,7 +239,7 @@ async function main() {
     const cookie = String(sessionResponse.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
     const session = await sessionResponse.json();
     const csrf = session.data.csrfToken;
-    log('PASS  development fixture authenticated and issued a session');
+    log('PASS  '+(localMode ? 'production local employee credentials' : 'development fixture')+' authenticated and issued a session');
 
     const overview = await fetch(`${origin}/api/manager/overview`, { headers: { cookie } });
     if (overview.status !== 200) throw new Error(`overview failed (${overview.status}): ${await overview.text()}`);
@@ -256,6 +266,27 @@ async function main() {
     }
     log('PASS  the created project is readable through the authorized list');
 
+    worker = spawn('node', ['apps/worker/dist/main.js'], {
+      cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, DATABASE_URL: databaseUrl, APP_ENV: 'DEVELOPMENT', SCHEDULE_ENABLED: 'false',
+        WORKER_ID: 'smoke-worker', POLL_INTERVAL_MS: '1000', GOOGLE_SERVICE_ACCOUNT_JSON: '', GMAIL_SENDER: '', CALENDAR_ID: '' }
+    });
+    worker.stdout.resume(); worker.stderr.resume();
+    await client.query("INSERT INTO outbox_jobs (kind, dedupe_key, payload) VALUES ('maintenance.sessions', 'smoke-maintenance', '{}') ON CONFLICT DO NOTHING");
+    const workerDeadline = Date.now() + 20000;
+    for (;;) {
+      const result = await client.query("SELECT status FROM outbox_jobs WHERE dedupe_key = 'smoke-maintenance'");
+      if (result.rows[0]?.status === 'DONE') break;
+      if (Date.now() > workerDeadline || worker.exitCode !== null) throw new Error('Built worker did not complete its smoke job');
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    log('PASS  built worker claimed and completed an outbox job');
+    if (process.argv.includes('--browser')) {
+      const { browserSmoke } = await import('./browser-smoke.mjs');
+      await browserSmoke(origin, ADMIN_EMAIL, localMode ? {employeeId:'0001',password:localPassword} : null);
+    }
+
+
     const stopped = await new Promise((resolve) => {
       api.on('close', (code, signal) => resolve({ code, signal }));
       api.kill('SIGTERM');
@@ -274,8 +305,12 @@ async function main() {
     log('PRODUCTION SMOKE: PASS');
   } finally {
     if (api) api.kill('SIGKILL');
+    if (worker) {
+      await new Promise(resolve => { worker.once('close', resolve); worker.kill('SIGTERM'); });
+    }
     await client.end().catch(() => undefined);
     if (server) await server.stop();
+    if(externalAdmin){await externalAdmin.query('DROP DATABASE '+isolatedName+' WITH (FORCE)');await externalAdmin.end();}
   }
 }
 

@@ -1,7 +1,8 @@
 /** One form for creating and editing a task (a partial patch on edit). */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { ProjectPicker } from '../components/ProjectPicker';
 import type { Reference, Task } from '@eh/contracts';
-import { api, queryString } from '../api/client';
+import { api } from '../api/client';
 import { keys, queryCache } from '../state/cache';
 import { useI18n } from '../i18n';
 import { ErrorBox, SaveState } from '../components/ui';
@@ -13,7 +14,6 @@ type References = {
   subprojects: Reference[];
 };
 
-type ProjectOption = { projectId: string; projectName: string };
 
 const STATUSES = ['Not Started', 'Assigned', 'In Progress', 'Blocked', 'On Hold', 'Cancelled'];
 const PRIORITIES = ['Low', 'Medium', 'High', 'Critical'];
@@ -38,7 +38,7 @@ export function TaskForm({
   const { t, label } = useI18n();
   const save = useSave();
   const idempotencyKey = useIdempotencyKey();
-  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [optionError, setOptionError] = useState<unknown>(null);
   const [parentOptions, setParentOptions] = useState<{ id: string; name: string; depth: number }[]>([]);
   const [form, setForm] = useState({
     projectId: task?.projectId ?? initialProjectId ?? '',
@@ -70,19 +70,19 @@ export function TaskForm({
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]): void =>
     setForm((current) => ({ ...current, [key]: value }));
 
-  async function loadProjects(): Promise<void> {
-    const page = await api.get<{ items: ProjectOption[] }>('/api/manager/projects?pageSize=100');
-    setProjects(page.items);
-    if (!form.projectId && page.items[0]) set('projectId', page.items[0].projectId);
-  }
-
-  async function loadParents(projectId: string): Promise<void> {
-    if (!projectId) return;
-    const options = await api.get<{ items: { id: string; name: string; depth: number }[] }>(
-      `/api/manager/tasks/parent-options${queryString({ projectId, excludeTaskId: task?.taskId })}`
-    );
-    setParentOptions(options.items);
-  }
+  useEffect(() => {
+    let current = true;
+    setParentOptions([]);
+    setOptionError(null);
+    if (form.projectId) {
+      // An explicit empty subproject selects only direct project tasks.
+      const params = new URLSearchParams({ projectId: form.projectId, subprojectId: form.subprojectId, excludeTaskId: task?.taskId ?? '' });
+      void api.get<{ items: { id: string; name: string; depth: number }[] }>('/api/manager/tasks/parent-options?' + params)
+        .then(result => { if (current) setParentOptions(result.items); })
+        .catch(error => { if (current) setOptionError(error); });
+    }
+    return () => { current = false; };
+  }, [form.projectId, form.subprojectId, task?.taskId]);
 
   return (
     <div className="modal-screen" role="dialog" aria-modal="true">
@@ -95,29 +95,10 @@ export function TaskForm({
         </header>
         <div className="modal-body stack">
           <div className="field-row">
-            <label className="field">
+            <div className="field">
               <span className="field-label">{t('nav.projects')}</span>
-              <select
-                value={form.projectId}
-                disabled={!!task}
-                onFocus={() => {
-                  if (!projects.length) void loadProjects();
-                }}
-                onChange={(event) => {
-                  set('projectId', event.target.value);
-                  set('parentTaskId', '');
-                  set('subprojectId', '');
-                  void loadParents(event.target.value);
-                }}
-              >
-                <option value="">{t('common.unset')}</option>
-                {projects.map((project) => (
-                  <option key={project.projectId} value={project.projectId}>
-                    {project.projectName}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <ProjectPicker value={form.projectId} disabled={!!task} onChange={(projectId) => setForm(current => ({ ...current, projectId, parentTaskId: '', subprojectId: '' }))} />
+            </div>
             <label className="field">
               <span className="field-label">{t('tasks.subproject')}</span>
               <SelectInput
@@ -125,11 +106,11 @@ export function TaskForm({
                 onChange={(value) => {
                   set('subprojectId', value);
                   set('parentTaskId', '');
-                  void loadParents(form.projectId);
+
                 }}
                 allowEmpty={t('common.unset')}
                 options={(references?.subprojects ?? [])
-                  .filter((entry) => entry.parentId !== undefined)
+                  .filter((entry) => entry.projectId === form.projectId && entry.status !== 'Archived')
                   .map((entry) => ({ value: entry.id, label: entry.name }))}
               />
             </label>
@@ -138,13 +119,11 @@ export function TaskForm({
             <span className="field-label">{t('tasks.name')}</span>
             <TextInput value={form.taskName} onChange={(value) => set('taskName', value)} required />
           </label>
+          <ErrorBox error={optionError} />
           <label className="field">
             <span className="field-label">{t('tasks.parent')}</span>
             <select
               value={form.parentTaskId}
-              onFocus={() => {
-                if (form.projectId && !parentOptions.length) void loadParents(form.projectId);
-              }}
               onChange={(event) => set('parentTaskId', event.target.value)}
             >
               <option value="">{t('common.none')}</option>

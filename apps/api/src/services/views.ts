@@ -325,7 +325,8 @@ export async function buildProjectDetail(ctx: ReadCtx, project: import('@eh/cont
   const tasks = await listTaskSummariesForProject(ctx.db, project.projectId);
   const { scope } = await taskScope(ctx);
   const projectScopeTasks = scope.tasks.filter((task) => task.projectId === project.projectId);
-  const progress = rollup(toRollupTasks(projectScopeTasks));
+  const rawProgress = rollup(toRollupTasks(projectScopeTasks));
+  const progress = { ...rawProgress, unknownEffort: rawProgress.unknown };
   const children = new Map<string, string[]>();
   for (const subproject of dir.subprojects.filter((entry) => entry.projectId === project.projectId)) {
     const parent = subproject.parentSubprojectId ?? '';
@@ -352,7 +353,7 @@ export async function buildProjectDetail(ctx: ReadCtx, project: import('@eh/cont
     .filter((entry) => entry.projectId === project.projectId)
     .map((entry) => ({
       ...entry,
-      progress: rollup(toRollupTasks(subtreeTasks(entry.subprojectId)))
+      progress: (() => { const value = rollup(toRollupTasks(subtreeTasks(entry.subprojectId))); return { ...value, unknownEffort: value.unknown }; })()
     }));
   return { record: project, progress, subprojects, tasks };
 }

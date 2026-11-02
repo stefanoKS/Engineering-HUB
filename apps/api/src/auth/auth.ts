@@ -20,6 +20,7 @@ import { createSession, findSession, revokeMemberSessions, revokeSession, touchS
 import { newToken, insertAudit } from '@eh/db';
 
 export type SessionContext = {
+  mustChangePassword?: boolean;
   identity: Identity;
   tokenHash: string;
   csrfToken: string;
@@ -183,6 +184,14 @@ export class AuthService {
     const session = await findSession(this.db, tokenHash);
     if (!session) return null;
     if (session.revoked_at) return null;
+    const credential = await this.db.one<{local_password_version:number|null}>('SELECT local_password_version FROM sessions WHERE token_hash=$1',[tokenHash]);
+    if (this.config.authMode === 'google' && typeof credential?.local_password_version === 'number') return null;
+    let mustChangePassword = false;
+    if (this.config.authMode === 'local') {
+      const local = await this.db.one<{ must_change_password: boolean; valid: boolean }>('SELECT a.must_change_password, s.local_password_version=a.password_version AS valid FROM local_accounts a JOIN sessions s USING(member_id) WHERE s.token_hash=$1', [tokenHash]);
+      if (!local?.valid) return null;
+      mustChangePassword = local.must_change_password;
+    }
     if (new Date(session.expires_at).getTime() <= Date.now()) {
       await revokeSession(this.db, tokenHash);
       return null;
@@ -197,13 +206,10 @@ export class AuthService {
     if (!member || !member.active) return null;
     await touchSession(this.db, tokenHash);
     return {
+      mustChangePassword,
       identity: {
-        memberId: member.member_id,
-        name: member.name,
-        email: member.email,
-        role: effectiveRole(member.role),
-        active: member.active,
-        verified: true
+        memberId: member.member_id, name: member.name, email: member.email ?? '',
+        role: effectiveRole(member.role), active: member.active, verified: true
       },
       tokenHash,
       csrfToken: session.csrf_token,

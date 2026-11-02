@@ -95,7 +95,12 @@ export async function createDump(options: DumpOptions): Promise<{ content: Buffe
     const args = ['--format=custom', '--no-owner', '--no-privileges', '--file', file];
     const env: NodeJS.ProcessEnv = { ...process.env };
     if (options.connection.connectionString) {
-      args.push('--dbname', options.connection.connectionString);
+      const connectionUrl = new URL(options.connection.connectionString);
+      const password = connectionUrl.searchParams.get('password') ?? decodeURIComponent(connectionUrl.password);
+      connectionUrl.password = '';
+      connectionUrl.searchParams.delete('password');
+      if (password) env.PGPASSWORD = password;
+      args.push('--dbname', connectionUrl.toString());
     } else {
       if (options.connection.host) args.push('--host', options.connection.host);
       if (options.connection.port) args.push('--port', String(options.connection.port));
@@ -153,7 +158,7 @@ export async function restoreContainer(input: {
       stream.end(plain);
     });
     await stat(file);
-    const args = ['--no-owner', '--no-privileges', '--dbname', input.targetDatabase, file];
+    const args = ['--no-owner', '--no-privileges', '--exit-on-error', '--single-transaction', '--dbname', input.targetDatabase, file];
     const env: NodeJS.ProcessEnv = { ...process.env };
     if (input.connection.password) env.PGPASSWORD = input.connection.password;
     if (input.connection.host) args.push('--host', input.connection.host);
@@ -172,6 +177,7 @@ export async function restoreContainer(input: {
  */
 export const BACKUP_TABLES = [
   'members',
+  'local_accounts',
   'responsibilities',
   'skills',
   'holidays',
@@ -212,14 +218,17 @@ export type LogicalBackup = {
 export async function createLogicalBackup(db: Database): Promise<{ archive: Buffer; backup: LogicalBackup }> {
   const tables: Record<string, unknown[]> = {};
   const rowCounts: Record<string, number> = {};
-  for (const table of BACKUP_TABLES) {
-    const row = await db.one<{ rows: unknown[] }>(
+  await db.transaction(async (tx) => {
+    await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
+    for (const table of BACKUP_TABLES) {
+    const row = await tx.one<{ rows: unknown[] }>(
       `SELECT COALESCE(jsonb_agg(to_jsonb(t)), '[]'::jsonb) AS rows FROM ${table} t`
     );
     const rows = row?.rows ?? [];
     tables[table] = rows;
     rowCounts[table] = rows.length;
-  }
+    }
+  });
   const backup: LogicalBackup = {
     format: 'eh-logical-v1',
     createdAt: new Date().toISOString(),

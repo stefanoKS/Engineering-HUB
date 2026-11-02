@@ -1,5 +1,15 @@
 # Changelog
 
+
+## Employee-ID LAN mode — 2026-11-02
+
+The user-selected deployment now supports local employee ID/password accounts, a Windows LAN host, and local-first encrypted PostgreSQL backups with optional Google Drive upload. Google sign-in/email is not required in this mode. See [setup and operating guide](docs/v2/LOCAL_LAN.md) and its acceptance record. Existing V1 documentation below remains historical.
+
+## V2 release hardening — 2026-11-01
+
+Refreshed responsive UI; added project-detail editing and subproject forms; fixed stale editors, uncertain request retries, queue pagination, concurrent administrator changes, backup snapshots, capped notification retries and Calendar milestone synchronization. Optimized workload calculation and added built-artifact Chromium/worker smoke checks. See [implementation and release gates](docs/v2/RELEASE_HARDENING.md). Not deployed or approved for production.
+
+
 ## V2 stabilization (2026-10-31) — production candidate work
 
 **IMPLEMENTED AND VERIFIED LOCALLY. NOT DEPLOYED. NOT APPROVED FOR PRODUCTION.**

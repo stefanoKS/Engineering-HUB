@@ -2,11 +2,11 @@
  * Overview for managers, and the published-task home for employees.
  *
  * The employee view never calls a manager endpoint: it reads only the allowlisted snapshot and
- * submits a request. Submission is non-blocking: the form closes when the request is validated,
+ * submits a request. Submission is non-blocking: the form closes only after the server acknowledges the request,
  * the receipt state is reported only after a durable acknowledgement, and an unobservable
  * outcome is shown as unknown rather than retried automatically.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { Actor, EmployeeSnapshot, Overview, Reference } from '@eh/contracts';
 import { api, ApiFailure, queryString } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
@@ -208,6 +208,9 @@ function writeReceipt(taskId: string, receipt: Receipt): void {
 export function EmployeeHome({ actor }: { actor: Actor }): JSX.Element {
   const { t, label } = useI18n();
   const snapshot = useQuery<EmployeeSnapshot>(keys.employee, () => api.get<EmployeeSnapshot>('/api/employee/snapshot'));
+  const sending = useRef(false);
+  const requestId = useRef<string | null>(null);
+  const [submission, setSubmission] = useState<'idle' | 'sending' | 'unknown'>('idle');
   const [worker, setWorker] = useState('');
   const [receipts, setReceipts] = useState<Record<string, Receipt>>(() => readReceipts());
   const [banner, setBanner] = useState<{ tone: string; text: string } | null>(null);
@@ -235,11 +238,14 @@ export function EmployeeHome({ actor }: { actor: Actor }): JSX.Element {
     completionNote?: string;
     requesterName?: string;
   }): Promise<void> {
-    const clientRequestId =
+    if (sending.current) return;
+    sending.current = true;
+    setSubmission('sending');
+    const clientRequestId = requestId.current ?? (
       typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
-        : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    setForm(null);
+        : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    requestId.current = clientRequestId;
     setBanner({ tone: 'info', text: t('request.transport.SENDING') });
     const receipt: Receipt = {
       taskId: input.taskId,
@@ -253,6 +259,9 @@ export function EmployeeHome({ actor }: { actor: Actor }): JSX.Element {
         ...input,
         clientRequestId
       });
+      setForm(null);
+      setSubmission('idle');
+      requestId.current = null;
       receipt.state = result.state;
       receipt.requestId = result.requestId;
       writeReceipt(input.taskId, receipt);
@@ -261,18 +270,23 @@ export function EmployeeHome({ actor }: { actor: Actor }): JSX.Element {
       queryCache.invalidate([keys.employee]);
     } catch (failure) {
       if (failure instanceof ApiFailure && (failure.code === 'NETWORK' || failure.code === 'INVALID_RESPONSE')) {
+        setSubmission('unknown');
         receipt.state = 'OUTCOME_UNKNOWN';
         writeReceipt(input.taskId, receipt);
         setReceipts(readReceipts());
         setBanner({ tone: 'warning', text: t('request.transport.OUTCOME_UNKNOWN') });
         return;
       }
+      requestId.current = null;
+      setSubmission('idle');
       writeReceipt(input.taskId, { ...receipt, state: 'FAILED' });
       setReceipts(readReceipts());
       setBanner({
         tone: 'danger',
         text: failure instanceof ApiFailure ? failure.message : t('common.error')
       });
+    } finally {
+      sending.current = false;
     }
   }
 
@@ -339,14 +353,16 @@ export function EmployeeHome({ actor }: { actor: Actor }): JSX.Element {
                       <button
                         type="button"
                         className="button secondary"
-                        onClick={() => setForm({ taskId: task.taskId, requestType: 'DEADLINE_CHANGE' })}
+                        disabled={!!form}
+                         onClick={() => setForm({ taskId: task.taskId, requestType: 'DEADLINE_CHANGE' })}
                       >
                         {t('request.action.deadline')}
                       </button>
                       <button
                         type="button"
                         className="button secondary"
-                        onClick={() => setForm({ taskId: task.taskId, requestType: 'COMPLETION_REPORT' })}
+                        disabled={!!form}
+                         onClick={() => setForm({ taskId: task.taskId, requestType: 'COMPLETION_REPORT' })}
                       >
                         {t('request.action.completion')}
                       </button>
@@ -361,6 +377,8 @@ export function EmployeeHome({ actor }: { actor: Actor }): JSX.Element {
 
       {form ? (
         <RequestForm
+          key={form.taskId + form.requestType}
+          submission={submission}
           taskId={form.taskId}
           requestType={form.requestType}
           onCancel={() => setForm(null)}
@@ -371,12 +389,14 @@ export function EmployeeHome({ actor }: { actor: Actor }): JSX.Element {
   );
 }
 
-function RequestForm({
+export function RequestForm({
+  submission = 'idle',
   taskId,
   requestType,
   onCancel,
   onSubmit
 }: {
+  submission?: 'idle' | 'sending' | 'unknown';
   taskId: string;
   requestType: 'DEADLINE_CHANGE' | 'COMPLETION_REPORT';
   onCancel: () => void;
@@ -405,6 +425,7 @@ function RequestForm({
       <h2>{requestType === 'DEADLINE_CHANGE' ? t('request.action.deadline') : t('request.action.completion')}</h2>
       <p className="muted small">{t('request.confirm.id')}: {taskId}</p>
       <div className="stack">
+        <fieldset className="stack form-fields" disabled={submission !== 'idle'}>
         {requestType === 'DEADLINE_CHANGE' ? (
           <>
             <label className="field">
@@ -430,15 +451,17 @@ function RequestForm({
           <span className="field-label">{t('request.form.requester')}</span>
           <input value={requesterName} onChange={(event) => setRequesterName(event.target.value)} maxLength={200} />
         </label>
+        </fieldset>
+        {submission === 'unknown' && <p role="status" className="banner warning">{t('state.unknown')}</p>}
         {validation ? <div className="banner danger">{validation}</div> : null}
         <div className="inline-actions">
-          <button type="button" className="button secondary" onClick={onCancel}>
+          <button type="button" className="button secondary" disabled={submission !== 'idle'} onClick={onCancel}>
             {t('request.form.cancel')}
           </button>
           <button
             type="button"
             className="button"
-            disabled={!valid}
+            disabled={!valid || submission === 'sending'}
             onClick={() => {
               if (!valid) {
                 setValidation(t('request.form.requiredNote'));
@@ -453,7 +476,7 @@ function RequestForm({
               });
             }}
           >
-            {t('request.form.submit')}
+            {submission === 'sending' ? t('state.saving') : submission === 'unknown' ? t('state.retry') : t('request.form.submit')}
           </button>
         </div>
       </div>

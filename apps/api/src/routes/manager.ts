@@ -24,6 +24,7 @@ import {
   PatchSubprojectBody,
   PatchTaskBody,
   ProjectListQuery,
+  RequestQueueQuery,
   PublishBody,
   ReconcileBody,
   SaveMemberBody,
@@ -309,7 +310,7 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
     }
     const items = summaries
       .filter((summary) => !excluded.has(summary.taskId))
-      .filter((summary) => !query.subprojectId || summary.subprojectId === query.subprojectId)
+      .filter((summary) => query.subprojectId === undefined || (summary.subprojectId ?? '') === query.subprojectId)
       .map((summary) => ({
         id: summary.taskId,
         name: summary.taskName,
@@ -440,6 +441,7 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
         id: entry.subprojectId,
         name: entry.subprojectName,
         status: entry.status,
+        projectId: entry.projectId,
         parentId: entry.parentSubprojectId
       }))
     };
@@ -567,9 +569,9 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
 
   app.get('/api/manager/requests', async (request, reply) => {
     try {
-      const query = request.query as { includeDecided?: string };
+      const query = RequestQueueQuery.parse(request.query);
       const data = await queue(serviceCtx(request), deps.inbox, {
-        includeDecided: query.includeDecided === 'true',
+        ...query,
         import: false
       });
       return ok(reply, request, data);
@@ -580,9 +582,9 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
 
   app.post('/api/manager/requests/sync', async (request, reply) => {
     try {
-      const body = (request.body ?? {}) as { includeDecided?: boolean };
+      const body = RequestQueueQuery.parse(request.body ?? {});
       const data = await queue(serviceCtx(request), deps.inbox, {
-        includeDecided: body.includeDecided === true,
+        ...body,
         import: true
       });
       return ok(reply, request, data);

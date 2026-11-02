@@ -28,6 +28,8 @@ export function LoginScreen({
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [configError, setConfigError] = useState('');
   const [email, setEmail] = useState('');
+  const [employeeId, setEmployeeId] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const clientId = config?.googleClientId ?? '';
@@ -85,7 +87,7 @@ export function LoginScreen({
     return undefined;
   }, [language, clientId]);
 
-  async function signIn(body: { idToken?: string; devEmail?: string }): Promise<void> {
+  async function signIn(body: { idToken?: string; devEmail?: string; employeeId?: string; password?: string }): Promise<void> {
     setBusy(true);
     setError('');
     try {
@@ -103,14 +105,19 @@ export function LoginScreen({
     <main className="login-screen">
       <div className="login-card">
         <h1>{t('app.name')}</h1>
-        <p className="muted">{t('login.domain')}</p>
+        <p className="muted">{t(config?.authMode === 'local' ? 'local.intro' : 'login.domain')}</p>
         {notice ? <div className="banner warning">{notice}</div> : null}
         {configError ? <div className="banner danger">{configError}</div> : null}
         {config && !config.authConfigured && !config.devSignInEnabled ? (
           <div className="banner danger">{t('login.unconfigured')}</div>
         ) : null}
         {clientId ? <div ref={buttonRef} className="gsi-button" /> : null}
-        {config?.devSignInEnabled ? (
+        {config?.authMode === 'local' && <form className="stack" onSubmit={event => { event.preventDefault(); if (!busy) void signIn({employeeId, password}); }}>
+          <label className="field"><span>{t('local.employeeId')}</span><input value={employeeId} onChange={e=>setEmployeeId(e.target.value)} autoComplete="username" required maxLength={32} /></label>
+          <label className="field"><span>{t('local.password')}</span><input type="password" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="current-password" required maxLength={128} /></label>
+          <button className="button" disabled={busy}>{t('local.signIn')}</button>
+        </form>}
+        {config?.devSignInEnabled && config.authMode !== 'local' ? (
           <form
             className="stack"
             onSubmit={(event) => {

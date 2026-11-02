@@ -243,6 +243,7 @@ export async function listAllTasksForScope(db: Db, limit = 20000): Promise<
     dueDate: string | null;
     plannedStart: string | null;
     estimatedHours: number | null;
+    actualHours: number | null;
     progressPercent: number | null;
   }[]
 > {
@@ -255,10 +256,11 @@ export async function listAllTasksForScope(db: Db, limit = 20000): Promise<
     due_date: string | null;
     planned_start: string | null;
     estimated_hours: number | null;
+    actual_hours: number | null;
     progress_percent: number | null;
   }>(
     `SELECT task_id, project_id, subproject_id, parent_task_id, status, due_date, planned_start,
-            estimated_hours, progress_percent
+            estimated_hours, actual_hours, progress_percent
        FROM tasks WHERE deleted_at IS NULL ORDER BY task_id LIMIT $1`,
     [limit]
   );
@@ -271,6 +273,7 @@ export async function listAllTasksForScope(db: Db, limit = 20000): Promise<
     dueDate: row.due_date,
     plannedStart: row.planned_start,
     estimatedHours: row.estimated_hours,
+    actualHours: row.actual_hours,
     progressPercent: row.progress_percent
   }));
 }

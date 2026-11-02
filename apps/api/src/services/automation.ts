@@ -236,6 +236,14 @@ export async function workloadReport(ctx: ServiceCtx): Promise<WorkloadReport> {
     ownersByTask.set(row.task_id, list);
   }
 
+  const workByMember = new Map<string, typeof activeWork>();
+  for (const task of activeWork) {
+    for (const memberId of ownersByTask.get(task.taskId) ?? []) {
+      const assigned = workByMember.get(memberId) ?? [];
+      assigned.push(task);
+      workByMember.set(memberId, assigned);
+    }
+  }
   const weekday = new Date(`${today}T00:00:00Z`).getUTCDay();
   const mondayOffset = -((weekday + 6) % 7);
   const weeks: string[] = [];
@@ -246,18 +254,18 @@ export async function workloadReport(ctx: ServiceCtx): Promise<WorkloadReport> {
     const weekEnd = shift(weekStart, 6);
     for (const member of members) {
       let hours = 0;
+      let actual = 0;
       let unknown = 0;
       let overdue = 0;
-      for (const scopeTask of activeWork) {
-        const ownersForTask = ownersByTask.get(scopeTask.taskId) ?? [];
-        if (!ownersForTask.includes(member.member_id)) continue;
+      for (const scopeTask of workByMember.get(member.member_id) ?? []) {
         const detail = detailById.get(scopeTask.taskId);
         if (!detail) continue;
         const start = detail.plannedStart ?? detail.dueDate ?? weekStart;
         const end = detail.dueDate ?? start;
         const overlaps = start <= weekEnd && end >= weekStart;
         if (!overlaps) continue;
-        const remaining = remainingHours({ estimatedHours: detail.estimatedHours, actualHours: null });
+        const remaining = remainingHours({ estimatedHours: detail.estimatedHours, actualHours: detail.actualHours });
+        actual += detail.actualHours ?? 0;
         if (remaining === null) unknown += 1;
         else hours += remaining;
         if (detail.dueDate && detail.dueDate < today) overdue += 1;
@@ -271,7 +279,7 @@ export async function workloadReport(ctx: ServiceCtx): Promise<WorkloadReport> {
         capacityHours: capacity,
         utilization: capacity > 0 ? Math.round((hours / capacity) * 1000) / 1000 : null,
         unknownEstimateTasks: unknown,
-        actualHours: 0,
+        actualHours: Math.round(actual * 10) / 10,
         overdueTasks: overdue,
         overloadWarning: capacity > 0 && hours > capacity
       });

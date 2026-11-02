@@ -22,6 +22,8 @@ const Text = (max: number) => z.string().max(max);
 
 export const CreateSessionBody = z
   .object({
+    employeeId: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/).optional(),
+    password: z.string().min(1).max(128).optional(),
     idToken: z.string().max(8000).optional(),
     devEmail: z.string().email().max(320).optional()
   })
@@ -276,7 +278,11 @@ export const DecisionBody = z
   .strict();
 
 export const RequestQueueQuery = z
-  .object({ includeDecided: z.coerce.boolean().default(false) })
+  .object({
+    includeDecided: z.union([z.boolean(), z.enum(['true', 'false'])]).transform(value => value === true || value === 'true').default(false),
+    page: z.coerce.number().int().min(1).max(1000000).default(1),
+    pageSize: z.coerce.number().int().min(1).max(100).default(25)
+  })
   .strict();
 
 export const AutomationSaveBody = z

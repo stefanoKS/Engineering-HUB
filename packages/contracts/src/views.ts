@@ -29,6 +29,7 @@ export const ScopeCounts = z.object({
 export type ScopeCounts = z.infer<typeof ScopeCounts>;
 
 export const Reference = z.object({
+  projectId: z.string().optional(),
   id: z.string(),
   name: z.string(),
   status: z.string(),

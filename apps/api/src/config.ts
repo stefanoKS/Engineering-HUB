@@ -24,8 +24,10 @@ const Schema = z
     PG_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
     PGSSL: z.enum(['true', 'false']).default('false'),
     PUBLIC_ORIGIN: z.string().url().default('http://localhost:5173'),
+    AUTH_MODE: z.enum(['google', 'local']).default('google'),
+    ALLOW_INSECURE_LAN_HTTP: z.enum(['true', 'false']).default('false'),
     GOOGLE_CLIENT_ID: z.string().min(10).optional(),
-    MANAGER_WEB_ALLOWED_DOMAINS: z.string().min(1, 'MANAGER_WEB_ALLOWED_DOMAINS is mandatory'),
+    MANAGER_WEB_ALLOWED_DOMAINS: z.string().default(''),
     SESSION_TTL_MINUTES: z.coerce.number().int().min(5).max(24 * 60).default(720),
     COOKIE_NAME: z.string().default('eh_session'),
     DEV_AUTH_ENABLED: z.enum(['true', 'false']).default('false'),
@@ -52,7 +54,7 @@ const Schema = z
         message: 'Development authentication fixtures cannot be enabled in production'
       });
     }
-    if (production && !value.GOOGLE_CLIENT_ID) {
+    if (production && value.AUTH_MODE === 'google' && !value.GOOGLE_CLIENT_ID) {
       ctx.addIssue({
         code: 'custom',
         path: ['GOOGLE_CLIENT_ID'],
@@ -66,6 +68,9 @@ const Schema = z
         message: 'A database connection is required in production'
       });
     }
+    if (value.AUTH_MODE === 'google' && !value.MANAGER_WEB_ALLOWED_DOMAINS.trim()) ctx.addIssue({ code: 'custom', message: 'Google authentication requires allowed domains' });
+    if (production && value.PUBLIC_ORIGIN.startsWith('http:') && value.ALLOW_INSECURE_LAN_HTTP !== 'true') ctx.addIssue({ code: 'custom', message: 'HTTPS required; isolated LAN HTTP requires explicit ALLOW_INSECURE_LAN_HTTP=true' });
+    if (value.ALLOW_INSECURE_LAN_HTTP === 'true' && value.AUTH_MODE !== 'local') ctx.addIssue({ code: 'custom', message: 'LAN HTTP is only supported for local authentication' });
     if (value.ALLOWED_ORIGINS.trim() === '*') {
       ctx.addIssue({
         code: 'custom',
@@ -76,6 +81,8 @@ const Schema = z
   });
 
 export type AppConfig = {
+  authMode: 'google' | 'local';
+  secureCookies: boolean;
   nodeEnv: 'development' | 'test' | 'production';
   appEnv: 'DEVELOPMENT' | 'STAGING' | 'PRODUCTION';
   version: string;
@@ -123,6 +130,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   const value = parsed.data;
   return {
+    authMode: value.AUTH_MODE,
+    secureCookies: value.PUBLIC_ORIGIN.startsWith('https:'),
     nodeEnv: value.NODE_ENV,
     appEnv: value.APP_ENV,
     version: value.APP_VERSION,

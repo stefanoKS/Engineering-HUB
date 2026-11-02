@@ -48,6 +48,9 @@ services:
       NODE_ENV: production
       APP_ENV: ${APP_ENV:-PRODUCTION}
       WEB_ROOT: /app/apps/web/dist
+      GOOGLE_SERVICE_ACCOUNT_JSON: ''
+      BACKUP_ENCRYPTION_KEY: ''
+      GOOGLE_DRIVE_DELEGATED_USER: ''
       DATABASE_URL: postgresql://${POSTGRES_USER:-ehub}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-engineering_hub}
       # Only the container network is trusted to set X-Forwarded-For. The API port is bound to
       # loopback, so a browser can never reach it without the proxy in front.
@@ -77,6 +80,9 @@ services:
       APP_ENV: ${APP_ENV:-PRODUCTION}
       DATABASE_URL: postgresql://${POSTGRES_USER:-ehub}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-engineering_hub}
       BACKUP_INTERVAL_MINUTES: ${BACKUP_INTERVAL_MINUTES:-60}
+      BACKUP_DIRECTORY: /app/data/backups
+    volumes:
+      - backup-data:/app/data/backups
     depends_on:
       db:
         condition: service_healthy
@@ -97,6 +103,9 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-ehub}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-engineering_hub}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ''
+      BACKUP_ENCRYPTION_KEY: ''
+      GOOGLE_DRIVE_DELEGATED_USER: ''
     depends_on:
       db:
         condition: service_healthy
@@ -131,5 +140,6 @@ services:
 
 volumes:
   db-data:
+  backup-data:
   caddy-data:
   caddy-config:

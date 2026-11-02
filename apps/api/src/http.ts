@@ -60,10 +60,14 @@ export function registerContext(app: FastifyInstance, deps: AppDependencies): vo
   app.addHook('preHandler', async (request) => {
     request.state.session = await deps.auth.resolve(request);
 
+    const path = request.url.split('?')[0];
+    if (request.state.session?.mustChangePassword && path?.startsWith('/api/') && !['/api/session','/api/account/password','/api/public-config'].includes(path)) throw new DomainError('AUTHORIZATION_DENIED','Change your temporary password before accessing work data');
     if (SAFE_METHODS.has(request.method)) return;
+    const origin = String(request.headers.origin ?? '');
+    if (origin && ![deps.config.publicOrigin,...deps.config.allowedOrigins].includes(origin)) throw new DomainError('AUTHORIZATION_DENIED','This origin is not allowed');
 
     // The session API is the only mutation that is allowed to run without a session.
-    if (request.url.startsWith('/api/session')) return;
+    if (path === '/api/session' && request.method === 'POST') return;
 
     if (!request.state.session) {
       throw new DomainError('UNAUTHENTICATED', 'Sign in is required for this operation');
@@ -72,7 +76,6 @@ export function registerContext(app: FastifyInstance, deps: AppDependencies): vo
     if (!csrf || csrf !== request.state.session.csrfToken) {
       throw new DomainError('AUTHORIZATION_DENIED', 'A valid CSRF token is required');
     }
-    const origin = String(request.headers.origin ?? '');
     if (origin) {
       const allowed = [deps.config.publicOrigin, ...deps.config.allowedOrigins];
       if (!allowed.includes(origin)) {

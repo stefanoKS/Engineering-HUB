@@ -1,5 +1,10 @@
 # Backup and manual restore
 
+
+## Employee-ID LAN mode — 2026-11-02
+
+The user-selected deployment now supports local employee ID/password accounts, a Windows LAN host, and local-first encrypted PostgreSQL backups with optional Google Drive upload. Google sign-in/email is not required in this mode. See [setup and operating guide](docs/v2/LOCAL_LAN.md) and its acceptance record. Existing V1 documentation below remains historical.
+
 ## V1.5 web-app recovery
 
 The manager web UI and sidebar share the same A. Code deployment does not back up, migrate or roll back data. Preserve the existing restricted backups and audit/history; no V1.5 migration is required. For a web UI failure, return to the Sheets sidebar and disable/reselect the web deployment as described in [manager deployment rollback](docs/MANAGER_WEB_APP_DEPLOYMENT.md). Review uncertain writes before retrying. Do not reset operational sheets or restore data automatically. A deployment-version rollback does not change editor source or spreadsheet rows.

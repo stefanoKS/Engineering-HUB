@@ -382,7 +382,7 @@ The rules above stay in force for the V1 Apps Script project (`src/`, `dashboard
      request decisions, staleness, soft relationships, audit and notification gating exist once in
      `packages/domain`. Never duplicate a rule in a route, a component or a trigger without the
      domain function, and never introduce a second definition of "open", "overdue" or "progress".
-152. **Identity is server-verified.** Google ID token signature, issuer, audience, expiry,
+152. **Identity is server-verified.** In local mode (authorized 2026-11-02), use employee ID + password, hashed with scrypt; no email is required. Temporary credentials require a password change before work data access. Local mode must never accept development/Google credentials. In Google mode, verify ID token signature, issuer, audience, expiry,
      `email_verified` and the company domain, then a database member row. A browser-supplied role,
      member ID, owner or confirmation is data, never authority. A missing or unverified identity
      fails closed; never substitute the deployer or a default user.
@@ -447,7 +447,7 @@ The rules above stay in force for the V1 Apps Script project (`src/`, `dashboard
      against destination defaults, relationship tables as sets, settings against their documented
      safe overrides, plus a destination checksum. Report volatile defaults as skipped, never as a
      match.
-169. **Public browser configuration is runtime, never build-time.** `GET /api/public-config` may
+169. **Public browser configuration is runtime, never build-time.** Auth mode (local/google) is also an allowlisted non-secret configuration field. `GET /api/public-config` may
      expose only the OAuth client ID, the release marker and whether the development fixture is
      available. Never compile a `VITE_*` login secret and never expose a database URL, token,
      spreadsheet id or service-account value.

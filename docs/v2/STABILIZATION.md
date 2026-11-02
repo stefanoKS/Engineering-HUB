@@ -1,5 +1,10 @@
 # V2 Stabilization Record
 
+## Update — 2026-11-01
+
+See [RELEASE_HARDENING.md](RELEASE_HARDENING.md) for the current UI, concurrency, delivery, Calendar and performance changes and unresolved release blockers. The dated records below are historical; they do not establish complete feature parity or production approval.
+
+
 This document records the stabilization pass that turned the first V2 commit into a candidate that
 can be built, started and exercised as a production artifact. It is deliberately conservative: a
 check is **PASS** only with a recorded command and its actual result, and everything that needs a

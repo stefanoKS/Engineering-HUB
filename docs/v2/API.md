@@ -1,5 +1,14 @@
 # V2 HTTP API
 
+## Local LAN update — 2026-11-02
+
+[LOCAL_LAN.md](LOCAL_LAN.md) specifies the employee-ID/password mode, schema 7, optional email, first-login change, administrator reset, employee-owned progress editing, Windows launcher, durable local backup and optional Shared Drive upload. It supersedes Google-only or Linux-only assumptions below for this mode. [Verification record](LOCAL_LAN_ACCEPTANCE.md).
+
+## Request queue pagination (2026-11-01)
+
+Manager request reads and sync accept page (default 1), pageSize (default 25, maximum 100), and includeDecided (boolean or the exact strings true/false). Responses include page, pageSize, totalPages and the total count. Out-of-range pages clamp to the last available page. Reference entries include projectId for scoped selectors.
+
+
 Base URL: the deployment origin (same origin as the web application). All responses are JSON.
 
 ## 1. Envelope

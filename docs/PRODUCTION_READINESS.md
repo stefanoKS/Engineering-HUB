@@ -1,5 +1,14 @@
 # Production readiness
 
+## Employee-ID LAN implementation — 2026-11-02
+
+Local account and backup-only mode is implemented; [setup](v2/LOCAL_LAN.md) and [acceptance](v2/LOCAL_LAN_ACCEPTANCE.md). **NOT APPROVED FOR PRODUCTION** until the actual host/network and backup recovery gates pass.
+
+## Current V2 review — 2026-11-01
+
+**NOT APPROVED FOR PRODUCTION.** Browser workflow smoke and the built worker now run locally. See [release hardening](v2/RELEASE_HARDENING.md) for measured performance, implemented fixes, and remaining feature/deployment/restore/Google gates. October 31 results below are historical.
+
+
 ## V2 platform — stabilization pass (2026-10-31)
 
 **NOT APPROVED FOR PRODUCTION.**

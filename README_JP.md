@@ -1,5 +1,10 @@
 # Engineering-HUB
 
+
+## Employee-ID LAN mode — 2026-11-02
+
+The user-selected deployment now supports local employee ID/password accounts, a Windows LAN host, and local-first encrypted PostgreSQL backups with optional Google Drive upload. Google sign-in/email is not required in this mode. See [setup and operating guide](docs/v2/LOCAL_LAN.md) and its acceptance record. Existing V1 documentation below remains historical.
+
 ## V2 プラットフォーム — PostgreSQL・セルフホスト（ローカル実装済み、未配備）
 
 **ローカルで実装・検証済み。未配備。本番承認なし。**

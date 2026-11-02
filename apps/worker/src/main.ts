@@ -59,7 +59,7 @@ async function main(): Promise<void> {
       credentialsJson: config.GOOGLE_SERVICE_ACCOUNT_JSON,
       calendarId: config.CALENDAR_ID
     }),
-    drive: new GoogleDriveTransport({ credentialsJson: config.GOOGLE_SERVICE_ACCOUNT_JSON }),
+    drive: new GoogleDriveTransport({ credentialsJson: config.GOOGLE_SERVICE_ACCOUNT_JSON, delegatedUser: config.GOOGLE_DRIVE_DELEGATED_USER }),
     sheets: { configured: sheets.configured, append: sheets.append.bind(sheets) },
     log
   };
@@ -154,6 +154,9 @@ async function schedule(db: Database, log: (message: string, meta?: Record<strin
   // Reminders are evaluated every hour: the sending window, the catch-up allowance and the
   // overdue interval all need more than one opportunity per day.
   await enqueue(db, { kind: 'notification.reminder-scan', dedupeKey: `reminder-scan:${hour}`, payload: {} });
+  if (settingFlag(settings, SETTING_KEYS.CALENDAR_SYNC_ENABLED, false)) {
+    await enqueue(db, { kind: 'calendar.scan', dedupeKey: 'calendar-scan:' + hour, payload: {} });
+  }
   await enqueue(db, { kind: 'maintenance.sessions', dedupeKey: `maintenance:${day}`, payload: {} });
 
   if (settingFlag(settings, SETTING_KEYS.SHARED_DASHBOARD_PUBLISH_ENABLED, false)) {

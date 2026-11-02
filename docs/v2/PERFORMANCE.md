@@ -1,5 +1,10 @@
 # Performance
 
+## Large local benchmark — 2026-11-01
+
+At 10,000 tasks and concurrency 5, task creation p95 was 55.43 ms, task lists 28.74 ms and workload 205.84 ms. These are in-process measurements without network/TLS. See [method, raw results and limits](RELEASE_HARDENING.md).
+
+
 All numbers below were **measured locally** with the repository's own harness. They are not
 evidence about a production deployment, and `docs/PRODUCTION_READINESS.md` stays **NOT APPROVED
 FOR PRODUCTION**.

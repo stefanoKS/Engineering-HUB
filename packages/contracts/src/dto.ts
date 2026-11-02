@@ -366,6 +366,9 @@ export const TaskRequest = z.object({
 export type TaskRequest = z.infer<typeof TaskRequest>;
 
 export const RequestQueue = z.object({
+  page: z.number().int().positive(),
+  pageSize: z.number().int().positive(),
+  totalPages: z.number().int().min(1),
   items: z.array(TaskRequest),
   total: z.number().int().min(0),
   imported: z.object({

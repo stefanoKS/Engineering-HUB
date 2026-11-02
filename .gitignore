@@ -12,3 +12,9 @@ backups/
 !.env.example
 *.log
 .DS_Store
+
+# Local runtime database configuration, credentials and process state
+data/
+
+# Local browser verification artifacts
+work/screenshots/

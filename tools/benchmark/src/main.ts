@@ -113,8 +113,10 @@ async function measure(
 
   const cold = await run(endpoint.payload?.());
   const samples: Sample[] = [];
-  for (let index = 0; index < iterations; index += 1) {
-    samples.push(await run(endpoint.payload?.()));
+  const concurrency = Number(arg('concurrency', '1'));
+  for (let index = 0; index < iterations; index += concurrency) {
+    const batch = Math.min(concurrency, iterations - index);
+    samples.push(...await Promise.all(Array.from({ length: batch }, () => run(endpoint.payload?.()))));
   }
   const sorted = samples.map((sample) => sample.ms).sort((left, right) => left - right);
   return {
@@ -158,7 +160,8 @@ async function measureDataset(
     DEV_AUTH_ENABLED: 'true',
     DEV_AUTH_EMAILS: `${ADMIN},${MEMBER}`,
     PUBLIC_ORIGIN: 'http://localhost:5173',
-    LOG_LEVEL: 'silent'
+    LOG_LEVEL: 'silent',
+    RATE_LIMIT_MAX: '100000'
   });
   const app = await buildApp({ config, db, inbox: new NullInboxSource(), logger: false });
   await app.ready();
@@ -223,6 +226,10 @@ function printTable(results: DatasetResult[]): void {
 async function main(): Promise<void> {
   const requested = arg('dataset', 'all') as DatasetSize | 'all';
   const iterations = Number(arg('iterations', '15'));
+  const concurrency = Number(arg('concurrency', '1'));
+  if (!['all', 'small', 'medium', 'large'].includes(requested) || !Number.isInteger(iterations) || iterations < 1 || iterations > 1000 || !Number.isInteger(concurrency) || concurrency < 1 || concurrency > 50) {
+    throw new Error('Use dataset small/medium/large/all, iterations 1..1000, concurrency 1..50');
+  }
   const selected: DatasetSize[] = requested === 'all' ? ['small', 'medium', 'large'] : [requested];
 
   const server = await startEmbeddedPostgres('eh_bench');
@@ -245,6 +252,7 @@ async function main(): Promise<void> {
     cores: cpus().length,
     memoryGb: round(totalmem() / 1024 ** 3),
     iterations,
+    concurrency,
     transport: 'in-process app.inject (no TLS, no network)',
     postgres: 'embedded PostgreSQL 18.6 (test binaries)'
   };

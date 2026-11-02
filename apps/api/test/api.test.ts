@@ -12,6 +12,7 @@ import { Database, insertMember, insertProject, insertResponsibility, insertSubp
 import { buildApp } from '../src/app';
 import { loadConfig } from '../src/config';
 import { NullInboxSource } from '../src/inbox';
+import { businessDate } from '@eh/domain';
 import { freshDatabase, requireDatabase } from '../../../packages/db/test/support/db';
 
 let app: FastifyInstance;
@@ -71,6 +72,38 @@ beforeEach(async () => {
 afterEach(async () => {
   await app.close();
   await pool.end();
+});
+
+describe('concurrent administrator changes', () => {
+  it('keeps an administrator when two authenticated administrators demote each other', async () => {
+    await insertMember(db, { name: 'Second admin', email: 'second-admin@example.co.jp', role: 'ADMIN' }, 'MEM-ADMIN2');
+    const { saveMember } = await import('../src/services/directory');
+    const identity = (id: string) => ({ memberId: id, name: 'Admin', email: ADMIN, role: 'ADMIN' as const, active: true, verified: true });
+    const ctx = (id: string) => ({ db, identity: identity(id), correlationId: 'race' });
+    const results = await Promise.allSettled([
+      saveMember(ctx('MEM-ADMIN'), { memberId: 'MEM-ADMIN2', revision: 1, role: 'MEMBER' }),
+      saveMember(ctx('MEM-ADMIN2'), { memberId: 'MEM-ADMIN', revision: 1, role: 'MEMBER' })
+    ]);
+    expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
+    const remaining = await db.one<{ count: string }>("SELECT count(*)::text AS count FROM members WHERE role = 'ADMIN' AND active");
+    expect(remaining?.count).toBe('1');
+  });
+});
+
+describe('request queue pagination', () => {
+  it('reaches requests past the old 500-row cutoff and validates paging inputs', async () => {
+    await insertProject(db, { projectName: 'Queue' }, 'PRJ-QUEUE');
+    await insertTask(db, { projectId: 'PRJ-QUEUE', taskName: 'Queue task', dueDate: '2026-11-05' }, 'TSK-QUEUE');
+    await db.query(`INSERT INTO task_requests (request_id, request_type, task_id, status)
+      SELECT 'REQ-' || lpad(n::text, 4, '0'), 'COMPLETION_REPORT', 'TSK-QUEUE', 'PENDING' FROM generate_series(1, 501) n`);
+    const auth = await signIn(MANAGER);
+    const response = await app.inject({ method: 'GET', url: '/api/manager/requests?page=6&pageSize=100&includeDecided=false', headers: headers(auth) });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({ total: 501, page: 6, totalPages: 6 });
+    expect(response.json().data.items).toHaveLength(1);
+    const invalid = await app.inject({ method: 'GET', url: '/api/manager/requests?page=-1', headers: headers(auth) });
+    expect(invalid.statusCode).toBe(400);
+  });
 });
 
 describe('session and CSRF', () => {
@@ -544,3 +577,22 @@ function configToEnv(value: ReturnType<typeof loadConfig>): NodeJS.ProcessEnv {
     SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID: 'sheet-id'
   };
 }
+
+
+describe('workload effort', () => {
+  it('subtracts actual effort and counts an owner also listed as assignee only once', async () => {
+    await db.query("INSERT INTO projects (project_id, project_name) VALUES ('PRJ-W', 'Workload')");
+    await db.query(
+      "INSERT INTO tasks (task_id, project_id, task_name, owner_member_id, due_date, estimated_hours, actual_hours) VALUES ('TSK-W', 'PRJ-W', 'Work', 'MEM-MEMBER', $1, 10, 3)",
+      [businessDate()]
+    );
+    await db.query("INSERT INTO task_assignees (assignment_id, task_id, member_id) VALUES ('ASG-W', 'TSK-W', 'MEM-MEMBER')");
+    const auth = await signIn(MANAGER);
+    const result = await app.inject({ method: 'GET', url: '/api/manager/reports/workload', headers: headers(auth) });
+    expect(result.statusCode).toBe(200);
+    const data = result.json().data;
+    const row = data.rows.find((entry: { memberId: string; weekStart: string }) => entry.memberId === 'MEM-MEMBER' && entry.weekStart === data.weeks[0]);
+    expect(row.remainingHours).toBe(7);
+    expect(row.actualHours).toBe(3);
+  });
+});

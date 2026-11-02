@@ -142,14 +142,22 @@ export async function importRequests(ctx: ServiceCtx, inbox: InboxSource): Promi
 export async function queue(
   ctx: ServiceCtx,
   inbox: InboxSource,
-  input: { includeDecided: boolean; import: boolean }
-): Promise<{ items: TaskRequest[]; total: number; imported: ImportResult }> {
+  input: { includeDecided: boolean; import: boolean; page?: number; pageSize?: number }
+): Promise<{ items: TaskRequest[]; total: number; page: number; pageSize: number; totalPages: number; imported: ImportResult }> {
   requireRole(ctx.identity, 'MANAGER');
   const imported = input.import
     ? await importRequests(ctx, inbox)
     : { attempted: false, configured: inbox.configured, imported: 0, duplicates: 0, failed: 0, message: '' };
-  const items = await listRequests(ctx.db, input.includeDecided);
-  return { items, total: items.length, imported };
+  const pageSize = input.pageSize ?? 25;
+  return ctx.db.transaction(async tx => {
+    await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
+    const count = await tx.one<{ total: string }>("SELECT count(*)::text AS total FROM task_requests WHERE ($1::boolean OR status IN ('PENDING','PROCESSING','STALE'))", [input.includeDecided]);
+    const total = Number(count?.total ?? 0);
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(input.page ?? 1, totalPages);
+    const items = await listRequests(tx, input.includeDecided, page, pageSize);
+    return { items, total, page, pageSize, totalPages, imported };
+  });
 }
 
 export type EmployeeTaskRow = {

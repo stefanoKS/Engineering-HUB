@@ -1,3 +1,4 @@
+import { persistentBackup } from './persistent-backup';
 import { createHash } from 'node:crypto';
 import type { Database } from '@eh/db';
 import {
@@ -19,6 +20,11 @@ import {
   type OutboxJob
 } from '@eh/db';
 import {
+  addDays,
+  weekday,
+  createScope,
+  type ScopeTask,
+  type SubprojectLike,
   businessDate,
   businessMinutes,
   canonicalJson,
@@ -41,7 +47,7 @@ import {
 } from '@eh/domain';
 import { PUBLISHED_CONTRACT_VERSION } from '@eh/contracts';
 import type { WorkerConfig } from './config';
-import { createBackupArtifact, keyId, parseEncryptionKey } from './backup';
+
 import type { CalendarTransport, DriveTransport, MailTransport } from './transports';
 
 export type JobOutcome = { state: 'DONE' | 'RETRY' | 'FAILED'; error?: string };
@@ -142,6 +148,10 @@ async function ledgerRecord(
 const MAX_DELIVERY_ATTEMPTS = 3;
 
 type DeliveryResult = 'SENT' | 'PREVIEW' | 'UNCERTAIN' | 'FAILED' | 'SKIPPED';
+function deliveryTerminal(ledger: { result: string; attempts: number }, mode: string): boolean {
+  return ['SENT', 'DELIVERY_UNCERTAIN', 'SENDING'].includes(ledger.result) ||
+    (mode === 'PREVIEW' && ledger.result === 'PREVIEW') || ledger.attempts >= MAX_DELIVERY_ATTEMPTS;
+}
 
 /**
  * Whether the outbox job should be retried. A definite transient failure is retried with bounded
@@ -334,10 +344,10 @@ async function sendNotification(
     ctx.log('per-run email cap is zero; nothing is sent', { taskId: task.task_id });
     return { state: 'DONE' };
   }
-  const limited = recipients.slice(0, cap);
-  const overflow = recipients.length - limited.length;
-  let retry = overflow > 0;
-  for (const recipient of limited) {
+  let attempted = 0;
+  let overflow = 0;
+  let retry = false;
+  for (const recipient of recipients) {
     const key = notificationKey({
       kind: input.kind,
       taskId: task.task_id,
@@ -353,6 +363,9 @@ async function sendNotification(
       kind: input.kind,
       assignmentVersion: input.kind === 'ASSIGNMENT' ? task.assignment_version : null
     });
+    if (deliveryTerminal(ledger, mode)) continue;
+    if (attempted >= cap) { overflow++; retry = true; continue; }
+    attempted++;
     const message = MESSAGE[input.kind];
     const result = await deliver(ctx, {
       ledgerId: ledger.id,
@@ -371,7 +384,7 @@ async function sendNotification(
   if (overflow > 0) {
     ctx.log('email cap reached; the remaining recipients are deferred', {
       taskId: task.task_id,
-      sent: limited.length,
+      attempted,
       deferred: overflow
     });
   }
@@ -414,6 +427,14 @@ async function reminderScan(ctx: JobContext): Promise<JobOutcome> {
   if (!withinExecutionWindow(settings)) {
     ctx.log('outside the configured sending window');
     return { state: 'DONE' };
+  }
+  if (settingFlag(settings, SETTING_KEYS.PENDING_REQUEST_REMINDER_ENABLED, false)) {
+    const pending = await ctx.db.many<{ request_id: string; task_id: string; request_type: string }>(
+      "SELECT request_id, task_id, request_type FROM task_requests WHERE status IN ('PENDING','PROCESSING') AND submitted_at < $1::date ORDER BY request_id", [today]);
+    for (const request of pending) await enqueue(ctx.db, {
+      kind: 'notification.request', dedupeKey: 'pending-request:' + request.request_id + ':' + today,
+      payload: { requestId: request.request_id, taskId: request.task_id, requestType: request.request_type, pendingReminder: true, bucket: today }
+    });
   }
   const horizon = offsets[0] ?? 0;
   const candidates = await ctx.db.many<{ task_id: string; due_date: string | null }>(
@@ -472,109 +493,52 @@ async function reminderScan(ctx: JobContext): Promise<JobOutcome> {
   return { state: 'DONE' };
 }
 
-async function syncCalendar(ctx: JobContext, taskId: string): Promise<JobOutcome> {
+async function syncCalendar(ctx: JobContext, entityId: string, type: 'TASK' | 'MILESTONE' = 'TASK'): Promise<JobOutcome> {
   const settings = await getSettings(ctx.db);
   if (!settingFlag(settings, SETTING_KEYS.CALENDAR_SYNC_ENABLED, false)) return { state: 'DONE' };
   if (!ctx.calendar.configured) return { state: 'FAILED', error: 'CALENDAR_NOT_CONFIGURED' };
-  const task = await loadTask(ctx.db, taskId);
-  if (!task || !task.due_date) return { state: 'DONE' };
-  const existing = await ctx.db.one<{ event_id: string; sync_hash: string }>(
-    "SELECT event_id, sync_hash FROM calendar_links WHERE entity_type = 'TASK' AND entity_id = $1",
-    [taskId]
-  );
-  const end = task.due_date;
-  const start = task.planned_start ?? task.due_date;
-  const hash = createHash('sha256')
-    .update(`${task.task_name}|${start}|${end}`)
-    .digest('hex')
-    .slice(0, 16);
-  if (existing && existing.sync_hash === hash) return { state: 'DONE' };
-  const event = await ctx.calendar.upsertEvent({
-    eventId: existing?.event_id ?? null,
-    summary: task.task_name,
-    description: '設計・開発課 管理: タスク期限',
-    startDate: start,
-    endDate: end
+  return ctx.db.transaction(async tx => {
+    await tx.query("SET LOCAL idle_in_transaction_session_timeout = '90s'");
+    await tx.advisoryLock('calendar:' + type + ':' + entityId);
+    const row = type === 'TASK'
+      ? await tx.one<{ name: string; start: string | null; due: string | null; status: string; project_status: string }>(
+          'SELECT t.task_name AS name, t.planned_start AS start, t.due_date AS due, t.status, p.status AS project_status FROM tasks t JOIN projects p USING (project_id) WHERE t.task_id = $1 AND t.deleted_at IS NULL', [entityId])
+      : await tx.one<{ name: string; start: string | null; due: string | null; status: string; project_status: string }>(
+          'SELECT m.milestone_name AS name, m.target_date AS start, m.target_date AS due, m.status, p.status AS project_status FROM milestones m JOIN projects p USING (project_id) WHERE m.milestone_id = $1', [entityId]);
+    if (!row || !row.due) return { state: 'DONE' };
+    const existing = await tx.one<{ event_id: string; sync_hash: string }>('SELECT event_id, sync_hash FROM calendar_links WHERE entity_type = $1 AND entity_id = $2', [type, entityId]);
+    const inactive = ['Cancelled', 'Archived', 'Completed'].includes(row.project_status) || ['Cancelled', 'Archived', 'Done', 'Completed'].includes(row.status);
+    if (inactive && !existing) return { state: 'DONE' };
+    const summary = (inactive ? '[' + (row.status || row.project_status) + '] ' : '') + row.name;
+    const start = row.start && row.start <= row.due ? row.start : row.due;
+    const hash = createHash('sha256').update(JSON.stringify([summary, start, row.due])).digest('hex');
+    if (existing?.sync_hash === hash) return { state: 'DONE' };
+    const event = await ctx.calendar.upsertEvent({ eventId: existing?.event_id ?? null,
+      identityKey: ctx.config.APP_ENV + ':' + type + ':' + entityId, summary,
+      description: '設計・開発課 管理: ' + (type === 'TASK' ? 'タスク期限' : 'マイルストーン'), startDate: start, endDate: row.due });
+    await tx.query(`INSERT INTO calendar_links (entity_type, entity_id, event_id, sync_hash) VALUES ($1,$2,$3,$4)
+      ON CONFLICT (entity_type, entity_id) DO UPDATE SET event_id = EXCLUDED.event_id, sync_hash = EXCLUDED.sync_hash, synced_at = now()`, [type, entityId, event.eventId, hash]);
+    return { state: 'DONE' };
   });
-  await ctx.db.query(
-    `INSERT INTO calendar_links (entity_type, entity_id, event_id, sync_hash)
-     VALUES ('TASK', $1, $2, $3)
-     ON CONFLICT (entity_type, entity_id) DO UPDATE SET event_id = EXCLUDED.event_id, sync_hash = EXCLUDED.sync_hash, synced_at = now()`,
-    [taskId, event.eventId, hash]
-  );
+}
+
+async function calendarScan(ctx: JobContext): Promise<JobOutcome> {
+  if (!settingFlag(await getSettings(ctx.db), SETTING_KEYS.CALENDAR_SYNC_ENABLED, false)) return { state: 'DONE' };
+  const rows = await ctx.db.many<{ kind: string; id: string }>(`SELECT 'TASK' AS kind, task_id AS id FROM tasks WHERE due_date IS NOT NULL AND deleted_at IS NULL
+    UNION ALL SELECT 'MILESTONE', milestone_id FROM milestones WHERE target_date IS NOT NULL`);
+  const hour = new Date().toISOString().slice(0, 13);
+  for (const row of rows) await enqueue(ctx.db, { kind: row.kind === 'TASK' ? 'calendar.task' : 'calendar.milestone',
+    dedupeKey: 'calendar-scan:' + row.kind + ':' + row.id + ':' + hour, payload: { entityId: row.id, taskId: row.id } });
   return { state: 'DONE' };
 }
 
-async function backup(ctx: JobContext): Promise<JobOutcome> {
-  const backupId = `BAK-${new Date().toISOString().replace(/[:.]/g, '-')}`;
-  if (!ctx.config.DRIVE_BACKUP_FOLDER_ID || !ctx.config.BACKUP_ENCRYPTION_KEY) {
-    await ctx.db.query(
-      `INSERT INTO backup_log (backup_id, schema_version, result, error_details)
-       VALUES ($1, 1, 'FAILED', 'BACKUP_NOT_CONFIGURED')`,
-      [backupId]
-    );
-    return { state: 'FAILED', error: 'BACKUP_NOT_CONFIGURED' };
-  }
-  if (!ctx.drive.configured) {
-    await ctx.db.query(
-      `INSERT INTO backup_log (backup_id, schema_version, result, error_details)
-       VALUES ($1, 1, 'FAILED', 'DRIVE_NOT_CONFIGURED')`,
-      [backupId]
-    );
-    return { state: 'FAILED', error: 'DRIVE_NOT_CONFIGURED' };
-  }
-  try {
-    const key = parseEncryptionKey(ctx.config.BACKUP_ENCRYPTION_KEY);
-    const artifact = await createBackupArtifact({
-      pgDumpPath: ctx.config.PG_DUMP_PATH,
-      encryptionKey: key,
-      connection: ctx.config.database
-    });
-    const upload = await ctx.drive.upload({
-      name: artifact.fileName,
-      content: artifact.encrypted,
-      mimeType: 'application/octet-stream',
-      folderId: ctx.config.DRIVE_BACKUP_FOLDER_ID,
-      appProperties: { plainChecksum: artifact.plainChecksum, keyId: artifact.keyId }
-    });
-    const manifest = {
-      fileName: artifact.fileName,
-      plainBytes: artifact.plainBytes,
-      encryptedBytes: artifact.encrypted.byteLength,
-      plainChecksum: artifact.plainChecksum,
-      encryptedChecksum: artifact.encryptedChecksum,
-      keyId: artifact.keyId,
-      driveFileId: upload.fileId,
-      keyIdConfirmed: artifact.keyId === keyId(key)
-    };
-    await ctx.db.query(
-      `INSERT INTO backup_log
-         (backup_id, schema_version, backup_reference, result, checksum, size_bytes, manifest)
-       VALUES ($1, 1, $2, 'OK', $3, $4, $5)`,
-      [backupId, upload.fileId, artifact.encryptedChecksum, artifact.encrypted.byteLength, JSON.stringify(manifest)]
-    );
-    if (ctx.config.BACKUP_RETENTION_DAYS > 0) {
-      // Retention is reported, never enforced: a backup file is only ever removed by an
-      // operator, and a failed run never deletes the previous verified backup.
-      const old = await ctx.drive.listOld(ctx.config.DRIVE_BACKUP_FOLDER_ID, ctx.config.BACKUP_RETENTION_DAYS);
-      if (old.length) {
-        await ctx.db.query(
-          `INSERT INTO audit_log (entity_type, entity_id, action, new_value, actor_email, result)
-           VALUES ('BACKUP', $1, 'BACKUP_RETENTION_DUE', $2, 'worker', 'OK')`,
-          [backupId, JSON.stringify({ retentionDays: ctx.config.BACKUP_RETENTION_DAYS, files: old.map((file) => file.fileId) })]
-        );
-        ctx.log('backup retention due', { count: old.length });
-      }
-    }
-    return { state: 'DONE' };
-  } catch (error) {
-    await ctx.db.query(
-      `INSERT INTO backup_log (backup_id, schema_version, result, error_details)
-       VALUES ($1, 1, 'FAILED', $2)`,
-      [backupId, (error as Error).message.slice(0, 1000)]
-    );
-    return { state: 'RETRY', error: (error as Error).message };
-  }
+async function backup(ctx: JobContext, jobId: string): Promise<JobOutcome> {
+ try { await persistentBackup(ctx.db,ctx.config,ctx.drive,jobId); return {state:'DONE'}; }
+ catch(error){
+  const id='BAK-'+createHash('sha256').update(ctx.config.BACKUP_INSTANCE_ID+':'+jobId).digest('hex').slice(0,32);
+  await ctx.db.query("INSERT INTO backup_log(backup_id,schema_version,result,error_details) VALUES($1,0,'FAILED',$2) ON CONFLICT(backup_id) DO UPDATE SET result='FAILED',error_details=EXCLUDED.error_details",[id,(error as Error).message.slice(0,500)]);
+  return {state:'RETRY',error:(error as Error).message};
+ }
 }
 
 async function publish(ctx: JobContext): Promise<JobOutcome> {
@@ -722,27 +686,19 @@ async function weeklyReport(ctx: JobContext): Promise<JobOutcome> {
     return { state: 'DONE' };
   }
   const today = businessDate();
-  const counts = await ctx.db.one<{
-    open: string;
-    overdue: string;
-    upcoming: string;
-    completed_week: string;
-    pending_requests: string;
-  }>(
-    `SELECT
-       (SELECT count(*) FROM tasks t WHERE t.deleted_at IS NULL
-          AND t.status NOT IN ('Done','Cancelled')
-          AND NOT EXISTS (SELECT 1 FROM tasks c WHERE c.parent_task_id = t.task_id AND c.deleted_at IS NULL))::text AS open,
-       (SELECT count(*) FROM tasks t WHERE t.deleted_at IS NULL
-          AND t.status NOT IN ('Done','Cancelled') AND t.due_date < $1::date)::text AS overdue,
-       (SELECT count(*) FROM tasks t WHERE t.deleted_at IS NULL
-          AND t.status NOT IN ('Done','Cancelled') AND t.due_date >= $1::date
-          AND t.due_date <= $1::date + 7)::text AS upcoming,
-       (SELECT count(*) FROM tasks WHERE deleted_at IS NULL AND status = 'Done'
-          AND completed_at >= date_trunc('week', now()))::text AS completed_week,
-       (SELECT count(*) FROM task_requests WHERE status = 'PENDING')::text AS pending_requests`,
-    [today]
-  );
+  const counts = await ctx.db.transaction(async tx => {
+    await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
+    const tasks = await tx.many<ScopeTask & { completedAt: string | null }>(`SELECT task_id AS "taskId", project_id AS "projectId", subproject_id AS "subprojectId",
+      parent_task_id AS "parentTaskId", status, due_date AS "dueDate", completed_at AS "completedAt" FROM tasks WHERE deleted_at IS NULL`);
+    const projects = await tx.many<{ projectId: string; status: string }>('SELECT project_id AS "projectId", status FROM projects WHERE deleted_at IS NULL');
+    const subprojects = await tx.many<SubprojectLike>('SELECT subproject_id AS "subprojectId", project_id AS "projectId", parent_subproject_id AS "parentSubprojectId", status FROM subprojects WHERE deleted_at IS NULL');
+    const scope = createScope(tasks, new Map(projects.map(p => [p.projectId, p])), new Map(subprojects.map(p => [p.subprojectId, p])), today);
+    const totals = scope.counts();
+    const weekStart = addDays(today, -((weekday(today) + 6) % 7));
+    const completed = tasks.filter(task => !scope.isContainer(task.taskId) && task.status === 'Done' && task.completedAt && businessDate(new Date(task.completedAt)) >= weekStart).length;
+    const pending = await tx.one<{ count: string }>("SELECT count(*)::text AS count FROM task_requests WHERE status IN ('PENDING','PROCESSING')");
+    return { open: totals.openWork, overdue: totals.overdueWork, upcoming: scope.upcoming(today, addDays(today, 7)).length, completed_week: completed, pending_requests: Number(pending?.count ?? 0) };
+  });
   const text = [
     `週次レポート (${today})`,
     `未完了の作業: ${counts?.open ?? '0'}`,
@@ -761,10 +717,11 @@ async function weeklyReport(ctx: JobContext): Promise<JobOutcome> {
         "SELECT email FROM members WHERE active AND role IN ('ADMIN','MANAGER') ORDER BY email"
       )).map((row) => row.email);
   const cap = maxEmailsPerRun(settings);
-  const recipients = managers.filter((email) => recipientDomainAllowed(email, settings)).slice(0, cap);
-  let retry = managers.length > recipients.length && cap > 0;
+  const recipients = managers.filter((email) => recipientDomainAllowed(email, settings));
+  let attempted = 0;
+  let retry = false;
   for (const email of recipients) {
-    const key = notificationKey({ kind: 'REPORT', taskId: '', recipient: email, bucket: `week:${today}` });
+    const key = notificationKey({ kind: 'REPORT', taskId: '', recipient: email, bucket: `week:${addDays(today, -((weekday(today) + 6) % 7))}` });
     const ledger = await ledgerRecord(ctx.db, {
       key,
       taskId: null,
@@ -772,6 +729,9 @@ async function weeklyReport(ctx: JobContext): Promise<JobOutcome> {
       kind: 'REPORT',
       assignmentVersion: null
     });
+    if (deliveryTerminal(ledger, mode)) continue;
+    if (attempted >= cap) { retry = true; continue; }
+    attempted++;
     const result = await deliver(ctx, {
       ledgerId: ledger.id,
       dedupeKey: key,
@@ -788,6 +748,7 @@ async function weeklyReport(ctx: JobContext): Promise<JobOutcome> {
 }
 
 export async function handleJob(ctx: JobContext, job: OutboxJob): Promise<JobOutcome> {
+  if (ctx.config.BACKUP_ONLY === 'true' && !['backup.database','maintenance.sessions'].includes(job.kind)) return {state:'DONE'};
   const payload = job.payload as Record<string, unknown>;
   switch (job.kind) {
     case 'notification.assignment':
@@ -815,9 +776,17 @@ export async function handleJob(ctx: JobContext, job: OutboxJob): Promise<JobOut
         requestType === 'COMPLETION_REPORT'
           ? SETTING_KEYS.COMPLETION_REPORT_EMAIL_ENABLED
           : SETTING_KEYS.DEADLINE_REQUEST_EMAIL_ENABLED;
-      if (!settingFlag(settings, gate, false)) {
+      if (!payload.pendingReminder && !settingFlag(settings, gate, false)) {
         return { state: 'DONE' };
       }
+      if (mode === 'OFF') return { state: 'DONE' };
+      if (payload.pendingReminder) {
+        if (!settingFlag(settings, SETTING_KEYS.PENDING_REQUEST_REMINDER_ENABLED, false)) return { state: 'DONE' };
+        const current = await ctx.db.one<{ status: string }>('SELECT status FROM task_requests WHERE request_id = $1', [requestId]);
+        if (!current || !['PENDING', 'PROCESSING'].includes(current.status)) return { state: 'DONE' };
+      }
+      let attempted = 0;
+      let retry = false;
       for (const manager of managers) {
         if (!recipientDomainAllowed(manager.email, settings)) continue;
         // One request is one notification: two requests on the same task never share an identity.
@@ -825,7 +794,7 @@ export async function handleJob(ctx: JobContext, job: OutboxJob): Promise<JobOut
           kind: 'REQUEST_DECISION',
           taskId,
           recipient: manager.email,
-          bucket: `request:${requestId || 'unknown'}`
+          bucket: payload.pendingReminder ? `pending:${requestId}:${String(payload.bucket)}` : `request:${requestId || 'unknown'}`
         });
         const ledger = await ledgerRecord(ctx.db, {
           key,
@@ -834,18 +803,22 @@ export async function handleJob(ctx: JobContext, job: OutboxJob): Promise<JobOut
           kind: 'REQUEST_DECISION',
           assignmentVersion: null
         });
-        await deliver(ctx, {
+        if (deliveryTerminal(ledger, mode)) continue;
+        if (attempted >= maxEmailsPerRun(settings)) { retry = true; continue; }
+        attempted++;
+        const result = await deliver(ctx, {
           ledgerId: ledger.id,
           dedupeKey: key,
           result: ledger.result,
           attempts: ledger.attempts,
           to: manager.email,
-          subject: `【申請】${task.task_name}`,
-          text: `タスク「${task.task_name}」に新しい申請が届きました。申請一覧を確認してください。`,
+          subject: `${payload.pendingReminder ? '【未処理の申請】' : '【申請】'}${task.task_name}`,
+          text: `タスク「${task.task_name}」の申請一覧を確認してください。`,
           mode
         });
+        if (deliveryNeedsRetry(result, ledger.result)) retry = true;
       }
-      return { state: 'DONE' };
+      return retry ? { state: 'RETRY', error: 'REQUEST_NOTIFICATION_INCOMPLETE' } : { state: 'DONE' };
     }
     case 'notification.request-decision':
       return sendNotification(ctx, {
@@ -856,10 +829,14 @@ export async function handleJob(ctx: JobContext, job: OutboxJob): Promise<JobOut
       });
     case 'notification.reminder-scan':
       return reminderScan(ctx);
+    case 'calendar.scan':
+      return calendarScan(ctx);
+    case 'calendar.milestone':
+      return syncCalendar(ctx, String(payload.entityId), 'MILESTONE');
     case 'calendar.task':
       return syncCalendar(ctx, String(payload.taskId));
     case 'backup.database':
-      return backup(ctx);
+      return backup(ctx, job.job_id+':'+(job.created_at??'legacy'));
     case 'publication.run':
       return publish(ctx);
     case 'export.sheets':

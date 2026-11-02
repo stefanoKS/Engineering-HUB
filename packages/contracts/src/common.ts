@@ -164,6 +164,7 @@ export const PublicConfig = z
   .object({
     appVersion: z.string().min(1),
     environment: z.enum(['DEVELOPMENT', 'STAGING', 'PRODUCTION']),
+    authMode: z.enum(['google', 'local']).default('google'),
     googleClientId: z.string().default(''),
     authConfigured: z.boolean(),
     devSignInEnabled: z.boolean()

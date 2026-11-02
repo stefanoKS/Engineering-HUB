@@ -17,6 +17,8 @@ import type { AppConfig } from './config';
 import { AuthService } from './auth/auth';
 import { registerContext, type AppDependencies } from './http';
 import { sendError } from './errors';
+import { registerMyWork } from './routes/my-work';
+import { registerAccountRoutes } from './routes/accounts';
 import { registerSessionRoutes } from './routes/session';
 import { registerManagerRoutes } from './routes/manager';
 import { registerEmployeeRoutes } from './routes/employee';
@@ -41,6 +43,8 @@ export async function buildApp(options: BuildOptions): Promise<FastifyInstance> 
             level: config.logLevel,
             redact: {
               paths: [
+                'req.body.password',
+                'req.body.currentPassword',
                 'req.headers.cookie',
                 'req.headers.authorization',
                 'req.headers["x-csrf-token"]',
@@ -68,7 +72,8 @@ export async function buildApp(options: BuildOptions): Promise<FastifyInstance> 
         frameAncestors: ["'none'"],
         baseUri: ["'none'"],
         formAction: ["'self'"],
-        objectSrc: ["'none'"]
+        objectSrc: ["'none'"],
+        upgradeInsecureRequests: config.secureCookies ? [] : null
       }
     },
     crossOriginResourcePolicy: { policy: 'same-origin' }
@@ -91,6 +96,8 @@ export async function buildApp(options: BuildOptions): Promise<FastifyInstance> 
   registerContext(app, deps);
   registerHealthRoutes(app, deps);
   registerSessionRoutes(app, deps);
+  registerAccountRoutes(app, deps);
+  registerMyWork(app, deps);
   registerManagerRoutes(app, deps);
   registerEmployeeRoutes(app, deps);
 

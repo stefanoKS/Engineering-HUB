@@ -1,5 +1,5 @@
 /** API process entry point. */
-import { join } from 'node:path';
+import { resolve } from 'node:path';
 import { createPool, Database } from '@eh/db';
 import { loadConfig } from './config';
 import { buildApp } from './app';
@@ -16,7 +16,7 @@ async function main(): Promise<void> {
     config,
     db,
     inbox: createInboxSource(process.env),
-    webRoot: process.env.WEB_ROOT ?? join(process.cwd(), 'apps', 'web', 'dist')
+    webRoot: resolve(process.env.WEB_ROOT ?? 'apps/web/dist')
   });
 
   let stopping = false;

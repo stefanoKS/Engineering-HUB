@@ -1,5 +1,14 @@
 # Backup and Restore (V2)
 
+## Local LAN update — 2026-11-02
+
+[LOCAL_LAN.md](LOCAL_LAN.md) specifies the employee-ID/password mode, schema 7, optional email, first-login change, administrator reset, employee-owned progress editing, Windows launcher, durable local backup and optional Shared Drive upload. It supersedes Google-only or Linux-only assumptions below for this mode. [Verification record](LOCAL_LAN_ACCEPTANCE.md).
+
+## Hardening — 2026-11-01
+
+Logical backup tables now share one repeatable-read, read-only snapshot. Custom-format restore uses --exit-on-error and --single-transaction. Connection URL passwords are passed through the child environment rather than command arguments. The local custom-format client test is explicitly skipped when binaries are absent; a deployment-host restore drill is still required.
+
+
 PostgreSQL is the authoritative store, so a backup is a database backup. The V1 workbook backup
 procedure stays valid for the V1 workbook and is not replaced here.
 

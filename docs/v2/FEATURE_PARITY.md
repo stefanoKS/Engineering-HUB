@@ -1,5 +1,14 @@
 # V1 → V2 Feature Parity
 
+## Local LAN update — 2026-11-02
+
+[LOCAL_LAN.md](LOCAL_LAN.md) specifies the employee-ID/password mode, schema 7, optional email, first-login change, administrator reset, employee-owned progress editing, Windows launcher, durable local backup and optional Shared Drive upload. It supersedes Google-only or Linux-only assumptions below for this mode. [Verification record](LOCAL_LAN_ACCEPTANCE.md).
+
+## Update — 2026-11-01
+
+See [RELEASE_HARDENING.md](RELEASE_HARDENING.md) for the current UI, concurrency, delivery, Calendar and performance changes and unresolved release blockers. The dated records below are historical; they do not establish complete feature parity or production approval.
+
+
 Status legend: **PASS** = implemented and verified locally (unit/integration/API test);
 **PARTIAL** = implemented with a documented limitation; **BLOCKED** = needs a credential,
 Workspace, DNS or deployment that this environment cannot provide; **NOT_RUN** = not measured.

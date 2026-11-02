@@ -10,7 +10,9 @@
  *
  * Nothing here activates automation, sends mail or deploys anything.
  */
-import { createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { persistentBackup } from './persistent-backup';
 import pg from 'pg';
 import {
   authorizeDeliveryRetry,
@@ -22,7 +24,7 @@ import {
   runMigrations,
   toDatabaseConfig
 } from '@eh/db';
-import { createBackupArtifact, createLogicalBackup, encrypt, parseEncryptionKey, restoreLogicalBackup } from './backup';
+import { createLogicalBackup, parseEncryptionKey, restoreLogicalBackup, restoreContainer } from './backup';
 import { loadWorkerConfig } from './config';
 import { handleJob } from './jobs';
 import {
@@ -45,50 +47,8 @@ function connectionFromUrl(url: string): pg.ClientConfig {
 }
 
 async function backupNow(config: ReturnType<typeof loadWorkerConfig>, db: Database): Promise<void> {
-  const { archive, backup } = await createLogicalBackup(db);
-  const key = config.BACKUP_ENCRYPTION_KEY ? parseEncryptionKey(config.BACKUP_ENCRYPTION_KEY) : null;
-  const payload = key ? encrypt(archive, key) : archive;
-  const artifact = key
-    ? await createBackupArtifact({
-        pgDumpPath: config.PG_DUMP_PATH,
-        encryptionKey: key,
-        connection: config.database
-      }).catch(() => null)
-    : null;
-  const drive = new GoogleDriveTransport({ credentialsJson: config.GOOGLE_SERVICE_ACCOUNT_JSON });
-  const backupId = `BAK-CLI-${new Date().toISOString().replace(/[:.]/g, '-')}`;
-  let reference = '';
-  if (drive.configured && config.DRIVE_BACKUP_FOLDER_ID && key) {
-    const uploaded = await drive.upload({
-      name: `${backupId}.logical.gz.enc`,
-      content: payload,
-      mimeType: 'application/octet-stream',
-      folderId: config.DRIVE_BACKUP_FOLDER_ID,
-      appProperties: { format: 'eh-logical-v1', rows: String(backup.rowCounts.tasks ?? 0) }
-    });
-    reference = uploaded.fileId;
-  }
-  await db.query(
-    `INSERT INTO backup_log (backup_id, schema_version, backup_reference, result, checksum, size_bytes, manifest)
-     VALUES ($1, 1, $2, 'OK', $3, $4, $5)`,
-    [
-      backupId,
-      reference,
-      createHash('sha256').update(payload).digest('hex'),
-      payload.byteLength,
-      JSON.stringify({
-        method: artifact ? 'pg_dump+logical' : 'logical',
-        uploaded: !!reference,
-        encrypted: !!key,
-        rowCounts: backup.rowCounts,
-        format: backup.format
-      })
-    ]
-  );
-  process.stdout.write(
-    `backup ${backupId}: ${Object.values(backup.rowCounts).reduce((sum, value) => sum + value, 0)} rows, ` +
-      `${payload.byteLength} bytes, uploaded=${!!reference}, encrypted=${!!key}\n`
-  );
+ const drive=new GoogleDriveTransport({credentialsJson:config.GOOGLE_SERVICE_ACCOUNT_JSON,delegatedUser:config.GOOGLE_DRIVE_DELEGATED_USER});
+ process.stdout.write(JSON.stringify(await persistentBackup(db,config,drive,'manual:'+randomUUID()))+'\n');
 }
 
 async function verifyRestore(config: ReturnType<typeof loadWorkerConfig>, db: Database): Promise<void> {
@@ -108,7 +68,13 @@ async function verifyRestore(config: ReturnType<typeof loadWorkerConfig>, db: Da
   const pool = createPool({ connectionString: scratchUrl.toString(), max: 2 });
   const scratchDb = new Database(pool);
   try {
-    await runMigrations(pool);
+    if(!process.argv[3])await runMigrations(pool);
+    const file=process.argv[3];
+    if(file){
+      await restoreContainer({container:await readFile(file),key:parseEncryptionKey(config.BACKUP_ENCRYPTION_KEY??''),pgRestorePath:config.PG_RESTORE_PATH,targetDatabase:scratch,productionDatabase:base.database,connection:{host:base.host,port:base.port,user:base.user,password:typeof base.password==='string'?base.password:undefined}});
+      const counts=await scratchDb.one('SELECT (SELECT count(*) FROM members)::int AS members,(SELECT count(*) FROM tasks)::int AS tasks,(SELECT count(*) FROM local_accounts)::int AS accounts');
+      process.stdout.write(JSON.stringify({result:'PASS',source:file,scratchDatabase:scratch,counts})+'\n');return;
+    }
     const { archive, backup } = await createLogicalBackup(db);
     const restored = await restoreLogicalBackup(scratchDb, archive);
     const mismatched = Object.entries(backup.rowCounts)
@@ -156,7 +122,7 @@ async function runOnce(config: ReturnType<typeof loadWorkerConfig>, db: Database
       credentialsJson: config.GOOGLE_SERVICE_ACCOUNT_JSON,
       calendarId: config.CALENDAR_ID
     }),
-    drive: new GoogleDriveTransport({ credentialsJson: config.GOOGLE_SERVICE_ACCOUNT_JSON }),
+    drive: new GoogleDriveTransport({ credentialsJson: config.GOOGLE_SERVICE_ACCOUNT_JSON, delegatedUser: config.GOOGLE_DRIVE_DELEGATED_USER }),
     sheets: { configured: sheets.configured, append: sheets.append.bind(sheets) },
     log: (message: string, meta: Record<string, unknown> = {}) =>
       process.stdout.write(`${JSON.stringify({ message, ...meta })}\n`)

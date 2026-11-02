@@ -1,10 +1,10 @@
 /** Form primitives and the save-state hook shared by every editor. */
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, ApiFailure } from '../api/client';
 import { useI18n } from '../i18n';
 import { Modal } from './ui';
 
-export type SaveStateValue = 'idle' | 'saving' | 'saved' | 'failed' | 'conflict';
+export type SaveStateValue = 'idle' | 'saving' | 'saved' | 'failed' | 'conflict' | 'unknown';
 
 export function useSave(): {
   state: SaveStateValue;
@@ -14,22 +14,30 @@ export function useSave(): {
 } {
   const [state, setState] = useState<SaveStateValue>('idle');
   const [error, setError] = useState<unknown>(null);
+  const busy = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   const run = useCallback(
     async <T,>(action: () => Promise<T>, options?: { onSuccess?: (value: T) => void }): Promise<T | undefined> => {
+      if (busy.current) return undefined;
+      busy.current = true;
       setState('saving');
       setError(null);
       try {
         const value = await action();
+        if (!mounted.current) return value;
         setState('saved');
         options?.onSuccess?.(value);
         return value;
       } catch (failure) {
+        if (!mounted.current) return undefined;
         if (failure instanceof ApiFailure && failure.isConflict) setState('conflict');
+        else if (failure instanceof ApiFailure && ['NETWORK', 'INVALID_RESPONSE'].includes(failure.code)) setState('unknown');
         else setState('failed');
         setError(failure);
         return undefined;
-      }
+      } finally { busy.current = false; }
     },
     []
   );

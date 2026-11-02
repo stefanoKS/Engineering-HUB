@@ -96,6 +96,19 @@ export async function saveMember(
   if (body.managerId) await activeMember(ctx, body.managerId);
 
   const updated = await ctx.db.transaction(async (tx) => {
+    if (touchesRole) {
+      // Serialize the whole administrator set, not only the target row. Two administrators
+      // removing each other must not both validate against the same old membership set.
+      await tx.advisoryLock('members:role-and-activation');
+      const acting = await getMember(tx, ctx.identity.memberId);
+      if (!acting) throw new DomainError('AUTHORIZATION_DENIED', 'The acting member no longer exists');
+      const actor = { ...ctx.identity, role: acting.role ?? 'VIEWER' as const, active: acting.active };
+      requireRole(actor, 'ADMIN');
+      const current = await getMember(tx, member.memberId);
+      if (!current || current.revision !== memberRevision) throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
+      assertRoleChangeAllowed({ actor, targetMemberId: current.memberId, targetRole: body.role ?? null,
+        targetActive: body.active ?? current.active, activeAdministratorIds: await activeAdministratorIds(tx) });
+    }
     const next = await updateMember(
       tx,
       member.memberId,

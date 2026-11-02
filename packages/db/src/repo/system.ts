@@ -97,6 +97,7 @@ export const KNOWN_SETTINGS: Record<string, { defaultValue: string; description:
 /* -------------------------------- outbox --------------------------------- */
 
 export type OutboxJob = {
+  created_at?: string;
   job_id: string;
   kind: string;
   payload: Record<string, unknown>;
@@ -158,7 +159,7 @@ export async function claimNext(db: Db, workerId: string, leaseSeconds = 120): P
         FOR UPDATE SKIP LOCKED
         LIMIT 1
       )
-      RETURNING job_id::text, kind, payload, attempts, max_attempts, correlation_id, lease_token`,
+      RETURNING job_id::text, created_at::text, kind, payload, attempts, max_attempts, correlation_id, lease_token`,
     [workerId, String(leaseSeconds), leaseToken]
   );
   return row ?? null;

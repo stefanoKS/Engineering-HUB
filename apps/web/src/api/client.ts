@@ -110,7 +110,9 @@ async function request<T>(
   }
 
   let payload: unknown = null;
-  const text = await response.text();
+  let text: string;
+  try { text = await response.text(); }
+  catch { throw new ApiFailure({ code: 'NETWORK', message: 'The connection closed before the response was received', retryable: true }); }
   if (text) {
     try {
       payload = JSON.parse(text);

@@ -20,14 +20,14 @@ const REQUEST_SELECT = `
          snapshot_version, stale_reason, revision
     FROM task_requests`;
 
-export async function listRequests(db: Db, includeDecided: boolean): Promise<TaskRequest[]> {
+export async function listRequests(db: Db, includeDecided: boolean, page = 1, pageSize = 25): Promise<TaskRequest[]> {
   const rows = await db.many<RequestRow>(
     `${REQUEST_SELECT}
       WHERE ($1::boolean OR status IN ('PENDING','PROCESSING','STALE'))
       ORDER BY CASE status WHEN 'PENDING' THEN 0 WHEN 'PROCESSING' THEN 1 WHEN 'STALE' THEN 2 ELSE 3 END,
-               submitted_at DESC
-      LIMIT 500`,
-    [includeDecided]
+               submitted_at DESC, request_id DESC
+      LIMIT $2 OFFSET $3`,
+    [includeDecided, pageSize, (page - 1) * pageSize]
   );
   return rows.map(toRequest);
 }

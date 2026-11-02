@@ -1,3 +1,5 @@
+import { ProjectPicker } from '../components/ProjectPicker';
+import { useEditorState } from '../state/editor';
 /** Task list: server-side filtering and paging, narrow rows, one form for create and edit. */
 import { useState } from 'react';
 import type { Actor, Reference, Task, TaskDetail, TaskSummary } from '@eh/contracts';
@@ -25,14 +27,11 @@ export function TasksScreen({ actor }: { actor: Actor }): JSX.Element {
   const [query, setQuery] = useState('');
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [page, setPage] = useState(1);
-  const [editing, setEditing] = useState<{ mode: 'create' } | { mode: 'edit'; detail: TaskDetail } | null>(null);
+  const [editing, setEditing, loadEditor, editorError, editorLoading] = useEditorState<{ mode: 'create' } | { mode: 'edit'; detail: TaskDetail } | null>(null);
   const [action, setAction] = useState<{ kind: 'approve' | 'confirm' | 'override'; task: TaskSummary } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ task: TaskSummary; confirmation: string; blockers: string[] } | null>(null);
 
   const references = useQuery<References>(keys.references, () => api.get<References>('/api/manager/references'));
-  const projects = useQuery<{ items: { projectId: string; projectName: string }[] }>(keys.projects, () =>
-    api.get<{ items: { projectId: string; projectName: string }[] }>('/api/manager/projects?pageSize=100')
-  );
   const listKey = `${keys.tasks}${queryString({ projectId, status, query, overdueOnly, page })}`;
   const list = useQuery<Page>(listKey, () =>
     api.get<Page>(
@@ -42,8 +41,7 @@ export function TasksScreen({ actor }: { actor: Actor }): JSX.Element {
   const canManage = actor.role === 'ADMIN' || actor.role === 'MANAGER';
 
   async function openEdit(summary: TaskSummary): Promise<void> {
-    const detail = await api.get<TaskDetail>(`/api/manager/tasks/${summary.taskId}`);
-    setEditing({ mode: 'edit', detail });
+    await loadEditor(async () => ({ mode: 'edit', detail: await api.get<TaskDetail>(`/api/manager/tasks/${summary.taskId}`) }));
   }
 
   async function startDelete(summary: TaskSummary): Promise<void> {
@@ -62,20 +60,7 @@ export function TasksScreen({ actor }: { actor: Actor }): JSX.Element {
       <div className="screen-header">
         <h2>{t('nav.tasks')}</h2>
         <div className="filters">
-          <select
-            value={projectId}
-            onChange={(event) => {
-              setProjectId(event.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="">{t('filter.all')}</option>
-            {(projects.data?.items ?? []).map((project) => (
-              <option key={project.projectId} value={project.projectId}>
-                {project.projectName}
-              </option>
-            ))}
-          </select>
+          <ProjectPicker value={projectId} onChange={id => { setProjectId(id); setPage(1); }} />
           <select
             value={status}
             onChange={(event) => {
@@ -110,6 +95,8 @@ export function TasksScreen({ actor }: { actor: Actor }): JSX.Element {
         </div>
       </div>
 
+      {editorLoading && <p role="status">{t('state.loading')}</p>}
+      <ErrorBox error={editorError} />
       <ErrorBox error={list.error} onRetry={() => list.refresh()} />
 
       {!list.data ? (

@@ -131,6 +131,16 @@ if (workerImage) {
   expect(/USER node/.test(runtime), 'worker runtime must not run as root');
 }
 
+/* --------------------------- Windows LAN profile ------------------------- */
+const lanApi = read('deploy/windows/api.env.example');
+const lanWorker = read('deploy/windows/worker.env.example');
+expect(lanApi.includes('AUTH_MODE=local'), 'LAN API must use local authentication');
+expect(lanApi.includes('DEV_AUTH_ENABLED=false'), 'LAN API must disable development sign-in');
+expect(!lanApi.includes('GOOGLE_SERVICE_ACCOUNT_JSON'), 'LAN API must not receive Google credentials');
+expect(lanWorker.includes('BACKUP_ONLY=true'), 'LAN worker must suppress mail and Calendar');
+expect(lanWorker.includes('BACKUP_DIRECTORY='), 'LAN backups need persistent storage');
+expect(read('.gitignore').split(/\r?\n/).includes('data/'), 'Runtime secrets and local data must be gitignored');
+
 /* -------------------------------- pipeline -------------------------------- */
 const ci = read('.github/workflows/ci.yml');
 if (ci) {
@@ -138,7 +148,7 @@ if (ci) {
   expect(/image:\s*postgres:18/.test(ci), 'CI must start a PostgreSQL 18 service container');
   expect(/TEST_DATABASE_URL:/.test(ci), 'CI must point the tests at its PostgreSQL service');
   expect(/REQUIRE_DATABASE:\s*['"]?1/.test(ci), 'CI must fail when the database is unavailable');
-  for (const step of ['npm ci', 'run typecheck', 'run lint', 'test', 'run validate', 'run build', 'smoke:prod']) {
+  for (const step of ['npm ci', 'run typecheck', 'run lint', 'test', 'run validate', 'run build', 'test:browser']) {
     expect(ci.includes(step), `CI is missing the "${step}" step`);
   }
   expect(!/windows|macos/.test(ci.split('jobs:')[1] ?? ''), 'CI must not depend on a developer platform');
