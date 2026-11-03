@@ -2,6 +2,8 @@
 
 ## V2 corrective follow-up — 2026-11-03
 
+- Show child tasks directly beneath expandable parent rows, with server-filtered ancestry, sibling pagination and in-memory expansion state.
+
 - Fix repeated member creation, isolate member idempotency and request receipts, use verified request authors, and permit assigned restricted-project reviews.
 - Disable container completion controls; preserve administrator completion approval for member-created work.
 - Persist resumable Drive checkpoints and reserved file identities, correct byte acknowledgements, and verify folder upload capability.

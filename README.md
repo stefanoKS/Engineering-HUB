@@ -8,7 +8,8 @@ on your company LAN, with PostgreSQL as the database. Employee-ID/password sign-
 account or email. Japanese is the default; every user can switch to English.
 
 Managers organise responsibilities, projects, subprojects (four levels) and tasks (three levels),
-review requests and monitor progress without counting parent tasks twice. Members create their own
+review requests and monitor progress without counting parent tasks twice. Expand the arrow beside
+a parent task to show its children directly underneath; click again to collapse the branch. Members create their own
 work, update progress and submit completion reports. Backups are encrypted locally first, with an
 optional Google Drive copy. Mail, Calendar and publication remain optional and off by default.
 

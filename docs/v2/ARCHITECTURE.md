@@ -162,3 +162,11 @@ separately.
 * No workload-overlap validation, capacity blocking or automatic reassignment.
 * No second bootstrap route, no browser write path outside the documented commands.
 * No claim that a single office server is highly available.
+
+## Expandable task hierarchy
+
+The task screen pages root tasks and loads bounded child pages through the same authorized manager
+endpoint. A recursive SQL ancestor projection is bounded by the domain MAX_TASK_DEPTH. It resolves
+search/filter ancestry before paging. Parent_Task_ID is unchanged; collapse changes only page-memory
+expansion state. Child queries share the normal task-cache invalidation prefix and reopening uses
+cached rows. Nested expansion survives collapsing and reopening its parent within the screen.

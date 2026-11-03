@@ -338,6 +338,8 @@ export const EmployeeTimelineQuery = z
 
 export const TaskListQuery = z
   .object({
+    tree: z.enum(['true', 'false']).optional(),
+    treeParentId: Id.optional(),
     projectId: Id.optional(),
     subprojectId: Id.optional(),
     responsibilityId: Id.optional(),

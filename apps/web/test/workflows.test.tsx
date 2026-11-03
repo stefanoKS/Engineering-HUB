@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { I18nProvider } from '../src/i18n';
 import { TaskForm } from '../src/screens/TaskForm';
 import { RequestForm } from '../src/screens/Overview';
+import { TasksScreen } from '../src/screens/Tasks';
 import { MyWorkScreen } from '../src/screens/MyWork';
 import { useEditorState } from '../src/state/editor';
 import { queryCache } from '../src/state/cache';
@@ -166,5 +167,36 @@ describe('member self-service work', () => {
     expect(await screen.findByText('配線確認')).toBeTruthy();
     expect(screen.getAllByText('承認待ち').length).toBeGreaterThan(0);
     expect((screen.getByRole('button', { name: '完了報告' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+
+describe('collapsible task tree', () => {
+  it('opens children directly below their parent and preserves nested expansion after collapse', async () => {
+    const task=(taskId:string,taskName:string,parentTaskId:string|null,depth:number,container:boolean)=>({taskId,taskName,parentTaskId,depth,container,projectId:'PRJ-TREE',projectName:'Tree',status:'Not Started',priority:'Medium',ownerName:'',assigneeNames:[],dueDate:null,progressPercent:0,overdue:false,reviewState:'NONE',revision:1});
+    const root=task('ROOT','Root',null,1,true),child=task('CHILD','Child','ROOT',2,true),leaf=task('LEAF','Leaf','CHILD',3,false),other=task('OTHER','Other',null,1,false);
+    const fetcher=vi.fn(async(url:string)=>{
+      if(url.includes('/references'))return response({members:[],skills:[],subprojects:[]});
+      if(url.includes('/projects'))return response({items:[],total:0,totalPages:1});
+      const parent=new URL(url,'http://test').searchParams.get('treeParentId');
+      const items=parent==='ROOT'?[child]:parent==='CHILD'?[leaf]:[root,other];
+      return response({items,total:items.length,matchedTotal:4,page:1,pageSize:25,totalPages:1});
+    });
+    vi.stubGlobal('fetch',fetcher);
+    const view=render(<I18nProvider><TasksScreen actor={{memberId:'A',name:'Admin',email:'fixture@example.invalid',role:'ADMIN',active:true,verified:true,selfServiceEnabled:false}} /></I18nProvider>);
+    await screen.findByText('Root');
+    expect(screen.queryByText('Child')).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'Root の子タスクを開く'}));
+    await screen.findByText('Child');
+    fireEvent.click(screen.getByRole('button',{name:'Child の子タスクを開く'}));
+    await screen.findByText('Leaf');
+    expect(Array.from(view.container.querySelectorAll('tr[data-task-id]')).map(row=>row.getAttribute('data-task-id'))).toEqual(['ROOT','CHILD','LEAF','OTHER']);
+    fireEvent.click(screen.getByRole('button',{name:'Root の子タスクを閉じる'}));
+    expect(screen.queryByText('Child')).toBeNull();
+    expect(screen.queryByText('Leaf')).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'Root の子タスクを開く'}));
+    await screen.findByText('Leaf');
+    expect(screen.getByRole('button',{name:'Child の子タスクを閉じる'}).getAttribute('aria-expanded')).toBe('true');
+    expect(fetcher.mock.calls.filter(([url])=>url.includes('treeParentId=ROOT'))).toHaveLength(1);
   });
 });

@@ -11,7 +11,7 @@ import type { z } from 'zod';
 import type { CreateMyTaskBody, MyWorkList, MyWorkProjectOptions } from '@eh/contracts';
 import { getProject, insertTask, listSubprojects, updateTask, getTask } from '@eh/db';
 import { DomainError, requireRole, taskInActiveWork } from '@eh/domain';
-import { audit, enqueueJob, runIdempotent, type ServiceCtx } from './common';
+import { audit, enqueueJob, hashRequest, runIdempotent, type ServiceCtx } from './common';
 import { assertTaskPlacement, planTaskDeadline } from './tasks';
 
 const PAGE_SIZE = 25;
@@ -215,6 +215,19 @@ export async function createMyTask(
   // carries assignment, hierarchy and scheduling controls this endpoint deliberately lacks.
   if (ctx.identity.role !== 'MEMBER') {
     throw new DomainError('AUTHORIZATION_DENIED', 'Member self-service creation is limited to the MEMBER role');
+  }
+  // Preserve retries from installations that used the old global scope, without exposing
+  // another member's response or creating a second task after this application update.
+  const legacy = await ctx.db.one<{ request_hash: string; status: string; response: { taskId?: string } | null }>(
+    "SELECT request_hash, status, response FROM idempotency_keys WHERE scope = 'employee.task.create' AND key = $1",
+    [body.idempotencyKey]
+  );
+  if (legacy) {
+    const task = legacy.response?.taskId ? await getTask(ctx.db, legacy.response.taskId) : null;
+    if (legacy.status !== 'COMPLETED' || legacy.request_hash !== hashRequest(body) || task?.createdByMemberId !== ctx.identity.memberId) {
+      throw new DomainError('IDEMPOTENCY_REPLAY', 'This key cannot be reused; check the original operation');
+    }
+    return { taskId: task.taskId, replayed: true };
   }
   const project = await getProject(ctx.db, body.projectId);
   if (!project) throw new DomainError('NOT_FOUND', `Project not found: ${body.projectId}`);

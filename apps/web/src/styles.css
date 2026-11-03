@@ -775,3 +775,7 @@ input[type=checkbox] { min-height: auto; width: 17px; height: 17px; accent-color
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; } }
 
 @media (max-width: 850px) { .table th, .table td { min-width: 110px; } .table th:first-child, .table td:first-child { min-width: 190px; } }
+
+.task-tree-toggle, .task-tree-spacer { display: inline-block; width: 1.5rem; text-align: center; }
+.task-tree-toggle { font-size: 1.1rem; padding: 0; margin-right: 0.25rem; }
+.task-tree-footer { padding: 0.4rem 1rem 0.7rem 2.5rem; background: var(--surface-muted, #f7f9fc); }

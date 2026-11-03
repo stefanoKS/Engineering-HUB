@@ -1,5 +1,37 @@
 # V2 Acceptance Record
 
+## Corrective follow-up and expandable task tree — 2026-11-03
+
+Reviewed latest origin/main at 7f5d9e2 with a clean starting worktree; during continuation,
+HEAD advanced to 5581a1e containing the earlier self-service/backup changes. Those changes were
+preserved; the tree and compatibility follow-up build on that head. This is a source/build update,
+not a deployment. No new migration: schema 8 and the existing checksummed migrations are unchanged.
+V1 runtime and historical gate files are unchanged. Operational database URLs were removed from
+validation subprocesses; database tests used isolated embedded PostgreSQL with REQUIRE_DATABASE=1.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| npm ci | PASS | Locked install; Node 24.21.0. npm reports 17 moderate dependency advisories; no forced dependency upgrade applied. |
+| npm test | PASS | 776 V1 tests; 190 V2 tests across 15 files, zero skipped with TEST_PG_BIN_DIR pointing to PostgreSQL 18 clients. |
+| Targeted follow-up | PASS | API suite 37 tests after legacy idempotency replay preservation; UI workflow suite 9 tests after container-feedback correction. |
+| npm run build | PASS | API, web, worker and migration artifacts built. |
+| npm run validate | PASS | V1/V2 governance and deployment templates. |
+| npm run lint / typecheck | PASS | Final checks include tree fixtures and backward-compatible creation replay; explicit required-date fixtures corrected. |
+| Built artifact and Chromium local-login smoke | PASS | Isolated schema-8 migration; API health/readiness/auth/mutation; worker job; local account provisioning and password change; child-task create, placement, collapse/reopen; responsive overview and sign-out. |
+| Task tree API/UI | PASS | Server-side ancestry before paging, root pages, 27-child branch pagination, MEMBER refusal, nested expansion retention and cached reopening. |
+| Member workflows | PASS | Repeated creation (including HTTP-LAN randomUUID fallback), identity-scoped keys, legacy-key replay, receipt isolation, verified requester, restricted-project submission, ADMIN-only member-created completion. |
+| Drive transport | PASS (mock) | 11 cases include 9 MiB upload, interrupted chunk, persisted session, expired session, reserved file ID and 409 reconciliation, folder permissions and missing Range. Local checkpoint stays out of database status. |
+| Encrypted custom-format restore | PASS (local) | pg_dump -> AES-GCM file -> read-back -> pg_restore into a separate scratch database; restored data checked and source retained. Scratch removed afterwards. |
+| Real Drive upload/download | NOT_RUN | Requires real service account and Shared Drive. Local file read-back is not a cloud download. |
+| Physical LAN installation | NOT_RUN | Second PC, firewall, reboot, scheduled backup and recovery-host rehearsal require operator verification. |
+
+Browser evidence: work/screenshots/task-tree-desktop.png. Local command logs were retained outside
+the repository under the operator's .codex directory (eh-complete-tests, eh-ready-browser,
+eh-legacy-compat and final verification logs). Initial SQL-placeholder and browser-locator failures
+were corrected and the relevant suites rerun successfully. Earlier records below remain historical.
+Production remains **NOT APPROVED FOR PRODUCTION**.
+
+
 ## Member self-service, completion approval and Drive backup — 2026-11-03
 
 Schema **8** (migration `0008_member_created_work`, additive). Employee contract 1.6, migrations

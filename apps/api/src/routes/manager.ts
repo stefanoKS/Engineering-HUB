@@ -46,6 +46,7 @@ import {
   listSkills,
   listSubprojects,
   listTaskSummaries,
+  listTaskTreeSummaries,
   listTaskSummariesForProject,
   searchTasks
 } from '@eh/db';
@@ -280,9 +281,12 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
     try {
       managerOf(request);
       const query = TaskListQuery.parse(request.query ?? {});
-      const result = await listTaskSummaries(request.state.db, query, query.page, query.pageSize);
+      const result = query.tree === 'true'
+        ? await listTaskTreeSummaries(request.state.db, query, query.treeParentId, query.page, query.pageSize)
+        : await listTaskSummaries(request.state.db, query, query.page, query.pageSize);
       return ok(reply, request, {
         items: result.items,
+        ...('matchedTotal' in result ? { matchedTotal: result.matchedTotal } : {}),
         total: result.total,
         page: query.page,
         pageSize: query.pageSize,

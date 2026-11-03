@@ -9,6 +9,10 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { APP_NAME, DEFAULT_LANGUAGE, LANGUAGES, STORAGE_KEY, isLanguage, label as dictLabel, t as dictT, type Language } from '@eh/i18n';
 
 export const V2_LABELS = {
+ 'tasks.expandBranch': { ja: '{name} の子タスクを開く', en: 'Expand subtasks of {name}' },
+ 'tasks.collapseBranch': { ja: '{name} の子タスクを閉じる', en: 'Collapse subtasks of {name}' },
+ 'tasks.treeScope': { ja: '条件に一致するタスク: {n} 件。下のページ切替は最上位タスク単位です。親タスクを開くと子タスクを表示します。', en: '{n} matching tasks. Pagination below is by top-level task. Expand a parent to show its subtasks.' },
+ 'tasks.childScope': { ja: '{name} の子タスク: {n} 件（現在の条件）', en: 'Subtasks of {name}: {n} (current filters)' },
  'local.myWork': {ja:'自分の担当タスク',en:'My assigned work'},
  'local.progressHint': {ja:'進捗は0～99%。完了と期限の変更は管理者の確認が必要です。',en:'Progress is 0–99%. Completion and deadline changes require manager review.'}, 'local.actualHours': {ja:'実績工数（時間）',en:'Actual hours'},
  'local.progress': {ja:'進捗（%）',en:'Progress (%)'},

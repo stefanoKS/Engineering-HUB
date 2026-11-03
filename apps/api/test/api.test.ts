@@ -676,6 +676,10 @@ describe('member self-service task creation', () => {
       (second.json() as { data: { taskId: string } }).data.taskId
     ]);
     expect(ids.size).toBe(1);
+    await db.query("UPDATE idempotency_keys SET scope='employee.task.create' WHERE scope='employee.task.create:MEM-MEMBER'");
+    const legacyReplay=await app.inject({method:'POST',url:'/api/employee/my-work',headers:headers(auth,true),payload:body()});
+    expect(legacyReplay.statusCode,legacyReplay.body).toBe(200);
+    expect(legacyReplay.json().data.taskId).toBe(first.json().data.taskId);
     const count = await db.one<{ count: string }>('SELECT count(*)::text AS count FROM tasks');
     expect(Number(count?.count)).toBe(1);
   });
@@ -894,4 +898,35 @@ describe('member completion requests', () => {
     const body = response.json() as { data: { csrfToken: string } };
     return { cookie, csrf: body.data.csrfToken };
   }
+});
+
+
+describe('task tree paging', () => {
+  it('keeps matching descendants reachable beneath ancestors before paging', async () => {
+    await insertProject(db,{projectName:'Tree',status:'Active'},'PRJ-TREE');
+    await insertTask(db,{projectId:'PRJ-TREE',taskName:'Root later',dueDate:'2027-12-01'},'TSK-ROOT');
+    await insertTask(db,{projectId:'PRJ-TREE',taskName:'Branch',parentTaskId:'TSK-ROOT',dueDate:'2027-01-01'},'TSK-BRANCH');
+    await insertTask(db,{projectId:'PRJ-TREE',taskName:'Needle',parentTaskId:'TSK-BRANCH',dueDate:'2026-12-01'},'TSK-LEAF');
+    await insertTask(db,{projectId:'PRJ-TREE',taskName:'Other root',dueDate:'2028-01-01'},'TSK-OTHER');
+    const auth=await signIn(MANAGER);
+    const get=async(extra:string)=>app.inject({method:'GET',url:'/api/manager/tasks?tree=true&pageSize=1'+extra,headers:headers(auth)});
+    const root=await get('&query=Needle');
+    expect(root.statusCode,root.body).toBe(200);
+    expect(root.json().data).toMatchObject({total:1,matchedTotal:1,totalPages:1});
+    expect(root.json().data.items.map((t:{taskId:string})=>t.taskId)).toEqual(['TSK-ROOT']);
+    const branch=await get('&query=Needle&treeParentId=TSK-ROOT');
+    expect(branch.json().data.items.map((t:{taskId:string})=>t.taskId)).toEqual(['TSK-BRANCH']);
+    const leaf=await get('&query=Needle&treeParentId=TSK-BRANCH');
+    expect(leaf.json().data.items.map((t:{taskId:string})=>t.taskId)).toEqual(['TSK-LEAF']);
+    const all=await get('');
+    expect(all.json().data).toMatchObject({total:2,matchedTotal:4,totalPages:2});
+    expect((await get('&page=2')).json().data.items[0].taskId).toBe('TSK-OTHER');
+    const refused=await app.inject({method:'GET',url:'/api/manager/tasks?tree=true&treeParentId=TSK-ROOT',headers:headers(await signIn(MEMBER))});
+    expect(refused.statusCode).toBe(403);
+    for (let i=0;i<26;i++) await insertTask(db,{projectId:'PRJ-TREE',taskName:'Sibling '+i,parentTaskId:'TSK-ROOT',dueDate:'2028-01-01'},'TSK-SIB-'+String(i).padStart(2,'0'));
+    const siblings=await app.inject({method:'GET',url:'/api/manager/tasks?tree=true&treeParentId=TSK-ROOT&page=2&pageSize=25',headers:headers(auth)});
+    expect(siblings.statusCode,siblings.body).toBe(200);
+    expect(siblings.json().data).toMatchObject({total:27,page:2,totalPages:2});
+    expect(siblings.json().data.items).toHaveLength(2);
+  });
 });

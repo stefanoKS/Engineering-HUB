@@ -1,7 +1,7 @@
 import { ProjectPicker } from '../components/ProjectPicker';
 import { useEditorState } from '../state/editor';
 /** Task list: server-side filtering and paging, narrow rows, one form for create and edit. */
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import type { Actor, Reference, Task, TaskDetail, TaskSummary } from '@eh/contracts';
 import { api, queryString } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
@@ -9,9 +9,9 @@ import { useI18n } from '../i18n';
 import { Badge, EmptyState, ErrorBox, Pagination, ProgressBar, statusTone } from '../components/ui';
 import { ConfirmDialog } from '../components/forms';
 import { TaskForm } from './TaskForm';
-import { projectColor } from '@eh/domain';
+import { MAX_TASK_DEPTH, projectColor } from '@eh/domain';
 
-type Page = { items: TaskSummary[]; total: number; page: number; pageSize: number; totalPages: number };
+type Page = { items: TaskSummary[]; matchedTotal?: number; total: number; page: number; pageSize: number; totalPages: number };
 type References = {
   members: { memberId: string; name: string; active: boolean }[];
   skills: { skillId: string; skillName: string }[];
@@ -27,15 +27,21 @@ export function TasksScreen({ actor }: { actor: Actor }): JSX.Element {
   const [query, setQuery] = useState('');
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [page, setPage] = useState(1);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const toggle = (id: string): void => setExpanded(current => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   const [editing, setEditing, loadEditor, editorError, editorLoading] = useEditorState<{ mode: 'create' } | { mode: 'edit'; detail: TaskDetail } | null>(null);
   const [action, setAction] = useState<{ kind: 'approve' | 'confirm' | 'override'; task: TaskSummary } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ task: TaskSummary; confirmation: string; blockers: string[] } | null>(null);
 
   const references = useQuery<References>(keys.references, () => api.get<References>('/api/manager/references'));
-  const listKey = `${keys.tasks}${queryString({ projectId, status, query, overdueOnly, page })}`;
+  const listKey = `${keys.tasks}${queryString({ projectId, status, query, overdueOnly, page, tree: true })}`;
   const list = useQuery<Page>(listKey, () =>
     api.get<Page>(
-      `/api/manager/tasks${queryString({ projectId, status, query, overdueOnly, page, pageSize: 25 })}`
+      `/api/manager/tasks${queryString({ projectId, status, query, overdueOnly, page, pageSize: 25, tree: true })}`
     )
   );
   const canManage = actor.role === 'ADMIN' || actor.role === 'MANAGER';
@@ -117,62 +123,13 @@ export function TasksScreen({ actor }: { actor: Actor }): JSX.Element {
             </tr>
           </thead>
           <tbody>
-            {list.data.items.map((task) => (
-              <tr key={task.taskId} style={{ ['--project-accent' as string]: projectColor(task.projectId) }}>
-                <td>
-                  <span className="project-dot" style={{ background: projectColor(task.projectId) }} aria-hidden="true" />
-                  <span style={{ paddingLeft: `${Math.max(0, task.depth - 1) * 14}px` }}>
-                    <a href={`#/task/${task.taskId}`}>{task.taskName}</a>
-                  </span>
-                  {task.container ? <Badge>{t('request.container')}</Badge> : null}
-                  {task.reviewState === 'PENDING' ? <Badge tone="warn">{t('tasks.review')}</Badge> : null}
-                </td>
-                <td className="muted small">{task.projectName}</td>
-                <td>
-                  {task.ownerName || t('common.unset')}
-                  {task.assigneeNames.length ? <div className="muted small">{task.assigneeNames.join(', ')}</div> : null}
-                </td>
-                <td>
-                  <Badge tone={statusTone(task.status)}>{label('task.status', task.status)}</Badge>
-                </td>
-                <td>
-                  {task.dueDate ?? t('common.unset')}
-                  {task.overdue ? <Badge tone="danger">{t('overview.overdue')}</Badge> : null}
-                </td>
-                <td>
-                  <ProgressBar value={task.progressPercent} />
-                </td>
-                <td className="actions">
-                  {canManage ? (
-                    <>
-                      <button type="button" className="link-button" onClick={() => void openEdit(task)}>
-                        {t('action.edit')}
-                      </button>
-                      <button type="button" className="link-button" onClick={() => setAction({ kind: 'approve', task })}>
-                        {t('tasks.approve')}
-                      </button>
-                      <button type="button" className="link-button" onClick={() => setAction({ kind: 'confirm', task })}>
-                        {t('tasks.confirmSchedule')}
-                      </button>
-                      {actor.role === 'ADMIN' ? (
-                        <>
-                          <button type="button" className="link-button" onClick={() => setAction({ kind: 'override', task })}>
-                            {t('tasks.override')}
-                          </button>
-                          <button type="button" className="link-button danger" onClick={() => void startDelete(task)}>
-                            {t('projects.delete')}
-                          </button>
-                        </>
-                      ) : null}
-                    </>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
+            <TaskTreeRows items={list.data.items} actor={actor} expanded={expanded} toggle={toggle}
+              filters={{ projectId, status, query, overdueOnly }} openEdit={openEdit} setAction={setAction} startDelete={startDelete} />
           </tbody>
         </table>
       )}
 
+      {list.data ? <p className="muted small">{t('tasks.treeScope', { n: list.data.matchedTotal ?? list.data.total })}</p> : null}
       {list.data ? (
         <Pagination page={list.data.page} totalPages={list.data.totalPages} total={list.data.total} onChange={setPage} />
       ) : null}
@@ -263,4 +220,96 @@ export function TasksScreen({ actor }: { actor: Actor }): JSX.Element {
       ) : null}
     </div>
   );
+}
+
+
+type TreeProps = {
+  actor: Actor;
+  expanded: Set<string>;
+  toggle: (id: string) => void;
+  filters: { projectId: string; status: string; query: string; overdueOnly: boolean };
+  openEdit: (task: TaskSummary) => Promise<void>;
+  startDelete: (task: TaskSummary) => Promise<void>;
+  setAction: (action: { kind: 'approve' | 'confirm' | 'override'; task: TaskSummary }) => void;
+};
+
+function TaskTreeRows(props: TreeProps & { items: TaskSummary[] }): JSX.Element {
+  const { actor, expanded, toggle, openEdit, startDelete, setAction } = props;
+  const { t, label } = useI18n();
+  const canManage = actor.role === 'ADMIN' || actor.role === 'MANAGER';
+  return <>{props.items.map(task => <Fragment key={task.taskId}>
+              <tr data-task-id={task.taskId} style={{ ['--project-accent' as string]: projectColor(task.projectId) }}>
+                <td style={{ paddingLeft: `${12 + Math.max(0, task.depth - 1) * 24}px` }}>
+                  {task.container ? <button type="button" className="link-button task-tree-toggle"
+                    aria-expanded={expanded.has(task.taskId)}
+                    aria-label={t(expanded.has(task.taskId) ? 'tasks.collapseBranch' : 'tasks.expandBranch', { name: task.taskName })}
+                    onClick={() => toggle(task.taskId)}>{expanded.has(task.taskId) ? '▾' : '▸'}</button> : <span className="task-tree-spacer" />}
+                  <span className="project-dot" style={{ background: projectColor(task.projectId) }} aria-hidden="true" />
+                  <span>
+                    <a href={`#/task/${task.taskId}`}>{task.taskName}</a>
+                  </span>
+                  {task.container ? <Badge>{t('request.container')}</Badge> : null}
+                  {task.reviewState === 'PENDING' ? <Badge tone="warn">{t('tasks.review')}</Badge> : null}
+                </td>
+                <td className="muted small">{task.projectName}</td>
+                <td>
+                  {task.ownerName || t('common.unset')}
+                  {task.assigneeNames.length ? <div className="muted small">{task.assigneeNames.join(', ')}</div> : null}
+                </td>
+                <td>
+                  <Badge tone={statusTone(task.status)}>{label('task.status', task.status)}</Badge>
+                </td>
+                <td>
+                  {task.dueDate ?? t('common.unset')}
+                  {task.overdue ? <Badge tone="danger">{t('overview.overdue')}</Badge> : null}
+                </td>
+                <td>
+                  <ProgressBar value={task.progressPercent} />
+                </td>
+                <td className="actions">
+                  {canManage ? (
+                    <>
+                      <button type="button" className="link-button" onClick={() => void openEdit(task)}>
+                        {t('action.edit')}
+                      </button>
+                      <button type="button" className="link-button" onClick={() => setAction({ kind: 'approve', task })}>
+                        {t('tasks.approve')}
+                      </button>
+                      <button type="button" className="link-button" onClick={() => setAction({ kind: 'confirm', task })}>
+                        {t('tasks.confirmSchedule')}
+                      </button>
+                      {actor.role === 'ADMIN' ? (
+                        <>
+                          <button type="button" className="link-button" onClick={() => setAction({ kind: 'override', task })}>
+                            {t('tasks.override')}
+                          </button>
+                          <button type="button" className="link-button danger" onClick={() => void startDelete(task)}>
+                            {t('projects.delete')}
+                          </button>
+                        </>
+                      ) : null}
+                    </>
+                  ) : null}
+                </td>
+              </tr>
+    {task.container && task.depth < MAX_TASK_DEPTH && expanded.has(task.taskId) ? <TaskChildren key={task.taskId + JSON.stringify(props.filters)} {...props} parent={task} /> : null}
+  </Fragment>)}</>;
+}
+
+function TaskChildren(props: TreeProps & { parent: TaskSummary }): JSX.Element {
+  const { t } = useI18n();
+  const [page, setPage] = useState(1);
+  const query = queryString({ ...props.filters, tree: true, treeParentId: props.parent.taskId, page, pageSize: 25 });
+  const children = useQuery<Page>(keys.tasks + query, () => api.get<Page>('/api/manager/tasks' + query));
+  return <>
+    {children.data ? <TaskTreeRows {...props} items={children.data.items} /> : null}
+    <tr><td colSpan={7} className="task-tree-footer">
+      <ErrorBox error={children.error} onRetry={children.refresh} />
+      {!children.data && !children.error ? <span role="status">{t('state.loading')}</span> : null}
+      {children.data ? <>
+        <span className="muted small">{t('tasks.childScope', { name: props.parent.taskName, n: children.data.total })}</span>
+        {children.data.totalPages > 1 ? <Pagination page={page} totalPages={children.data.totalPages} total={children.data.total} onChange={setPage} /> : null}
+      </> : null}
+    </td></tr>
+  </>;
 }

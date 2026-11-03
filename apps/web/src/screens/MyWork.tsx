@@ -239,7 +239,8 @@ function WorkCard({
   const [reporting, setReporting] = useState(false);
   const save = useSave();
 
-  const finished = item.container || ['Done', 'Cancelled'].includes(item.status);
+  const finished = ['Done', 'Cancelled'].includes(item.status);
+  const locked = finished || item.container;
   const review = reviewKey(item.reviewState);
 
   return (
@@ -282,13 +283,13 @@ function WorkCard({
         </div>
         <ErrorBox error={save.error} onRetry={onChanged} />
         <div className="inline-actions">
-          <button type="submit" className="button" disabled={save.state === 'saving' || finished}>
+          <button type="submit" className="button" disabled={save.state === 'saving' || locked}>
             {t('action.save')}
           </button>
           <button
             type="button"
             className="button secondary"
-            disabled={finished || item.pendingRequest || !submissionEnabled}
+            disabled={locked || item.pendingRequest || !submissionEnabled}
             title={submissionEnabled ? undefined : t('myWork.requestsClosed')}
             onClick={() => setReporting(true)}
           >
@@ -297,6 +298,7 @@ function WorkCard({
         </div>
         {item.pendingRequest ? <p className="muted small">{t('myWork.review.pending')}</p> : null}
         {finished ? <p className="muted small">{t('myWork.doneNote')}</p> : null}
+        {item.container ? <p className="muted small">{t('myWork.containerNote')}</p> : null}
       </form>
 
       {reporting ? (

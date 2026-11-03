@@ -207,3 +207,11 @@ My Work rows include the server-derived `container` boolean. Assigned tasks in R
 may submit requests without changing project publication. Request author names are server-verified;
 client names are ignored. Employee create/request idempotency is scoped to the authenticated member,
 and a client request ID already owned by another member returns NOT_FOUND.
+
+## Expandable task list
+
+`GET /api/manager/tasks?tree=true` pages root tasks. Add `treeParentId=<taskId>` to page
+direct children. Filters are resolved before paging; matching ancestors are retained as context
+so a child matching a query cannot disappear behind an excluded parent. `total` counts siblings
+at the requested level, while `matchedTotal` counts matching records across the filter scope.
+The default endpoint without `tree=true` retains its existing flat-list behavior.

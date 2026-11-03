@@ -1,6 +1,6 @@
 /** Task repository: records, summaries, relationships, approvals and confirmations. */
 import type { Task, TaskSummary } from '@eh/contracts';
-import { deadlineState } from '@eh/domain';
+import { deadlineState, MAX_TASK_DEPTH } from '@eh/domain';
 import type { Queryable } from '../pool';
 import { newId } from '../ids';
 import { toTask, type TaskRow } from '../map';
@@ -186,6 +186,35 @@ export async function listTaskSummaries(
     [...params, pageSize, (page - 1) * pageSize]
   );
   return { items: rows.map((row) => toTaskSummary(row)), total: Number(total?.count ?? 0) };
+}
+
+/** Pages siblings, retaining ancestors of filter matches so a matching child stays reachable. */
+export async function listTaskTreeSummaries(
+  db: Db, filters: TaskFilters, parentTaskId: string | undefined, page: number, pageSize: number
+): Promise<{ items: TaskSummary[]; total: number; matchedTotal: number }> {
+  const { where, params } = taskWhere(filters);
+  const cte = `WITH RECURSIVE matching AS (
+    SELECT t.task_id, t.parent_task_id FROM tasks t JOIN projects p ON p.project_id=t.project_id ${where}
+  ), ancestors AS (
+    SELECT task_id, parent_task_id, 1 AS levels FROM matching
+    UNION ALL
+    SELECT p.task_id, p.parent_task_id, a.levels+1 FROM ancestors a
+      JOIN tasks p ON p.task_id=a.parent_task_id
+      WHERE p.deleted_at IS NULL AND a.levels < ${MAX_TASK_DEPTH}
+  )`;
+  const branch = `WHERE t.deleted_at IS NULL AND t.parent_task_id IS NOT DISTINCT FROM $${params.length+1}::text
+    AND EXISTS (SELECT 1 FROM ancestors a WHERE a.task_id=t.task_id)`;
+  const values = [...params, parentTaskId ?? null];
+  const total = await db.one<{count:string; matched:string}>(
+    `${cte} SELECT count(*)::text AS count, (SELECT count(*)::text FROM matching) AS matched FROM tasks t ${branch}`, values
+  );
+  const order = SUMMARY_SORTS[filters.sort ?? 'dueDate'];
+  const direction = filters.direction === 'desc' ? 'DESC' : 'ASC';
+  const rows = await db.many<TaskSummaryRow>(
+    `${cte} ${SUMMARY_SELECT} ${branch} ORDER BY ${order} ${direction} NULLS LAST, t.task_id
+      LIMIT $${values.length+1} OFFSET $${values.length+2}`, [...values,pageSize,(page-1)*pageSize]
+  );
+  return {items:rows.map(row=>toTaskSummary(row)),total:Number(total?.count??0),matchedTotal:Number(total?.matched??0)};
 }
 
 /** Bounded root-task search, used where a full task table must never reach the browser. */
