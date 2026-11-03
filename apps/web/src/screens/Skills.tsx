@@ -1,4 +1,4 @@
-/** Skill catalogue and the manager-only assessment matrix. */
+/** Skill catalogue and the manager-only assessment matrix. Grades are always A-D, never numbers. */
 import { useState } from 'react';
 import type { Actor, Skill, SkillAssessment } from '@eh/contracts';
 import { api } from '../api/client';
@@ -6,8 +6,30 @@ import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
 import { EmptyState, ErrorBox, SaveState, Section } from '../components/ui';
 import { SelectInput, TextInput, useSave } from '../components/forms';
+import { SKILL_GRADES, formatSkillGrade, gradeToLevel } from '@eh/domain';
 
-type References = { members: { memberId: string; name: string }[] };
+type References = { members: { memberId: string; name: string; employeeId?: string }[] };
+
+function GradeSelect({
+  value,
+  onChange,
+  notAssessed
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  notAssessed: string;
+}): JSX.Element {
+  return (
+    <SelectInput
+      value={value}
+      onChange={onChange}
+      options={[
+        ...SKILL_GRADES.map((grade) => ({ value: grade, label: formatSkillGrade(gradeToLevel(grade), notAssessed) })),
+        { value: '', label: formatSkillGrade(null, notAssessed) }
+      ]}
+    />
+  );
+}
 
 export function SkillsScreen({ actor }: { actor: Actor }): JSX.Element {
   const { t } = useI18n();
@@ -44,7 +66,7 @@ export function SkillsScreen({ actor }: { actor: Actor }): JSX.Element {
               <tr>
                 <th>{t('column.name')}</th>
                 <th>{t('projects.category')}</th>
-                <th>{t('skills.level')}</th>
+                <th>{t('skills.grade')}</th>
               </tr>
             </thead>
             <tbody>
@@ -52,7 +74,7 @@ export function SkillsScreen({ actor }: { actor: Actor }): JSX.Element {
                 <tr key={skill.skillId}>
                   <td>{skill.skillName}</td>
                   <td>{skill.category || t('common.unset')}</td>
-                  <td>{skill.requiredLevel ?? t('common.unset')}</td>
+                  <td>{formatSkillGrade(skill.requiredLevel, t('skills.notAssessed'))}</td>
                 </tr>
               ))}
             </tbody>
@@ -69,7 +91,7 @@ export function SkillsScreen({ actor }: { actor: Actor }): JSX.Element {
               <tr>
                 <th>{t('members.name')}</th>
                 <th>{t('nav.skills')}</th>
-                <th>{t('skills.level')}</th>
+                <th>{t('skills.grade')}</th>
                 <th>{t('skills.evidence')}</th>
               </tr>
             </thead>
@@ -78,7 +100,7 @@ export function SkillsScreen({ actor }: { actor: Actor }): JSX.Element {
                 <tr key={assessment.memberSkillId}>
                   <td>{assessment.memberName}</td>
                   <td>{assessment.skillName}</td>
-                  <td>{assessment.currentLevel}</td>
+                  <td>{formatSkillGrade(assessment.currentLevel, t('skills.notAssessed'))}</td>
                   <td className="muted small">{assessment.evidence}</td>
                 </tr>
               ))}
@@ -132,9 +154,10 @@ function SkillForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => v
             <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} />
           </label>
           <label className="field">
-            <span className="field-label">{t('skills.level')}</span>
-            <TextInput type="number" min={0} max={4} value={requiredLevel} onChange={setRequiredLevel} />
+            <span className="field-label">{t('skills.grade')}</span>
+            <GradeSelect value={requiredLevel} onChange={setRequiredLevel} notAssessed={t('skills.notAssessed')} />
           </label>
+          <p className="muted small">{t('skills.gradeHint')}</p>
           <SaveState state={save.state} />
           <ErrorBox error={save.error} />
           <div className="inline-actions">
@@ -152,7 +175,7 @@ function SkillForm({ onClose, onSaved }: { onClose: () => void; onSaved: () => v
                       skillName,
                       category,
                       description,
-                      requiredLevel: requiredLevel === '' ? null : Number(requiredLevel)
+                      requiredLevel: requiredLevel === '' ? null : gradeToLevel(requiredLevel)
                     }),
                   {
                     onSuccess: () => {
@@ -187,7 +210,7 @@ function AssessmentForm({
   const save = useSave();
   const [memberId, setMemberId] = useState('');
   const [skillId, setSkillId] = useState('');
-  const [level, setLevel] = useState('1');
+  const [level, setLevel] = useState('C');
   const [evidence, setEvidence] = useState('');
   const [trainingAction, setTrainingAction] = useState('');
   return (
@@ -219,9 +242,10 @@ function AssessmentForm({
             />
           </label>
           <label className="field">
-            <span className="field-label">{t('skills.level')}</span>
-            <TextInput type="number" min={0} max={4} value={level} onChange={setLevel} />
+            <span className="field-label">{t('skills.grade')}</span>
+            <GradeSelect value={level} onChange={setLevel} notAssessed={t('skills.notAssessed')} />
           </label>
+          <p className="muted small">{t('skills.gradeHint')}</p>
           <label className="field">
             <span className="field-label">{t('skills.evidence')}</span>
             <textarea value={evidence} onChange={(event) => setEvidence(event.target.value)} rows={2} />
@@ -246,7 +270,7 @@ function AssessmentForm({
                     api.post('/api/manager/skills/assess', {
                       memberId,
                       skillId,
-                      currentLevel: Number(level),
+                      currentLevel: gradeToLevel(level),
                       evidence,
                       trainingAction
                     }),

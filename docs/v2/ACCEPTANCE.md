@@ -1,5 +1,38 @@
 # V2 Acceptance Record
 
+## Unified account, role, task and UI simplification — 2026-11-03
+
+Baseline `main @ c0cee21201531ffd2b6c13cca6de79b160ed6b96` with a clean worktree. This is a
+source/build update, not a deployment. **No new migration**: schema 8 (including the unchanged
+checksummed `0008_member_created_work`) is the required schema, and no operational database was
+touched. V1 Apps Script code, the published employee contract 1.6 and every earlier gate record
+are unchanged.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| `npm run typecheck` (all workspaces) | PASS | contracts, domain, db, i18n, api, web, worker, benchmark, migration |
+| `npm run lint` (V1 + V2) | PASS | `eslint src dashboard-app shared scripts tests` and `eslint apps packages tools` clean |
+| `npm test` | PASS | V1 **776 pass, 0 fail**; V2 **213 pass, 1 skipped** across 17 files (real PostgreSQL 18.6) |
+| `npm run validate` | PASS | V1 source, V2 governance (135 files), deployment templates |
+| `npm run build` | PASS | `@eh/api`, `@eh/web`, `@eh/worker`, `@eh/migration` |
+| `npm run smoke:prod` | PASS | built migration CLI applied schema 8; `readyz` reported schema 8; session, authorized read and mutation, worker job, clean stop |
+| Accounts: create, link, duplicates, leading zeros | PASS | `apps/api/test/roles-and-work.test.ts`, `local-auth.test.ts` — new employee + login atomically, link to an existing member keeps name/role/count, duplicate employee number and second login refused, `0050`/`0001` preserved, idempotent retry replays |
+| Account authorization | PASS | ADMIN-only create/list/reset; MANAGER, MEMBER and VIEWER refused (403); password hashes never returned |
+| My Work isolation | PASS | per-role personal lists from the session identity; a removed assignee loses visibility; a re-added assignee regains it |
+| Role matrix (read/write) | PASS | MEMBER reads `/api/work/tasks` but every manager write is 403 and a forged `assigneeIds` payload is a 400; VIEWER read-only, cannot request or complete; unauthenticated caller refused by the session middleware |
+| Completion authority | PASS | MANAGER approves a member-created request exactly once; MANAGER completes own and other authorized tasks directly; MEMBER direct completion 403; container completion 409 |
+| Direct completion reconciliation | PASS | pending completion report becomes `WITHDRAWN`; `TASK_COMPLETED_DIRECT` audit row records actor, role, source and final state |
+| Multi-assignee | PASS | deterministic primary owner (lowest member ID, current owner preserved), one logical patch, historical row retained as a soft removal, every assignee sees the task |
+| Derived status | PASS | yesterday/today/tomorrow, month/year boundary, Saturday/Sunday, Culture Day, Done-over-Overdue, legacy statuses, Tokyo instant boundary; stored status unchanged |
+| A-D skill grades | PASS | A=4…D=1, 0/null/undefined stay not assessed, unknown grade and out-of-range level refused |
+| Weekend/holiday deadline | PASS | no `NON_WORKING_DEADLINE` warning and no acknowledgement requirement |
+| Schema compatibility | PASS | `/readyz` answers `503 DATABASE_MIGRATION_REQUIRED` with `requiredSchemaVersion: 8` when the ledger is older, and `200` after it is restored |
+| `npm run test:browser` | PASS | Chromium against the built app and isolated schema-8 database: Japanese sign-in, language switch, project create/edit, task create with parent, expandable tree collapse/reopen, responsive overview, sign-out |
+| `npm run test:lan` | PASS | Local mode: administrator account creation for `0009`, forced temporary-password change, employee sign-in landing on My assigned work without the Accounts link |
+| Real Google Workspace / Drive / mail | NOT_RUN | no credential, tenant or mailbox was used |
+
+Production remains **NOT APPROVED FOR PRODUCTION**.
+
 ## Corrective follow-up and expandable task tree — 2026-11-03
 
 Reviewed latest origin/main at 7f5d9e2 with a clean starting worktree; during continuation,

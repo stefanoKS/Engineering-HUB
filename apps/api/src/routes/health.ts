@@ -2,7 +2,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { AppDependencies } from '../http';
 import { ok } from '../http';
-import { schemaVersion } from '@eh/db';
+import { REQUIRED_SCHEMA_VERSION, schemaVersion } from '@eh/db';
 
 export function registerHealthRoutes(app: FastifyInstance, deps: AppDependencies): void {
   app.get('/healthz', async (_request, reply) => reply.code(200).send({ ok: true, status: 'live' }));
@@ -11,6 +11,22 @@ export function registerHealthRoutes(app: FastifyInstance, deps: AppDependencies
     try {
       await deps.db.query('SELECT 1');
       const version = await schemaVersion(deps.db.pool);
+      if (version < REQUIRED_SCHEMA_VERSION) {
+        // Never report a false "ready": the running build needs a newer schema, and migrating is
+        // an explicit, reviewed step, so it is not done here.
+        return reply.code(503).send({
+          ok: false,
+          status: 'migration-required',
+          error: {
+            code: 'DATABASE_MIGRATION_REQUIRED',
+            message: `The database schema is ${version}; this build requires ${REQUIRED_SCHEMA_VERSION}. Apply the reviewed migrations before starting.`,
+            retryable: false,
+            correlationId: request.state.correlationId
+          },
+          schemaVersion: version,
+          requiredSchemaVersion: REQUIRED_SCHEMA_VERSION
+        });
+      }
       return ok(reply, request, { status: 'ready', schemaVersion: version });
     } catch (error) {
       return reply.code(503).send({

@@ -35,6 +35,8 @@ export const Member = z.object({
   managerId: z.string().nullable(),
   weeklyCapacityHours: z.number().nullable().optional(),
   role: Role,
+  /** The login identifier when a local account exists; never a password or a hash. */
+  employeeId: z.string().optional(),
   revision: Revision,
   createdAt: IsoTimestamp,
   updatedAt: IsoTimestamp
@@ -45,7 +47,9 @@ export const MemberSummary = z.object({
   memberId: Id,
   name: z.string(),
   active: z.boolean(),
-  role: Role
+  role: Role,
+  /** The login identifier, when a local account exists. Absent for a member without a login. */
+  employeeId: z.string().optional()
 });
 export type MemberSummary = z.infer<typeof MemberSummary>;
 
@@ -185,6 +189,10 @@ export type DeadlineState = z.infer<typeof DeadlineState>;
 export const ReviewState = z.enum(['NONE', 'PENDING', 'APPROVED', 'STALE']);
 export type ReviewState = z.infer<typeof ReviewState>;
 
+/** The only user-facing active states: 進行中 / 期限超過 / 完了 (plus 取消 for cancelled work). */
+export const DisplayTaskStatus = z.enum(['IN_PROGRESS', 'OVERDUE', 'DONE', 'CANCELLED']);
+export type DisplayTaskStatus = z.infer<typeof DisplayTaskStatus>;
+
 export const Task = z.object({
   taskId: Id,
   projectId: Id,
@@ -195,6 +203,8 @@ export const Task = z.object({
   ownerMemberId: z.string().nullable(),
   ownerName: z.string(),
   status: TaskStatus,
+  /** Derived from the deadline and the completion state; never persisted. */
+  displayStatus: DisplayTaskStatus,
   priority: Priority,
   plannedStart: IsoDate.nullable(),
   dueDate: IsoDate.nullable(),
@@ -233,10 +243,13 @@ export const TaskSummary = z.object({
   parentTaskId: z.string().nullable(),
   taskName: z.string(),
   status: TaskStatus,
+  displayStatus: DisplayTaskStatus,
   priority: Priority,
   ownerMemberId: z.string().nullable(),
   ownerName: z.string(),
   assigneeNames: z.array(z.string()),
+  /** Every active assignee, primary owner included, deduplicated in a stable order. */
+  assigneeIds: z.array(Id),
   dueDate: IsoDate.nullable(),
   plannedStart: IsoDate.nullable(),
   progressPercent: z.number().min(0).max(100).nullable(),
@@ -253,6 +266,8 @@ export const TaskDetail = z.object({
   record: Task,
   assignees: z.array(ResponsibilityMember),
   additionalAssigneeIds: z.array(Id),
+  /** The unified effective assignment: primary owner plus active additional assignees. */
+  assigneeIds: z.array(Id),
   assigneeHistory: z.array(ResponsibilityMember),
   confirmations: z.array(
     z.object({

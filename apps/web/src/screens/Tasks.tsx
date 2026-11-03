@@ -1,3 +1,14 @@
+/**
+ * All Work — すべてのタスク.
+ *
+ * One list for every role. A manager gets the management endpoint (edit, approve, complete,
+ * remove); a MEMBER and a VIEWER get the read-only endpoint and no mutation control at all. The
+ * server decides which endpoint answers, and it also re-checks the role: hiding a button is never
+ * the authorization.
+ *
+ * Paging, filtering and the expandable tree stay server-side; a child branch is fetched only when
+ * a parent is opened.
+ */
 import { ProjectPicker } from '../components/ProjectPicker';
 import { useEditorState } from '../state/editor';
 /** Task list: server-side filtering and paging, narrow rows, one form for create and edit. */
@@ -6,26 +17,39 @@ import type { Actor, Reference, Task, TaskDetail, TaskSummary } from '@eh/contra
 import { api, queryString } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
-import { Badge, EmptyState, ErrorBox, Pagination, ProgressBar, statusTone } from '../components/ui';
+import { Badge, EmptyState, ErrorBox, Pagination } from '../components/ui';
 import { ConfirmDialog } from '../components/forms';
 import { TaskForm } from './TaskForm';
 import { MAX_TASK_DEPTH, projectColor } from '@eh/domain';
 
 type Page = { items: TaskSummary[]; matchedTotal?: number; total: number; page: number; pageSize: number; totalPages: number };
 type References = {
-  members: { memberId: string; name: string; active: boolean }[];
+  members: { memberId: string; name: string; active: boolean; employeeId?: string; role?: string }[];
   skills: { skillId: string; skillName: string }[];
   subprojects: Reference[];
 };
 
-const STATUSES = ['Not Started', 'Assigned', 'In Progress', 'Blocked', 'On Hold', 'Done', 'Cancelled'];
+const DISPLAY_STATUSES = ['IN_PROGRESS', 'OVERDUE', 'DONE'] as const;
 
-export function TasksScreen({ actor }: { actor: Actor }): JSX.Element {
-  const { t, label } = useI18n();
+export function displayTone(status: TaskSummary['displayStatus']): 'ok' | 'warn' | 'danger' | 'neutral' | 'info' {
+  switch (status) {
+    case 'DONE':
+      return 'ok';
+    case 'OVERDUE':
+      return 'danger';
+    case 'CANCELLED':
+      return 'neutral';
+    default:
+      return 'info';
+  }
+}
+
+export function TasksScreen({ actor, readOnly = false }: { actor: Actor; readOnly?: boolean }): JSX.Element {
+  const { t } = useI18n();
   const [projectId, setProjectId] = useState('');
-  const [status, setStatus] = useState('');
+  const [displayStatus, setDisplayStatus] = useState('');
   const [query, setQuery] = useState('');
-  const [overdueOnly, setOverdueOnly] = useState(false);
+  const [includeInactive, setIncludeInactive] = useState(false);
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const toggle = (id: string): void => setExpanded(current => {
@@ -34,17 +58,24 @@ export function TasksScreen({ actor }: { actor: Actor }): JSX.Element {
     return next;
   });
   const [editing, setEditing, loadEditor, editorError, editorLoading] = useEditorState<{ mode: 'create' } | { mode: 'edit'; detail: TaskDetail } | null>(null);
-  const [action, setAction] = useState<{ kind: 'approve' | 'confirm' | 'override'; task: TaskSummary } | null>(null);
+  const [action, setAction] = useState<{ kind: 'approve' | 'confirm' | 'override' | 'complete'; task: TaskSummary } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ task: TaskSummary; confirmation: string; blockers: string[] } | null>(null);
 
-  const references = useQuery<References>(keys.references, () => api.get<References>('/api/manager/references'));
-  const listKey = `${keys.tasks}${queryString({ projectId, status, query, overdueOnly, page, tree: true })}`;
+  const endpoint = readOnly ? '/api/work/tasks' : '/api/manager/tasks';
+  const keyPrefix = readOnly ? 'work/tasks' : keys.tasks;
+  const references = useQuery<References>(keys.references, () =>
+    readOnly
+      ? Promise.resolve({ members: [], skills: [], subprojects: [] })
+      : api.get<References>('/api/manager/references')
+  );
+  const filters = { projectId, displayStatus, query, includeInactive, page };
+  const listKey = `${keyPrefix}${queryString({ ...filters, tree: true })}`;
   const list = useQuery<Page>(listKey, () =>
     api.get<Page>(
-      `/api/manager/tasks${queryString({ projectId, status, query, overdueOnly, page, pageSize: 25, tree: true })}`
+      `${endpoint}${queryString({ ...filters, pageSize: 25, tree: true })}`
     )
   );
-  const canManage = actor.role === 'ADMIN' || actor.role === 'MANAGER';
+  const canManage = !readOnly && (actor.role === 'ADMIN' || actor.role === 'MANAGER');
 
   async function openEdit(summary: TaskSummary): Promise<void> {
     await loadEditor(async () => ({ mode: 'edit', detail: await api.get<TaskDetail>(`/api/manager/tasks/${summary.taskId}`) }));
@@ -64,20 +95,24 @@ export function TasksScreen({ actor }: { actor: Actor }): JSX.Element {
   return (
     <div className="screen">
       <div className="screen-header">
-        <h2>{t('nav.tasks')}</h2>
+        <div>
+          <h2>{t('nav.allWork')}</h2>
+          <p className="muted small">{readOnly ? t('allWork.intro') : t('allWork.managerIntro')}</p>
+        </div>
         <div className="filters">
           <ProjectPicker value={projectId} onChange={id => { setProjectId(id); setPage(1); }} />
           <select
-            value={status}
+            value={displayStatus}
             onChange={(event) => {
-              setStatus(event.target.value);
+              setDisplayStatus(event.target.value);
               setPage(1);
             }}
+            aria-label={t('column.status')}
           >
             <option value="">{t('filter.all')}</option>
-            {STATUSES.map((value) => (
+            {DISPLAY_STATUSES.map((value) => (
               <option key={value} value={value}>
-                {label('task.status', value)}
+                {t(`taskStatus.${value}`)}
               </option>
             ))}
           </select>
@@ -90,8 +125,15 @@ export function TasksScreen({ actor }: { actor: Actor }): JSX.Element {
             }}
           />
           <label className="checkbox">
-            <input type="checkbox" checked={overdueOnly} onChange={(event) => setOverdueOnly(event.target.checked)} />
-            {t('overview.overdue')}
+            <input
+              type="checkbox"
+              checked={includeInactive}
+              onChange={(event) => {
+                setIncludeInactive(event.target.checked);
+                setPage(1);
+              }}
+            />
+            {t('tasks.includeInactive')}
           </label>
           {canManage ? (
             <button type="button" className="button" onClick={() => setEditing({ mode: 'create' })}>
@@ -118,18 +160,28 @@ export function TasksScreen({ actor }: { actor: Actor }): JSX.Element {
               <th>{t('column.owner')}</th>
               <th>{t('column.status')}</th>
               <th>{t('column.deadline')}</th>
-              <th>{t('column.progress')}</th>
-              <th>{t('column.actions')}</th>
+              {canManage ? <th>{t('column.actions')}</th> : null}
             </tr>
           </thead>
           <tbody>
-            <TaskTreeRows items={list.data.items} actor={actor} expanded={expanded} toggle={toggle}
-              filters={{ projectId, status, query, overdueOnly }} openEdit={openEdit} setAction={setAction} startDelete={startDelete} />
+            <TaskTreeRows
+              items={list.data.items}
+              actor={actor}
+              readOnly={readOnly}
+              expanded={expanded}
+              toggle={toggle}
+              filters={filters}
+              endpoint={endpoint}
+              keyPrefix={keyPrefix}
+              openEdit={openEdit}
+              setAction={setAction}
+              startDelete={startDelete}
+            />
           </tbody>
         </table>
       )}
 
-      {list.data ? <p className="muted small">{t('tasks.treeScope', { n: list.data.matchedTotal ?? list.data.total })}</p> : null}
+      {list.data ? <p className="muted small">{t('allWork.scope', { n: list.data.items.length, total: list.data.matchedTotal ?? list.data.total })}</p> : null}
       {list.data ? (
         <Pagination page={list.data.page} totalPages={list.data.totalPages} total={list.data.total} onChange={setPage} />
       ) : null}
@@ -154,9 +206,11 @@ export function TasksScreen({ actor }: { actor: Actor }): JSX.Element {
               ? t('tasks.approve')
               : action.kind === 'confirm'
                 ? t('tasks.confirmSchedule')
-                : t('tasks.override')
+                : action.kind === 'complete'
+                  ? t('tasks.completeDirectTitle')
+                  : t('tasks.override')
           }
-          message={action.task.taskName}
+          message={action.kind === 'complete' ? t('tasks.completeDirectBody') : action.task.taskName}
           confirmText={action.kind === 'override' ? `COMPLETE ${action.task.taskId}` : undefined}
           reasonRequired={action.kind === 'override'}
           destructive={action.kind === 'override'}
@@ -172,6 +226,12 @@ export function TasksScreen({ actor }: { actor: Actor }): JSX.Element {
                 revision: action.task.revision,
                 confirmed: true
               });
+            } else if (action.kind === 'complete') {
+              await api.post(`/api/manager/tasks/${action.task.taskId}/complete`, {
+                revision: action.task.revision,
+                confirmed: true,
+                note: reason || undefined
+              });
             } else {
               await api.post(`/api/manager/tasks/${action.task.taskId}/override-complete`, {
                 revision: action.task.revision,
@@ -180,7 +240,14 @@ export function TasksScreen({ actor }: { actor: Actor }): JSX.Element {
               });
             }
             setAction(null);
-            queryCache.invalidate([keys.tasks, keys.task(action.task.taskId), keys.taskIndex, keys.overview, keys.project(action.task.projectId)]);
+            queryCache.invalidate([
+              keys.tasks,
+              keys.task(action.task.taskId),
+              keys.taskIndex,
+              keys.overview,
+              keys.project(action.task.projectId),
+              keys.myWork
+            ]);
           }}
         />
       ) : null}
@@ -193,7 +260,7 @@ export function TasksScreen({ actor }: { actor: Actor }): JSX.Element {
           reasonRequired
           message={
             deleteTarget.blockers.length ? (
-              <div className="banner danger">
+              <div className="stack">
                 <strong>{t('confirm.blocked')}</strong>
                 <ul>
                   {deleteTarget.blockers.map((blocker) => (
@@ -222,21 +289,24 @@ export function TasksScreen({ actor }: { actor: Actor }): JSX.Element {
   );
 }
 
-
 type TreeProps = {
   actor: Actor;
+  readOnly: boolean;
+  endpoint: string;
+  keyPrefix: string;
   expanded: Set<string>;
   toggle: (id: string) => void;
-  filters: { projectId: string; status: string; query: string; overdueOnly: boolean };
+  filters: { projectId: string; displayStatus: string; query: string; includeInactive: boolean; page: number };
   openEdit: (task: TaskSummary) => Promise<void>;
   startDelete: (task: TaskSummary) => Promise<void>;
-  setAction: (action: { kind: 'approve' | 'confirm' | 'override'; task: TaskSummary }) => void;
+  setAction: (action: { kind: 'approve' | 'confirm' | 'override' | 'complete'; task: TaskSummary }) => void;
 };
 
 function TaskTreeRows(props: TreeProps & { items: TaskSummary[] }): JSX.Element {
-  const { actor, expanded, toggle, openEdit, startDelete, setAction } = props;
-  const { t, label } = useI18n();
-  const canManage = actor.role === 'ADMIN' || actor.role === 'MANAGER';
+  const { actor, readOnly, expanded, toggle, openEdit, startDelete, setAction } = props;
+  const { t } = useI18n();
+  const canManage = !readOnly && (actor.role === 'ADMIN' || actor.role === 'MANAGER');
+  const columnCount = canManage ? 6 : 5;
   return <>{props.items.map(task => <Fragment key={task.taskId}>
               <tr data-task-id={task.taskId} style={{ ['--project-accent' as string]: projectColor(task.projectId) }}>
                 <td style={{ paddingLeft: `${12 + Math.max(0, task.depth - 1) * 24}px` }}>
@@ -257,53 +327,50 @@ function TaskTreeRows(props: TreeProps & { items: TaskSummary[] }): JSX.Element 
                   {task.assigneeNames.length ? <div className="muted small">{task.assigneeNames.join(', ')}</div> : null}
                 </td>
                 <td>
-                  <Badge tone={statusTone(task.status)}>{label('task.status', task.status)}</Badge>
+                  <Badge tone={displayTone(task.displayStatus)}>{t(`taskStatus.${task.displayStatus}`)}</Badge>
                 </td>
-                <td>
-                  {task.dueDate ?? t('common.unset')}
-                  {task.overdue ? <Badge tone="danger">{t('overview.overdue')}</Badge> : null}
-                </td>
-                <td>
-                  <ProgressBar value={task.progressPercent} />
-                </td>
-                <td className="actions">
-                  {canManage ? (
-                    <>
-                      <button type="button" className="link-button" onClick={() => void openEdit(task)}>
-                        {t('action.edit')}
+                <td>{task.dueDate ?? t('common.unset')}</td>
+                {canManage ? (
+                  <td className="actions">
+                    <button type="button" className="link-button" onClick={() => void openEdit(task)}>
+                      {t('action.edit')}
+                    </button>
+                    {!task.container && task.displayStatus !== 'DONE' && task.displayStatus !== 'CANCELLED' ? (
+                      <button type="button" className="link-button" onClick={() => setAction({ kind: 'complete', task })}>
+                        {t('tasks.completeDirect')}
                       </button>
-                      <button type="button" className="link-button" onClick={() => setAction({ kind: 'approve', task })}>
-                        {t('tasks.approve')}
-                      </button>
-                      <button type="button" className="link-button" onClick={() => setAction({ kind: 'confirm', task })}>
-                        {t('tasks.confirmSchedule')}
-                      </button>
-                      {actor.role === 'ADMIN' ? (
-                        <>
-                          <button type="button" className="link-button" onClick={() => setAction({ kind: 'override', task })}>
-                            {t('tasks.override')}
-                          </button>
-                          <button type="button" className="link-button danger" onClick={() => void startDelete(task)}>
-                            {t('projects.delete')}
-                          </button>
-                        </>
-                      ) : null}
-                    </>
-                  ) : null}
-                </td>
+                    ) : null}
+                    <button type="button" className="link-button" onClick={() => setAction({ kind: 'approve', task })}>
+                      {t('tasks.approve')}
+                    </button>
+                    <button type="button" className="link-button" onClick={() => setAction({ kind: 'confirm', task })}>
+                      {t('tasks.confirmSchedule')}
+                    </button>
+                    {actor.role === 'ADMIN' ? (
+                      <>
+                        <button type="button" className="link-button" onClick={() => setAction({ kind: 'override', task })}>
+                          {t('tasks.override')}
+                        </button>
+                        <button type="button" className="link-button danger" onClick={() => void startDelete(task)}>
+                          {t('projects.delete')}
+                        </button>
+                      </>
+                    ) : null}
+                  </td>
+                ) : null}
               </tr>
-    {task.container && task.depth < MAX_TASK_DEPTH && expanded.has(task.taskId) ? <TaskChildren key={task.taskId + JSON.stringify(props.filters)} {...props} parent={task} /> : null}
+    {task.container && task.depth < MAX_TASK_DEPTH && expanded.has(task.taskId) ? <TaskChildren key={task.taskId + JSON.stringify(props.filters)} {...props} parent={task} columnCount={columnCount} /> : null}
   </Fragment>)}</>;
 }
 
-function TaskChildren(props: TreeProps & { parent: TaskSummary }): JSX.Element {
+function TaskChildren(props: TreeProps & { parent: TaskSummary; columnCount: number }): JSX.Element {
   const { t } = useI18n();
   const [page, setPage] = useState(1);
   const query = queryString({ ...props.filters, tree: true, treeParentId: props.parent.taskId, page, pageSize: 25 });
-  const children = useQuery<Page>(keys.tasks + query, () => api.get<Page>('/api/manager/tasks' + query));
+  const children = useQuery<Page>(props.keyPrefix + query, () => api.get<Page>(props.endpoint + query));
   return <>
     {children.data ? <TaskTreeRows {...props} items={children.data.items} /> : null}
-    <tr><td colSpan={7} className="task-tree-footer">
+    <tr><td colSpan={props.columnCount} className="task-tree-footer">
       <ErrorBox error={children.error} onRetry={children.refresh} />
       {!children.data && !children.error ? <span role="status">{t('state.loading')}</span> : null}
       {children.data ? <>

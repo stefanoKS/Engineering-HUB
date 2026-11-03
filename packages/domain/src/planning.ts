@@ -51,7 +51,7 @@ export type DerivedPlan = {
   deadlineIsWorkingDay: boolean;
 };
 
-const ACKNOWLEDGEMENT_CODES: ReadonlySet<PlanWarningCode> = new Set(['NON_WORKING_DEADLINE']);
+const ACKNOWLEDGEMENT_CODES: ReadonlySet<PlanWarningCode> = new Set([]);
 
 export function planFromDuration(input: DurationInput, calendar: WorkingCalendar = createCalendar()): DerivedPlan {
   const end = input.deadline;
@@ -122,7 +122,8 @@ export function planningWarnings(
   }
   const today = input.today;
   if (today && input.deadline < today) warn('PAST_DEADLINE');
-  if (!cal.isWorkingDay(input.deadline)) warn('NON_WORKING_DEADLINE');
+  // A Saturday, Sunday or public holiday is a valid deadline. Nothing is refused or warned about
+  // because of the calendar, and a duration is never required to keep a deadline.
   const duration = Number(input.durationValue);
   if (!Number.isFinite(duration) || duration <= 0) {
     warn('MISSING_DURATION');

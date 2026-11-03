@@ -271,7 +271,7 @@ describe('planning', () => {
     expect(weeks.length).toBe(5);
   });
 
-  it('warns about a non-working deadline and requires acknowledgement', () => {
+  it('accepts a weekend or holiday deadline without a warning or an acknowledgement', () => {
     const warnings = planningWarnings(
       {
         deadline: '2026-01-03',
@@ -283,9 +283,8 @@ describe('planning', () => {
       },
       createCalendar([{ date: '2026-01-05' }])
     );
-    expect(warnings.map((warning) => warning.code)).toContain('NON_WORKING_DEADLINE');
-    expect(warnings.find((warning) => warning.code === 'NON_WORKING_DEADLINE')?.requiresAcknowledgement).toBe(true);
-    expect(warnings.find((warning) => warning.code === 'NON_WORKING_DEADLINE')?.message).toContain('working day');
+    expect(warnings.map((warning) => warning.code)).not.toContain('NON_WORKING_DEADLINE');
+    expect(warnings.every((warning) => warning.requiresAcknowledgement === false)).toBe(true);
   });
 
   it('keeps a legacy planned start when no duration exists', () => {

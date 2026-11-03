@@ -48,13 +48,46 @@ export function isManager(identity: Identity | null): boolean {
 
 /**
  * ADMIN and MANAGER manage every project, subproject, task and responsibility.
- * MEMBER keeps the own-task boundary and VIEWER stays read-only.
+ * MEMBER keeps the own-task boundary and never edits an existing task, even one it created.
+ * VIEWER stays read-only. Visibility and editability are independent: being able to read
+ * another employee's task never grants authority to change it.
  */
 export function canEditTask(identity: Identity | null, task: { ownerMemberId: string | null } | null): boolean {
   if (!identity || !identity.active || !task) return false;
-  if (identity.role === 'ADMIN' || identity.role === 'MANAGER') return true;
-  return identity.role === 'MEMBER' && !!task.ownerMemberId && task.ownerMemberId === identity.memberId;
+  return identity.role === 'ADMIN' || identity.role === 'MANAGER';
 }
+
+/** Creating a task under an existing active project belongs to MEMBER; managers use the manager form. */
+export function canCreateOwnTask(identity: Identity | null): boolean {
+  return !!identity && identity.verified && identity.active && identity.role === 'MEMBER';
+}
+
+/** Only a MEMBER files a completion request for work personally assigned to them. */
+export function canSubmitCompletionRequest(identity: Identity | null): boolean {
+  return !!identity && identity.verified && identity.active && identity.role === 'MEMBER';
+}
+
+/** `Done` outside the request workflow is a manager decision; VIEWER never mutates. */
+export function canCompleteTaskDirectly(identity: Identity | null): boolean {
+  return !!identity && identity.verified && identity.active && (identity.role === 'ADMIN' || identity.role === 'MANAGER');
+}
+
+/** Every verified active account may read permitted active work, whatever the role. */
+export function canViewWork(identity: Identity | null): boolean {
+  return !!identity && identity.verified && identity.active;
+}
+
+/** Assignments are accountability, never permission: any active member may be assigned. */
+export function isEffectiveAssignee(
+  identity: Identity | null,
+  assignment: { ownerMemberId: string | null; assigneeIds: readonly string[] }
+): boolean {
+  if (!identity) return false;
+  return (
+    assignment.ownerMemberId === identity.memberId || assignment.assigneeIds.includes(identity.memberId)
+  );
+}
+
 
 export function canManageResponsibility(identity: Identity | null): boolean {
   return !!identity && identity.verified && identity.active && (identity.role === 'ADMIN' || identity.role === 'MANAGER');
@@ -66,10 +99,16 @@ export function requirePrimaryOwnerChange(identity: Identity | null): Identity {
   return identity as Identity;
 }
 
+/**
+ * Reading scope. A manager reads every authorized task; a member and a viewer read permitted
+ * active work (read-only for the viewer and for the member's non-assigned tasks) plus their own
+ * assignments. Nothing returns `NONE` for a verified active account, because the policy separates
+ * visibility from editability.
+ */
 export function visibleTaskScope(identity: Identity): 'ALL' | 'OWN' | 'NONE' {
+  if (!identity.active || !identity.verified) return 'NONE';
   if (identity.role === 'ADMIN' || identity.role === 'MANAGER') return 'ALL';
-  if (identity.role === 'MEMBER') return 'OWN';
-  return 'NONE';
+  return 'OWN';
 }
 
 export type RoleChangeRequest = {

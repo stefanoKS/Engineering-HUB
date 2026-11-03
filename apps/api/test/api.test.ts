@@ -805,31 +805,16 @@ describe('member completion requests', () => {
     expect(response.json().error.code).toBe('AUTHORIZATION_DENIED');
   });
 
-  it('requires an ADMIN decision to complete a member-created task', async () => {
+  it('lets a MANAGER approve a member-created completion request', async () => {
     const { taskId, member } = await memberTask();
     const submitted = await submitCompletion(member, taskId);
     const requestId = (submitted.json() as { data: { requestId: string } }).data.requestId;
 
     const manager = await signIn(MANAGER);
-    const refused = await app.inject({
-      method: 'POST',
-      url: `/api/manager/requests/${requestId}/decide`,
-      headers: headers(manager, true),
-      payload: { decision: 'APPROVE', revision: 1, confirmed: true }
-    });
-    expect(refused.statusCode).toBe(403);
-    expect(refused.json().error.code).toBe('AUTHORIZATION_DENIED');
-    // A refused decision never claims the request or touches the task.
-    const afterRefusal = await db.one<{ status: string }>('SELECT status FROM task_requests WHERE request_id = $1', [requestId]);
-    expect(afterRefusal?.status).toBe('PENDING');
-    const untouched = await db.one<{ status: string }>('SELECT status FROM tasks WHERE task_id = $1', [taskId]);
-    expect(untouched?.status).toBe('Not Started');
-
-    const admin = await signIn(ADMIN);
     const approved = await app.inject({
       method: 'POST',
       url: `/api/manager/requests/${requestId}/decide`,
-      headers: headers(admin, true),
+      headers: headers(manager, true),
       payload: { decision: 'APPROVE', revision: 1, confirmed: true }
     });
     expect(approved.statusCode, approved.body).toBe(200);
@@ -839,6 +824,14 @@ describe('member completion requests', () => {
     );
     expect(done?.status).toBe('Done');
     expect(Number(done?.progress_percent)).toBe(100);
+    // A second decision never applies a second effect.
+    const replay = await app.inject({
+      method: 'POST',
+      url: `/api/manager/requests/${requestId}/decide`,
+      headers: headers(manager, true),
+      payload: { decision: 'APPROVE', revision: 2, confirmed: true }
+    });
+    expect(replay.statusCode).toBe(409);
   });
 
   it('leaves the task unfinished after a rejection or a return', async () => {

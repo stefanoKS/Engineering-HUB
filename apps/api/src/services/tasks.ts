@@ -26,21 +26,20 @@ import {
   listTaskAssignees,
   listTaskNodes,
   setDependencies,
-  setTaskAssignees,
+  setEffectiveAssignees,
   taskRecordsForDependencyCheck,
-  updateTask
+  updateTask,
+  withdrawPendingCompletionRequests
 } from '@eh/db';
 import {
   DomainError,
   applyTaskPlan,
+  assertDirectCompletionAllowed,
   assertNoDependencyCycle,
   assertNotDirectCompletion,
   assertOverrideAllowed,
-  assertWarningsAcknowledged,
   assignmentChanged,
-  businessDate,
   createCalendar,
-  planningWarnings,
   requireRole,
   validateTaskParent,
   type Identity
@@ -116,6 +115,13 @@ async function assertDependencies(ctx: ServiceCtx, taskId: string, projectId: st
   void projectId;
 }
 
+/**
+ * Resolves the schedule of a task from its deadline and optional duration.
+ *
+ * A deadline alone is a complete schedule: when no duration is supplied the stored start is
+ * kept, no artificial start is derived and no business-calendar acknowledgement is required. A
+ * Saturday, Sunday or public holiday is a valid deadline.
+ */
 export async function planTaskDeadline(
   ctx: ServiceCtx,
   input: {
@@ -123,25 +129,12 @@ export async function planTaskDeadline(
     durationValue: number | null | undefined;
     durationUnit: string | null | undefined;
     durationBasis: string | null | undefined;
-    acknowledge: boolean | undefined;
+    acknowledge?: boolean | undefined;
     milestones?: { name: string; targetDate: string | null }[];
   }
 ): Promise<{ plannedStart: string | null; plannedStartSource: 'DERIVED' | 'LEGACY' | 'MANUAL' | null }> {
   if (!input.deadline) return { plannedStart: null, plannedStartSource: null };
   const holidays = await listHolidays(ctx.db);
-  const warnings = planningWarnings(
-    {
-      deadline: input.deadline,
-      today: businessDate(),
-      durationValue: input.durationValue ?? null,
-      durationUnit: (input.durationUnit as 'DAY' | 'WEEK' | null) ?? null,
-      durationBasis: (input.durationBasis as 'WORKING_DAYS' | 'CALENDAR_DAYS' | null) ?? null,
-      holidays,
-      milestones: input.milestones
-    },
-    createCalendar(holidays)
-  );
-  assertWarningsAcknowledged(warnings, input.acknowledge === true);
   const applied = applyTaskPlan(
     {
       dueDate: input.deadline,
@@ -154,6 +147,35 @@ export async function planTaskDeadline(
     createCalendar(holidays)
   );
   return { plannedStart: applied.plannedStart, plannedStartSource: applied.plannedStartSource };
+}
+
+export type EffectiveAssignment = { ownerMemberId: string | null; assigneeIds: string[] };
+
+/**
+ * One effective assignment from a unified selection.
+ *
+ * The current primary owner is kept when it is still selected, so an ordinary edit never moves
+ * ownership. Otherwise the deterministic replacement is the lowest member ID in the selection,
+ * which makes the result independent of selection or rendering order. The owner is never
+ * duplicated among the additional assignees.
+ */
+export function resolveEffectiveAssignment(
+  selectedIds: readonly string[],
+  currentOwnerId: string | null | undefined
+): EffectiveAssignment {
+  const selected = [...new Set(selectedIds.filter(Boolean))].sort();
+  if (!selected.length) return { ownerMemberId: null, assigneeIds: [] };
+  const owner = currentOwnerId && selected.includes(currentOwnerId) ? currentOwnerId : selected[0]!;
+  return { ownerMemberId: owner, assigneeIds: selected.filter((memberId) => memberId !== owner) };
+}
+
+function effectiveAssigneesOf(task: Task, assignees: { member_id: string; removed_at: string | null }[]): EffectiveAssignment {
+  return {
+    ownerMemberId: task.ownerMemberId,
+    assigneeIds: assignees
+      .filter((row) => !row.removed_at && row.member_id !== task.ownerMemberId)
+      .map((row) => row.member_id)
+  };
 }
 
 export async function createTask(
@@ -173,12 +195,19 @@ export async function createTask(
     parentTaskId: body.parentTaskId ?? null
   });
   await assertMembersActive(ctx, [body.ownerMemberId, ...(body.assigneeIds ?? [])]);
+  const assignment = resolveEffectiveAssignment(
+    body.assigneeIds !== undefined
+      ? body.assigneeIds
+      : body.ownerMemberId
+        ? [body.ownerMemberId]
+        : [],
+    body.ownerMemberId ?? null
+  );
   const plan = await planTaskDeadline(ctx, {
     deadline: body.deadline,
     durationValue: body.plannedDurationValue,
     durationUnit: body.plannedDurationUnit,
-    durationBasis: body.plannedDurationBasis,
-    acknowledge: body.acknowledgeNonWorking
+    durationBasis: body.plannedDurationBasis
   });
 
   const result = await runIdempotent(
@@ -191,7 +220,7 @@ export async function createTask(
         parentTaskId: body.parentTaskId ?? null,
         taskName: body.taskName,
         description: body.description,
-        ownerMemberId: body.ownerMemberId ?? null,
+        ownerMemberId: assignment.ownerMemberId,
         status: body.status,
         priority: body.priority,
         plannedStart: plan.plannedStart,
@@ -212,8 +241,14 @@ export async function createTask(
         createdByMemberId: ctx.identity.memberId,
         creationChannel: 'MANAGER'
       });
-      if (body.assigneeIds?.length) {
-        await setTaskAssignees(tx, task.taskId, body.assigneeIds, ctx.identity.email);
+      if (assignment.ownerMemberId || assignment.assigneeIds.length) {
+        await setEffectiveAssignees(
+          tx,
+          task.taskId,
+          [assignment.ownerMemberId, ...assignment.assigneeIds].filter((id): id is string => !!id),
+          assignment.ownerMemberId,
+          ctx.identity.email
+        );
       }
       if (body.dependencyIds?.length) {
         await assertDependencies(ctx, task.taskId, body.projectId, body.dependencyIds);
@@ -261,18 +296,27 @@ export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<t
       parentTaskId: nextParent
     });
   }
-  await assertMembersActive(ctx, [body.ownerMemberId, ...(body.assigneeIds ?? [])]);
 
   const currentAssignees = await listTaskAssignees(ctx.db, taskId);
-  const currentShape = {
-    ownerMemberId: task.ownerMemberId,
-    assigneeIds: currentAssignees.filter((row) => !row.removed_at && !row.is_primary).map((row) => row.member_id)
-  };
-  const nextShape = {
-    ownerMemberId: body.ownerMemberId !== undefined ? body.ownerMemberId : task.ownerMemberId,
-    assigneeIds: body.assigneeIds ?? currentShape.assigneeIds
-  };
+  const currentShape = effectiveAssigneesOf(task, currentAssignees);
+  const nextShape: EffectiveAssignment =
+    body.assigneeIds !== undefined
+      ? resolveEffectiveAssignment(body.assigneeIds, task.ownerMemberId)
+      : body.ownerMemberId !== undefined
+        ? resolveEffectiveAssignment([body.ownerMemberId, ...currentShape.assigneeIds].filter((id): id is string => !!id), body.ownerMemberId)
+        : currentShape;
   const assignmentMoved = assignmentChanged(currentShape, nextShape);
+  // Only a new assignment must name an active member; an existing relationship survives a later
+  // deactivation and is never dropped by an unrelated edit.
+  const alreadyAssigned = new Set(
+    [currentShape.ownerMemberId, ...currentShape.assigneeIds].filter((id): id is string => !!id)
+  );
+  await assertMembersActive(
+    ctx,
+    [nextShape.ownerMemberId, ...nextShape.assigneeIds].filter(
+      (id): id is string => !!id && !alreadyAssigned.has(id)
+    )
+  );
 
   const deadlineChanged = body.deadline !== undefined && (body.deadline ?? '') !== (task.dueDate ?? '');
   if (deadlineChanged && body.confirmDeadlineChange !== true) {
@@ -289,8 +333,7 @@ export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<t
             body.plannedDurationValue !== undefined ? body.plannedDurationValue : task.plannedDurationValue,
           durationUnit: body.plannedDurationUnit !== undefined ? body.plannedDurationUnit : task.plannedDurationUnit,
           durationBasis:
-            body.plannedDurationBasis !== undefined ? body.plannedDurationBasis : task.plannedDurationBasis,
-          acknowledge: body.acknowledgeNonWorking
+            body.plannedDurationBasis !== undefined ? body.plannedDurationBasis : task.plannedDurationBasis
         })
       : null;
 
@@ -324,6 +367,9 @@ export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<t
     const value = (body as Record<string, unknown>)[key];
     if (value !== undefined) changes[key] = value;
   }
+  if (body.assigneeIds !== undefined || body.ownerMemberId !== undefined) {
+    changes.ownerMemberId = nextShape.ownerMemberId;
+  }
   if (body.deadline !== undefined) changes.dueDate = body.deadline;
   if (plan) {
     changes.plannedStart = plan.plannedStart;
@@ -340,8 +386,14 @@ export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<t
   const updated = await ctx.db.transaction(async (tx) => {
     const next = await updateTask(tx, taskId, changes, body.revision);
     if (!next) throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
-    if (body.assigneeIds !== undefined) {
-      await setTaskAssignees(tx, taskId, body.assigneeIds, ctx.identity.email);
+    if (body.assigneeIds !== undefined || body.ownerMemberId !== undefined) {
+      await setEffectiveAssignees(
+        tx,
+        taskId,
+        [nextShape.ownerMemberId, ...nextShape.assigneeIds].filter((id): id is string => !!id),
+        nextShape.ownerMemberId,
+        ctx.identity.email
+      );
     }
     if (body.dependencyIds !== undefined) {
       await setDependencies(tx, taskId, body.dependencyIds);
@@ -442,8 +494,89 @@ export async function confirmScheduleCommand(
   });
 }
 
-export async function overrideComplete(
+/**
+ * A manager completes authorized work directly, without a prior request.
+ *
+ * One transaction: the single task update, the reconciliation of any pending completion report and
+ * the audit record of who decided, in which role, when, and from which state. A pending request is
+ * never left misleading and is never approved a second time.
+ */
+export async function completeTaskDirectly(
   ctx: ServiceCtx,
+  taskId: string,
+  input: { revision: number; confirmed: true; note?: string }
+): Promise<Task> {
+  requireRole(ctx.identity, WRITE_ROLES);
+  requireConfirmation(input.confirmed, 'Completing a task requires explicit confirmation');
+  const task = await getTask(ctx.db, taskId);
+  if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  if (task.revision !== input.revision) {
+    throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved', {
+      expected: input.revision,
+      stored: task.revision
+    });
+  }
+  const children = await countTaskChildren(ctx.db, taskId);
+  assertDirectCompletionAllowed({
+    actorRole: ctx.identity.role,
+    task: {
+      taskId,
+      status: task.status,
+      container: children > 0,
+      assignmentApprovedAt: task.assignmentApprovedAt
+    }
+  });
+  const completedAt = new Date().toISOString();
+  return ctx.db.transaction(async (tx) => {
+    const next = await updateTask(
+      tx,
+      taskId,
+      { status: 'Done', progressPercent: 100, completedAt },
+      input.revision
+    );
+    if (!next) throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
+    const withdrawn = await withdrawPendingCompletionRequests(
+      tx,
+      taskId,
+      ctx.identity.email,
+      'The task was completed directly by a manager; this request is no longer needed'
+    );
+    for (const requestId of withdrawn) {
+      await audit(tx, ctx, {
+        entityType: 'TASK_REQUESTS',
+        entityId: requestId,
+        action: 'REQUEST_WITHDRAWN',
+        previousValue: { status: 'PENDING' },
+        newValue: { status: 'WITHDRAWN', reason: 'DIRECT_COMPLETION', taskId }
+      });
+    }
+    await audit(tx, ctx, {
+      entityType: 'TASKS',
+      entityId: taskId,
+      action: 'TASK_COMPLETED_DIRECT',
+      previousValue: {
+        status: task.status,
+        progressPercent: task.progressPercent,
+        completedAt: task.completedAt
+      },
+      newValue: {
+        taskId,
+        actorMemberId: ctx.identity.memberId,
+        actorRole: ctx.identity.role,
+        completedAt,
+        completionSource: 'DIRECT',
+        requestId: null,
+        withdrawnRequestIds: withdrawn,
+        status: next.status,
+        progressPercent: next.progressPercent,
+        note: input.note ?? ''
+      }
+    });
+    return next;
+  });
+}
+
+export async function overrideComplete(  ctx: ServiceCtx,
   taskId: string,
   input: { revision: number; reason: string; confirmation: string }
 ): Promise<Task> {
@@ -531,6 +664,7 @@ export async function taskDetail(ctx: ServiceCtx, taskId: string): Promise<TaskD
     record: task,
     assignees: effective,
     additionalAssigneeIds: effective.filter((row) => !row.primary).map((row) => row.memberId),
+    assigneeIds: effective.map((row) => row.memberId),
     assigneeHistory: history,
     confirmations,
     deadlineHistory,

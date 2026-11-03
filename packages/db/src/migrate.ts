@@ -16,6 +16,15 @@ const MIGRATIONS_DIR =
   process.env.EH_MIGRATIONS_DIR ?? join(dirname(fileURLToPath(import.meta.url)), 'migrations');
 const LOCK_KEY = 947_311_002;
 
+/**
+ * The schema version this build was written against.
+ *
+ * Readiness refuses an older database with `DATABASE_MIGRATION_REQUIRED` instead of reporting a
+ * false "ready", and nothing ever migrates automatically: applying migrations stays an explicit,
+ * reviewed one-shot step against a verified backup.
+ */
+export const REQUIRED_SCHEMA_VERSION = 8;
+
 export type MigrationRow = {
   version: number;
   name: string;

@@ -10,7 +10,7 @@ This mode runs on the host Windows PC and serves colleagues through a browser. P
 - Five wrong passwords lock an account for 15 minutes; the login endpoint also limits attempts by IP. A correct password resets the failure counter after the lock expires. A reset clears the lock.
 - Administrators create local accounts, attach credentials to existing member IDs, and reset another employee's password. New/reset accounts must change the temporary password before accessing any work API. Password change/reset invalidates all old sessions.
 - Roles/activation remain in Members. Administrators manage these fields; existing self-change/last-administrator guards remain. Register a second administrator for recovery. There is no default password or public registration endpoint.
-- Managers retain the project, task, assignment and review screens. Members receive My assigned work: primary/additional assignments only, with revision-checked actual-hours and progress updates (0–99), a task they create for themselves, and a completion-request form. Reassignment, deadlines and completion remain manager/admin decisions; a member-created task is completed only by an ADMIN decision.
+- Managers retain the project, task, assignment and review screens. Members receive My assigned work and a read-only All Work list; they may create a task for themselves and submit a completion request, but they cannot edit an existing task, change an assignee or deadline, or complete work. ADMIN and MANAGER both decide completion requests, and either may complete authorized work directly.
 - VIEWER retains the existing published read-only projection; publication must already be configured/populated. A fresh local installation does not automatically publish company data. Use MEMBER for employees who need assigned work.
 - Account linking retains an existing member's name/role and IDs; it does not duplicate project relationships. Existing Google bindings remain stored but are not used in local mode.
 
@@ -101,26 +101,46 @@ For automatic start, an operator can create a Windows Task Scheduler task that r
 
 ## 6. Register staff
 
-Use Accounts to create employee IDs, names, roles and temporary passwords. Deliver each password privately. Use Members to change roles or disable employees; do not delete their historical records. When attaching credentials to an existing member, enter its existing member ID; name/role inputs do not overwrite that member. Users change their own password from the header. Resetting another user's password revokes their current sessions and requires another first-login change.
+Use Accounts to create employee IDs, names, roles and temporary passwords, or to link a login to an existing member picked from the searchable list. Deliver each password privately. Use Members to change roles or disable employees; do not delete their historical records. Linking to an existing member keeps its name and role; the form cannot overwrite them. Users change their own password from the header. Resetting another user's password revokes their current sessions and requires another first-login change.
 
 Create responsibility areas, then projects and tasks. Assign employees as primary/additional assignees so their My assigned work screen contains the appropriate tasks. Save conflicts require a fresh read; another user's update is never silently overwritten.
 
-### Member self-service (2026-11-03)
+### Member self-service and manager authority (updated 2026-11-03)
 
 * A member creates work from 自分の担当タスク: choose an active project, an optional subproject, a name, a
   description, a deadline and a priority. The owner is the signed-in member and the task starts as
   `Not Started` with 0 % progress. No administrator approval is needed to create it, and it appears
-  immediately in the member's list and the manager's task list.
-* The member updates progress/actual hours on their own active leaf work (0–99 %), then uses 完了報告
-  to submit a completion request with a required note.
+  immediately in the member's list and the manager's task list. The deadline may fall on a weekend
+  or a public holiday; no duration, working-day acknowledgement or effort estimate is requested.
+* A member does **not** edit progress, actual hours, a deadline or an existing task. The only way to
+  finish work is 完了報告 with a required note. The former progress endpoint was removed.
 * `REQUEST_SUBMISSION_ENABLED` (Automation → 自動化設定, default **false**) must be `true` before any
   request is accepted. The screen shows that submissions are closed and offers no request action
   while it is off.
-* A pending request never changes the task. An ADMIN decision on a request for a member-created task
-  writes `Done`; a MANAGER decision on that request is refused. Older and manager-created tasks keep
-  the manager decision. Rejection or return leaves the task unfinished.
+* A pending request never changes the task. A **MANAGER** or an **ADMIN** decision writes `Done`
+  exactly once, for member-created, manager-created and legacy tasks alike. Rejection or return
+  leaves the task unfinished.
+* A MANAGER or ADMIN may also complete authorized work directly from すべてのタスク or the task detail
+  (完了にする). Containers, cancelled and already-done work are refused; a pending completion report
+  is withdrawn with a recorded reason and a `TASK_COMPLETED_DIRECT` audit row.
+* The displayed state is derived: 完了 when done, 期限超過 when the Asia/Tokyo date is past the
+  deadline, otherwise 進行中. Nothing is persisted by a nightly job and the stored legacy status is
+  kept.
 * The member sees 承認待ち / 承認済 / 却下 / 差戻し / 再確認が必要 for their own requests only; another
   member's receipt is not readable.
+
+### Accounts and assignment (updated 2026-11-03)
+
+* Accounts offers two ways to create a login: **create a new employee** (employee number, name, role,
+  temporary password) or **link an existing member** chosen from a searchable picker of members that
+  have no login yet. Linking never rewrites the member's name, role, assignments or history, and one
+  member can only ever have one login.
+* One two-panel picker replaces the old primary-owner and additional-assignee controls: search by
+  name or employee number at the top, selected employees as removable chips below. The current
+  primary owner is kept while still selected; otherwise the lowest member ID in the selection
+  becomes primary, so click order never decides ownership.
+* My Assigned Work is available to ADMIN, MANAGER, MEMBER and VIEWER and is always resolved from the
+  verified session; only a MEMBER may create a task or submit a request from it.
 
 ## 7. Hourly local backups
 

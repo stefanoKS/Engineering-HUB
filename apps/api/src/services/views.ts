@@ -28,6 +28,7 @@ import type {
   ResponsibilityCard,
   TaskRequest
 } from '@eh/contracts';
+import { API_VERSION, APP_VERSION, DB_SCHEMA_VERSION } from '@eh/contracts';
 import {
   businessDate,
   createScope,
@@ -281,9 +282,9 @@ export async function buildBootstrap(ctx: ReadCtx, identity: Identity, environme
   return {
     actor: actorDto(identity),
     app: {
-      version: '2.0.0',
-      apiVersion: '2.0.0',
-      schemaVersion: 1,
+      version: APP_VERSION,
+      apiVersion: API_VERSION,
+      schemaVersion: DB_SCHEMA_VERSION,
       defaultLocale: 'ja',
       environment
     },
@@ -297,7 +298,8 @@ export async function buildBootstrap(ctx: ReadCtx, identity: Identity, environme
         memberId: member.memberId,
         name: member.name,
         active: member.active,
-        role: member.role
+        role: member.role,
+        employeeId: member.employeeId
       })),
       skills: dir.skills,
       subprojects: dir.subprojects.map((subproject) => ({

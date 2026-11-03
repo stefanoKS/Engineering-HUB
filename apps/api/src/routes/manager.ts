@@ -10,6 +10,7 @@ import {
   ApproveAssignmentBody,
   AssessSkillBody,
   AutomationSaveBody,
+  CompleteTaskBody,
   ConfirmReasonBody,
   ConfirmScheduleBody,
   CreateProjectBody,
@@ -73,6 +74,7 @@ import {
 } from '../services/projects';
 import {
   approveAssignmentCommand,
+  completeTaskDirectly,
   confirmScheduleCommand,
   createTask,
   overrideComplete,
@@ -385,6 +387,16 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
     }
   });
 
+  app.post('/api/manager/tasks/:id/complete', async (request, reply) => {
+    try {
+      const body = CompleteTaskBody.parse(request.body ?? {});
+      const { id } = request.params as { id: string };
+      return ok(reply, request, { task: await completeTaskDirectly(serviceCtx(request), id, body) });
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
   app.post('/api/manager/tasks/:id/override-complete', async (request, reply) => {
     try {
       const body = OverrideCompleteBody.parse(request.body ?? {});
@@ -438,7 +450,8 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
         memberId: entry.memberId,
         name: entry.name,
         active: entry.active,
-        role: entry.role
+        role: entry.role,
+        employeeId: entry.employeeId
       })),
       skills: dir.skills,
       subprojects: dir.subprojects.map((entry) => ({

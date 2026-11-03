@@ -1,12 +1,13 @@
-﻿/**
- * My Work: the member screen.
+/**
+ * My Assigned Work: 自分の担当タスク.
  *
- * A member files their own tasks, records progress and asks for a completion review. The owner of
- * a created task, the request author and the review decision are all decided by the server; the
- * browser only chooses a project, a subproject, a name, a description, a deadline and a priority.
+ * The list is always the signed-in member's own work, resolved on the server from the verified
+ * session - never from a name, an employee number or a task owner sent by the browser. A manager
+ * keeps this personal list beside the departmental one; a MEMBER also files and reports work here;
+ * a VIEWER sees the same list read-only.
  */
 import { useMemo, useState } from 'react';
-import type { MemberRequest, MemberRequests, MyWorkList, MyWorkProjectOptions } from '@eh/contracts';
+import type { Actor, MemberRequest, MemberRequests, MyWorkList, MyWorkProjectOptions } from '@eh/contracts';
 import { api, ApiFailure } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
@@ -15,12 +16,36 @@ import { createIdempotencyKey, SelectInput, TextInput, useIdempotencyKey, useSav
 
 const PAGE_SIZE = 25;
 
-export function MyWorkScreen(): JSX.Element {
+function displayTone(status: MyWorkList['items'][number]['displayStatus']): 'ok' | 'warn' | 'danger' | 'neutral' | 'info' {
+  switch (status) {
+    case 'DONE':
+      return 'ok';
+    case 'OVERDUE':
+      return 'danger';
+    case 'CANCELLED':
+      return 'neutral';
+    default:
+      return 'info';
+  }
+}
+
+export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
   const { t } = useI18n();
   const [page, setPage] = useState(1);
-  const list = useQuery<MyWorkList>(`${keys.myWork}:${page}`, () => api.get<MyWorkList>(`/api/employee/my-work?page=${page}`));
-  const projects = useQuery<MyWorkProjectOptions>(keys.myProjects, () => api.get<MyWorkProjectOptions>('/api/employee/my-work/projects'));
-  const requests = useQuery<MemberRequests>(keys.myRequests, () => api.get<MemberRequests>('/api/employee/requests/mine'));
+  const canCreate = actor.role === 'MEMBER';
+  const canReport = actor.role === 'MEMBER';
+
+  const list = useQuery<MyWorkList>(`${keys.myWork}:${page}`, () =>
+    api.get<MyWorkList>(`/api/employee/my-work?page=${page}`)
+  );
+  const projects = useQuery<MyWorkProjectOptions>(keys.myProjects, () =>
+    canCreate
+      ? api.get<MyWorkProjectOptions>('/api/employee/my-work/projects')
+      : Promise.resolve({ items: [], taskCreationEnabled: false })
+  );
+  const requests = useQuery<MemberRequests>(keys.myRequests, () =>
+    api.get<MemberRequests>('/api/employee/requests/mine')
+  );
 
   const refreshAll = (): void => {
     queryCache.invalidate([keys.myWork, keys.myRequests]);
@@ -33,37 +58,51 @@ export function MyWorkScreen(): JSX.Element {
   return (
     <div className="screen stack">
       <h2>{t('local.myWork')}</h2>
-      <p className="muted small">{t('myWork.intro')}</p>
+      <p className="muted small">{canCreate ? t('myWork.intro') : t('myWork.derivedNote')}</p>
 
-      {requests.data && !requests.data.submissionEnabled ? (
+      {!canCreate ? (
+        <div className="banner info">
+          <p className="muted small">{canCreate ? t('myWork.memberOnlyCreate') : t('myWork.managerNote')}</p>
+        </div>
+      ) : null}
+
+      {requests.data && !requests.data.submissionEnabled && canReport ? (
         <div className="banner warning">
           <strong>{t('myWork.requestsClosed')}</strong>
           <p className="muted small">{t('myWork.requestsClosedHint')}</p>
         </div>
       ) : null}
 
-      <CreateTaskCard
-        projects={projects.data?.items ?? []}
-        loading={projects.loading}
-        onCreated={() => {
-          refreshAll();
+      {canCreate ? (
+        <CreateTaskCard
+          projects={projects.data?.items ?? []}
+          loading={projects.loading}
+          onCreated={() => {
+            refreshAll();
+          }}
+        />
+      ) : null}
+
+      <ErrorBox
+        error={list.error ?? (canCreate ? projects.error : null) ?? requests.error}
+        onRetry={() => {
+          list.refresh();
+          if (canCreate) projects.refresh();
+          requests.refresh();
         }}
       />
-
-      <ErrorBox error={list.error ?? projects.error ?? requests.error} onRetry={() => {
-        list.refresh();
-        projects.refresh();
-        requests.refresh();
-      }} />
 
       <div className="inline-actions">
         <span className="muted small">{t('myWork.total', { n: total })}</span>
       </div>
 
+      {items.length === 0 ? <p className="muted">{t('myWork.requestsEmpty')}</p> : null}
+
       {items.map((item) => (
         <WorkCard
           key={`${item.taskId}:${item.revision}`}
           item={item}
+          canReport={canReport}
           submissionEnabled={requests.data?.submissionEnabled ?? false}
           onChanged={refreshAll}
         />
@@ -105,12 +144,10 @@ function CreateTaskCard({
   const [description, setDescription] = useState('');
   const [deadline, setDeadline] = useState('');
   const [priority, setPriority] = useState('Medium');
-  const [acknowledge, setAcknowledge] = useState(false);
   const [notice, setNotice] = useState('');
 
   const current = useMemo(() => projects.find((entry) => entry.projectId === projectId), [projects, projectId]);
   const subprojects = current?.subprojects ?? [];
-  const needsAcknowledgement = save.state === 'failed' && save.error instanceof ApiFailure && save.error.code === 'CONFIRMATION_REQUIRED';
   const valid = !!projectId && taskName.trim().length > 0 && !!deadline;
 
   return (
@@ -128,8 +165,7 @@ function CreateTaskCard({
               taskName: taskName.trim(),
               description: description.trim() || undefined,
               deadline,
-              priority,
-              acknowledgeNonWorking: acknowledge
+              priority
             }),
           {
             onSuccess: () => {
@@ -138,7 +174,6 @@ function CreateTaskCard({
               setTaskName('');
               setDescription('');
               setDeadline('');
-              setAcknowledge(false);
               onCreated();
             }
           }
@@ -162,7 +197,7 @@ function CreateTaskCard({
             allowEmpty={t('common.unset')}
             options={projects.map((entry) => ({
               value: entry.projectId,
-              label: entry.responsibilityName ? entry.projectName + " / " + entry.responsibilityName : entry.projectName
+              label: entry.responsibilityName ? entry.projectName + ' / ' + entry.responsibilityName : entry.projectName
             }))}
           />
         </label>
@@ -201,18 +236,9 @@ function CreateTaskCard({
           />
         </label>
       </div>
+      <p className="muted small">{t('tasks.noDurationNote')}</p>
 
-      {needsAcknowledgement ? (
-        <div className="banner warning">
-          <p>{t('myWork.dueSoonWarning')}</p>
-          <label className="inline-field">
-            <input type="checkbox" checked={acknowledge} onChange={(event) => setAcknowledge(event.target.checked)} />
-            <span>{t('myWork.acknowledge')}</span>
-          </label>
-        </div>
-      ) : null}
-
-      <ErrorBox error={save.state === 'failed' && !needsAcknowledgement ? save.error : undefined} onRetry={onCreated} />
+      <ErrorBox error={save.error} onRetry={onCreated} />
       {notice ? <div className="banner ok">{notice}</div> : null}
 
       <div className="inline-actions">
@@ -226,66 +252,46 @@ function CreateTaskCard({
 
 function WorkCard({
   item,
+  canReport,
   submissionEnabled,
   onChanged
 }: {
   item: MyWorkList['items'][number];
+  canReport: boolean;
   submissionEnabled: boolean;
   onChanged: () => void;
 }): JSX.Element {
-  const { t, label } = useI18n();
-  const [progress, setProgress] = useState(String(item.progressPercent ?? 0));
-  const [actual, setActual] = useState(String(item.actualHours ?? 0));
+  const { t } = useI18n();
   const [reporting, setReporting] = useState(false);
-  const save = useSave();
 
-  const finished = ['Done', 'Cancelled'].includes(item.status);
+  const finished = ['DONE', 'CANCELLED'].includes(item.displayStatus);
   const locked = finished || item.container;
   const review = reviewKey(item.reviewState);
 
   return (
     <div className="card stack">
-      <form
-        className="stack"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void save.run(
-            () =>
-              api.patch(`/api/employee/my-work/${item.taskId}`, {
-                revision: item.revision,
-                progressPercent: Number(progress),
-                actualHours: Number(actual)
-              }),
-            { onSuccess: onChanged }
-          );
-        }}
-      >
-        <h3>{item.taskName}</h3>
-        <p className="muted small">
-          {item.projectName}
-          {item.subprojectName ? ` / ${item.subprojectName}` : ''} · {label('status', item.status)} ·{' '}
-          {item.dueDate ?? t('common.unset')}
-        </p>
+      <h3>{item.taskName}</h3>
+      <p className="muted small">
+        {item.projectName}
+        {item.subprojectName ? ` / ${item.subprojectName}` : ''} · {t('myWork.deadline')}: {item.dueDate ?? t('common.unset')}
+      </p>
+      <p className="small">
+        <span className="muted">{t('myWork.status')}: </span>
+        <Badge tone={displayTone(item.displayStatus)}>{t(`taskStatus.${item.displayStatus}`)}</Badge>
+        {item.pendingRequest ? <Badge tone="warn">{t('myWork.pendingBadge')}</Badge> : null}
+        {item.creationChannel === 'MEMBER' ? (
+          <span className="muted small"> · {t('myWork.adminApprovalNote')}</span>
+        ) : null}
+      </p>
+      {canReport ? (
         <p className="small">
           <span className="muted">{t('myWork.reviewLabel')}: </span>
           <Badge tone={review.tone}>{t(review.label)}</Badge>
-          {item.creationChannel === 'MEMBER' ? <span className="muted small"> · {t('myWork.adminApprovalNote')}</span> : null}
         </p>
-        <div className="field-row">
-          <label className="field">
-            <span className="field-label">{t('local.progress')}</span>
-            <TextInput type="number" min={0} max={99} value={progress} onChange={setProgress} required />
-          </label>
-          <label className="field">
-            <span className="field-label">{t('local.actualHours')}</span>
-            <TextInput type="number" min={0} max={99999} step={0.1} value={actual} onChange={setActual} required />
-          </label>
-        </div>
-        <ErrorBox error={save.error} onRetry={onChanged} />
+      ) : null}
+
+      {canReport ? (
         <div className="inline-actions">
-          <button type="submit" className="button" disabled={save.state === 'saving' || locked}>
-            {t('action.save')}
-          </button>
           <button
             type="button"
             className="button secondary"
@@ -296,10 +302,10 @@ function WorkCard({
             {t('myWork.reportCompletion')}
           </button>
         </div>
-        {item.pendingRequest ? <p className="muted small">{t('myWork.review.pending')}</p> : null}
-        {finished ? <p className="muted small">{t('myWork.doneNote')}</p> : null}
-        {item.container ? <p className="muted small">{t('myWork.containerNote')}</p> : null}
-      </form>
+      ) : null}
+      {item.pendingRequest ? <p className="muted small">{t('myWork.review.pending')}</p> : null}
+      {finished ? <p className="muted small">{t('myWork.doneNote')}</p> : null}
+      {item.container ? <p className="muted small">{t('myWork.containerNote')}</p> : null}
 
       {reporting ? (
         <CompletionRequestForm

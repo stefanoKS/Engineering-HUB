@@ -12,7 +12,8 @@ import {
 } from '../map';
 
 const MEMBER_COLUMNS = `m.member_id, m.name, m.email, m.department, m.position, m.active,
-  m.manager_id, m.weekly_capacity_hours, m.role, m.created_at, m.updated_at, m.revision`;
+  m.manager_id, m.weekly_capacity_hours, m.role, m.created_at, m.updated_at, m.revision,
+  (SELECT a.employee_id FROM local_accounts a WHERE a.member_id = m.member_id) AS employee_id`;
 
 export async function listMembers(
   db: Queryable,
@@ -48,8 +49,44 @@ export async function listMembersPaged(
   return { items: rows.map(toMember), total: Number(total?.count ?? 0) };
 }
 
-export async function getMember(db: Queryable, memberId: string): Promise<Member | null> {
-  const row = await db.one<MemberRow>(`SELECT ${MEMBER_COLUMNS} FROM members m WHERE m.member_id = $1`, [
+/**
+ * Members an administrator may still attach a login to.
+ *
+ * An account is one per member (`local_accounts.member_id` is the primary key), so a linked
+ * member never appears here twice and the picker can never create a duplicate login.
+ */
+export async function listLinkableMembers(
+  db: Queryable,
+  input: { query?: string; limit?: number } = {}
+): Promise<{ memberId: string; name: string; role: string; active: boolean; employeeId: string | null }[]> {
+  const filter = `%${(input.query ?? '').trim().toLowerCase()}%`;
+  const rows = await db.many<{
+    member_id: string;
+    name: string;
+    role: string | null;
+    active: boolean;
+    employee_id: string | null;
+  }>(
+    `SELECT m.member_id, m.name, m.role, m.active, a.employee_id
+       FROM members m
+       LEFT JOIN local_accounts a ON a.member_id = m.member_id
+      WHERE m.active
+        AND a.employee_id IS NULL
+        AND ($1 = '%%' OR lower(m.name) LIKE $1 OR lower(m.member_id) LIKE $1)
+      ORDER BY lower(m.name) ASC, m.member_id ASC
+      LIMIT $2`,
+    [filter, Math.min(Math.max(input.limit ?? 20, 1), 50)]
+  );
+  return rows.map((row) => ({
+    memberId: row.member_id,
+    name: row.name,
+    role: row.role ?? 'VIEWER',
+    active: row.active,
+    employeeId: row.employee_id ?? null
+  }));
+}
+
+export async function getMember(db: Queryable, memberId: string): Promise<Member | null> {  const row = await db.one<MemberRow>(`SELECT ${MEMBER_COLUMNS} FROM members m WHERE m.member_id = $1`, [
     memberId
   ]);
   return row ? toMember(row) : null;

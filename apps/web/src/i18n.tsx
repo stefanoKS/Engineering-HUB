@@ -9,6 +9,89 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { APP_NAME, DEFAULT_LANGUAGE, LANGUAGES, STORAGE_KEY, isLanguage, label as dictLabel, t as dictT, type Language } from '@eh/i18n';
 
 export const V2_LABELS = {
+ 'nav.allWork': { ja: 'すべてのタスク', en: 'All work' },
+ 'allWork.intro': {
+   ja: '社内で共有されている作業を閲覧できます。閲覧のみで、変更はできません。',
+   en: 'Browse the work shared inside the company. This view is read-only.'
+ },
+ 'allWork.managerIntro': {
+   ja: 'すべての作業を検索・編集できます。自分の担当は「自分の担当タスク」に表示されます。',
+   en: 'Search and manage all work. Your own assignments stay under My assigned work.'
+ },
+ 'allWork.scope': { ja: '表示中の {n} 件 / 全 {total} 件', en: '{n} shown of {total}' },
+ 'taskStatus.IN_PROGRESS': { ja: '進行中', en: 'In progress' },
+ 'taskStatus.OVERDUE': { ja: '期限超過', en: 'Overdue' },
+ 'taskStatus.DONE': { ja: '完了', en: 'Done' },
+ 'taskStatus.CANCELLED': { ja: '取消', en: 'Cancelled' },
+ 'tasks.includeInactive': { ja: '取消・アーカイブも表示', en: 'Include cancelled and archived' },
+ 'tasks.completeDirect': { ja: '完了にする', en: 'Mark done' },
+ 'tasks.completeDirectTitle': { ja: 'タスクを完了にします', en: 'Mark the task done' },
+ 'tasks.completeDirectBody': {
+   ja: 'このタスクを完了にします。承認待ちの完了報告がある場合は取り下げられます。',
+   en: 'This task will be marked done. Any pending completion report is withdrawn.'
+ },
+ 'tasks.completeNote': { ja: '完了メモ（任意）', en: 'Completion note (optional)' },
+ 'tasks.completed': { ja: '完了にしました。', en: 'The task is done.' },
+ 'tasks.deadlineChangedConfirm': {
+   ja: '期限を変更します。内容を確認して保存してください。',
+   en: 'This changes the deadline. Review it before saving.'
+ },
+ 'tasks.noDurationNote': {
+   ja: '期限だけを登録します。所要期間や工数の入力は不要です。',
+   en: 'Only the deadline is recorded. No duration or effort estimate is required.'
+ },
+ 'assignee.heading': { ja: '担当者', en: 'Assignees' },
+ 'assignee.available': { ja: '選択可能なメンバー', en: 'Available employees' },
+ 'assignee.selected': { ja: '選択済みの担当者', en: 'Selected assignees' },
+ 'assignee.search': { ja: '氏名・社員番号で検索', en: 'Search by name or employee ID' },
+ 'assignee.empty': { ja: '未選択', en: 'No one selected' },
+ 'assignee.none': { ja: '該当するメンバーがいません', en: 'No matching employee' },
+ 'assignee.hint': {
+   ja: 'メンバーを選ぶと下の欄に移動します。×で外すと元の位置に戻ります。',
+   en: 'Select an employee to move them down. Use × to return them to the list.'
+ },
+ 'assignee.remove': { ja: '{name} を外す', en: 'Remove {name}' },
+ 'assignee.ownerNote': {
+   ja: '先頭の担当者が主担当として記録されます。担当者は権限ではなく、作業の責任者を表します。',
+   en: 'The first assignee is stored as the primary owner. Assignment is accountability, not permission.'
+ },
+ 'skills.grade': { ja: '技能グレード', en: 'Skill grade' },
+ 'skills.notAssessed': { ja: '未評価', en: 'Not assessed' },
+ 'skills.gradeHint': {
+   ja: 'A=4、B=3、C=2、D=1。未評価は 0 のまま保持されます。',
+   en: 'A=4, B=3, C=2, D=1. Not-assessed values stay 0.'
+ },
+ 'myWork.status': { ja: '状態', en: 'Status' },
+ 'myWork.memberOnlyCreate': {
+   ja: 'タスクの作成と完了報告はメンバー（MEMBER）が行えます。',
+   en: 'Task creation and completion reports are available to the MEMBER role.'
+ },
+ 'myWork.managerNote': {
+   ja: '管理者は「すべてのタスク」から作成・編集・完了を行えます。',
+   en: 'Managers create, edit and complete work from All work.'
+ },
+ 'myWork.derivedNote': {
+   ja: '状態は期限と完了状況から自動で決まります（進行中・期限超過・完了）。',
+   en: 'The state is derived from the deadline and completion (in progress, overdue, done).'
+ },
+ 'myWork.pendingBadge': { ja: '承認待ち', en: 'Awaiting approval' },
+ 'local.linkExisting': { ja: '既存メンバーにログインを追加', en: 'Link a login to an existing member' },
+ 'local.newMember': { ja: '新しい社員として登録', en: 'Create a new employee' },
+ 'local.memberSearch': { ja: '既存メンバーを検索（氏名・メンバーID）', en: 'Search existing members (name or member ID)' },
+ 'local.memberSelected': { ja: '選択中のメンバー', en: 'Selected member' },
+ 'local.noLinkable': { ja: 'ログインを追加できる有効なメンバーがいません。', en: 'No active member is waiting for a login.' },
+ 'local.roleFromMember': {
+   ja: '既存メンバーの氏名と権限は変更しません。',
+   en: 'The existing name and role are never overwritten.'
+ },
+ 'local.accountExists': { ja: 'この社員番号は既に登録されています。', en: 'This employee number already has a login.' },
+ 'local.list': { ja: '登録済みアカウント', en: 'Existing accounts' },
+ 'local.mustChange': { ja: '仮パスワード', en: 'Temporary password' },
+ 'local.noAccounts': { ja: '登録済みアカウントはありません。', en: 'No account exists yet.' },
+ 'local.employeeNumberHint': {
+   ja: '社員番号はログインIDです。先頭の0は保持されます。',
+   en: 'The employee ID is the login identifier; leading zeros are preserved.'
+ },
  'tasks.expandBranch': { ja: '{name} の子タスクを開く', en: 'Expand subtasks of {name}' },
  'tasks.collapseBranch': { ja: '{name} の子タスクを閉じる', en: 'Collapse subtasks of {name}' },
  'tasks.treeScope': { ja: '条件に一致するタスク: {n} 件。下のページ切替は最上位タスク単位です。親タスクを開くと子タスクを表示します。', en: '{n} matching tasks. Pagination below is by top-level task. Expand a parent to show its subtasks.' },

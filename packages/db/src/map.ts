@@ -14,7 +14,7 @@ import type {
   Task,
   TaskRequest
 } from '@eh/contracts';
-import { effectiveRole } from '@eh/domain';
+import { displayTaskStatus, effectiveRole } from '@eh/domain';
 
 export type MemberRow = {
   member_id: string;
@@ -29,6 +29,7 @@ export type MemberRow = {
   created_at: string;
   updated_at: string;
   revision: number;
+  employee_id?: string | null;
 };
 
 export function toMember(row: MemberRow): Member {
@@ -42,6 +43,7 @@ export function toMember(row: MemberRow): Member {
     managerId: row.manager_id,
     weeklyCapacityHours: row.weekly_capacity_hours,
     role: effectiveRole(row.role),
+    employeeId: row.employee_id ?? undefined,
     revision: row.revision,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -194,6 +196,7 @@ export function toTask(row: TaskRow): Task {
     ownerMemberId: row.owner_member_id,
     ownerName: row.owner_name ?? '',
     status: row.status,
+    displayStatus: displayTaskStatus({ status: row.status, dueDate: row.due_date }),
     priority: row.priority,
     plannedStart: row.planned_start,
     dueDate: row.due_date,

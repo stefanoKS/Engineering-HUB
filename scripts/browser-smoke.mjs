@@ -39,7 +39,7 @@ export async function browserSmoke(origin, email, local = null) {
     await dialog.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'Browser edited project', exact: true })).toBeVisible();
-    await page.locator('.app-nav').getByRole('link', { name: 'Tasks', exact: true }).click();
+    await page.locator('.app-nav').getByRole('link', { name: 'All work', exact: true }).click();
     await page.getByRole('button', { name: 'New task', exact: true }).click();
     await dialog.getByRole('combobox', { name: 'Projects', exact: true }).selectOption({ label: 'Browser edited project' });
     await dialog.getByLabel('Task name', { exact: true }).fill('Browser verified task');

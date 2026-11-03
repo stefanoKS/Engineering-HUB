@@ -215,6 +215,42 @@ export const OverrideCompleteBody = z
   })
   .strict();
 
+/**
+ * A manager deciding that authorized work is finished, without a prior request.
+ *
+ * The role is always the verified session role; the browser supplies only the revision and the
+ * confirmation.
+ */
+export const CompleteTaskBody = z
+  .object({
+    revision: Revision,
+    confirmed: Confirm,
+    note: Text(1000).optional()
+  })
+  .strict();
+
+/**
+ * Local login accounts.
+ *
+ * `memberId` links the new login to an existing member and keeps that member's name, role,
+ * assignments and history untouched. Without it the command creates the member and the login
+ * together in one transaction.
+ */
+export const CreateAccountBody = z
+  .object({
+    idempotencyKey: IdempotencyKey,
+    employeeId: z.string().regex(/^[A-Za-z0-9_-]{1,32}$/),
+    password: z.string().min(4).max(128),
+    name: Text(200).min(1).optional(),
+    role: Role.optional(),
+    memberId: Id.optional()
+  })
+  .strict();
+
+export const ResetAccountPasswordBody = z
+  .object({ password: z.string().min(4).max(128), confirmed: Confirm })
+  .strict();
+
 export const SaveResponsibilityBody = z
   .object({
     responsibilityId: Id.optional(),
@@ -345,10 +381,14 @@ export const TaskListQuery = z
     responsibilityId: Id.optional(),
     unassigned: z.coerce.boolean().default(false),
     status: TaskStatus.optional(),
+    /** Filter by the derived, user-facing state (進行中 / 期限超過 / 完了 / 取消). */
+    displayStatus: z.enum(['IN_PROGRESS', 'OVERDUE', 'DONE', 'CANCELLED']).optional(),
     ownerMemberId: Id.optional(),
     query: z.string().trim().max(200).optional(),
     containerOnly: z.coerce.boolean().default(false),
     overdueOnly: z.coerce.boolean().default(false),
+    /** Archived projects, archived subprojects and Cancelled work stay hidden unless asked for. */
+    includeInactive: z.coerce.boolean().default(false),
     page: z.coerce.number().int().min(1).max(10000).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(25),
     sort: z.enum(['dueDate', 'priority', 'name', 'status', 'updated']).default('dueDate'),

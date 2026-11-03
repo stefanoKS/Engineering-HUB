@@ -18,6 +18,7 @@ import { AuthService } from './auth/auth';
 import { registerContext, type AppDependencies } from './http';
 import { sendError } from './errors';
 import { registerMyWork } from './routes/my-work';
+import { registerWorkRoutes } from './routes/work';
 import { registerAccountRoutes } from './routes/accounts';
 import { registerSessionRoutes } from './routes/session';
 import { registerManagerRoutes } from './routes/manager';
@@ -98,6 +99,7 @@ export async function buildApp(options: BuildOptions): Promise<FastifyInstance> 
   registerSessionRoutes(app, deps);
   registerAccountRoutes(app, deps);
   registerMyWork(app, deps);
+  registerWorkRoutes(app, deps);
   registerManagerRoutes(app, deps);
   registerEmployeeRoutes(app, deps);
 

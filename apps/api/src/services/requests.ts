@@ -29,7 +29,9 @@ import {
   assertCompletableByDecision,
   assertCompletionDecisionRole,
   assertReportable,
+  canSubmitCompletionRequest,
   createCalendar,
+  displayTaskStatus,
   effectiveEmailMode,
   evaluateStaleness,
   planDecision,
@@ -221,6 +223,7 @@ export async function employeeSnapshot(ctx: ServiceCtx) {
       projectName: row.project_name,
       responsibilityName: row.responsibility_name ?? '',
       status: row.status,
+      displayStatus: displayTaskStatus({ status: row.status, dueDate: row.due_date }),
       dueDate: row.due_date,
       plannedStart: row.planned_start,
       ownerName: row.owner_name ?? '',
@@ -244,7 +247,9 @@ export async function submitRequest(
   ctx: ServiceCtx,
   body: z.infer<typeof SubmitRequestBody>
 ): Promise<{ requestId: string; state: 'RECEIVED' | 'DUPLICATE'; requestType: string; taskId: string; submittedAt: string }> {
-  requireRole(ctx.identity, 'MEMBER');
+  if (!canSubmitCompletionRequest(ctx.identity)) {
+    throw new DomainError('AUTHORIZATION_DENIED', 'Only a MEMBER files a request for their own work');
+  }
   const settings = await getSettings(ctx.db);
   if (!settingFlag(settings, SETTING_KEYS.REQUEST_SUBMISSION_ENABLED, false)) {
     throw new DomainError('REQUEST_SUBMISSION_CLOSED', 'Request submission is closed');
@@ -377,10 +382,7 @@ export async function decideRequest(ctx: ServiceCtx, body: z.infer<typeof Decisi
     }
     // Refused before the request is claimed, so a refusal never leaves a request PROCESSING.
     if (body.decision === 'APPROVE' && locked.requestType === 'COMPLETION_REPORT') {
-      assertCompletionDecisionRole({
-        actorRole: ctx.identity.role,
-        creationChannel: task.creationChannel
-      });
+      assertCompletionDecisionRole({ actorRole: ctx.identity.role });
     }
     const claimed = await claimRequest(tx, body.requestId);
     if (!claimed) {
@@ -570,7 +572,7 @@ export async function requestReceipt(
   ctx: ServiceCtx,
   requestId: string
 ): Promise<{ requestId: string; state: string; requestType: string; taskId: string; submittedAt: string }> {
-  requireRole(ctx.identity, 'MEMBER');
+  requireRole(ctx.identity, 'VIEWER');
   const request = await getRequest(ctx.db, requestId);
   if (!request) throw new DomainError('NOT_FOUND', 'Request not found');
   const manager = ctx.identity.role === 'ADMIN' || ctx.identity.role === 'MANAGER';
@@ -593,8 +595,7 @@ export async function requestReceipt(
  * It is filtered by the verified identity, so one member never sees another member's
  * submission, and it carries state only: no reviewer address and no manager-only note.
  */
-export async function myRequests(ctx: ServiceCtx, limit = 50): Promise<{
-  items: {
+export async function myRequests(ctx: ServiceCtx, limit = 50): Promise<{  items: {
     requestId: string;
     requestType: string;
     taskId: string;
@@ -609,7 +610,7 @@ export async function myRequests(ctx: ServiceCtx, limit = 50): Promise<{
   }[];
   submissionEnabled: boolean;
 }> {
-  requireRole(ctx.identity, 'MEMBER');
+  requireRole(ctx.identity, 'VIEWER');
   const settings = await getSettings(ctx.db);
   const rows = await ctx.db.many<{
     request_id: string;

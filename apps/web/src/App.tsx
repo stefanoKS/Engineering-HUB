@@ -54,6 +54,15 @@ export function App(): JSX.Element {
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
+  // A member or viewer never lands on a manager-only route, even if the address bar still holds
+  // one from a previous administrator session on a shared workstation.
+  useEffect(() => {
+    const role = session?.actor.role;
+    if (!role || role === 'ADMIN' || role === 'MANAGER') return;
+    const allowed = new Set(['my-work', 'all-work', 'overview', 'task', 'project']);
+    if (!allowed.has(route.segments[0] ?? 'overview')) navigate('my-work');
+  }, [session, route.path]);
+
   useEffect(() => {
     let cancelled = false;
     api
@@ -62,6 +71,10 @@ export function App(): JSX.Element {
         if (cancelled) return;
         setCsrfToken(value.csrfToken);
         setSession(value);
+        // A member or a viewer lands on their own work; managers land on the overview.
+        if (!window.location.hash && (value.actor.role === 'MEMBER' || value.actor.role === 'VIEWER')) {
+          navigate('my-work');
+        }
       })
       .catch(() => {
         if (!cancelled) setSession(null);
@@ -95,15 +108,14 @@ export function App(): JSX.Element {
 
   const signedIn = session ? session.actor : null;
   const isManager = !!signedIn && (signedIn.role === 'ADMIN' || signedIn.role === 'MANAGER');
-  const isMember = !!signedIn && signedIn.role === 'MEMBER';
 
   const nav = useMemo(
     () =>
       [
         { path: 'overview', label: t('nav.overview') },
         { path: 'my-work', label: t('local.myWork') },
+        { path: 'all-work', label: t('nav.allWork') },
         { path: 'projects', label: t('nav.projects') },
-        { path: 'tasks', label: t('nav.tasks') },
         { path: 'responsibilities', label: t('nav.responsibilities') },
         { path: 'members', label: t('nav.members') },
         { path: 'skills', label: t('nav.skills') },
@@ -111,8 +123,12 @@ export function App(): JSX.Element {
         { path: 'workload', label: t('nav.workload') },
         { path: 'automation', label: t('nav.automation') },
         { path: 'status', label: t('nav.status') }
-      ].filter((entry) => isManager || entry.path === 'overview' || (isMember && entry.path === 'my-work')),
-    [t, isManager, isMember]
+      ].filter((entry) =>
+        isManager
+          ? true
+          : entry.path === 'my-work' || entry.path === 'all-work' || entry.path === 'overview'
+      ),
+    [t, isManager]
   );
 
   if (session === undefined) {
@@ -177,7 +193,7 @@ export function App(): JSX.Element {
 
       <main className="app-main" id="main-content" tabIndex={-1}>
         <Suspense fallback={<p role="status">{t('state.loading')}</p>}>
-          <div key={route.path}>{session.authMode === 'local' && !isManager && session.actor.role === 'MEMBER' && route.segments[0] !== 'my-work' ? <MyWorkScreen/> : renderScreen(route, session.actor, isManager)}</div>
+          <div key={route.path}>{renderScreen(route, session.actor, isManager)}</div>
         </Suspense>
       </main>
     </div>
@@ -186,40 +202,42 @@ export function App(): JSX.Element {
 
 function renderScreen(route: Route, actor: Actor, isManager: boolean): JSX.Element {
   const [first, second] = route.segments;
-  // A member files their own work in both authentication modes; the published dashboard stays
-  // the member's overview.
-  if (!isManager) {
-    return first === 'my-work' && actor.role === 'MEMBER' ? <MyWorkScreen /> : <OverviewScreen actor={actor} />;
+  // Every signed-in role keeps a personal work list; only a MEMBER may create or request from it.
+  if (first === 'my-work') return <MyWorkScreen actor={actor} />;
+  // All Work is the same read-only list for MEMBER and VIEWER, and the management list otherwise.
+  if (first === 'all-work' || first === 'tasks') {
+    return <TasksScreen actor={actor} readOnly={!isManager} />;
   }
+  if (first === 'task') {
+    if (!second) return <TasksScreen actor={actor} readOnly={!isManager} />;
+    return <TaskDetailScreen actor={actor} taskId={second} readOnly={!isManager} />;
+  }
+  if (!isManager) return <OverviewScreen actor={actor} />;
   switch (first) {
     case 'accounts':
-      return actor.role === 'ADMIN' ? <LocalAccountsScreen/> : <OverviewScreen actor={actor}/>;
+      return actor.role === 'ADMIN' ? <LocalAccountsScreen /> : <OverviewScreen actor={actor} />;
     case 'overview':
       return <OverviewScreen actor={actor} />;
     case 'projects':
       return <ProjectsScreen actor={actor} />;
     case 'project':
       return second ? <ProjectDetailScreen actor={actor} projectId={second} /> : <ProjectsScreen actor={actor} />;
-    case 'tasks':
-      return <TasksScreen actor={actor} />;
-    case 'task':
-      return second ? <TaskDetailScreen actor={actor} taskId={second} /> : <TasksScreen actor={actor} />;
     case 'responsibilities':
-      return isManager ? <ResponsibilitiesScreen actor={actor} /> : <OverviewScreen actor={actor} />;
+      return <ResponsibilitiesScreen actor={actor} />;
     case 'members':
       return <MembersScreen actor={actor} />;
     case 'member':
       return second ? <MemberProfileScreen actor={actor} memberId={second} /> : <MembersScreen actor={actor} />;
     case 'skills':
-      return isManager ? <SkillsScreen actor={actor} /> : <OverviewScreen actor={actor} />;
+      return <SkillsScreen actor={actor} />;
     case 'requests':
-      return isManager ? <RequestsScreen actor={actor} /> : <OverviewScreen actor={actor} />;
+      return <RequestsScreen actor={actor} />;
     case 'workload':
-      return isManager ? <WorkloadScreen actor={actor} /> : <OverviewScreen actor={actor} />;
+      return <WorkloadScreen actor={actor} />;
     case 'automation':
-      return isManager ? <AutomationScreen actor={actor} /> : <OverviewScreen actor={actor} />;
+      return <AutomationScreen actor={actor} />;
     case 'status':
-      return isManager ? <StatusScreen actor={actor} /> : <OverviewScreen actor={actor} />;
+      return <StatusScreen actor={actor} />;
     default:
       return <OverviewScreen actor={actor} />;
   }

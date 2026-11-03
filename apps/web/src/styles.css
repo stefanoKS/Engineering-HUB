@@ -779,3 +779,57 @@ input[type=checkbox] { min-height: auto; width: 17px; height: 17px; accent-color
 .task-tree-toggle, .task-tree-spacer { display: inline-block; width: 1.5rem; text-align: center; }
 .task-tree-toggle { font-size: 1.1rem; padding: 0; margin-right: 0.25rem; }
 .task-tree-footer { padding: 0.4rem 1rem 0.7rem 2.5rem; background: var(--surface-muted, #f7f9fc); }
+
+/* Unified assignee picker: available employees on top, the effective selection below. */
+.assignee-picker { gap: 0.75rem; }
+.assignee-panel {
+  border: 1px solid var(--border, #d8dde4);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface, #fff);
+}
+.assignee-panel h4 { margin: 0 0 0.4rem; font-size: 0.85rem; }
+.assignee-list { list-style: none; margin: 0; padding: 0; max-height: 11rem; overflow-y: auto; }
+.assignee-option {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.assignee-option:hover, .assignee-option:focus-visible {
+  border-color: var(--accent, #3b6ea5);
+  outline: none;
+}
+.assignee-name { font-weight: 600; }
+.chip-list { display: flex; flex-wrap: wrap; gap: 0.35rem; list-style: none; margin: 0 0 0.35rem; padding: 0; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  background: var(--tint, #eef2f7);
+  border: 1px solid var(--border, #d8dde4);
+  font-size: 0.85rem;
+}
+.chip-remove {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.15rem;
+  color: var(--danger, #b3261e);
+}
+.chip-remove:focus-visible { outline: 2px solid var(--accent, #3b6ea5); border-radius: 50%; }
+@media (max-width: 720px) {
+  .assignee-panel { padding: 0.35rem 0.5rem; }
+  .assignee-list { max-height: 9rem; }
+}

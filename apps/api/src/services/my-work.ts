@@ -9,8 +9,8 @@
  */
 import type { z } from 'zod';
 import type { CreateMyTaskBody, MyWorkList, MyWorkProjectOptions } from '@eh/contracts';
-import { getProject, insertTask, listSubprojects, updateTask, getTask } from '@eh/db';
-import { DomainError, requireRole, taskInActiveWork } from '@eh/domain';
+import { getProject, insertTask, getTask } from '@eh/db';
+import { DomainError, canCreateOwnTask, displayTaskStatus, requireRole } from '@eh/domain';
 import { audit, enqueueJob, hashRequest, runIdempotent, type ServiceCtx } from './common';
 import { assertTaskPlacement, planTaskDeadline } from './tasks';
 
@@ -59,6 +59,12 @@ const MY_WORK_SELECT = `
 const OWN_WORK = `(t.owner_member_id = $1 OR EXISTS (
   SELECT 1 FROM task_assignees a WHERE a.task_id = t.task_id AND a.member_id = $1 AND a.removed_at IS NULL))`;
 
+/** Archived and cancelled work is never active work, whatever the role of the reader. */
+const ACTIVE_WORK = `t.deleted_at IS NULL AND t.status <> 'Cancelled'
+  AND p.status <> 'Archived' AND p.archived_at IS NULL
+  AND (t.subproject_id IS NULL OR NOT EXISTS (
+        SELECT 1 FROM subprojects sp WHERE sp.subproject_id = t.subproject_id AND sp.status = 'Archived'))`;
+
 /** A compact review state for the member: what happened to the last completion report. */
 export function reviewStateOf(row: { pending_request: boolean; last_completion_status: string | null }) {
   if (row.pending_request) return 'PENDING' as const;
@@ -69,18 +75,27 @@ export function reviewStateOf(row: { pending_request: boolean; last_completion_s
   return 'NONE' as const;
 }
 
+/**
+ * The signed-in member's own work.
+ *
+ * The identity is always the verified session member, so a manager keeps a personal list beside
+ * the departmental one, and a MEMBER, a MANAGER, an ADMIN and a VIEWER each see only their own
+ * assignments. Nothing is filtered by a role or an identifier supplied by the browser.
+ */
 export async function listMyWork(ctx: ServiceCtx, page: number): Promise<MyWorkList> {
-  requireRole(ctx.identity, 'MEMBER');
+  requireRole(ctx.identity, 'VIEWER');
   const [rows, total] = await Promise.all([
     ctx.db.many<MyWorkRow>(
       `${MY_WORK_SELECT}
-        WHERE t.deleted_at IS NULL AND ${OWN_WORK}
+        WHERE ${ACTIVE_WORK} AND ${OWN_WORK}
         ORDER BY t.due_date NULLS LAST, t.task_id
         LIMIT ${PAGE_SIZE} OFFSET $2`,
       [ctx.identity.memberId, (page - 1) * PAGE_SIZE]
     ),
     ctx.db.one<{ count: string }>(
-      `SELECT count(*)::text AS count FROM tasks t WHERE t.deleted_at IS NULL AND ${OWN_WORK}`,
+      `SELECT count(*)::text AS count
+         FROM tasks t JOIN projects p ON p.project_id = t.project_id
+        WHERE ${ACTIVE_WORK} AND ${OWN_WORK}`,
       [ctx.identity.memberId]
     )
   ]);
@@ -94,6 +109,7 @@ export async function listMyWork(ctx: ServiceCtx, page: number): Promise<MyWorkL
       projectName: row.project_name,
       subprojectName: row.subproject_name ?? '',
       status: row.status as MyWorkList['items'][number]['status'],
+      displayStatus: displayTaskStatus({ status: row.status, dueDate: row.due_date }),
       priority: row.priority,
       dueDate: row.due_date,
       progressPercent: row.progress_percent,
@@ -113,7 +129,9 @@ export const MY_WORK_PAGE_SIZE = PAGE_SIZE;
 
 /** Active projects and non-archived subprojects a member may file work under. */
 export async function myWorkProjectOptions(ctx: ServiceCtx): Promise<MyWorkProjectOptions> {
-  requireRole(ctx.identity, 'MEMBER');
+  if (!canCreateOwnTask(ctx.identity)) {
+    throw new DomainError('AUTHORIZATION_DENIED', 'Only a MEMBER files a task through self-service');
+  }
   const [projects, subprojects] = await Promise.all([
     ctx.db.many<{ project_id: string; project_name: string; responsibility_name: string | null }>(
       `SELECT p.project_id, p.project_name, r.name AS responsibility_name
@@ -147,57 +165,11 @@ export async function myWorkProjectOptions(ctx: ServiceCtx): Promise<MyWorkProje
 }
 
 /**
- * Progress and recorded effort on the member's own active leaf work.
+ * A MEMBER no longer edits progress or recorded effort.
  *
- * The own-task boundary is re-checked inside the transaction, so a browser-supplied task ID
- * cannot reach another member's record. `Done` stays refused: only the reviewed completion
- * workflow writes it.
+ * The only way for a member to finish work is the reviewed completion request, so no callable
+ * path exists that lets a member rewrite progress, hours or a stored status.
  */
-export async function updateMyWork(
-  ctx: ServiceCtx,
-  taskId: string,
-  body: { revision: number; progressPercent: number; actualHours: number }
-): Promise<{ saved: true }> {
-  requireRole(ctx.identity, 'MEMBER');
-  await ctx.db.transaction(async (tx) => {
-    await tx.query('SELECT task_id FROM tasks WHERE task_id = $1 FOR UPDATE', [taskId]);
-    const owned = await tx.one(
-      `SELECT task_id FROM tasks WHERE task_id = $1 AND deleted_at IS NULL
-         AND (owner_member_id = $2 OR EXISTS (
-           SELECT 1 FROM task_assignees WHERE task_id = $1 AND member_id = $2 AND removed_at IS NULL))`,
-      [taskId, ctx.identity.memberId]
-    );
-    if (!owned) throw new DomainError('AUTHORIZATION_DENIED', 'Only your assigned work can be updated');
-    const task = await getTask(tx, taskId);
-    if (!task) throw new DomainError('NOT_FOUND', 'Task not found');
-    const project = await getProject(tx, task.projectId);
-    const subprojects = await listSubprojects(tx);
-    const container = await tx.one(
-      'SELECT task_id FROM tasks WHERE parent_task_id = $1 AND deleted_at IS NULL LIMIT 1',
-      [taskId]
-    );
-    const active = taskInActiveWork(
-      task,
-      new Map([[task.projectId, project ?? undefined]]),
-      new Map(subprojects.map((entry) => [entry.subprojectId, entry]))
-    );
-    if (container || !active) throw new DomainError('INVALID_TRANSITION', 'Only active leaf work can be updated');
-    const updated = await updateTask(
-      tx,
-      taskId,
-      { progressPercent: body.progressPercent, actualHours: body.actualHours },
-      body.revision
-    );
-    if (!updated) throw new DomainError('EDIT_CONFLICT', 'Reload the task before updating it');
-    await audit(tx, ctx, {
-      entityType: 'TASKS',
-      entityId: taskId,
-      action: 'EMPLOYEE_PROGRESS_UPDATED',
-      newValue: body
-    });
-  });
-  return { saved: true };
-}
 
 /**
  * Creates one task owned by the verified member.
@@ -213,7 +185,7 @@ export async function createMyTask(
   requireRole(ctx.identity, 'MEMBER');
   // This path exists for employees. A manager files work through the manager task form, which
   // carries assignment, hierarchy and scheduling controls this endpoint deliberately lacks.
-  if (ctx.identity.role !== 'MEMBER') {
+  if (!canCreateOwnTask(ctx.identity)) {
     throw new DomainError('AUTHORIZATION_DENIED', 'Member self-service creation is limited to the MEMBER role');
   }
   // Preserve retries from installations that used the old global scope, without exposing
@@ -244,8 +216,7 @@ export async function createMyTask(
     deadline: body.deadline,
     durationValue: null,
     durationUnit: null,
-    durationBasis: null,
-    acknowledge: body.acknowledgeNonWorking
+    durationBasis: null
   });
 
   const result = await runIdempotent(

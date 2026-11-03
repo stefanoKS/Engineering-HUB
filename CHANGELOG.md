@@ -1,5 +1,51 @@
 # Changelog
 
+## V2 unified account, role, task and UI simplification — 2026-11-03
+
+No new migration: schema **8** (including the unchanged checksummed `0008_member_created_work`) is
+required, and the operational database was neither migrated nor touched.
+
+### Accounts and identity
+- Accounts can create a new employee (member + login in one transaction) or link a login to an
+  existing member chosen from a searchable list of members without one. Linking never rewrites the
+  member's name, role, assignments or history; a duplicate employee number or a second login for the
+  same member is refused; leading zeros are preserved.
+- The account list is server-paged with a total, and the employee number is shown for linked members.
+
+### Roles and visibility
+- My Assigned Work is available to ADMIN, MANAGER, MEMBER and VIEWER and is always resolved from the
+  verified session; the manager "My assigned work" navigation no longer falls back to the overview.
+- All Work is one server-paged, filterable, expandable list. MEMBER and VIEWER read it (and task
+  detail) through a read-only projection with no workflow history or internal fields; every manager
+  write is refused server-side for them.
+- A MEMBER never edits an existing task, changes an assignee or deadline, or deletes work. Creating
+  their own task and submitting a completion request remain available.
+
+### Completion
+- ADMIN and MANAGER both decide completion reports, including member-created work. MANAGER/ADMIN may
+  also complete authorized work directly; containers, cancelled and done work are refused, a pending
+  completion report is withdrawn with a recorded reason, and `TASK_COMPLETED_DIRECT` records the
+  actor, role, source and previous/final state.
+
+### Tasks
+- Task state is derived at read time in Asia/Tokyo: 完了 → 期限超過 → 進行中 (plus 取消 for cancelled
+  work). Nothing is persisted by a job and legacy stored statuses are preserved.
+- The task form drops the status selector, planned duration, duration unit/basis, non-working-day
+  acknowledgement, estimated hours, actual hours and progress. Deadlines on weekends and public
+  holidays are accepted without a warning.
+- One two-panel assignee picker replaces the primary-owner and additional-assignee controls, with a
+  deterministic primary owner and a single logical assignment patch.
+- Skill grades are letters A–D (A=4 … D=1) with 0 kept as 未評価; stored integers are unchanged.
+
+### Platform
+- `/readyz` answers `503 DATABASE_MIGRATION_REQUIRED` when the schema ledger is older than 8 instead
+  of reporting a false ready state. Startup never migrates.
+
+### Verification
+- V1 **776 pass**; V2 **213 pass, 1 skipped** across 17 files against PostgreSQL 18.6;
+  `typecheck`, `lint`, `validate`, `build`, `smoke:prod`, `test:browser` and `test:lan` pass.
+  Real Google Workspace, Drive and mail remain **NOT_RUN**; production stays NOT APPROVED.
+
 ## V2 corrective follow-up — 2026-11-03
 
 - Show child tasks directly beneath expandable parent rows, with server-filtered ancestry, sibling pagination and in-memory expansion state.

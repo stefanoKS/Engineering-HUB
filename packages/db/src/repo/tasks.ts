@@ -1,6 +1,6 @@
 /** Task repository: records, summaries, relationships, approvals and confirmations. */
 import type { Task, TaskSummary } from '@eh/contracts';
-import { deadlineState, MAX_TASK_DEPTH } from '@eh/domain';
+import { businessDate, deadlineState, displayTaskStatus, MAX_TASK_DEPTH } from '@eh/domain';
 import type { Queryable } from '../pool';
 import { newId } from '../ids';
 import { toTask, type TaskRow } from '../map';
@@ -38,7 +38,10 @@ const SUMMARY_SELECT = `
            ORDER BY rr.submitted_at DESC LIMIT 1) AS stale_reason,
          COALESCE((SELECT array_agg(am.name ORDER BY am.name)
                      FROM task_assignees ta JOIN members am ON am.member_id = ta.member_id
-                    WHERE ta.task_id = t.task_id AND ta.removed_at IS NULL), '{}') AS assignee_names
+                    WHERE ta.task_id = t.task_id AND ta.removed_at IS NULL), '{}') AS assignee_names,
+         COALESCE((SELECT array_agg(ta.member_id ORDER BY ta.member_id)
+                     FROM task_assignees ta
+                    WHERE ta.task_id = t.task_id AND ta.removed_at IS NULL), '{}') AS assignee_ids
     FROM tasks t
     JOIN projects p ON p.project_id = t.project_id
     LEFT JOIN members owner ON owner.member_id = t.owner_member_id`;
@@ -66,6 +69,7 @@ export type TaskSummaryRow = {
   latest_completion_status: string | null;
   stale_reason: string | null;
   assignee_names: string[];
+  assignee_ids: string[] | null;
 };
 
 export function reviewStateOf(row: {
@@ -89,18 +93,23 @@ export function toTaskSummary(row: TaskSummaryRow, today?: string): TaskSummary 
     parentTaskId: row.parent_task_id,
     taskName: row.task_name,
     status: row.status,
+    displayStatus: displayTaskStatus({ status: row.status, dueDate: row.due_date }, today),
     priority: row.priority,
     ownerMemberId: row.owner_member_id,
     ownerName: row.owner_name ?? '',
     assigneeNames: row.assignee_names ?? [],
+    assigneeIds: row.assignee_ids ?? [],
     dueDate: row.due_date,
     plannedStart: row.planned_start,
     progressPercent: row.progress_percent,
     container: row.container,
     depth: row.depth,
     reviewState: reviewStateOf(row),
-    overdue: !!row.due_date && row.due_date < (today ?? new Date().toISOString().slice(0, 10)) &&
-      row.status !== 'Done' && row.status !== 'Cancelled',
+    overdue:
+      !!row.due_date &&
+      row.due_date < (today ?? businessDate()) &&
+      row.status !== 'Done' &&
+      row.status !== 'Cancelled',
     deadlineState: deadlineState(row.due_date, row.status, today),
     revision: row.revision
   };
@@ -112,10 +121,15 @@ export type TaskFilters = {
   responsibilityId?: string;
   unassigned?: boolean;
   status?: string;
+  /** Derived display state; resolved on the server with an explicit Asia/Tokyo business date. */
+  displayStatus?: 'IN_PROGRESS' | 'OVERDUE' | 'DONE' | 'CANCELLED';
+  today?: string;
   ownerMemberId?: string;
   query?: string;
   containerOnly?: boolean;
   overdueOnly?: boolean;
+  /** Archived projects, archived subprojects and Cancelled work stay hidden by default. */
+  includeInactive?: boolean;
   sort?: 'dueDate' | 'priority' | 'name' | 'status' | 'updated';
   direction?: 'asc' | 'desc';
 };
@@ -148,6 +162,31 @@ function taskWhere(filters: TaskFilters): { where: string; params: unknown[] } {
     params.push(filters.status);
     where.push(`t.status = $${params.length}`);
   }
+  if (filters.displayStatus) {
+    // The derived state is resolved here, with the Asia/Tokyo date supplied by the caller, so a
+    // page is never filtered in the browser after it was cut.
+    const today = filters.today ?? businessDate();
+    switch (filters.displayStatus) {
+      case 'DONE':
+        where.push("t.status = 'Done'");
+        break;
+      case 'CANCELLED':
+        where.push("t.status = 'Cancelled'");
+        break;
+      case 'OVERDUE':
+        params.push(today);
+        where.push(
+          `t.status NOT IN ('Done','Cancelled') AND t.due_date IS NOT NULL AND t.due_date < $${params.length}`
+        );
+        break;
+      default:
+        params.push(today);
+        where.push(
+          `t.status NOT IN ('Done','Cancelled') AND (t.due_date IS NULL OR t.due_date >= $${params.length})`
+        );
+        break;
+    }
+  }
   if (filters.ownerMemberId) {
     params.push(filters.ownerMemberId);
     where.push(`t.owner_member_id = $${params.length}`);
@@ -162,6 +201,15 @@ function taskWhere(filters: TaskFilters): { where: string; params: unknown[] } {
   if (filters.overdueOnly) {
     where.push(
       "t.due_date < current_date AND t.status IN ('Not Started','Assigned','In Progress','Blocked','On Hold')"
+    );
+  }
+  if (filters.includeInactive !== true) {
+    where.push("t.status <> 'Cancelled'");
+    where.push("p.status <> 'Archived' AND p.archived_at IS NULL");
+    where.push(
+      `(t.subproject_id IS NULL OR NOT EXISTS (
+         SELECT 1 FROM subprojects sp
+          WHERE sp.subproject_id = t.subproject_id AND sp.status = 'Archived'))`
     );
   }
   return { where: `WHERE ${where.join(' AND ')}`, params };
@@ -786,4 +834,48 @@ export async function countTaskChildren(db: Db, taskId: string): Promise<number>
     [taskId]
   );
   return Number(row?.count ?? 0);
+}
+
+/**
+ * Writes one unified effective assignment.
+ *
+ * The primary owner column stays authoritative and is never duplicated as an additional
+ * assignee row. Every other selected member is stored as an additional assignee, so a removed
+ * owner leaves no ghost assignment and a re-added former assignee reactivates its row.
+ */
+export async function setEffectiveAssignees(
+  db: Db,
+  taskId: string,
+  memberIds: readonly string[],
+  ownerMemberId: string | null,
+  actor: string
+): Promise<boolean> {
+  const desired = [...new Set(memberIds.filter(Boolean))];
+  const additional = desired.filter((memberId) => memberId !== ownerMemberId);
+  return setTaskAssignees(db, taskId, additional, actor);
+}
+
+/**
+ * Reconciles the pending completion reports of a task that was completed directly.
+ *
+ * A member's request can no longer be decided once the task is Done, so it is withdrawn with a
+ * recorded reason instead of being left pending or approved a second time. Returns the withdrawn
+ * request IDs for the caller's audit row.
+ */
+export async function withdrawPendingCompletionRequests(
+  db: Db,
+  taskId: string,
+  reviewer: string,
+  note: string
+): Promise<string[]> {
+  const rows = await db.many<{ request_id: string }>(
+    `UPDATE task_requests
+        SET status = 'WITHDRAWN', reviewer = $2, decided_at = now(), decision_note = $3,
+            revision = revision + 1
+      WHERE task_id = $1 AND request_type = 'COMPLETION_REPORT'
+        AND status IN ('PENDING','PROCESSING')
+      RETURNING request_id`,
+    [taskId, reviewer, note]
+  );
+  return rows.map((row) => row.request_id);
 }

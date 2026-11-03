@@ -4,24 +4,36 @@ import type { Actor, Reference, Task, TaskDetail } from '@eh/contracts';
 import { api } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
-import { Badge, EmptyState, ErrorBox, ProgressBar, Section, statusTone } from '../components/ui';
+import { Badge, EmptyState, ErrorBox, Section, statusTone } from '../components/ui';
 import { ConfirmDialog } from '../components/forms';
 import { TaskForm } from './TaskForm';
-import { projectColor } from '@eh/domain';
+import { displayTone } from './Tasks';
+import { formatSkillGrade, projectColor } from '@eh/domain';
 
 type References = {
-  members: { memberId: string; name: string; active: boolean }[];
+  members: { memberId: string; name: string; active: boolean; employeeId?: string }[];
   skills: { skillId: string; skillName: string }[];
   subprojects: Reference[];
 };
 
-export function TaskDetailScreen({ actor, taskId }: { actor: Actor; taskId: string }): JSX.Element {
+export function TaskDetailScreen({
+  actor,
+  taskId,
+  readOnly = false
+}: {
+  actor: Actor;
+  taskId: string;
+  readOnly?: boolean;
+}): JSX.Element {
   const { t, label } = useI18n();
   const [editing, setEditing] = useState(false);
-  const [action, setAction] = useState<'approve' | 'confirm' | 'override' | null>(null);
-  const detail = useQuery<TaskDetail>(keys.task(taskId), () => api.get<TaskDetail>(`/api/manager/tasks/${taskId}`));
-  const references = useQuery<References>(keys.references, () => api.get<References>('/api/manager/references'));
-  const canManage = actor.role === 'ADMIN' || actor.role === 'MANAGER';
+  const [action, setAction] = useState<'approve' | 'confirm' | 'override' | 'complete' | null>(null);
+  const endpoint = readOnly ? `/api/work/tasks/${taskId}` : `/api/manager/tasks/${taskId}`;
+  const detail = useQuery<TaskDetail>(keys.task(taskId), () => api.get<TaskDetail>(endpoint));
+  const references = useQuery<References>(keys.references, () =>
+    readOnly ? Promise.resolve({ members: [], skills: [], subprojects: [] }) : api.get<References>('/api/manager/references')
+  );
+  const canManage = !readOnly && (actor.role === 'ADMIN' || actor.role === 'MANAGER');
 
   if (detail.error) return <ErrorBox error={detail.error} onRetry={() => detail.refresh()} />;
   if (!detail.data) return <p className="muted">{t('state.loading')}</p>;
@@ -42,6 +54,11 @@ export function TaskDetailScreen({ actor, taskId }: { actor: Actor; taskId: stri
               <button type="button" className="button secondary" onClick={() => setEditing(true)}>
                 {t('action.edit')}
               </button>
+              {!detail.data.children.length && record.displayStatus !== 'DONE' && record.displayStatus !== 'CANCELLED' ? (
+                <button type="button" className="button" onClick={() => setAction('complete')}>
+                  {t('tasks.completeDirect')}
+                </button>
+              ) : null}
               <button type="button" className="button secondary" onClick={() => setAction('approve')}>
                 {t('tasks.approve')}
               </button>
@@ -63,7 +80,7 @@ export function TaskDetailScreen({ actor, taskId }: { actor: Actor; taskId: stri
           <div>
             <dt>{t('column.status')}</dt>
             <dd>
-              <Badge tone={statusTone(record.status)}>{label('task.status', record.status)}</Badge>
+              <Badge tone={displayTone(record.displayStatus)}>{t(`taskStatus.${record.displayStatus}`)}</Badge>
             </dd>
           </div>
           <div>
@@ -80,33 +97,29 @@ export function TaskDetailScreen({ actor, taskId }: { actor: Actor; taskId: stri
             <dd>{record.dueDate ?? t('common.unset')}</dd>
           </div>
           <div>
-            <dt>{t('tasks.plannedStart')}</dt>
-            <dd>{record.plannedStart ?? t('common.unset')}</dd>
+            <dt>{t('skills.grade')}</dt>
+            <dd>{record.requiredSkillId ? formatSkillGrade(record.requiredSkillLevel, t('skills.notAssessed')) : t('common.unset')}</dd>
           </div>
-          <div>
-            <dt>{t('tasks.estimate')}</dt>
-            <dd>{record.estimatedHours ?? t('common.unset')}</dd>
-          </div>
-          <div>
-            <dt>{t('tasks.actual')}</dt>
-            <dd>{record.actualHours ?? t('common.unset')}</dd>
-          </div>
-          <div>
-            <dt>{t('column.progress')}</dt>
-            <dd>
-              <ProgressBar value={record.progressPercent} />
-            </dd>
-          </div>
-          <div>
-            <dt>{t('tasks.approve')}</dt>
-            <dd>
-              {record.assignmentApprovedAt ? (
-                <Badge tone="ok">v{record.assignmentVersion}</Badge>
-              ) : (
-                <Badge tone="warn">v{record.assignmentVersion}</Badge>
-              )}
-            </dd>
-          </div>
+          {canManage ? (
+            <>
+              <div>
+                <dt>{t('column.status')} (DB)</dt>
+                <dd>
+                  <Badge tone={statusTone(record.status)}>{label('task.status', record.status)}</Badge>
+                </dd>
+              </div>
+              <div>
+                <dt>{t('tasks.approve')}</dt>
+                <dd>
+                  {record.assignmentApprovedAt ? (
+                    <Badge tone="ok">v{record.assignmentVersion}</Badge>
+                  ) : (
+                    <Badge tone="warn">v{record.assignmentVersion}</Badge>
+                  )}
+                </dd>
+              </div>
+            </>
+          ) : null}
         </div>
       </Section>
 
@@ -224,9 +237,11 @@ export function TaskDetailScreen({ actor, taskId }: { actor: Actor; taskId: stri
               ? t('tasks.approve')
               : action === 'confirm'
                 ? t('tasks.confirmSchedule')
-                : t('tasks.override')
+                : action === 'complete'
+                  ? t('tasks.completeDirectTitle')
+                  : t('tasks.override')
           }
-          message={record.taskName}
+          message={action === 'complete' ? t('tasks.completeDirectBody') : record.taskName}
           confirmText={action === 'override' ? `COMPLETE ${record.taskId}` : undefined}
           reasonRequired={action === 'override'}
           destructive={action === 'override'}
@@ -239,6 +254,12 @@ export function TaskDetailScreen({ actor, taskId }: { actor: Actor; taskId: stri
                 revision: record.revision,
                 confirmed: true
               });
+            } else if (action === 'complete') {
+              await api.post(`/api/manager/tasks/${record.taskId}/complete`, {
+                revision: record.revision,
+                confirmed: true,
+                note: reason || undefined
+              });
             } else {
               await api.post(`/api/manager/tasks/${record.taskId}/override-complete`, {
                 revision: record.revision,
@@ -247,7 +268,7 @@ export function TaskDetailScreen({ actor, taskId }: { actor: Actor; taskId: stri
               });
             }
             setAction(null);
-            queryCache.invalidate([keys.task(record.taskId), keys.tasks, keys.taskIndex, keys.overview, keys.project(record.projectId)]);
+            queryCache.invalidate([keys.task(record.taskId), keys.tasks, keys.taskIndex, keys.overview, keys.project(record.projectId), keys.myWork]);
           }}
         />
       ) : null}

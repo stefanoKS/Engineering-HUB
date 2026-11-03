@@ -11,6 +11,15 @@ import { queryCache } from '../src/state/cache';
 import { ColorPicker } from '../src/components/ColorPicker';
 afterEach(() => { cleanup(); queryCache.clear(); vi.unstubAllGlobals(); window.localStorage.clear(); });
 const response = (data: unknown) => new Response(JSON.stringify({ ok: true, data }));
+const MEMBER_ACTOR = {
+  memberId: 'MEM-MEMBER',
+  name: 'Member',
+  email: 'member@example.invalid',
+  role: 'MEMBER',
+  active: true,
+  verified: true,
+  selfServiceEnabled: true
+} as const;
 function Editor(): JSX.Element {
   const [value, set, load] = useEditorState('closed');
   return <><span>{value}</span><button onClick={() => void load(() => fetch('/a').then(r => r.text()))}>A</button><button onClick={() => void load(() => fetch('/b').then(r => r.text()))}>B</button><button onClick={() => set('closed')}>Close</button></>;
@@ -92,7 +101,7 @@ describe('member self-service work', () => {
   it('creates a task from the member form without sending an owner or an assignee', async () => {
     vi.stubGlobal('crypto', {}); // Plain HTTP LAN may not expose randomUUID.
     const calls = stubWork({ submissionEnabled: true });
-    render(<I18nProvider><MyWorkScreen /></I18nProvider>);
+    render(<I18nProvider><MyWorkScreen actor={MEMBER_ACTOR} /></I18nProvider>);
     expect(await screen.findByText('Alpha / Area')).toBeTruthy();
 
     fireEvent.change(screen.getAllByRole('combobox')[0]!, { target: { value: 'PRJ-A' } });
@@ -117,13 +126,13 @@ describe('member self-service work', () => {
 
   it('disables the completion report while request submission is closed', async () => {
     stubWork({ submissionEnabled: false });
-    render(<I18nProvider><MyWorkScreen /></I18nProvider>);
+    render(<I18nProvider><MyWorkScreen actor={MEMBER_ACTOR} /></I18nProvider>);
     expect(await screen.findByText(/申請の受付は停止しています/)).toBeTruthy();
   });
 
   it('submits a completion report without claiming that the task is done', async () => {
-    const calls=stubWork({submissionEnabled:true,items:[{container:false,taskId:'TSK-REPORT',taskName:'Report work',projectId:'PRJ-A',projectName:'Alpha',subprojectName:'',status:'Not Started',priority:'Medium',dueDate:null,progressPercent:0,actualHours:0,reviewState:'NONE',pendingRequest:false,creationChannel:'MEMBER',revision:1}]});
-    render(<I18nProvider><MyWorkScreen /></I18nProvider>);
+    const calls=stubWork({submissionEnabled:true,items:[{container:false,taskId:'TSK-REPORT',taskName:'Report work',projectId:'PRJ-A',projectName:'Alpha',subprojectName:'',status:'Not Started',displayStatus:'IN_PROGRESS',priority:'Medium',dueDate:null,progressPercent:0,actualHours:0,reviewState:'NONE',lastRequestStatus:'',lastRequestType:'',pendingRequest:false,creationChannel:'MEMBER',completedAt:null,revision:1}]});
+    render(<I18nProvider><MyWorkScreen actor={MEMBER_ACTOR} /></I18nProvider>);
     await screen.findByText('Report work');
     fireEvent.click(screen.getByRole('button',{name:'完了報告'}));
     const note=screen.getAllByRole('textbox').at(-1)!;
@@ -134,7 +143,7 @@ describe('member self-service work', () => {
     expect(posted).toMatchObject({taskId:'TSK-REPORT',requestType:'COMPLETION_REPORT',completionNote:'Checked the result'});
     expect(posted).not.toHaveProperty('requesterName');
     expect(await screen.findByText(/REQ-NEW/)).toBeTruthy();
-    expect(screen.getByText(/Not Started|未着手/)).toBeTruthy();
+    expect(screen.getByText(/進行中|In progress/)).toBeTruthy();
   });
 
   it('offers no second completion report while one is pending', async () => {
@@ -149,6 +158,7 @@ describe('member self-service work', () => {
           projectName: 'Alpha',
           subprojectName: '',
           status: 'In Progress',
+          displayStatus: 'IN_PROGRESS',
           priority: 'Medium',
           dueDate: '2026-05-01',
           progressPercent: 40,
@@ -163,7 +173,7 @@ describe('member self-service work', () => {
         }
       ]
     });
-    render(<I18nProvider><MyWorkScreen /></I18nProvider>);
+    render(<I18nProvider><MyWorkScreen actor={MEMBER_ACTOR} /></I18nProvider>);
     expect(await screen.findByText('配線確認')).toBeTruthy();
     expect(screen.getAllByText('承認待ち').length).toBeGreaterThan(0);
     expect((screen.getByRole('button', { name: '完了報告' }) as HTMLButtonElement).disabled).toBe(true);
@@ -173,7 +183,7 @@ describe('member self-service work', () => {
 
 describe('collapsible task tree', () => {
   it('opens children directly below their parent and preserves nested expansion after collapse', async () => {
-    const task=(taskId:string,taskName:string,parentTaskId:string|null,depth:number,container:boolean)=>({taskId,taskName,parentTaskId,depth,container,projectId:'PRJ-TREE',projectName:'Tree',status:'Not Started',priority:'Medium',ownerName:'',assigneeNames:[],dueDate:null,progressPercent:0,overdue:false,reviewState:'NONE',revision:1});
+    const task=(taskId:string,taskName:string,parentTaskId:string|null,depth:number,container:boolean)=>({taskId,taskName,parentTaskId,depth,container,projectId:'PRJ-TREE',projectName:'Tree',status:'Not Started',displayStatus:'IN_PROGRESS',priority:'Medium',ownerName:'',assigneeNames:[],assigneeIds:[],dueDate:null,progressPercent:0,overdue:false,reviewState:'NONE',revision:1});
     const root=task('ROOT','Root',null,1,true),child=task('CHILD','Child','ROOT',2,true),leaf=task('LEAF','Leaf','CHILD',3,false),other=task('OTHER','Other',null,1,false);
     const fetcher=vi.fn(async(url:string)=>{
       if(url.includes('/references'))return response({members:[],skills:[],subprojects:[]});

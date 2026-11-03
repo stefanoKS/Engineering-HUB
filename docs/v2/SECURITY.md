@@ -86,18 +86,32 @@ exists only for local and test runs.
 
 | Area | ADMIN | MANAGER | MEMBER | VIEWER |
 | --- | --- | --- | --- | --- |
-| Projects, subprojects, tasks: create/edit/archive/delete | yes | yes | no | no |
+| Projects, subprojects, responsibilities, tasks: create/edit/archive/delete | yes | yes | no | no |
 | Reports, workload, member profile, automation, publication, status | yes | read; changes need ADMIN for live activation | no | no |
-| Own task update (sidebar-equivalent screen) | yes | yes | own tasks only | no |
+| Read permitted work (`/api/work/*`, All Work) | yes | yes | yes, read-only | yes, read-only |
+| My Assigned Work (own assignments only) | yes | yes | yes | yes, read-only |
+| Create a task for oneself under an active project | not through self-service | not through self-service | yes | no |
+| Edit any existing task, assignment or deadline | yes | yes | no, even for a self-created task | no |
+| Progress / actual-hours edit | through the manager form | through the manager form | no (removed path) | no |
+| Submit a completion report | no (completes directly) | no (completes directly) | own assigned work only | no |
+| Approve / reject / return a completion report | yes | yes | no | no |
+| Complete authorized work directly | yes | yes | no | no |
+| Completion override (`COMPLETE <id>` + reason) | yes | no | no | no |
 | Role / activation change | yes, never self, never the last active admin | no | no | no |
 | Responsibility owner change | yes | no | no | no |
-| Completion override | yes (+ reason + `COMPLETE <id>`) | no | no | no |
+| Login accounts: create, link, reset password | yes | no | no | no |
 | Request decision (deadline / completion) | yes | yes | no | no |
 | Employee snapshot, submit request | yes | yes | yes | yes (read; submission follows the switch) |
 
 Ownership (`projects.owner_member_id`, `subprojects.owner_id`,
-`responsibilities.owner_member_id`) is accountability, never permission. There are no
+`responsibilities.owner_member_id`, `tasks.owner_member_id`) is accountability, never permission.
+Being assigned a task grants neither a manager capability nor an edit right. There are no
 per-project, per-responsibility or per-subproject ACLs.
+
+Readability and editability are independent: a MEMBER or a VIEWER may read permitted active work,
+including another employee's task, without gaining the right to change it, reassign it or report
+completion for it. A new project is `RESTRICTED` until a manager selects `INTERNAL`, and only
+`INTERNAL` projects reach the employee snapshot.
 
 Rules that are enforced in code **and** re-checked by a database trigger where a mistake would
 be destructive: task/subproject hierarchy limits and cycles, container tasks cannot be `Done`,

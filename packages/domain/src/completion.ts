@@ -72,19 +72,27 @@ export function assertNotDirectCompletion(currentStatus: string, nextStatus: str
 }
 
 /**
- * Work a member filed for themselves is completed by an ADMIN decision.
+ * A completion decision is a manager decision whatever created the task.
  *
- * The creator owns the record, so a manager deciding it would be a self-review one level up.
- * Older (LEGACY) and manager-created tasks keep the ordinary manager decision.
+ * A task a member filed for themselves is reviewed by a MANAGER or an ADMIN; requiring an ADMIN
+ * specifically would give a manager no authority over the department's ordinary work.
  */
-export function assertCompletionDecisionRole(input: {
-  actorRole: string;
-  creationChannel: 'LEGACY' | 'MANAGER' | 'MEMBER' | null | undefined;
-}): void {
-  if (input.creationChannel === 'MEMBER' && input.actorRole !== 'ADMIN') {
-    throw new DomainError(
-      'AUTHORIZATION_DENIED',
-      'A task created by a member can only be completed by an ADMIN decision'
-    );
+export function assertCompletionDecisionRole(input: { actorRole: string }): void {
+  if (input.actorRole !== 'ADMIN' && input.actorRole !== 'MANAGER') {
+    throw new DomainError('AUTHORIZATION_DENIED', 'Only a manager may decide a completion report');
   }
 }
+
+/**
+ * A manager marks authorized work Done directly, without a prior request.
+ *
+ * The same container, cancelled and already-Done refusals apply as for a request decision, so a
+ * direct completion can never bypass the workflow rules that protect derived progress.
+ */
+export function assertDirectCompletionAllowed(input: { actorRole: string; task: CompletionTask }): void {
+  if (input.actorRole !== 'ADMIN' && input.actorRole !== 'MANAGER') {
+    throw new DomainError('AUTHORIZATION_DENIED', 'Only a manager may complete a task directly');
+  }
+  assertCompletableByDecision(input.task);
+}
+

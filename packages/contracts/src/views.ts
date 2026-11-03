@@ -226,6 +226,7 @@ export const EmployeeTask = z.object({
   projectName: z.string(),
   responsibilityName: z.string(),
   status: TaskStatus,
+  displayStatus: z.enum(['IN_PROGRESS', 'OVERDUE', 'DONE', 'CANCELLED']),
   dueDate: IsoDate.nullable(),
   plannedStart: IsoDate.nullable(),
   ownerName: z.string(),
@@ -267,6 +268,7 @@ export const MyWorkItem = z.object({
   projectName: z.string(),
   subprojectName: z.string(),
   status: TaskStatus,
+  displayStatus: z.enum(['IN_PROGRESS', 'OVERDUE', 'DONE', 'CANCELLED']),
   priority: z.string(),
   dueDate: IsoDate.nullable(),
   progressPercent: z.number().nullable(),
@@ -339,3 +341,50 @@ export type ProjectDetail = z.infer<typeof ProjectDetail>;
 
 export const ProjectStatusFilter = ProjectStatus;
 export const TaskStatusFilter = TaskStatus;
+
+/** One local login account, as the administration screen sees it (never a password hash). */
+export const LocalAccount = z.object({
+  employeeId: z.string(),
+  memberId: z.string(),
+  name: z.string(),
+  role: z.enum(['ADMIN', 'MANAGER', 'MEMBER', 'VIEWER']),
+  active: z.boolean(),
+  mustChangePassword: z.boolean()
+});
+export type LocalAccount = z.infer<typeof LocalAccount>;
+
+export const LocalAccountList = z.object({
+  items: z.array(LocalAccount),
+  total: z.number().int().min(0),
+  page: z.number().int().min(1),
+  pageSize: z.number().int().min(1),
+  totalPages: z.number().int().min(1)
+});
+export type LocalAccountList = z.infer<typeof LocalAccountList>;
+
+/** An existing member without a login, which an administrator may link a new account to. */
+export const LinkableMember = z.object({
+  memberId: z.string(),
+  name: z.string(),
+  role: z.enum(['ADMIN', 'MANAGER', 'MEMBER', 'VIEWER']),
+  active: z.boolean(),
+  employeeId: z.string().nullable()
+});
+export type LinkableMember = z.infer<typeof LinkableMember>;
+
+export const LinkableMemberList = z.object({
+  items: z.array(LinkableMember),
+  total: z.number().int().min(0)
+});
+export type LinkableMemberList = z.infer<typeof LinkableMemberList>;
+
+/** A read-only page of active work for any signed-in role (MEMBER and VIEWER never mutate). */
+export const WorkTaskPage = z.object({
+  items: z.array(TaskSummary),
+  matchedTotal: z.number().int().min(0).optional(),
+  total: z.number().int().min(0),
+  page: z.number().int().min(1),
+  pageSize: z.number().int().min(1),
+  totalPages: z.number().int().min(0)
+});
+export type WorkTaskPage = z.infer<typeof WorkTaskPage>;
