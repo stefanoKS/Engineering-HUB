@@ -51,3 +51,15 @@ it('never uploads twice when the artifact already exists in Drive',async()=>{
  const manifest=JSON.parse(await readFile(join(directory,'BAK-'+createHash('sha256').update('test-instance:job-duplicate').digest('hex').slice(0,32)+'.json'),'utf8')) as {driveFileId:string};
  expect(manifest.driveFileId).toBe('existing');
 });
+
+it('checkpoints the session locally and keeps it out of database status',async()=>{
+ const create=vi.fn(async()=>fixture());
+ const upload=vi.fn().mockImplementationOnce(async(input)=>{await input.saveSession('https://upload.example/private-session');throw new Error('interrupted');}).mockResolvedValue({fileId:'resumed',webViewLink:''});
+ const drive={configured:true,upload,listOld:async()=>[],remove:async()=>{}};
+ const config=loadWorkerConfig({BACKUP_DIRECTORY:directory,BACKUP_ENCRYPTION_KEY:key.toString('base64'),DRIVE_BACKUP_FOLDER_ID:'folder',BACKUP_INSTANCE_ID:'test-instance'});
+ await expect(persistentBackup(db,config,drive,'checkpoint',create)).rejects.toThrow(/Local backup saved/);
+ await persistentBackup(db,config,drive,'checkpoint',create);
+ expect(upload.mock.calls[1]![0].resumeSession).toBe('https://upload.example/private-session');
+ expect(create).toHaveBeenCalledTimes(1);
+ expect(JSON.stringify(await db.one('SELECT manifest FROM backup_log'))).not.toContain('private-session');
+});

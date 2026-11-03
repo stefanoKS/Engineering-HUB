@@ -1,5 +1,13 @@
 # Changelog
 
+## V2 corrective follow-up — 2026-11-03
+
+- Fix repeated member creation, isolate member idempotency and request receipts, use verified request authors, and permit assigned restricted-project reviews.
+- Disable container completion controls; preserve administrator completion approval for member-created work.
+- Persist resumable Drive checkpoints and reserved file identities, correct byte acknowledgements, and verify folder upload capability.
+- Verify encrypted custom-format restore into a separate scratch database; simplify matching English/Japanese entry guides.
+- No new migration, deployment, live database operation or V1 runtime change.
+
 
 ## V2 member self-service, completion approval and Drive backup — 2026-11-03
 

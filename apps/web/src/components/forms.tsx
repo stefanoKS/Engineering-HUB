@@ -179,12 +179,16 @@ export function SelectInput({
   );
 }
 
-export function useIdempotencyKey(): string {
-  const [key] = useState(() =>
+export function createIdempotencyKey(): string {
+  return (
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
       ? crypto.randomUUID()
       : `idem-${Date.now()}-${Math.random().toString(36).slice(2)}`
   );
+}
+
+export function useIdempotencyKey(): string {
+  const [key] = useState(createIdempotencyKey);
   return key;
 }
 

@@ -65,3 +65,70 @@ it('refuses a destination that is not a folder',async()=>{
  const drive=new GoogleDriveTransport({credentialsJson:credentials});
  await expect(drive.verifyFolder('folder')).rejects.toThrow(/not a folder/);
 });
+
+it('does not skip bytes when Drive returns 308 without a Range', async () => {
+ const fetcher=vi.fn()
+  .mockResolvedValueOnce(new Response(null,{headers:{location:'https://upload.example/session'}}))
+  .mockResolvedValueOnce(new Response(null,{status:308}))
+  .mockResolvedValueOnce(new Response(JSON.stringify({id:'saved'})));
+ vi.stubGlobal('fetch',fetcher);
+ await new GoogleDriveTransport({credentialsJson:credentials}).upload({name:'retry',content:Buffer.from('abcd'),mimeType:'application/octet-stream',folderId:'folder'});
+ expect(fetcher.mock.calls.slice(1).map(call=>call[1].headers['Content-Range'])).toEqual(['bytes 0-3/4','bytes 0-3/4']);
+});
+
+it('resumes a persisted session after a worker restart', async () => {
+ const fetcher=vi.fn()
+  .mockResolvedValueOnce(new Response(null,{status:308,headers:{range:'bytes=0-262143'}}))
+  .mockResolvedValueOnce(new Response(JSON.stringify({id:'saved'})));
+ vi.stubGlobal('fetch',fetcher);
+ const saved=vi.fn();
+ await new GoogleDriveTransport({credentialsJson:credentials}).upload({name:'resume',content:Buffer.alloc(300*1024),mimeType:'application/octet-stream',folderId:'folder',resumeSession:'https://upload.example/session',saveSession:saved});
+ expect(fetcher.mock.calls.map(call=>call[1].headers['Content-Range'])).toEqual(['bytes */307200','bytes 262144-307199/307200']);
+ expect(saved).not.toHaveBeenCalled();
+});
+
+it('rejects a readable folder without upload permission',async()=>{
+ vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({id:'folder',mimeType:'application/vnd.google-apps.folder',capabilities:{canAddChildren:false}}))));
+ await expect(new GoogleDriveTransport({credentialsJson:credentials}).verifyFolder('folder')).rejects.toThrow(/cannot add files/);
+});
+
+it('reserves a file identity before starting an upload and reuses it after a lost completion',async()=>{
+ const fetcher=vi.fn()
+  .mockResolvedValueOnce(new Response(JSON.stringify({ids:['reserved']})))
+  .mockResolvedValueOnce(new Response(null,{headers:{location:'https://upload.example/session'}}))
+  .mockResolvedValueOnce(new Response(JSON.stringify({id:'reserved'})));
+ vi.stubGlobal('fetch',fetcher);
+ const saveFileId=vi.fn(async()=>undefined);
+ const input={name:'backup',content:Buffer.from('abcd'),mimeType:'application/octet-stream',folderId:'folder'};
+ await new GoogleDriveTransport({credentialsJson:credentials}).upload({...input,saveFileId});
+ expect(saveFileId).toHaveBeenCalledWith('reserved');
+ expect(JSON.parse(fetcher.mock.calls[1]![1].body).id).toBe('reserved');
+ const retry=vi.fn()
+  .mockResolvedValueOnce(new Response('exists',{status:409}))
+  .mockResolvedValueOnce(new Response(JSON.stringify({id:'reserved',size:'4'})));
+ vi.stubGlobal('fetch',retry);
+ expect((await new GoogleDriveTransport({credentialsJson:credentials}).upload({...input,resumeFileId:'reserved',saveFileId})).fileId).toBe('reserved');
+ expect(saveFileId).toHaveBeenCalledTimes(1);
+ expect(JSON.parse(retry.mock.calls[0]![1].body).id).toBe('reserved');
+});
+
+it('uploads a backup larger than the default 8 MiB chunk',async()=>{
+ const fetcher=vi.fn().mockResolvedValueOnce(new Response(null,{headers:{location:'https://upload.example/session'}}))
+  .mockResolvedValueOnce(new Response(null,{status:308,headers:{range:'bytes=0-8388607'}}))
+  .mockResolvedValueOnce(new Response(JSON.stringify({id:'large'})));
+ vi.stubGlobal('fetch',fetcher);
+ const result=await new GoogleDriveTransport({credentialsJson:credentials}).upload({name:'large',content:Buffer.alloc(9*1024*1024),mimeType:'application/octet-stream',folderId:'folder'});
+ expect(result.fileId).toBe('large');
+ expect(fetcher.mock.calls.slice(1).map(call=>call[1].headers['Content-Range'])).toEqual(['bytes 0-8388607/9437184','bytes 8388608-9437183/9437184']);
+});
+
+it('restarts an expired session with the same reserved file ID',async()=>{
+ const fetcher=vi.fn().mockResolvedValueOnce(new Response('expired',{status:404}))
+  .mockResolvedValueOnce(new Response(null,{headers:{location:'https://upload.example/new-session'}}))
+  .mockResolvedValueOnce(new Response(JSON.stringify({id:'reserved'})));
+ vi.stubGlobal('fetch',fetcher);
+ const saveSession=vi.fn(async()=>undefined);
+ await new GoogleDriveTransport({credentialsJson:credentials}).upload({name:'backup',content:Buffer.from('abcd'),mimeType:'application/octet-stream',folderId:'folder',resumeFileId:'reserved',resumeSession:'https://upload.example/expired',saveSession});
+ expect(JSON.parse(fetcher.mock.calls[1]![1].body).id).toBe('reserved');
+ expect(saveSession).toHaveBeenCalledWith('https://upload.example/new-session');
+});

@@ -161,3 +161,13 @@ ambiguous outcome".
 Live Google Workspace setup (see [GOOGLE_WORKSPACE.md](./GOOGLE_WORKSPACE.md)), the DNS/tunnel
 setup (see [REMOTE_ACCESS.md](./REMOTE_ACCESS.md)) and the V1 → V2 cut-over (see
 [MIGRATION.md](./MIGRATION.md)). None of those has been executed against a live environment.
+
+## Corrective update rollout (2026-11-03)
+
+No new migration accompanies this update. Keep schema 8; installations older than schema 8 must
+follow the existing reviewed backup/migration procedure. With a verified backup, build using
+`npm ci` and `npm run build`, then restart the API and worker together via the Windows launcher.
+Refresh browser tabs to load the updated My Work contract. Confirm two successive member task
+creates, restricted-project completion review, ADMIN-only approval for member-created work, and
+local/Drive status. Retain protected `BAK-*.upload.json` checkpoints beside the encrypted artifacts.
+A checkpoint is private upload state, never a document to attach to support tickets.

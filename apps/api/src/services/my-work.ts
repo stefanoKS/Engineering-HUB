@@ -87,6 +87,7 @@ export async function listMyWork(ctx: ServiceCtx, page: number): Promise<MyWorkL
   return {
     total: Number(total?.count ?? 0),
     items: rows.map((row) => ({
+      container: row.container,
       taskId: row.task_id,
       taskName: row.task_name,
       projectId: row.project_id,
@@ -236,7 +237,7 @@ export async function createMyTask(
 
   const result = await runIdempotent(
     ctx,
-    { scope: 'employee.task.create', key: body.idempotencyKey, request: body },
+    { scope: `employee.task.create:${ctx.identity.memberId}`, key: body.idempotencyKey, request: body },
     async (tx) => {
       const task = await insertTask(tx, {
         projectId: body.projectId,

@@ -7,6 +7,9 @@
  * run instead of being faked.
  */
 import { existsSync } from 'node:fs';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import pg from 'pg';
@@ -21,7 +24,7 @@ import {
   restoreContainer,
   restoreLogicalBackup
 } from '../src/backup';
-import { freshDatabase, pgBinDir } from '../../../packages/db/test/support/db';
+import { databaseUrl, freshDatabase, pgBinDir } from '../../../packages/db/test/support/db';
 
 let db: Database;
 let pool: pg.Pool;
@@ -119,7 +122,7 @@ describe('backup container', () => {
   });
 
   it('produces a custom-format dump only when the client tools exist', async (context) => {
-    const binDir = pgBinDir();
+    const binDir = process.env.TEST_PG_BIN_DIR || pgBinDir();
     const pgDump = binDir ? join(binDir, process.platform === 'win32' ? 'pg_dump.exe' : 'pg_dump') : '';
     if (!pgDump || !existsSync(pgDump)) {
       // Reported as not run: the embedded server ships without client tools.
@@ -129,10 +132,26 @@ describe('backup container', () => {
     const artifact = await createBackupArtifact({
       pgDumpPath: pgDump,
       encryptionKey: KEY,
-      connection: { connectionString: process.env.TEST_DATABASE_URL }
+      connection: { connectionString: databaseUrl() }
     });
     expect(artifact.plainBytes).toBeGreaterThan(0);
     expect(artifact.encryptedChecksum).toHaveLength(64);
     expect(decrypt(artifact.encrypted, KEY).subarray(0, 5).toString()).toBe('PGDMP');
+    const targetDatabase = 'eh_restore_' + randomUUID().replaceAll('-', '');
+    const source = new URL(databaseUrl());
+    const directory = await mkdtemp(join(tmpdir(), 'eh-download-test-'));
+    await db.query('CREATE DATABASE ' + targetDatabase);
+    const restored = new pg.Pool({ connectionString: new URL('/' + targetDatabase, source).toString() });
+    try {
+      const downloaded = join(directory, 'downloaded.dump.enc');
+      await writeFile(downloaded, artifact.encrypted);
+      await restoreContainer({container:await readFile(downloaded),key:KEY,pgRestorePath:join(binDir,process.platform==='win32'?'pg_restore.exe':'pg_restore'),targetDatabase,productionDatabase:source.pathname.slice(1),connection:{host:source.hostname,port:Number(source.port),user:decodeURIComponent(source.username),password:decodeURIComponent(source.password)}});
+      expect((await restored.query("SELECT task_name, estimated_hours FROM tasks WHERE task_id='TSK-B'")).rows[0]).toMatchObject({task_name:'Task',estimated_hours:12.5});
+      expect((await db.one<{count:string}>('SELECT count(*)::text AS count FROM tasks'))?.count).toBe('1');
+    } finally {
+      await restored.end();
+      await db.query('DROP DATABASE ' + targetDatabase);
+      await rm(directory,{recursive:true,force:true});
+    }
   });
 });

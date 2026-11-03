@@ -200,3 +200,10 @@ a service-account value, a spreadsheet identifier or any other secret. `devSignI
 * Pages are bounded: 100 rows per page maximum, task index 2 000 entries, project index 500.
 * Logs redact cookies, authorization and CSRF headers. Metrics may contain timings, call counts
   and payload sizes only — never an identifier, address or cell value.
+
+## Member self-service correction (2026-11-03)
+
+My Work rows include the server-derived `container` boolean. Assigned tasks in RESTRICTED projects
+may submit requests without changing project publication. Request author names are server-verified;
+client names are ignored. Employee create/request idempotency is scoped to the authenticated member,
+and a client request ID already owned by another member returns NOT_FOUND.

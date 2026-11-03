@@ -261,8 +261,8 @@ export async function submitRequest(
     throw new DomainError('AUTHORIZATION_DENIED', 'Only your assigned work can be requested');
   }
   const project = await getProject(ctx.db, task.projectId);
-  if (!project || project.dashboardVisibility !== 'INTERNAL') {
-    throw new DomainError('NOT_FOUND', 'This task is not published');
+  if (!project) {
+    throw new DomainError('NOT_FOUND', 'Project not found');
   }
   const childRow = await ctx.db.one<{ count: string }>(
     'SELECT count(*)::text AS count FROM tasks WHERE parent_task_id = $1 AND deleted_at IS NULL',
@@ -286,10 +286,13 @@ export async function submitRequest(
 
   const result = await runIdempotent(
     ctx,
-    { scope: 'employee.request', key: body.clientRequestId, request: body },
+    { scope: `employee.request:${ctx.identity.memberId}`, key: body.clientRequestId, request: body },
     async (tx) => {
       const existing = await getRequestByInboxId(tx, body.clientRequestId);
       if (existing) {
+        if (existing.requesterMemberId !== ctx.identity.memberId) {
+          throw new DomainError('NOT_FOUND', 'Request not found');
+        }
         return {
           requestId: existing.requestId,
           state: 'DUPLICATE' as const,
@@ -304,7 +307,7 @@ export async function submitRequest(
         requestType: body.requestType,
         taskId: task.taskId,
         projectId: task.projectId,
-        requesterName: body.requesterName?.trim() || ctx.identity.name,
+        requesterName: ctx.identity.name,
         originalDueDate: task.dueDate,
         requestedDueDate: body.requestedDueDate ?? null,
         reason: body.reason ?? '',

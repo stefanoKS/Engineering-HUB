@@ -1,5 +1,17 @@
 # V2 Architecture
 
+## Corrective follow-up — 2026-11-03
+
+Member creation and request idempotency scopes include the verified member ID. Request authors
+come from server identity; another member cannot recover a receipt by reusing a client request ID.
+Assigned work may be submitted from RESTRICTED projects without publishing it. The department-wide
+role model permits self-owned creation in active projects; no new project ACL is introduced.
+My Work exposes the server container flag and disables direct container actions. Successful task
+creation rotates its form idempotency key; failures retain the key for safe recovery.
+
+Drive checkpoints and reserved file IDs live beside the encrypted artifact, outside API status
+payloads. No new database migration is needed; existing schema 8 and migrations remain unchanged.
+
 ## Member self-service — 2026-11-03
 
 A member files their own work through `POST /api/employee/my-work`

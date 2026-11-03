@@ -78,6 +78,7 @@ describe('member self-service work', () => {
     const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
       calls.push({ url, method, body: typeof init?.body === 'string' ? init.body : undefined });
+      if (method === 'POST' && url.endsWith('/api/employee/requests')) return response({ requestId: 'REQ-NEW' });
       if (url.includes('/projects')) return response(projects());
       if (url.includes('/requests/mine')) return response({ items: [], submissionEnabled: options.submissionEnabled });
       if (method === 'POST' && url.endsWith('/api/employee/my-work')) return response({ taskId: 'TSK-NEW', replayed: false });
@@ -88,6 +89,7 @@ describe('member self-service work', () => {
   }
 
   it('creates a task from the member form without sending an owner or an assignee', async () => {
+    vi.stubGlobal('crypto', {}); // Plain HTTP LAN may not expose randomUUID.
     const calls = stubWork({ submissionEnabled: true });
     render(<I18nProvider><MyWorkScreen /></I18nProvider>);
     expect(await screen.findByText('Alpha / Area')).toBeTruthy();
@@ -104,6 +106,12 @@ describe('member self-service work', () => {
     expect(posted).not.toHaveProperty('assigneeIds');
     expect(posted).not.toHaveProperty('status');
     expect(await screen.findByText(/タスクを作成しました/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('タスク名'), { target: { value: 'Second task' } });
+    fireEvent.change(screen.getByLabelText('期限'), { target: { value: '2026-05-04' } });
+    fireEvent.click(screen.getByRole('button', { name: 'タスクを作成' }));
+    await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toHaveLength(2));
+    const second = JSON.parse(calls.filter(call => call.method === 'POST')[1]!.body!);
+    expect(second.idempotencyKey).not.toBe(posted.idempotencyKey);
   });
 
   it('disables the completion report while request submission is closed', async () => {
@@ -112,11 +120,28 @@ describe('member self-service work', () => {
     expect(await screen.findByText(/申請の受付は停止しています/)).toBeTruthy();
   });
 
+  it('submits a completion report without claiming that the task is done', async () => {
+    const calls=stubWork({submissionEnabled:true,items:[{container:false,taskId:'TSK-REPORT',taskName:'Report work',projectId:'PRJ-A',projectName:'Alpha',subprojectName:'',status:'Not Started',priority:'Medium',dueDate:null,progressPercent:0,actualHours:0,reviewState:'NONE',pendingRequest:false,creationChannel:'MEMBER',revision:1}]});
+    render(<I18nProvider><MyWorkScreen /></I18nProvider>);
+    await screen.findByText('Report work');
+    fireEvent.click(screen.getByRole('button',{name:'完了報告'}));
+    const note=screen.getAllByRole('textbox').at(-1)!;
+    fireEvent.change(note,{target:{value:'Checked the result'}});
+    fireEvent.click(screen.getByRole('button',{name:'報告を送信'}));
+    await waitFor(()=>expect(calls.some(call=>call.url.endsWith('/api/employee/requests')&&call.method==='POST')).toBe(true));
+    const posted=JSON.parse(calls.find(call=>call.url.endsWith('/api/employee/requests')&&call.method==='POST')!.body!);
+    expect(posted).toMatchObject({taskId:'TSK-REPORT',requestType:'COMPLETION_REPORT',completionNote:'Checked the result'});
+    expect(posted).not.toHaveProperty('requesterName');
+    expect(await screen.findByText(/REQ-NEW/)).toBeTruthy();
+    expect(screen.getByText(/Not Started|未着手/)).toBeTruthy();
+  });
+
   it('offers no second completion report while one is pending', async () => {
     stubWork({
       submissionEnabled: true,
       items: [
         {
+          container: false,
           taskId: 'TSK-1',
           taskName: '配線確認',
           projectId: 'PRJ-A',

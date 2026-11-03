@@ -260,6 +260,7 @@ export type EmployeeSubmission = z.infer<typeof EmployeeSubmission>;
 
 /** One row of the member's own work list. Only the member's own assignment is present. */
 export const MyWorkItem = z.object({
+  container: z.boolean(),
   taskId: z.string(),
   taskName: z.string(),
   projectId: z.string(),

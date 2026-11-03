@@ -680,6 +680,17 @@ describe('member self-service task creation', () => {
     expect(Number(count?.count)).toBe(1);
   });
 
+  it('isolates creation idempotency by authenticated member', async () => {
+    await activeProject();
+    await insertMember(db, { name: 'Other', email: 'other@example.co.jp', role: 'MEMBER' }, 'MEM-OTHER');
+    const first = await app.inject({ method: 'POST', url: '/api/employee/my-work', headers: headers(await signIn(MEMBER), true), payload: body() });
+    const second = await app.inject({ method: 'POST', url: '/api/employee/my-work', headers: headers(await signIn('other@example.co.jp'), true), payload: body() });
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(second.json().data.taskId).not.toBe(first.json().data.taskId);
+    expect((await db.one<{owner_member_id:string}>('SELECT owner_member_id FROM tasks WHERE task_id=$1',[second.json().data.taskId]))?.owner_member_id).toBe('MEM-OTHER');
+  });
+
   it('refuses an owner, an assignee, a status or a project in the payload', async () => {
     await activeProject();
     const auth = await signIn(MEMBER);
@@ -717,6 +728,8 @@ describe('member self-service task creation', () => {
     });
     expect(managerAttempt.statusCode).toBe(403);
     expect(managerAttempt.json().error.code).toBe('AUTHORIZATION_DENIED');
+    const adminAttempt = await app.inject({method:'POST',url:'/api/employee/my-work',headers:headers(await signIn(ADMIN),true),payload:body({idempotencyKey:'admin-create-refused'})});
+    expect(adminAttempt.statusCode).toBe(403);
 
     const other = await insertProject(db, { projectName: 'Other', status: 'Active' }, 'PRJ-O');
     await insertSubproject(db, { projectId: other.projectId, subprojectName: 'Elsewhere' }, 'SUB-O');
@@ -749,6 +762,7 @@ describe('member completion requests', () => {
       payload: { idempotencyKey: 'member-completion-1', projectId: 'PRJ-C', taskName: 'Report me', deadline: '2026-06-01' }
     });
     const taskId = (created.json() as { data: { taskId: string } }).data.taskId;
+    await db.query("UPDATE projects SET dashboard_visibility = 'RESTRICTED' WHERE project_id = 'PRJ-C'");
     await saveSettings(db, { REQUEST_SUBMISSION_ENABLED: 'true' }, ADMIN);
     return { taskId, member };
   }
@@ -839,6 +853,20 @@ describe('member completion requests', () => {
     expect(afterReject?.status).toBe('Not Started');
     const stored = await db.one<{ status: string }>('SELECT status FROM task_requests WHERE request_id = $1', [firstId]);
     expect(stored?.status).toBe('REJECTED');
+  });
+
+  it('uses the verified requester name and refuses another member replaying the receipt key', async () => {
+    const { taskId, member } = await memberTask();
+    const payload = {clientRequestId:'shared-receipt-key',taskId,requestType:'COMPLETION_REPORT',completionNote:'Checked',requesterName:'Pretend administrator'};
+    const first = await app.inject({method:'POST',url:'/api/employee/requests',headers:headers(member,true),payload});
+    expect(first.statusCode,first.body).toBe(200);
+    const row=await db.one<{requester_name:string}>('SELECT requester_name FROM task_requests WHERE request_id=$1',[first.json().data.requestId]);
+    expect(row?.requester_name).not.toBe(payload.requesterName);
+    await insertMember(db,{name:'Other',email:'other@example.co.jp',role:'MEMBER'},'MEM-OTHER');
+    await db.query("UPDATE tasks SET owner_member_id='MEM-OTHER' WHERE task_id=$1",[taskId]);
+    const other=await app.inject({method:'POST',url:'/api/employee/requests',headers:headers(await signInOther(),true),payload});
+    expect(other.statusCode).toBe(404);
+    expect(other.body).not.toContain(first.json().data.requestId);
   });
 
   it('shows the member only their own receipts', async () => {

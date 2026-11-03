@@ -52,6 +52,10 @@ export interface DriveTransport {
     mimeType: string;
     folderId: string;
     appProperties?: Record<string, string>;
+    resumeFileId?: string;
+    saveFileId?: (fileId: string) => Promise<void>;
+    resumeSession?: string;
+    saveSession?: (session: string) => Promise<void>;
   }): Promise<{ fileId: string; webViewLink: string }>;
   listOld(folderId: string, olderThanDays: number): Promise<{ fileId: string; name: string }[]>;
   remove(fileId: string): Promise<void>;
@@ -211,9 +215,9 @@ function driveError(status: number, detail: string): DriveError {
 }
 
 /** Reads the inclusive byte range the session reports as stored. */
-function receivedBytes(range: string | null, fallback: number): number {
-  const match = /bytes=\d+-(\d+)/.exec(range ?? '');
-  if (!match) return fallback;
+function receivedBytes(range: string | null): number {
+  const match = /^bytes=0-(\d+)$/.exec(range ?? '');
+  if (!match) return 0;
   return Number(match[1]) + 1;
 }
 
@@ -231,7 +235,7 @@ export class GoogleDriveTransport implements DriveTransport {
     this.delegatedUser = input.delegatedUser;
     this.auth = input.credentialsJson ? new GoogleAuth(input.credentialsJson) : null;
     this.configured = !!this.auth;
-    this.chunkBytes = Math.max(256 * 1024, input.chunkBytes ?? 8 * 1024 * 1024);
+    this.chunkBytes = Math.max(256 * 1024, Math.floor((input.chunkBytes ?? 8 * 1024 * 1024) / (256 * 1024)) * (256 * 1024));
     this.attempts = Math.max(1, input.attempts ?? 4);
   }
 
@@ -263,13 +267,16 @@ export class GoogleDriveTransport implements DriveTransport {
     if (cached) return cached;
     const token = await this.token();
     const response = await fetch(
-      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(folderId)}?fields=id,name,mimeType&supportsAllDrives=true`,
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(folderId)}?fields=id,name,mimeType,capabilities(canAddChildren)&supportsAllDrives=true`,
       { headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(30000) }
     );
     if (!response.ok) throw driveError(response.status, (await response.text()).slice(0, 300));
-    const body = (await response.json()) as { id?: string; name?: string; mimeType?: string };
+    const body = (await response.json()) as { id?: string; name?: string; mimeType?: string; capabilities?: { canAddChildren?: boolean } };
     if (body.mimeType !== 'application/vnd.google-apps.folder') {
       throw new DriveError('The Drive backup destination is not a folder', false);
+    }
+    if (body.capabilities?.canAddChildren === false) {
+      throw new DriveError('Drive permission denied: the service account cannot add files to this folder', false);
     }
     const verified = { folderId: body.id ?? folderId, name: body.name ?? '' };
     this.verifiedFolders.set(folderId, verified);
@@ -290,9 +297,51 @@ export class GoogleDriveTransport implements DriveTransport {
     mimeType: string;
     folderId: string;
     appProperties?: Record<string, string>;
+    resumeFileId?: string;
+    saveFileId?: (fileId: string) => Promise<void>;
+    resumeSession?: string;
+    saveSession?: (session: string) => Promise<void>;
   }): Promise<{ fileId: string; webViewLink: string }> {
-    const session = await this.startSession(input);
+    let fileId = input.resumeFileId;
+    if (!fileId && input.saveFileId) {
+      const token = await this.token();
+      const response = await fetch('https://www.googleapis.com/drive/v3/files/generateIds?count=1&space=drive&type=files', {
+        headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(30000)
+      });
+      if (!response.ok) throw driveError(response.status, 'Could not reserve a backup file identity');
+      const body = await response.json() as { ids?: string[] };
+      fileId = body.ids?.[0];
+      if (!fileId) throw new DriveError('Drive returned no reserved file identity', true);
+      await input.saveFileId(fileId);
+    }
+    let session = input.resumeSession;
     let offset = 0;
+    if (session) {
+      try {
+        const status = await this.sessionStatus(session, input.content.length);
+        if (status.file) return status.file;
+        offset = status.received;
+      } catch (error) {
+        if (!(error instanceof DriveError) || !error.message.includes('(404)')) throw error;
+        session = undefined; // Expired sessions restart using the same durable artifact.
+      }
+    }
+    if (!session) {
+      try {
+        session = await this.startSession({ ...input, resumeFileId: fileId });
+      } catch (error) {
+        if (!fileId || !(error instanceof DriveError) || !error.message.includes('(409)')) throw error;
+        const token = await this.token();
+        const existing = await fetch('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(fileId) + '?fields=id,size,webViewLink&supportsAllDrives=true', {
+          headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(30000)
+        });
+        if (!existing.ok) throw driveError(existing.status, 'Could not reconcile the reserved backup identity');
+        const body = await existing.json() as { id: string; size?: string; webViewLink?: string };
+        if (body.id !== fileId || Number(body.size) !== input.content.length) throw new DriveError('Reserved backup is not yet complete', true);
+        return { fileId, webViewLink: body.webViewLink ?? '' };
+      }
+      await input.saveSession?.(session);
+    }
     while (offset < input.content.length) {
       const end = Math.min(offset + this.chunkBytes, input.content.length);
       const chunk = input.content.subarray(offset, end);
@@ -309,9 +358,13 @@ export class GoogleDriveTransport implements DriveTransport {
     folderId: string;
     content: Buffer;
     appProperties?: Record<string, string>;
+    resumeFileId?: string;
+    saveFileId?: (fileId: string) => Promise<void>;
+    resumeSession?: string;
+    saveSession?: (session: string) => Promise<void>;
   }): Promise<string> {
     const accessToken = await this.token();
-    const metadata = { name: input.name, parents: [input.folderId], appProperties: input.appProperties ?? {} };
+    const metadata = { ...(input.resumeFileId ? { id: input.resumeFileId } : {}), name: input.name, parents: [input.folderId], appProperties: input.appProperties ?? {} };
     const response = await fetch(
       'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id,webViewLink',
       {
@@ -362,7 +415,7 @@ export class GoogleDriveTransport implements DriveTransport {
           return { file: { fileId: body.id, webViewLink: body.webViewLink ?? '' }, received: total };
         }
         if (response.status === 308) {
-          const received = receivedBytes(response.headers.get('range'), position + chunk.length);
+          const received = receivedBytes(response.headers.get('range'));
           if (received === total) {
             // The last chunk already landed but the final answer was lost; the file exists.
             const status = await this.sessionStatus(session, total);
@@ -379,7 +432,10 @@ export class GoogleDriveTransport implements DriveTransport {
         await new Promise((resolve) => setTimeout(resolve, Math.min(500 * attempt, 4000)));
         const status = await this.sessionStatus(session, total, true);
         if (status.file) return { file: status.file, received: total };
-        position = Math.max(position, status.received);
+        if (status.received < offset || status.received > offset + chunk.length) {
+          throw new DriveError('Drive returned an inconsistent upload offset', true);
+        }
+        position = status.received;
       }
     }
   }
@@ -401,9 +457,10 @@ export class GoogleDriveTransport implements DriveTransport {
         if (body.id) return { file: { fileId: body.id, webViewLink: body.webViewLink ?? '' }, received: total };
         return { file: null, received: 0 };
       }
-      return { file: null, received: receivedBytes(response.headers.get('range'), 0) };
+      if (response.status !== 308) throw driveError(response.status, 'Resumable session status failed');
+      return { file: null, received: receivedBytes(response.headers.get('range')) };
     } catch (error) {
-      if (tolerateError) return { file: null, received: 0 };
+      if (tolerateError && !(error instanceof DriveError)) return { file: null, received: 0 };
       throw error;
     }
   }

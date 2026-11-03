@@ -1,5 +1,19 @@
 # Backup and Restore (V2)
 
+## Retry and restore verification update — 2026-11-03
+
+Uploads reserve a Drive file ID before sending data and save it with the resumable session in a
+restricted local `BAK-*.upload.json` checkpoint. Keep that checkpoint beside its artifact: it allows
+worker restarts and expired sessions to reuse the same file identity. Session URLs are credentials;
+never publish checkpoints or copy them into database status responses. A missing Range on a 308
+response means no acknowledged bytes, not a successful chunk. Chunks are multiples of 256 KiB.
+See Google's [resumable upload protocol](https://developers.google.com/workspace/drive/api/guides/manage-uploads).
+Folder checks also reject an explicit canAddChildren=false capability.
+
+The local encrypted-file restore round trip is now tested with PostgreSQL 18 client tools and an
+isolated scratch database (set TEST_PG_BIN_DIR to the client bin directory). This proves local
+custom-format recovery, not a real Drive download or physical-host recovery rehearsal.
+
 ## Local LAN update — 2026-11-02
 
 [LOCAL_LAN.md](LOCAL_LAN.md) specifies the employee-ID/password mode, schema 7, optional email, first-login change, administrator reset, employee-owned progress editing, Windows launcher, durable local backup and optional Shared Drive upload. It supersedes Google-only or Linux-only assumptions below for this mode. [Verification record](LOCAL_LAN_ACCEPTANCE.md).
@@ -69,9 +83,9 @@ material, and a restore must not resurrect a signed-in browser.
   automation. The setting name is historical; it now schedules an interval, not a day.
 * A run that overlaps an in-flight backup is prevented by the same interval dedupe key; the backup
   itself is not re-entrant.
-* `npm run --workspace @eh/worker tsx src/cli.ts backup-now` runs one backup immediately
+* `node --env-file=data/lan/worker.env apps/worker/dist/cli.js backup-now` runs one backup immediately
   (uploading when Drive is configured).
-* `npm run --workspace @eh/worker tsx src/cli.ts backup-status` prints the last local backup, the
+* `node --env-file=data/lan/worker.env apps/worker/dist/cli.js backup-status` prints the last local backup, the
   last Drive upload, the latest failure and whether a Drive folder is configured.
 * Before a risky operation (schema change, migration, bulk correction) run `backup-now` and
   record the `backup_id`.
@@ -82,7 +96,7 @@ material, and a restore must not resurrect a signed-in browser.
 ## 3. Verify a backup (required step)
 
 ```bash
-npm run --workspace @eh/worker tsx src/cli.ts verify-restore
+node --env-file=data/lan/worker.env apps/worker/dist/cli.js verify-restore
 ```
 
 It creates a scratch database, runs the migrations, restores the freshly created logical archive,
@@ -96,7 +110,7 @@ A `FAIL` means the backup is not a usable backup. Fix it before any migration or
 1. Download `BAK-<id>.dump.enc` from the Drive backup folder.
 2. On the host, with the **same** `BACKUP_ENCRYPTION_KEY` used when it was written:
    ```bash
-   npm run --workspace @eh/worker tsx src/cli.ts verify-restore ./BAK-<id>.dump.enc
+   node --env-file=data/lan/worker.env apps/worker/dist/cli.js verify-restore ./BAK-<id>.dump.enc
    ```
 3. The command creates `eh_verify_<timestamp>`, restores into it, prints member/task/account row
    counts with `result: PASS`, then drops the scratch database. It refuses the production database
@@ -104,8 +118,11 @@ A `FAIL` means the backup is not a usable backup. Fix it before any migration or
 4. Keep the result next to the backup ID. A wrong key fails the AES-GCM tag and is reported as a
    failed verification, not as a successful restore.
 
-Both paths need `PG_RESTORE_PATH` (or `pg_restore` on `PATH`) for the container path; the logical
-path needs no client tools.
+Only the downloaded custom-format path needs PG_RESTORE_PATH (or pg_restore on PATH).
+The logical path needs no client tools. Use a protected recovery environment with the original key
+and a PostgreSQL role with CREATEDB on a separate recovery server. The ordinary application role
+need not have CREATEDB. Compare the reported counts with the backup-time inventory; PASS confirms
+restore execution, not an independent comparison with the original production data.
 
 ## 4. Restore procedures
 
@@ -140,9 +157,9 @@ by an operator. Never edit rows directly in the production database to "fix" a m
 
 | Objective | Value | Note |
 | --- | --- | --- |
-| RPO | 24 hours with the daily backup on; better if `backup-now` is run before risky work | no continuous archiving |
+| RPO | Since the last successful local backup (normally 60 minutes with the default enabled interval) | no continuous archiving |
 | RTO | Provision host + database + restore + verify: measured as **NOT_RUN** locally | depends on dump size and Drive download speed |
-| Restore rehearsal | **PASS** for the logical path (`verify-restore`, 4 worker tests) | `pg_dump`/`pg_restore` path **NOT_RUN** (client tools absent in this environment) |
+| Restore rehearsal | **PASS** locally for logical and encrypted custom-format scratch restore | Real Drive download and physical recovery host remain **NOT_RUN** |
 | Drive upload rehearsal | **PASS** in mock tests (resumable, resume, permission error, duplicate prevention); **NOT_RUN** with real credentials | requires a real service account + shared folder |
 
 ## 6. Failure handling
@@ -151,7 +168,7 @@ by an operator. Never edit rows directly in the production database to "fix" a m
 | --- | --- |
 | Drive unavailable | Job `RETRY` with backoff; `backup_log` keeps the failure; the local artefact and the previous cloud artefact are untouched |
 | Drive folder missing / not shared / not a folder | Reported before the upload starts with a readable reason; local backup kept |
-| `pg_dump` missing | `backup-now` falls back to the logical archive and records `method: logical`; the scheduled job records the error |
+| `pg_dump` missing | Backup fails visibly; no automatic logical fallback is claimed |
 | Wrong encryption key | Decryption fails the auth tag; restore refuses |
 | Interrupted chunk | The resumable session is asked how far it got and only the remaining bytes are sent |
 | Upload succeeded but the answer was lost | The retry finds the file by `backupId`; no duplicate copy is created |

@@ -42,7 +42,20 @@ export async function persistentBackup(db:Database,config:WorkerConfig,drive:Dri
    await drive.verifyFolder?.(config.DRIVE_BACKUP_FOLDER_ID);
    // A retry after a lost answer must find the stored file instead of uploading it again.
    const existing=await drive.findBackup?.(config.DRIVE_BACKUP_FOLDER_ID,id);
-   const uploaded=existing??await drive.upload({name:manifest.fileName,content,mimeType:'application/octet-stream',folderId:config.DRIVE_BACKUP_FOLDER_ID,appProperties:{backupId:id,plainChecksum:manifest.plainChecksum,keyId:manifest.keyId}});
+   const sessionPath=join(directory,id+'.upload.json');
+   let resumeSession: string | undefined;
+   let resumeFileId: string | undefined;
+   try {
+    const checkpoint=JSON.parse(await readFile(sessionPath,'utf8')) as {folderId:string;session?:string;fileId?:string};
+    if(checkpoint.folderId===config.DRIVE_BACKUP_FOLDER_ID){resumeSession=checkpoint.session;resumeFileId=checkpoint.fileId;}
+   } catch(error) { if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error; }
+   const saveCheckpoint=async()=>{
+    await writeFile(sessionPath+'.tmp',JSON.stringify({folderId:config.DRIVE_BACKUP_FOLDER_ID,session:resumeSession,fileId:resumeFileId}),{mode:0o600});
+    await rename(sessionPath+'.tmp',sessionPath);
+   };
+   const saveSession=async(session:string)=>{resumeSession=session;await saveCheckpoint();};
+   const saveFileId=async(fileId:string)=>{resumeFileId=fileId;await saveCheckpoint();};
+   const uploaded=existing??await drive.upload({resumeFileId,saveFileId,resumeSession,saveSession,name:manifest.fileName,content,mimeType:'application/octet-stream',folderId:config.DRIVE_BACKUP_FOLDER_ID,appProperties:{backupId:id,plainChecksum:manifest.plainChecksum,keyId:manifest.keyId}});
    manifest.driveFileId=uploaded.fileId;
    manifest.driveUploadedAt=new Date().toISOString();
    await writeFile(manifestPath+'.tmp',JSON.stringify(manifest),{mode:0o600});await rename(manifestPath+'.tmp',manifestPath);

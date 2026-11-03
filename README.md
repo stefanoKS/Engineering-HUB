@@ -1,254 +1,138 @@
-# Engineering-HUB
+# Engineering-HUB — 設計・開発課 管理
 
-**Design and development department management** — projects, subprojects, tasks, deadlines,
-completion review and backups, running on a company LAN with a PostgreSQL database.
+[日本語](README_JP.md)
 
-The current platform is **V2**: a TypeScript API, a background worker and a React application.
-The legacy V1 Google Apps Script application (`src/`, `dashboard-app/`, `shared/`) stays in the
-repository as historical reference and as the migration source; this documentation does not change
-it. Its user-visible name is 設計・開発課 管理, and its release records — the V1.2 shared dashboard,
-V1.3 planning and request work, and V1.4–V1.7 — are kept in [CHANGELOG.md](CHANGELOG.md), with the
-V1 design notes in [ARCHITECTURE.md](ARCHITECTURE.md) and
-[docs/TASK_DURATION_POLICY.md](docs/TASK_DURATION_POLICY.md). Release history for V2 lives in the
-same changelog.
+Engineering-HUB manages a design and development department's projects, task hierarchy, deadlines,
+progress and completion reviews. V2 runs a React application, TypeScript API and background worker
+on your company LAN, with PostgreSQL as the database. Employee-ID/password sign-in needs no Google
+account or email. Japanese is the default; every user can switch to English.
 
-> Status: implemented and verified locally. A production deployment is **not** approved until the
-> checks in [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) have recorded evidence on
-> the real host.
+Managers organise responsibilities, projects, subprojects (four levels) and tasks (three levels),
+review requests and monitor progress without counting parent tasks twice. Members create their own
+work, update progress and submit completion reports. Backups are encrypted locally first, with an
+optional Google Drive copy. Mail, Calendar and publication remain optional and off by default.
 
----
+## Install on Windows LAN
 
-## 1. What you can do with it
+Use an always-on Windows PC, Node.js 22.13+ (tested with Node 24), PostgreSQL 18 running as a service,
+and matching pg_dump/pg_restore tools. Reserve a LAN address. PostgreSQL should listen on localhost
+with scram-sha-256 authentication; allow application port 8050 only from approved LAN ranges.
 
-**Managers and administrators**
+From the repository root:
 
-* Organise work by responsibility area → project → subproject (up to four levels) → task (up to three levels).
-* Create and edit projects, subprojects, tasks, members, skills and responsibility areas.
-* Deadlines plus a required duration drive the schedule; a non-working deadline raises a warning.
-* Review employee requests (completion reports, deadline changes) and approve, reject or return them.
-* See each task exactly once in counts and progress: a parent task is organisation, never extra work.
-* Configure automation (mail, calendar, publication, backups) with safe defaults: everything outbound is off.
-
-**Members**
-
-* 自分の担当タスク (My Work): your own tasks only, with progress and actual hours.
-* Create a task for yourself under an active project, then report progress.
-* Submit a completion report and follow its state: 承認待ち / 承認済 / 却下 / 差戻し / 再確認が必要.
-
-**Everyone**
-
-* Japanese by default with a 日本語 | English switch; stored text, IDs and enum values are never translated.
-* A stable colour per project so a project stays recognisable across screens.
-
----
-
-## 2. Prerequisites
-
-| Requirement | Detail |
-| --- | --- |
-| Host | An always-on Windows PC for the LAN installation (Linux/containers are documented separately) |
-| Node.js | 22.13 or newer (Node 24 is the tested runtime) |
-| PostgreSQL | 18, installed as a Windows service, listening on localhost only, `scram-sha-256` authentication |
-| PostgreSQL tools | `pg_dump` and `pg_restore` on the host (path configured explicitly) |
-| Network | A reserved LAN address for the app host; port 8050 reachable from approved LAN ranges only |
-| Google (optional) | A service account only if you want encrypted backups copied to Google Drive |
-
-Do not expose PostgreSQL port 5432 or the application port to the internet.
-
----
-
-## 3. Install on a Windows LAN host
-
-```powershell
-cd C:\path\to\Engineering-HUB
+~~~powershell
 npm.cmd ci
-npm.cmd run typecheck
-npm.cmd run lint
-npm.cmd run test:v2
-npm.cmd run validate
 npm.cmd run build
-```
-
-Then create the two environment files from the templates and edit them:
-
-```powershell
 New-Item -ItemType Directory -Force data/lan
 Copy-Item deploy/windows/api.env.example data/lan/api.env
 Copy-Item deploy/windows/worker.env.example data/lan/worker.env
-```
+~~~
 
-| Variable | File | Value |
-| --- | --- | --- |
-| `DATABASE_URL` | api.env, worker.env | Your dedicated database |
-| `PUBLIC_ORIGIN` | api.env | The exact origin staff will open, e.g. `http://10.1.6.253:8050` |
-| `HOST` / `PORT` | api.env | `0.0.0.0` / `8050` for LAN access |
-| `AUTH_MODE` | api.env | `local` (employee ID + password) |
-| `DEV_AUTH_ENABLED` | api.env | `false` |
-| `BACKUP_DIRECTORY` | worker.env | Persistent folder, e.g. `data/backups` |
-| `BACKUP_INSTANCE_ID` | worker.env | One stable name per installation |
-| `PG_DUMP_PATH` / `PG_RESTORE_PATH` | worker.env | Installed client executables |
-| `BACKUP_ENCRYPTION_KEY` | worker.env | Base64 of 32 random bytes |
-| `BACKUP_ONLY` | worker.env | `true` until you deliberately enable mail/calendar/publication |
+Edit the copied files using [the Windows LAN guide](docs/v2/LOCAL_LAN.md):
 
-Never commit an environment file. Restrict `data/lan` and `data/backups` to the service operator
-and administrators; `data/` is gitignored.
+| Setting | Where / purpose |
+| --- | --- |
+| DATABASE_URL | Both files; a dedicated PostgreSQL database |
+| AUTH_MODE=local, DEV_AUTH_ENABLED=false | API; employee-ID/password sign-in |
+| HOST=0.0.0.0, PORT=8050, PUBLIC_ORIGIN | API; exact address staff open |
+| BACKUP_ONLY=true | Worker; backups without mail, Calendar or publication |
+| BACKUP_DIRECTORY, BACKUP_INSTANCE_ID | Worker; protected persistent folder and unique stable installation name |
+| PG_DUMP_PATH, PG_RESTORE_PATH | Worker; installed client executable paths |
+| BACKUP_ENCRYPTION_KEY | Worker; base64 of 32 random bytes, also kept in a separate protected recovery location |
 
-Generate the backup key locally and also store it in a separate protected recovery location:
+Generate the key locally:
 
-```powershell
+~~~powershell
 node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
-```
+~~~
 
-The example LAN configuration uses plain HTTP on a private address, which means passwords travel
-unencrypted inside that network. Use it only on a trusted, approved LAN, or put an approved TLS
-proxy in front and set `PUBLIC_ORIGIN` to the HTTPS address.
+Never commit credentials or environment files. Restrict data/lan and the backup directory to the
+operator and administrators. Plain HTTP exposes passwords within the LAN: use only an approved,
+trusted LAN or configure a TLS proxy and an HTTPS PUBLIC_ORIGIN. Do not expose either port online.
 
----
+## Set up the database and accounts
 
-## 4. Initial database and account setup
+Create a dedicated database role using PostgreSQL's administration tools:
 
-1. Create a dedicated role and database (never reuse the superuser):
+~~~sql
+CREATE ROLE ehub LOGIN PASSWORD 'REPLACE_WITH_A_GENERATED_PASSWORD';
+CREATE DATABASE engineering_hub OWNER ehub;
+~~~
 
-   ```sql
-   CREATE ROLE ehub LOGIN PASSWORD 'REPLACE_WITH_A_GENERATED_PASSWORD';
-   CREATE DATABASE engineering_hub OWNER ehub;
-   ```
+Set DATABASE_URL to that database, then run:
 
-2. Apply the reviewed migrations **once, explicitly** — start-up never migrates:
+~~~powershell
+./deploy/windows/Migrate-Lan.cmd
+./deploy/windows/Bootstrap-Admin.ps1
+./deploy/windows/Start-Lan.cmd
+~~~
 
-   ```powershell
-   ./deploy/windows/Migrate-Lan.cmd
-   ```
+Migration requires the exact confirmation APPLY MIGRATIONS. For an existing installation, create
+and verify a backup first; services never migrate at startup. Bootstrap prompts for employee ID,
+name and a hidden temporary password and refuses an installation that already has accounts.
 
-   Type `APPLY MIGRATIONS` when asked. For an existing database, create and verify a backup first.
+Open PUBLIC_ORIGIN, change the temporary password and create staff accounts in **Accounts**.
+Create a second administrator for recovery. New/reset accounts must change their temporary
+password before accessing work. Start-Lan supervises the API and worker; keep its window running.
+Verify sign-in from a second PC before inviting staff.
 
-3. Create the first administrator:
+## Daily workflows
 
-   ```powershell
-   ./deploy/windows/Bootstrap-Admin.ps1
-   ```
+* **ADMIN / MANAGER:** create responsibility areas and active projects, assign work, and review
+  completion or deadline-change requests. ADMIN manages accounts and automation.
+* **MEMBER:** open **My Work**, select an active project and optional subproject, enter the task,
+  description, deadline and priority. The server assigns you as owner with Not Started / 0%.
+  Creation needs no approval. All active projects are available under the department-wide role
+  model; publication visibility does not grant editing rights.
+* Update your assigned leaf work and send a completion report with a note. Pending requests do
+  not complete the task. Only ADMIN can approve completion of member-created tasks; existing
+  tasks retain manager review. Follow Pending, Approved, Rejected, Returned or Stale in My Work.
+* An administrator must enable REQUEST_SUBMISSION_ENABLED in **Automation** before submission
+  (default false). Assigned work in restricted projects can also be reviewed. BACKUP_ONLY does
+  not prevent requests or approvals; Google email is unnecessary.
 
-   It asks for employee ID, name and a hidden temporary password, and refuses when accounts already
-   exist. There is no default password and no public sign-up.
+## Configure and verify backups
 
-4. Register further staff in **Accounts**: employee ID, name, role and a temporary password. Every
-   new or reset account must change its password at the next sign-in, and a reset ends existing
-   sessions. Register a second administrator for recovery.
+1. Run **deploy/windows/Backup-Now.cmd** and confirm the local encrypted file exists.
+2. In **Automation**, enable DAILY_BACKUP_ENABLED and choose BACKUP_INTERVAL_MINUTES (60 is hourly).
+3. Check **Status** for the last local backup, last Drive upload and failures. A Drive outage keeps
+   the local backup. Preserve the encryption key for every retained backup.
+4. Optional Drive: share a company Shared Drive folder with the service account, set
+   GOOGLE_SERVICE_ACCOUNT_JSON (JSON content) and DRIVE_BACKUP_FOLDER_ID in the worker environment,
+   then restart the worker. Uploads checkpoint their progress and reuse the same file identity.
+5. Download an encrypted backup and verify it using a separate recovery environment file and a
+   PostgreSQL role allowed to create scratch databases:
 
----
+~~~powershell
+node --env-file=C:/approved-recovery/worker.env apps/worker/dist/cli.js verify-restore C:/approved-recovery/backup.dump.enc
+~~~
 
-## 5. Start and use
+This restores into a new scratch database, reports counts and removes only that scratch database.
+It never restores over the configured database. Follow the complete
+[backup and recovery procedure](docs/v2/BACKUP_RESTORE.md), including comparison with expected
+counts. Backups are never automatically deleted. Real Drive and physical LAN checks still require
+operator verification; [production approval remains pending](docs/PRODUCTION_READINESS.md).
 
-```powershell
-./deploy/windows/Start-Lan.cmd     # or: npm.cmd run start:lan
-```
+## Troubleshooting and further reading
 
-The supervisor starts the API and the worker and stops both if either fails. Leave the window
-running; PostgreSQL keeps running as a service. Open the `PUBLIC_ORIGIN` address from a second PC
-and sign in with the employee ID and temporary password, then change it.
-
-Ask IT to allow inbound TCP 8050 from approved LAN ranges only, and verify access from a second PC
-before inviting staff.
-
----
-
-## 6. Admin and member workflows
-
-**Administrator**
-
-1. Create responsibility areas, then projects (a project must name an active responsibility).
-2. Add subprojects and tasks with a deadline, then assign a primary owner and, if needed, additional assignees.
-3. Create employee accounts and keep roles in **Members**. Only ADMIN may grant `ADMIN`/`MANAGER`,
-   nobody can change their own role, and the last active administrator cannot be demoted.
-4. Review 申請一覧. A decision is applied once; a changed task makes a pending request `STALE`
-   instead of overwriting the newer value.
-5. Turn on optional automation in **Automation** — mail, calendar, shared-dashboard publication —
-   only when you are ready. All of them default to off.
-
-**Manager**
-
-Same project/task work as an administrator except role changes, permanent deletion, member
-administration limits and completion overrides, which stay ADMIN-only.
-
-**Member**
-
-1. 自分の担当タスク shows your own tasks only.
-2. Create a task for yourself: pick an active project, optionally a subproject, then name,
-   description, deadline and priority. You become the owner; the task starts as `Not Started` with
-   0 % progress and appears immediately for managers too.
-3. Update progress and actual hours on your own active leaf work, then send 完了報告 with a note.
-4. Follow the state of your own requests. Nothing changes until a manager approves, and a task you
-   created is completed only by an administrator.
-5. Completion and deadline changes always go through review; a parent task completes through its
-   child tasks.
-
-Requests are accepted only while the automation setting `REQUEST_SUBMISSION_ENABLED` is `true`
-(default `false`). The screen states clearly when submissions are closed.
-
----
-
-## 7. Backups
-
-A backup is one AES-256-GCM encrypted PostgreSQL archive written locally first, optionally copied
-to Google Drive. A Drive outage never costs the local backup.
-
-1. Run `./deploy/windows/Backup-Now.cmd` once and confirm the reported local file exists.
-2. In **Automation** enable `DAILY_BACKUP_ENABLED` and set `BACKUP_INTERVAL_MINUTES` (60 for hourly).
-3. Check **Status** for the last local backup, the last Drive upload and any failure.
-   `npm.cmd run --workspace @eh/worker tsx src/cli.ts backup-status` prints the same from the host.
-4. Verify a backup before you rely on it — a fresh logical check, or a downloaded file into a
-   scratch database:
-
-   ```powershell
-   node --env-file=data/lan/worker.env apps/worker/dist/cli.js verify-restore "C:/approved-recovery/backup.dump.enc"
-   ```
-
-   It creates a scratch database, restores, prints row counts, reports `PASS`/`FAIL`, and drops the
-   scratch database. It never restores over the configured database.
-
-Never rotate the encryption key without keeping the old key for old files, and never delete backups
-automatically — the application reports retention but never removes a file.
-
-Google Drive (optional): create a company Shared Drive folder, share it with the service account as
-Editor, put the service-account JSON (content, not a path) in `GOOGLE_SERVICE_ACCOUNT_JSON` and set
-`DRIVE_BACKUP_FOLDER_ID`. Large backups upload resumably and a retry never creates a second copy.
-Restart the worker after changing the environment.
-
----
-
-## 8. Troubleshooting
-
-| Symptom | Check |
+| Problem | Check |
 | --- | --- |
-| Sign-in fails for everyone | `DATABASE_URL` reachable, `AUTH_MODE=local`, API and PostgreSQL services running |
-| Sign-in works on the host but not from another PC | `HOST=0.0.0.0`, `PUBLIC_ORIGIN` uses the LAN address, Windows firewall rule for TCP 8050 |
-| "Change your temporary password" loop | Reset the password in **Accounts**; a reset ends old sessions |
-| Deadline is refused | A non-working or past deadline needs explicit acknowledgement; it is never moved automatically |
-| A member cannot send a completion report | `REQUEST_SUBMISSION_ENABLED` must be `true`; the member must be assigned to the task |
-| A manager cannot approve a member-created completion | By design — only ADMIN completes a task the member created |
-| Backup job fails, Drive | The local file is kept; check the failure text in **Status** (folder shared, folder type, credentials) |
-| `pg_dump` not found | Set `PG_DUMP_PATH` to the installed executable, quoting paths with spaces |
-| Page shows an old value after an edit | Reload; a save on a stale revision is refused rather than overwriting |
+| Cannot sign in | PostgreSQL/API running, DATABASE_URL, AUTH_MODE=local; change temporary password |
+| Second PC cannot connect | PUBLIC_ORIGIN, HOST=0.0.0.0, approved firewall rule for TCP 8050 |
+| Request cannot be sent | REQUEST_SUBMISSION_ENABLED, own assignment, unfinished leaf task |
+| Manager cannot approve completion | A member-created task requires ADMIN |
+| Backup fails | Status error, client executable paths, folder permissions and service-account configuration |
+| Stale edit refused | Reload the current revision; do not overwrite newer work |
 
----
+[LAN installation](docs/v2/LOCAL_LAN.md) · [Operations](docs/v2/OPERATIONS.md) ·
+[Architecture](docs/v2/ARCHITECTURE.md) · [API](docs/v2/API.md) · [Security](docs/v2/SECURITY.md) ·
+[Migration](docs/v2/MIGRATION.md) · [Container hosting](docs/v2/SELF_HOSTING.md) ·
+[Remote access](docs/v2/REMOTE_ACCESS.md) · [Google setup](docs/v2/GOOGLE_WORKSPACE.md) ·
+[Validation evidence](docs/v2/ACCEPTANCE.md)
 
-## 9. Documentation
+Development checks: npm run typecheck, npm run lint, npm test, npm run validate,
+npm run build and npm run test:browser. Contributor rules: [AGENTS.md](AGENTS.md).
 
-| Topic | Document |
-| --- | --- |
-| Windows LAN installation and operation | [docs/v2/LOCAL_LAN.md](docs/v2/LOCAL_LAN.md) |
-| Architecture and decisions | [docs/v2/ARCHITECTURE.md](docs/v2/ARCHITECTURE.md) |
-| HTTP API | [docs/v2/API.md](docs/v2/API.md) |
-| Security model and limits | [docs/v2/SECURITY.md](docs/v2/SECURITY.md) |
-| Backup and restore | [docs/v2/BACKUP_RESTORE.md](docs/v2/BACKUP_RESTORE.md) |
-| Daily operations | [docs/v2/OPERATIONS.md](docs/v2/OPERATIONS.md) |
-| V1 → V2 migration | [docs/v2/MIGRATION.md](docs/v2/MIGRATION.md) |
-| Self-hosting (Compose, Caddy) | [docs/v2/SELF_HOSTING.md](docs/v2/SELF_HOSTING.md) |
-| Remote access | [docs/v2/REMOTE_ACCESS.md](docs/v2/REMOTE_ACCESS.md) |
-| Google Workspace setup | [docs/v2/GOOGLE_WORKSPACE.md](docs/v2/GOOGLE_WORKSPACE.md) |
-| Performance measurement | [docs/v2/PERFORMANCE.md](docs/v2/PERFORMANCE.md) |
-| Acceptance evidence | [docs/v2/ACCEPTANCE.md](docs/v2/ACCEPTANCE.md) |
-| Production readiness | [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) |
-| Release history | [CHANGELOG.md](CHANGELOG.md) |
-
-Contributor rules are in [AGENTS.md](AGENTS.md).
+Legacy V1 is preserved separately. V1.2 / V1.3 and later release history belongs in
+[CHANGELOG.md](CHANGELOG.md); legacy [architecture](ARCHITECTURE.md) and
+[duration policy](docs/TASK_DURATION_POLICY.md) remain available.

@@ -11,7 +11,7 @@ import { api, ApiFailure } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
 import { Badge, ErrorBox } from '../components/ui';
-import { SelectInput, TextInput, useIdempotencyKey, useSave } from '../components/forms';
+import { createIdempotencyKey, SelectInput, TextInput, useIdempotencyKey, useSave } from '../components/forms';
 
 const PAGE_SIZE = 25;
 
@@ -47,7 +47,6 @@ export function MyWorkScreen(): JSX.Element {
         loading={projects.loading}
         onCreated={() => {
           refreshAll();
-          list.refresh();
         }}
       />
 
@@ -97,7 +96,8 @@ function CreateTaskCard({
   onCreated: () => void;
 }): JSX.Element {
   const { t, label } = useI18n();
-  const idempotencyKey = useIdempotencyKey();
+  const initialKey = useIdempotencyKey();
+  const [idempotencyKey, setIdempotencyKey] = useState(initialKey);
   const save = useSave();
   const [projectId, setProjectId] = useState('');
   const [subprojectId, setSubprojectId] = useState('');
@@ -134,6 +134,7 @@ function CreateTaskCard({
           {
             onSuccess: () => {
               setNotice(t('myWork.created'));
+              setIdempotencyKey(createIdempotencyKey());
               setTaskName('');
               setDescription('');
               setDeadline('');
@@ -238,7 +239,7 @@ function WorkCard({
   const [reporting, setReporting] = useState(false);
   const save = useSave();
 
-  const finished = ['Done', 'Cancelled'].includes(item.status);
+  const finished = item.container || ['Done', 'Cancelled'].includes(item.status);
   const review = reviewKey(item.reviewState);
 
   return (
@@ -261,13 +262,13 @@ function WorkCard({
         <h3>{item.taskName}</h3>
         <p className="muted small">
           {item.projectName}
-          {item.subprojectName ? ` / ${item.subprojectName}` : ''} ﾂｷ {label('status', item.status)} ﾂｷ{' '}
+          {item.subprojectName ? ` / ${item.subprojectName}` : ''} · {label('status', item.status)} ·{' '}
           {item.dueDate ?? t('common.unset')}
         </p>
         <p className="small">
           <span className="muted">{t('myWork.reviewLabel')}: </span>
           <Badge tone={review.tone}>{t(review.label)}</Badge>
-          {item.creationChannel === 'MEMBER' ? <span className="muted small"> ﾂｷ {t('myWork.adminApprovalNote')}</span> : null}
+          {item.creationChannel === 'MEMBER' ? <span className="muted small"> · {t('myWork.adminApprovalNote')}</span> : null}
         </p>
         <div className="field-row">
           <label className="field">
@@ -422,7 +423,7 @@ function MyRequestsCard({ requests }: { requests: MemberRequest[] }): JSX.Elemen
               <strong>{request.taskName || request.taskId}</strong>
               <span className="muted small">
                 {' '}
-                ﾂｷ {t(`myWork.requestType.${request.requestType}`)} ﾂｷ {label('request.status', request.status)} ﾂｷ{' '}
+                · {t(`myWork.requestType.${request.requestType}`)} · {label('request.status', request.status)} ·{' '}
                 {request.submittedAt.slice(0, 10)} ({request.requestId})
               </span>
               {request.decisionNote ? <div className="muted small">{t('myWork.decisionNote')}: {request.decisionNote}</div> : null}
