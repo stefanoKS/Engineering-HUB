@@ -100,7 +100,7 @@ export function TasksScreen({ actor, readOnly = false }: { actor: Actor; readOnl
           <p className="muted small">{readOnly ? t('allWork.intro') : t('allWork.managerIntro')}</p>
         </div>
         <div className="filters">
-          <ProjectPicker value={projectId} onChange={id => { setProjectId(id); setPage(1); }} />
+          <ProjectPicker scope={readOnly ? 'read' : 'manager'} value={projectId} onChange={id => { setProjectId(id); setPage(1); }} />
           <select
             value={displayStatus}
             onChange={(event) => {
@@ -124,17 +124,19 @@ export function TasksScreen({ actor, readOnly = false }: { actor: Actor; readOnl
               setPage(1);
             }}
           />
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={includeInactive}
-              onChange={(event) => {
-                setIncludeInactive(event.target.checked);
-                setPage(1);
-              }}
-            />
-            {t('tasks.includeInactive')}
-          </label>
+          {canManage ? (
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={includeInactive}
+                onChange={(event) => {
+                  setIncludeInactive(event.target.checked);
+                  setPage(1);
+                }}
+              />
+              {t('tasks.includeInactive')}
+            </label>
+          ) : null}
           {canManage ? (
             <button type="button" className="button" onClick={() => setEditing({ mode: 'create' })}>
               {t('tasks.new')}

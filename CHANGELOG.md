@@ -1,5 +1,51 @@
 # Changelog
 
+## V2 regression fixes (visibility, role-aware UI, list behaviour, partial edits) — 2026-11-04
+
+No schema change: migrations 0001–0008 and their checksums are untouched. Disposable databases only.
+
+### GATE 1 — security
+- `GET /api/work/tasks` and `GET /api/work/tasks/:id` now apply the documented visibility policy:
+  MEMBER/VIEWER see only `INTERNAL`, non-archived work; `RESTRICTED`, archived and deleted work
+  answers `404`, including for guessed identifiers.
+- `includeInactive=true` is a manager capability and answers `403 AUTHORIZATION_DENIED` otherwise.
+- Read-only task and project DTOs are rebuilt from an explicit allowlist (no effort, progress,
+  duration, planned start, notes, acceptance criteria, confirmations, history, dashboard summary or
+  notification settings).
+
+### GATE 2 — role-aware UI
+- `ProjectPicker` takes a `scope`; the read-only screens call `GET /api/work/projects` instead of the
+  manager endpoint.
+- New paginated read-only project list and project detail, plus `#/project/:id` routing for MEMBER
+  and VIEWER.
+- MANAGER and ADMIN get an "Open" link and a confirmed "Mark done" action on their own My Assigned
+  Work cards; MEMBER keeps the completion request and VIEWER stays read-only.
+- Browser journeys for MEMBER and VIEWER run in both `test:browser` and `test:lan`.
+
+### GATE 3 — list behaviour
+- Default lists exclude `Done`, `Cancelled`, archived and deleted work; completed work stays
+  reachable through the explicit `displayStatus=DONE` filter. Pagination totals and tree ancestry
+  counts remain filter-scoped.
+
+### GATE 4 — data preservation
+- The task form sends a true partial patch: unchanged deadline, assignment, description, priority,
+  subproject, parent and skill fields are omitted, and an unchanged form disables Save.
+- `planned_start` is recomputed only when the deadline or duration changes, and a stored start is
+  carried through when no duration is supplied.
+- Historical hours, progress, duration and audit rows are preserved.
+- An inactive current assignee stays visible in the picker and keeps the assignment; a new inactive
+  assignment is refused.
+- The My Work pending-completion indicator is filtered by the authenticated requester.
+
+### GATE 5 — startup and migration
+- `/readyz` checks `REQUIRED_SCHEMA_VERSION` before reporting ready; startup never migrates.
+- `docs/v2/MIGRATION.md` documents the explicit schema 7 → 8 upgrade and rollback.
+
+### Verification
+V1 776 pass / 0 fail; V2 **229 pass, 1 skipped**; typecheck, lint, validate, build, `smoke:prod`,
+`test:browser` and `test:lan` all pass. Live Workspace/Drive/mail remain **NOT_RUN**; production
+stays **NOT APPROVED FOR PRODUCTION**.
+
 ## V2 unified account, role, task and UI simplification — 2026-11-03
 
 No new migration: schema **8** (including the unchanged checksummed `0008_member_created_work`) is

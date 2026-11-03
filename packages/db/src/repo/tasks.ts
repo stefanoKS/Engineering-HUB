@@ -130,6 +130,10 @@ export type TaskFilters = {
   overdueOnly?: boolean;
   /** Archived projects, archived subprojects and Cancelled work stay hidden by default. */
   includeInactive?: boolean;
+  /** Completed work is an explicit history filter, never part of the default active list. */
+  includeCompleted?: boolean;
+  /** Visibility policy: only `INTERNAL` projects are employee-visible. */
+  internalOnly?: boolean;
   sort?: 'dueDate' | 'priority' | 'name' | 'status' | 'updated';
   direction?: 'asc' | 'desc';
 };
@@ -145,6 +149,17 @@ const SUMMARY_SORTS: Record<NonNullable<TaskFilters['sort']>, string> = {
 function taskWhere(filters: TaskFilters): { where: string; params: unknown[] } {
   const where: string[] = ['t.deleted_at IS NULL'];
   const params: unknown[] = [];
+  // An explicit terminal filter (完了 / 取消) is the authorized history view; otherwise the default
+  // active list never contains completed work.
+  const terminalRequested =
+    filters.displayStatus === 'DONE' ||
+    filters.displayStatus === 'CANCELLED' ||
+    filters.status === 'Done' ||
+    filters.status === 'Cancelled';
+  const cancelledRequested = filters.displayStatus === 'CANCELLED' || filters.status === 'Cancelled';
+  if (filters.includeCompleted !== true && !terminalRequested) {
+    where.push("t.status <> 'Done'");
+  }
   if (filters.projectId) {
     params.push(filters.projectId);
     where.push(`t.project_id = $${params.length}`);
@@ -204,13 +219,16 @@ function taskWhere(filters: TaskFilters): { where: string; params: unknown[] } {
     );
   }
   if (filters.includeInactive !== true) {
-    where.push("t.status <> 'Cancelled'");
+    if (!cancelledRequested) where.push("t.status <> 'Cancelled'");
     where.push("p.status <> 'Archived' AND p.archived_at IS NULL");
     where.push(
       `(t.subproject_id IS NULL OR NOT EXISTS (
          SELECT 1 FROM subprojects sp
           WHERE sp.subproject_id = t.subproject_id AND sp.status = 'Archived'))`
     );
+  }
+  if (filters.internalOnly === true) {
+    where.push("p.dashboard_visibility = 'INTERNAL'");
   }
   return { where: `WHERE ${where.join(' AND ')}`, params };
 }

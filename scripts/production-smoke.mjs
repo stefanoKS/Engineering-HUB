@@ -27,6 +27,13 @@ const root = process.cwd();
 const localMode = process.argv.includes('--local');
 const localPassword = 'Smoke-local-password-123';
 const ADMIN_EMAIL = 'smoke-admin@example.co.jp';
+const MEMBER_EMAIL = 'smoke-member@example.co.jp';
+const VIEWER_EMAIL = 'smoke-viewer@example.co.jp';
+/** Role fixtures the browser smoke signs in as; employee IDs are the local-mode login. */
+const ROLE_FIXTURES = {
+  member: { email: MEMBER_EMAIL, employeeId: '0002' },
+  viewer: { email: VIEWER_EMAIL, employeeId: '0003' }
+};
 
 function log(message) {
   process.stdout.write(`${message}\n`);
@@ -148,10 +155,15 @@ async function waitFor(url, timeoutMs = 30_000) {
 
 async function seed(client) {
  await client.query("INSERT INTO members(member_id,name,email,role,active) VALUES('MEM-SMOKE','Smoke Admin',$1,'ADMIN',true) ON CONFLICT(email) DO UPDATE SET role='ADMIN',active=true",[ADMIN_EMAIL]);
+ await client.query("INSERT INTO members(member_id,name,email,role,active) VALUES('MEM-SMOKE-MEMBER','Smoke Member',$1,'MEMBER',true) ON CONFLICT(email) DO UPDATE SET role='MEMBER',active=true",[MEMBER_EMAIL]);
+ await client.query("INSERT INTO members(member_id,name,email,role,active) VALUES('MEM-SMOKE-VIEWER','Smoke Viewer',$1,'VIEWER',true) ON CONFLICT(email) DO UPDATE SET role='VIEWER',active=true",[VIEWER_EMAIL]);
  if(localMode){
   const salt=randomBytes(16).toString('hex');
   const hash=await promisify(scrypt)(localPassword,salt,64,{N:131072,r:8,p:1,maxmem:160*1024*1024});
-  await client.query("INSERT INTO local_accounts(member_id,employee_id,password_hash,must_change_password) VALUES('MEM-SMOKE','0001',$1,false) ON CONFLICT(member_id) DO UPDATE SET password_hash=EXCLUDED.password_hash,must_change_password=false",[['scrypt',salt,hash.toString('hex')].join('$')]);
+  const stored=['scrypt',salt,hash.toString('hex')].join('$');
+  await client.query("INSERT INTO local_accounts(member_id,employee_id,password_hash,must_change_password) VALUES('MEM-SMOKE','0001',$1,false) ON CONFLICT(member_id) DO UPDATE SET password_hash=EXCLUDED.password_hash,must_change_password=false",[stored]);
+  await client.query("INSERT INTO local_accounts(member_id,employee_id,password_hash,must_change_password) VALUES('MEM-SMOKE-MEMBER','0002',$1,false) ON CONFLICT(member_id) DO UPDATE SET password_hash=EXCLUDED.password_hash,must_change_password=false",[stored]);
+  await client.query("INSERT INTO local_accounts(member_id,employee_id,password_hash,must_change_password) VALUES('MEM-SMOKE-VIEWER','0003',$1,false) ON CONFLICT(member_id) DO UPDATE SET password_hash=EXCLUDED.password_hash,must_change_password=false",[stored]);
  }
  await client.query("INSERT INTO responsibilities(responsibility_id,name,owner_member_id) VALUES('RSP-SMOKE','Smoke area','MEM-SMOKE') ON CONFLICT(responsibility_id) DO NOTHING");
 }
@@ -208,7 +220,7 @@ async function main() {
         DATABASE_URL: databaseUrl,
         MANAGER_WEB_ALLOWED_DOMAINS: 'example.co.jp',
         DEV_AUTH_ENABLED: localMode ? 'false' : 'true',
-        DEV_AUTH_EMAILS: ADMIN_EMAIL,
+        DEV_AUTH_EMAILS: [ADMIN_EMAIL, MEMBER_EMAIL, VIEWER_EMAIL].join(','),
         PUBLIC_ORIGIN: origin,
         WEB_ROOT: join(root, 'apps', 'web', 'dist'),
         LOG_LEVEL: 'silent',
@@ -283,7 +295,11 @@ async function main() {
     log('PASS  built worker claimed and completed an outbox job');
     if (process.argv.includes('--browser')) {
       const { browserSmoke } = await import('./browser-smoke.mjs');
-      await browserSmoke(origin, ADMIN_EMAIL, localMode ? {employeeId:'0001',password:localPassword} : null);
+      await browserSmoke(origin, ADMIN_EMAIL, localMode ? {employeeId:'0001',password:localPassword} : null, {
+        localMode,
+        password: localPassword,
+        roles: ROLE_FIXTURES
+      });
     }
 
 

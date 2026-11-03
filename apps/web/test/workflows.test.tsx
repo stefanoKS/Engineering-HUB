@@ -1,11 +1,18 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+// jsdom has no native <dialog>; the Modal component needs these two methods to open and close.
+if (typeof HTMLDialogElement !== 'undefined') {
+  HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) { this.open = true; };
+  HTMLDialogElement.prototype.close ??= function close(this: HTMLDialogElement) { this.open = false; };
+}
 import { I18nProvider } from '../src/i18n';
 import { TaskForm } from '../src/screens/TaskForm';
 import { RequestForm } from '../src/screens/Overview';
 import { TasksScreen } from '../src/screens/Tasks';
 import { MyWorkScreen } from '../src/screens/MyWork';
+import { ProjectPicker } from '../src/components/ProjectPicker';
+import { AssigneePicker } from '../src/components/AssigneePicker';
 import { useEditorState } from '../src/state/editor';
 import { queryCache } from '../src/state/cache';
 import { ColorPicker } from '../src/components/ColorPicker';
@@ -180,6 +187,172 @@ describe('member self-service work', () => {
   });
 });
 
+
+describe('role-aware read-only screens', () => {  it('uses the read-only project endpoint for a member picker and never calls a manager route', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(String(url));
+      return response({ items: [{ projectId: 'PRJ-A', projectName: 'Alpha' }], total: 1, totalPages: 1 });
+    }));
+    render(<I18nProvider><ProjectPicker scope="read" value="" onChange={() => undefined} /></I18nProvider>);
+    await screen.findByText('Alpha');
+    expect(calls.some((url) => url.startsWith('/api/work/projects'))).toBe(true);
+    expect(calls.some((url) => url.includes('/api/manager/'))).toBe(false);
+  });
+
+  it('keeps an inactive existing assignee visible without offering them as a new choice', () => {
+    const members = [
+      { memberId: 'MEM-A', name: 'Active Person', active: true, employeeId: '0011' },
+      { memberId: 'MEM-OLD', name: 'Former Person', active: false, employeeId: '0012' }
+    ];
+    render(
+      <I18nProvider>
+        <AssigneePicker members={members} selectedIds={['MEM-OLD']} onChange={() => undefined} />
+      </I18nProvider>
+    );
+    // Visible in the selected panel, marked inactive.
+    expect(screen.getByText('Former Person')).toBeTruthy();
+    expect(screen.getByText('無効')).toBeTruthy();
+    // Not offered for a new selection.
+    expect(screen.queryByRole('button', { name: '選択可能なメンバー: Former Person' })).toBeNull();
+    expect(screen.getByRole('button', { name: '選択可能なメンバー: Active Person' })).toBeTruthy();
+  });
+
+  it('sends a partial patch that omits unchanged deadline, assignees and description', async () => {
+    const legacyTask = {
+      taskId: 'TSK-LEGACY',
+      projectId: 'PRJ-A',
+      subprojectId: null,
+      parentTaskId: null,
+      taskName: 'Legacy task',
+      description: 'Stored description',
+      ownerMemberId: 'MEM-A',
+      ownerName: 'Active Person',
+      status: 'In Progress',
+      displayStatus: 'IN_PROGRESS',
+      priority: 'High',
+      plannedStart: '2026-10-01',
+      dueDate: '2026-12-01',
+      estimatedHours: 12.5,
+      actualHours: 4.25,
+      progressPercent: 35,
+      dependencyIds: [],
+      acceptanceCriteria: 'Kept',
+      nextAction: 'Kept',
+      requiredSkillId: null,
+      requiredSkillLevel: null,
+      assignmentVersion: 2,
+      assignmentApprovedAt: null,
+      notificationEnabled: false,
+      notificationBaseline: '',
+      publicNote: '',
+      plannedDurationValue: null,
+      plannedDurationUnit: null,
+      plannedDurationBasis: null,
+      plannedStartSource: 'LEGACY',
+      completedAt: null,
+      createdByMemberId: null,
+      creationChannel: 'LEGACY',
+      createdAt: '2026-10-01T00:00:00.000Z',
+      updatedAt: '2026-10-01T00:00:00.000Z',
+      revision: 3
+    };
+    const patches: { url: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('parent-options')) return response({ items: [] });
+      if ((init?.method ?? 'GET') === 'PATCH') {
+        patches.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) });
+        return response({ task: legacyTask });
+      }
+      if (url.includes('/api/manager/projects/PRJ-A')) {
+        return response({ record: { projectId: 'PRJ-A', projectName: 'Alpha' } });
+      }
+      return response({ items: [], total: 0, totalPages: 1 });
+    }));
+    render(
+      <I18nProvider>
+        <TaskForm
+          task={legacyTask as never}
+          detail={{ record: legacyTask as never, assignees: [], additionalAssigneeIds: [], assigneeIds: ['MEM-A'], assigneeHistory: [], confirmations: [], deadlineHistory: [], children: [] }}
+          references={{ members: [{ memberId: 'MEM-A', name: 'Active Person', active: true }], skills: [], subprojects: [] }}
+          onClose={() => undefined}
+          onSaved={() => undefined}
+        />
+      </I18nProvider>
+    );
+    fireEvent.change(screen.getByDisplayValue('Legacy task'), { target: { value: 'Legacy task renamed' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(patches).toHaveLength(1));
+    expect(patches[0]!.body).toEqual({ revision: 3, taskName: 'Legacy task renamed' });
+    expect(patches[0]!.body).not.toHaveProperty('deadline');
+    expect(patches[0]!.body).not.toHaveProperty('assigneeIds');
+    expect(patches[0]!.body).not.toHaveProperty('description');
+    expect(patches[0]!.body).not.toHaveProperty('estimatedHours');
+  });
+});
+
+describe('manager actions on the personal list', () => {
+  it('offers a task detail link and a confirmed direct completion, and hides both from a MEMBER', async () => {
+    const calls: { url: string; method: string; body?: string }[] = [];
+    const item = {
+      container: false,
+      taskId: 'TSK-MINE',
+      taskName: 'My own task',
+      projectId: 'PRJ-A',
+      projectName: 'Alpha',
+      subprojectName: '',
+      status: 'In Progress',
+      displayStatus: 'IN_PROGRESS',
+      priority: 'High',
+      dueDate: '2026-12-01',
+      progressPercent: 0,
+      actualHours: 0,
+      reviewState: 'NONE',
+      lastRequestStatus: '',
+      lastRequestType: '',
+      pendingRequest: false,
+      creationChannel: 'MANAGER',
+      completedAt: null,
+      revision: 4
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), method: init?.method ?? 'GET', body: typeof init?.body === 'string' ? init.body : undefined });
+      if (url.includes('/requests/mine')) return response({ items: [], submissionEnabled: true });
+      if (url.includes('/complete')) return response({ task: { ...item, status: 'Done', displayStatus: 'DONE' } });
+      return response({ items: [item], total: 1 });
+    }));
+    const manager = { ...MEMBER_ACTOR, memberId: 'MEM-MANAGER', role: 'MANAGER' as const };
+    render(<I18nProvider><MyWorkScreen actor={manager} /></I18nProvider>);
+    expect(await screen.findByText('My own task')).toBeTruthy();
+    expect(screen.getByRole('link', { name: '詳細を開く' }).getAttribute('href')).toBe('#/task/TSK-MINE');
+    fireEvent.click(screen.getByRole('button', { name: '完了にする' }));
+    fireEvent.click(screen.getByRole('button', { name: '確認' }));
+    await waitFor(() => expect(calls.some((call) => call.url.endsWith('/api/manager/tasks/TSK-MINE/complete'))).toBe(true));
+    const posted = JSON.parse(calls.find((call) => call.url.endsWith('/complete'))!.body!);
+    expect(posted).toEqual({ revision: 4, confirmed: true });
+    // No completion-request form for a manager.
+    expect(screen.queryByRole('button', { name: '完了報告' })).toBeNull();
+  });
+
+  it('gives a MEMBER the request action and no management action', async () => {
+    const item = {
+      container: false, taskId: 'TSK-A', taskName: 'Member work', projectId: 'PRJ-A', projectName: 'Alpha',
+      subprojectName: '', status: 'In Progress', displayStatus: 'IN_PROGRESS', priority: 'Medium',
+      dueDate: '2026-12-01', progressPercent: 0, actualHours: 0, reviewState: 'NONE', lastRequestStatus: '',
+      lastRequestType: '', pendingRequest: false, creationChannel: 'MEMBER', completedAt: null, revision: 1
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/requests/mine')) return response({ items: [], submissionEnabled: true });
+      if (url.includes('/projects')) return response({ items: [], taskCreationEnabled: false });
+      return response({ items: [item], total: 1 });
+    }));
+    render(<I18nProvider><MyWorkScreen actor={MEMBER_ACTOR} /></I18nProvider>);
+    expect(await screen.findByText('Member work')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '完了報告' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '完了にする' })).toBeNull();
+    expect(screen.queryByRole('link', { name: '詳細を開く' })).toBeNull();
+  });
+});
 
 describe('collapsible task tree', () => {
   it('opens children directly below their parent and preserves nested expansion after collapse', async () => {

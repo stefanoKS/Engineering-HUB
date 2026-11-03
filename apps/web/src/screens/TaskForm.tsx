@@ -90,7 +90,7 @@ export function TaskForm({
     [t]
   );
 
-  const payload = {
+  const createPayload = {
     subprojectId: form.subprojectId || null,
     parentTaskId: form.parentTaskId || null,
     taskName: form.taskName.trim(),
@@ -101,6 +101,41 @@ export function TaskForm({
     requiredSkillId: form.requiredSkillId || null,
     requiredSkillLevel: form.requiredSkillGrade ? gradeToLevel(form.requiredSkillGrade) : null
   };
+
+  /**
+   * A true partial patch: only the fields the manager actually changed are sent.
+   *
+   * An untouched deadline, assignment, skill or description is omitted, so the server never
+   * recomputes `planned_start` and never rewrites a historical column that this form does not show.
+   */
+  const editPatch = (): Record<string, unknown> => {
+    if (!task) return createPayload;
+    const patch: Record<string, unknown> = { revision: task.revision };
+    const taskName = form.taskName.trim();
+    if (taskName !== task.taskName) patch.taskName = taskName;
+    if (form.description !== task.description) patch.description = form.description;
+    if (form.priority !== task.priority) patch.priority = form.priority;
+    const subprojectId = form.subprojectId || null;
+    if (subprojectId !== task.subprojectId) patch.subprojectId = subprojectId;
+    const parentTaskId = form.parentTaskId || null;
+    if (parentTaskId !== task.parentTaskId) patch.parentTaskId = parentTaskId;
+    if (deadlineChanged) {
+      patch.deadline = form.deadline;
+      patch.confirmDeadlineChange = true;
+    }
+    const currentAssignees = [...new Set(detail?.assigneeIds ?? (task.ownerMemberId ? [task.ownerMemberId] : []))]
+      .sort()
+      .join(',');
+    const nextAssignees = [...new Set(assigneeIds)].sort().join(',');
+    if (nextAssignees !== currentAssignees) patch.assigneeIds = assigneeIds;
+    const requiredSkillId = form.requiredSkillId || null;
+    if (requiredSkillId !== task.requiredSkillId) patch.requiredSkillId = requiredSkillId;
+    const requiredSkillLevel = form.requiredSkillGrade ? gradeToLevel(form.requiredSkillGrade) : null;
+    if (requiredSkillLevel !== task.requiredSkillLevel) patch.requiredSkillLevel = requiredSkillLevel;
+    return patch;
+  };
+  const pendingPatch = task ? editPatch() : null;
+  const nothingToSave = !!pendingPatch && Object.keys(pendingPatch).length === 1;
 
   return (
     <div className="modal-screen" role="dialog" aria-modal="true">
@@ -207,6 +242,7 @@ export function TaskForm({
 
           <SaveState state={save.state} />
           <ErrorBox error={save.error} />
+          {nothingToSave ? <p className="muted small">{t('tasks.noChanges')}</p> : null}
           <div className="inline-actions">
             <button type="button" className="button secondary" onClick={onClose}>
               {t('action.cancel')}
@@ -214,7 +250,9 @@ export function TaskForm({
             <button
               type="button"
               className="button"
-              disabled={save.state === 'saving' || !form.projectId || !form.taskName || !form.deadline}
+              disabled={
+                save.state === 'saving' || !form.projectId || !form.taskName || !form.deadline || nothingToSave
+              }
               onClick={() =>
                 void save.run(
                   async () => {
@@ -222,15 +260,14 @@ export function TaskForm({
                       const created = await api.post<{ task: Task }>('/api/manager/tasks', {
                         idempotencyKey,
                         projectId: form.projectId,
-                        ...payload
+                        ...createPayload
                       });
                       return created.task;
                     }
-                    const updated = await api.patch<{ task: Task }>(`/api/manager/tasks/${task.taskId}`, {
-                      revision: task.revision,
-                      ...payload,
-                      ...(deadlineChanged ? { confirmDeadlineChange: true } : {})
-                    });
+                    const updated = await api.patch<{ task: Task }>(
+                      `/api/manager/tasks/${task.taskId}`,
+                      pendingPatch
+                    );
                     return updated.task;
                   },
                   {

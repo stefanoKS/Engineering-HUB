@@ -1,17 +1,36 @@
 /**
  * Read-only work browsing for every signed-in role.
  *
- * `MEMBER` and `VIEWER` may read permitted active work, but this module never mutates anything:
- * every write lives in the manager or member command services, each of which re-checks the
- * verified role. A manager sees the same projection here as in the manager screen, and the
- * private fields of a task are removed for the other roles rather than filtered in the browser.
+ * This module never mutates anything. It applies the documented visibility policy before a page is
+ * cut: an employee-visible list contains only `INTERNAL` projects that are not archived, and an
+ * explicit archived/cancelled history view is a manager capability. A guessed identifier answers
+ * `404`, so a refused reader cannot even learn that a RESTRICTED record exists.
  */
-import type { TaskDetail } from '@eh/contracts';
-import { getTask, listChildSummaries, listTaskAssignees, listTaskSummaries, listTaskTreeSummaries } from '@eh/db';
-import { DomainError, requireRole } from '@eh/domain';
+import type { TaskDetail, WorkProjectDetail, WorkProjectList } from '@eh/contracts';
 import type { TaskListQuery } from '@eh/contracts';
+import {
+  getProject,
+  getSubproject,
+  getTask,
+  listChildSummaries,
+  listProjects,
+  listSubprojects,
+  listTaskAssignees,
+  listTaskSummaries,
+  listTaskSummariesForProject,
+  listTaskTreeSummaries
+} from '@eh/db';
+import {
+  DomainError,
+  canIncludeArchivedWork,
+  canReadProjectVisibility,
+  canSeeRestrictedWork,
+  requireRole,
+  rollup
+} from '@eh/domain';
 import type { z } from 'zod';
 import type { ServiceCtx } from './common';
+
 export type WorkPage = {
   items: Awaited<ReturnType<typeof listTaskSummaries>>['items'];
   matchedTotal?: number;
@@ -21,17 +40,23 @@ export type WorkPage = {
   totalPages: number;
 };
 
+export const WORK_PROJECT_PAGE_SIZE = 25;
+
 /**
  * One bounded page of active work.
  *
- * The scope is resolved on the server before paging, archived and cancelled work stays hidden by
- * default, and the browser never filters an already paged list.
+ * The scope is resolved on the server before paging; completed, cancelled, archived and deleted
+ * work is hidden by default and only an explicit filter brings it back.
  */
 export async function listActiveWork(
   ctx: ServiceCtx,
   query: z.infer<typeof TaskListQuery>
 ): Promise<WorkPage> {
   requireRole(ctx.identity, 'VIEWER');
+  if (query.includeInactive && !canIncludeArchivedWork(ctx.identity)) {
+    throw new DomainError('AUTHORIZATION_DENIED', 'Archived and cancelled history is restricted to managers');
+  }
+  const manager = canSeeRestrictedWork(ctx.identity);
   const filters = {
     projectId: query.projectId,
     subprojectId: query.subprojectId,
@@ -44,6 +69,7 @@ export async function listActiveWork(
     containerOnly: query.containerOnly,
     overdueOnly: query.overdueOnly,
     includeInactive: query.includeInactive,
+    internalOnly: !manager,
     sort: query.sort,
     direction: query.direction
   };
@@ -63,18 +89,45 @@ export async function listActiveWork(
   };
 }
 
+/** True when this reader may see the project under the documented visibility policy. */
+function projectVisibleToReader(
+  ctx: ServiceCtx,
+  project: { status: string; dashboardVisibility: string; archivedAt: string | null }
+): boolean {
+  if (canSeeRestrictedWork(ctx.identity)) return true;
+  return (
+    canReadProjectVisibility(ctx.identity, project.dashboardVisibility) &&
+    project.status !== 'Archived' &&
+    !project.archivedAt
+  );
+}
+
 /**
  * Task detail for a non-manager reader.
  *
  * Workflow history, notifications, acceptance criteria, internal notes and schedule
  * confirmations stay manager-only; the reader still sees the task, its assignees and its
- * children, which is what the permitted detail screen needs.
+ * children. A RESTRICTED or archived project, and an unknown identifier, are both `404`.
  */
 export async function readOnlyTaskDetail(ctx: ServiceCtx, taskId: string): Promise<TaskDetail> {
   requireRole(ctx.identity, 'VIEWER');
   const task = await getTask(ctx.db, taskId);
   if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
-  const [children, assignees] = await Promise.all([listChildSummaries(ctx.db, taskId), listTaskAssignees(ctx.db, taskId)]);
+  const project = await getProject(ctx.db, task.projectId);
+  if (!project || !projectVisibleToReader(ctx, project)) {
+    throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  }
+  if (!canSeeRestrictedWork(ctx.identity) && task.subprojectId) {
+    const subproject = await getSubproject(ctx.db, task.subprojectId);
+    if (subproject?.status === 'Archived') throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+    if (subproject && subproject.projectId !== project.projectId) {
+      throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+    }
+  }
+  const [children, assignees] = await Promise.all([
+    listChildSummaries(ctx.db, taskId),
+    listTaskAssignees(ctx.db, taskId)
+  ]);
   const effective = [
     ...(task.ownerMemberId
       ? [
@@ -101,12 +154,44 @@ export async function readOnlyTaskDetail(ctx: ServiceCtx, taskId: string): Promi
   ];
   return {
     record: {
-      ...task,
+      // Explicit allowlist: no recorded effort, duration, notification, note or audit-adjacent value
+      // is copied from the stored row into a read-only response.
+      taskId: task.taskId,
+      projectId: task.projectId,
+      subprojectId: task.subprojectId,
+      parentTaskId: task.parentTaskId,
+      taskName: task.taskName,
+      description: task.description,
+      ownerMemberId: task.ownerMemberId,
+      ownerName: task.ownerName,
+      status: task.status,
+      displayStatus: task.displayStatus,
+      priority: task.priority,
+      plannedStart: null,
+      dueDate: task.dueDate,
+      estimatedHours: null,
+      actualHours: null,
+      progressPercent: null,
+      dependencyIds: [],
       acceptanceCriteria: '',
       nextAction: '',
-      publicNote: '',
+      requiredSkillId: task.requiredSkillId,
+      requiredSkillLevel: task.requiredSkillLevel,
+      assignmentVersion: task.assignmentVersion,
+      assignmentApprovedAt: null,
+      notificationEnabled: false,
       notificationBaseline: '',
-      notificationEnabled: false
+      publicNote: '',
+      plannedDurationValue: null,
+      plannedDurationUnit: null,
+      plannedDurationBasis: null,
+      plannedStartSource: null,
+      completedAt: task.completedAt,
+      createdByMemberId: null,
+      creationChannel: 'LEGACY',
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+      revision: task.revision
     },
     assignees: effective,
     additionalAssigneeIds: effective.filter((row) => !row.primary).map((row) => row.memberId),
@@ -115,5 +200,131 @@ export async function readOnlyTaskDetail(ctx: ServiceCtx, taskId: string): Promi
     confirmations: [],
     deadlineHistory: [],
     children
+  };
+}
+
+/**
+ * Paginated project options for the read-only screens.
+ *
+ * MEMBER and VIEWER see only `INTERNAL`, non-archived projects; the projection omits internal
+ * notes, notification settings and the dashboard summary.
+ */
+export async function listWorkProjects(
+  ctx: ServiceCtx,
+  input: { query?: string; page: number; pageSize?: number }
+): Promise<WorkProjectList> {
+  requireRole(ctx.identity, 'VIEWER');
+  const manager = canSeeRestrictedWork(ctx.identity);
+  const pageSize = Math.min(Math.max(input.pageSize ?? WORK_PROJECT_PAGE_SIZE, 1), 100);
+  const page = await listProjects(
+    ctx.db,
+    {
+      query: input.query,
+      internalOnly: !manager,
+      includeArchived: manager ? undefined : false,
+      sort: 'name',
+      direction: 'asc'
+    },
+    input.page,
+    pageSize
+  );
+  return {
+    items: page.items.map((project) => ({
+      projectId: project.projectId,
+      projectName: project.projectName,
+      responsibilityName: project.responsibilityName,
+      projectOwnerName: project.projectOwnerName,
+      status: project.status,
+      priority: project.priority,
+      committedDeadline: project.committedDeadline,
+      progressPercent: project.progressPercent,
+      health: project.health
+    })),
+    total: page.total,
+    page: input.page,
+    pageSize,
+    totalPages: Math.ceil(page.total / pageSize)
+  };
+}
+
+/**
+ * Project detail for MEMBER and VIEWER.
+ *
+ * The record is rebuilt from an explicit allowlist; milestones, phases, the dashboard summary and
+ * notification settings never leave the server. Completed and cancelled tasks are excluded from
+ * this default view, matching the All Work list.
+ */
+export async function readOnlyProjectDetail(ctx: ServiceCtx, projectId: string): Promise<WorkProjectDetail> {
+  requireRole(ctx.identity, 'VIEWER');
+  const project = await getProject(ctx.db, projectId);
+  if (!project || !projectVisibleToReader(ctx, project)) {
+    throw new DomainError('NOT_FOUND', `Project not found: ${projectId}`);
+  }
+  const manager = canSeeRestrictedWork(ctx.identity);
+  const [tasks, allSubprojects] = await Promise.all([
+    listTaskSummariesForProject(ctx.db, projectId),
+    listSubprojects(ctx.db, projectId)
+  ]);
+  const visibleSubprojects = allSubprojects.filter((subproject) => manager || subproject.status !== 'Archived');
+  const visibleTasks = tasks.filter(
+    (task) => manager || (task.status !== 'Done' && task.status !== 'Cancelled')
+  );
+
+  const rollupOf = (tasksForRollup: typeof tasks) => {
+    const value = rollup(
+      tasksForRollup.map((task) => ({
+        taskId: task.taskId,
+        status: task.status,
+        progressPercent: task.progressPercent ?? null,
+        estimatedHours: null,
+        parentTaskId: task.parentTaskId
+      }))
+    );
+    return { ...value, unknownEffort: value.unknown };
+  };
+
+  const childrenOf = new Map<string, string[]>();
+  for (const subproject of visibleSubprojects) {
+    const parent = subproject.parentSubprojectId ?? '';
+    const list = childrenOf.get(parent) ?? [];
+    list.push(subproject.subprojectId);
+    childrenOf.set(parent, list);
+  }
+  const subtreeIds = (subprojectId: string, seen = new Set<string>()): Set<string> => {
+    if (seen.has(subprojectId)) return seen;
+    seen.add(subprojectId);
+    for (const child of childrenOf.get(subprojectId) ?? []) subtreeIds(child, seen);
+    return seen;
+  };
+  const subtrees = new Map(
+    visibleSubprojects.map((subproject) => [subproject.subprojectId, subtreeIds(subproject.subprojectId)])
+  );
+
+  return {
+    record: {
+      projectId: project.projectId,
+      projectName: project.projectName,
+      responsibilityName: project.responsibilityName,
+      projectOwnerName: project.projectOwnerName,
+      status: project.status,
+      priority: project.priority,
+      committedDeadline: project.committedDeadline,
+      progressPercent: project.progressPercent,
+      health: project.health
+    },
+    progress: rollupOf(visibleTasks),
+    subprojects: visibleSubprojects.map((subproject) => ({
+      subprojectId: subproject.subprojectId,
+      subprojectName: subproject.subprojectName,
+      status: subproject.status,
+      deadline: subproject.deadline,
+      depth: subproject.depth,
+      progress: rollupOf(
+        visibleTasks.filter(
+          (task) => !!task.subprojectId && (subtrees.get(subproject.subprojectId)?.has(task.subprojectId) ?? false)
+        )
+      )
+    })),
+    tasks: visibleTasks
   };
 }

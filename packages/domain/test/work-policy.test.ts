@@ -7,6 +7,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   businessDate,
+  canIncludeArchivedWork,
+  canReadProjectVisibility,
+  canSeeRestrictedWork,
   displayTaskStatus,
   formatSkillGrade,
   gradeToLevel,
@@ -14,6 +17,43 @@ import {
   levelToGrade,
   SKILL_GRADES
 } from '../src/index';
+
+const identity = (role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'VIEWER', overrides: { active?: boolean; verified?: boolean } = {}) => ({
+  memberId: 'MEM-1',
+  name: 'Reader',
+  email: 'reader@example.co.jp',
+  role,
+  active: overrides.active ?? true,
+  verified: overrides.verified ?? true
+});
+
+describe('visibility policy', () => {
+  it('lets only managers see RESTRICTED work', () => {
+    expect(canSeeRestrictedWork(identity('ADMIN'))).toBe(true);
+    expect(canSeeRestrictedWork(identity('MANAGER'))).toBe(true);
+    expect(canSeeRestrictedWork(identity('MEMBER'))).toBe(false);
+    expect(canSeeRestrictedWork(identity('VIEWER'))).toBe(false);
+    expect(canSeeRestrictedWork(identity('ADMIN', { active: false }))).toBe(false);
+    expect(canSeeRestrictedWork(null)).toBe(false);
+  });
+
+  it('treats a blank or unknown visibility as RESTRICTED', () => {
+    expect(canReadProjectVisibility(identity('MEMBER'), 'INTERNAL')).toBe(true);
+    expect(canReadProjectVisibility(identity('MEMBER'), 'RESTRICTED')).toBe(false);
+    expect(canReadProjectVisibility(identity('MEMBER'), '')).toBe(false);
+    expect(canReadProjectVisibility(identity('MEMBER'), null)).toBe(false);
+    expect(canReadProjectVisibility(identity('VIEWER'), 'internal')).toBe(true);
+    expect(canReadProjectVisibility(identity('MANAGER'), 'RESTRICTED')).toBe(true);
+    expect(canReadProjectVisibility(identity('MEMBER', { active: false }), 'INTERNAL')).toBe(false);
+  });
+
+  it('restricts the archived history view to managers', () => {
+    expect(canIncludeArchivedWork(identity('ADMIN'))).toBe(true);
+    expect(canIncludeArchivedWork(identity('MANAGER'))).toBe(true);
+    expect(canIncludeArchivedWork(identity('MEMBER'))).toBe(false);
+    expect(canIncludeArchivedWork(identity('VIEWER'))).toBe(false);
+  });
+});
 
 describe('derived task status', () => {
   it('uses the Tokyo calendar date for yesterday, today and tomorrow', () => {
@@ -54,8 +94,7 @@ describe('derived task status', () => {
   });
 });
 
-describe('A-D skill grades', () => {
-  it('maps grades to the stored integer levels and back', () => {
+describe('A-D skill grades', () => {  it('maps grades to the stored integer levels and back', () => {
     expect(SKILL_GRADES.map((grade) => gradeToLevel(grade))).toEqual([4, 3, 2, 1]);
     expect(levelToGrade(4)).toBe('A');
     expect(levelToGrade(3)).toBe('B');

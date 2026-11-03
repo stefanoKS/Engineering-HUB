@@ -7,6 +7,7 @@ import {
   AuditEntry,
   HealthStatus,
   MemberSummary,
+  ProgressRollup,
   ProjectSummary,
   RequestQueue,
   ResponsibilityCard,
@@ -15,7 +16,7 @@ import {
   TaskSummary
 } from './dto';
 import { IsoDate, IsoTimestamp, Revision } from './common';
-import { ProjectStatus, RequestType, TaskStatus } from './enums';
+import { Priority, ProjectStatus, RequestType, TaskStatus } from './enums';
 
 export const ScopeCounts = z.object({
   workItems: z.number().int().min(0),
@@ -377,6 +378,53 @@ export const LinkableMemberList = z.object({
   total: z.number().int().min(0)
 });
 export type LinkableMemberList = z.infer<typeof LinkableMemberList>;
+
+/**
+ * Read-only project projection for MEMBER and VIEWER.
+ *
+ * It carries only what the permitted screens render: identity, name, responsibility, owner name,
+ * status, priority, deadline, health and derived progress. Notification settings, the dashboard
+ * summary, milestones, phases and internal notes are absent rather than filtered in the browser.
+ */
+export const WorkProject = z.object({
+  projectId: z.string(),
+  projectName: z.string(),
+  responsibilityName: z.string(),
+  projectOwnerName: z.string(),
+  status: ProjectStatus,
+  priority: Priority,
+  committedDeadline: IsoDate.nullable(),
+  progressPercent: z.number().min(0).max(100).nullable(),
+  health: z.string()
+});
+export type WorkProject = z.infer<typeof WorkProject>;
+
+export const WorkProjectList = z.object({
+  items: z.array(WorkProject),
+  total: z.number().int().min(0),
+  page: z.number().int().min(1),
+  pageSize: z.number().int().min(1),
+  totalPages: z.number().int().min(0)
+});
+export type WorkProjectList = z.infer<typeof WorkProjectList>;
+
+export const WorkSubproject = z.object({
+  subprojectId: z.string(),
+  subprojectName: z.string(),
+  status: ProjectStatus,
+  deadline: IsoDate.nullable(),
+  depth: z.number().int().min(1),
+  progress: ProgressRollup
+});
+export type WorkSubproject = z.infer<typeof WorkSubproject>;
+
+export const WorkProjectDetail = z.object({
+  record: WorkProject,
+  progress: ProgressRollup,
+  subprojects: z.array(WorkSubproject),
+  tasks: z.array(TaskSummary)
+});
+export type WorkProjectDetail = z.infer<typeof WorkProjectDetail>;
 
 /** A read-only page of active work for any signed-in role (MEMBER and VIEWER never mutate). */
 export const WorkTaskPage = z.object({

@@ -1,5 +1,35 @@
 # V2 Acceptance Record
 
+## Regression fixes: visibility, role-aware UI, list behaviour, partial edits — 2026-11-04
+
+Baseline `main @ 3bc47fc`. Source/build update only: migrations 0001–0008 and their checksums are
+unchanged, no live database was touched, and no deployment was performed. Every database test used a
+disposable database (`freshDatabase()` truncation, `smoke:prod` isolated/embedded PostgreSQL).
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| `npm run typecheck` | PASS | contracts, domain, db, i18n, api, web, worker, benchmark, migration |
+| `npm run lint` (V1 + V2) | PASS | eslint clean for both trees |
+| `npm test` | PASS | V1 **776 pass, 0 fail**; V2 **229 pass, 1 skipped** across 17 files |
+| `npm run validate` | PASS | V1 source, V2 governance (135 files), deployment templates |
+| `npm run build` | PASS | API, web, worker, migration artifacts |
+| `npm run smoke:prod` | PASS | built CLI applied schema 8; health/readiness/session/read/mutation; worker job; clean stop |
+| `npm run test:browser` | PASS | Chromium: admin journey plus **MEMBER and VIEWER** read-only journeys |
+| `npm run test:lan` | PASS | local auth: account provisioning, forced change, plus MEMBER and VIEWER journeys |
+| GATE 1 visibility (API, real PostgreSQL) | PASS | `roles-and-work.test.ts` "project visibility policy": INTERNAL visible, RESTRICTED/archived/guessed IDs `404`, manager sees all, `includeInactive` `403` for MEMBER/VIEWER, allowlisted project record keys |
+| GATE 1 DTO allowlist | PASS | read-only task record rebuilt from an allowlist; project record keys asserted exactly |
+| GATE 2 read-only project endpoints | PASS | `/api/work/projects` paginated and role-filtered; `/api/work/projects/:id` `404` for RESTRICTED/archived/guessed |
+| GATE 2 role-aware UI | PASS | `workflows.test.tsx` project-picker scope, manager My Work actions, MEMBER restrictions; browser journeys per role |
+| GATE 3 list behaviour | PASS | "active list behaviour": Done excluded by default for MEMBER and MANAGER, `displayStatus=DONE` returns it, pagination total 30 across 2 pages, tree `matchedTotal` 1 with the parent retained |
+| GATE 4 partial patch | PASS | "partial edits preserve recorded data": name-only patch keeps deadline, planned start, hours, progress, duration, assignment; deadline change without duration keeps the stored start |
+| GATE 4 inactive assignee | PASS | existing inactive assignee preserved; new inactive assignment refused and writes nothing |
+| GATE 4 requester filter | PASS | submitter sees `pendingRequest`/`reviewState`, the other assignee does not |
+| GATE 5 startup | PASS | `schema readiness` test: `503 DATABASE_MIGRATION_REQUIRED` when the ledger is behind, `200` after restore |
+| Live Google Workspace / Drive / mail | NOT_RUN | no credential, tenant or mailbox was used |
+| Physical second-PC LAN rehearsal | NOT_RUN | requires the operator host |
+
+Production remains **NOT APPROVED FOR PRODUCTION**.
+
 ## Unified account, role, task and UI simplification — 2026-11-03
 
 Baseline `main @ c0cee21201531ffd2b6c13cca6de79b160ed6b96` with a clean worktree. This is a

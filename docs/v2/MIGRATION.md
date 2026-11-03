@@ -6,6 +6,35 @@ workbook, and it never sends a notification.
 
 ## 1. Commands
 
+### Schema 7 → 8 on an existing installation (Windows LAN)
+
+A deployment built from this repository requires **schema 8** (the last migration is the unchanged,
+checksummed `0008_member_created_work.sql`). `/readyz` answers `503 DATABASE_MIGRATION_REQUIRED`
+until the ledger reaches 8; the API never migrates at startup.
+
+```powershell
+# 1. Verified encrypted backup first (a failed backup stops the upgrade)
+./deploy/windows/Backup-Now.cmd
+
+# 2. Apply the reviewed additive migrations; the prompt requires "APPLY MIGRATIONS"
+./deploy/windows/Migrate-Lan.cmd
+
+# 3. Confirm the ledger, readiness and data preservation
+psql "$env:DATABASE_URL" -c "SELECT version, name FROM schema_migrations ORDER BY version;"
+Invoke-RestMethod http://localhost:8050/readyz
+node --env-file=C:/approved-recovery/worker.env apps/worker/dist/cli.js verify-restore C:/approved-recovery/backup.dump.enc
+
+# 4. Only after 1-3 pass, publish the new application build and start it
+./deploy/windows/Start-Lan.cmd
+```
+
+Rollback is a restore, not a reverse migration: stop the API and worker, restore the verified
+backup into a fresh database, point `DATABASE_URL` at it and restart. An already-applied migration
+whose file changed is refused rather than re-run, so no recorded checksum may be edited - a schema
+change always needs a new numbered migration.
+
+### V1 workbook → V2 database
+
 ```bash
 export DATABASE_URL=postgres://eh:…@localhost:5432/eh
 npm run db:migrate                       # create the V2 schema first

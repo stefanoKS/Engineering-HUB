@@ -93,8 +93,11 @@ Verify sign-in from a second PC before inviting staff.
   session, so a manager keeps a personal list beside the departmental one and never sees another
   person's personal list.
 * **All Work (すべてのタスク):** the same server-paged, filterable, expandable list for everyone.
-  MEMBER and VIEWER see it read-only; only ADMIN and MANAGER get edit, approve, complete and delete
-  controls, and the server refuses those calls for the other roles regardless of the buttons.
+  MEMBER and VIEWER see it read-only, may open a permitted task and its project, and can filter the
+  project picker; only ADMIN and MANAGER get edit, approve, complete and delete controls, and the
+  server refuses those calls for the other roles regardless of the buttons. The default list hides
+  completed, cancelled and archived work; choose 完了 (Done) in the status filter to review completed
+  work, and managers may additionally include cancelled and archived records.
 * **Creating work:** a MEMBER selects an active project and optional subproject, enters the name,
   description, deadline and priority, and becomes the owner. Nothing else is required; a deadline on
   a Saturday, Sunday or public holiday is accepted without a warning. Creation needs no approval.

@@ -25,6 +25,10 @@ export type ProjectFilters = {
   query?: string;
   sort?: 'deadline' | 'name' | 'status' | 'priority' | 'updated';
   direction?: 'asc' | 'desc';
+  /** Visibility policy: only `INTERNAL` projects are employee-visible. */
+  internalOnly?: boolean;
+  /** Archived projects are an explicit management view. */
+  includeArchived?: boolean;
 };
 
 const PROJECT_SORTS: Record<NonNullable<ProjectFilters['sort']>, string> = {
@@ -55,6 +59,14 @@ export async function listProjects(
   if (filters.query) {
     params.push(`%${filters.query.toLowerCase()}%`);
     where.push(`(lower(p.project_name) LIKE $${params.length} OR lower(p.next_action) LIKE $${params.length})`);
+  }
+  if (filters.internalOnly === true) {
+    where.push("p.dashboard_visibility = 'INTERNAL'");
+  }
+  // Only an explicit `false` hides archived projects, so the manager list keeps its behaviour and
+  // `status=Archived` remains a usable filter.
+  if (filters.includeArchived === false && filters.status !== 'Archived') {
+    where.push("p.status <> 'Archived' AND p.archived_at IS NULL");
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const total = await db.one<{ count: string }>(`SELECT count(*)::text AS count FROM projects p ${whereSql}`, params);

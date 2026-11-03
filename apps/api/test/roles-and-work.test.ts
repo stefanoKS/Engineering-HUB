@@ -300,7 +300,7 @@ describe('derived status', () => {
     expect(stored?.status).toBe('In Progress');
   });
 
-  it('hides cancelled and archived work from the default list', async () => {
+  it('hides cancelled and archived work from the default list and restricts the history view', async () => {
     await db.query(
       "INSERT INTO tasks(task_id,project_id,task_name,owner_member_id,status,due_date) VALUES('TSK-OPEN','PRJ-A','Open','MEM-A','In Progress','2026-12-01'),('TSK-CAN','PRJ-A','Cancelled','MEM-A','Cancelled','2026-12-01')"
     );
@@ -312,10 +312,284 @@ describe('derived status', () => {
     expect(ids).toContain('TSK-OPEN');
     expect(ids).not.toContain('TSK-CAN');
     expect(ids).not.toContain('TSK-OLD');
-    const including = await app.inject({ url: '/api/work/tasks?includeInactive=true', headers: { cookie: viewer.cookie! } });
+    // Archived and cancelled history is a management view, refused before any read.
+    const refused = await app.inject({ url: '/api/work/tasks?includeInactive=true', headers: { cookie: viewer.cookie! } });
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json().error.code).toBe('AUTHORIZATION_DENIED');
+    const manager = await login('0002');
+    const including = await app.inject({ url: '/api/work/tasks?includeInactive=true', headers: { cookie: manager.cookie! } });
+    expect(including.statusCode, including.body).toBe(200);
     const allIds = (including.json() as { data: { items: { taskId: string }[] } }).data.items.map((task) => task.taskId);
     expect(allIds).toContain('TSK-CAN');
     expect(allIds).toContain('TSK-OLD');
+  });
+});
+
+describe('project visibility policy', () => {
+  async function fixtures(): Promise<void> {
+    await db.query(
+      "INSERT INTO projects(project_id,project_name,status,dashboard_visibility) VALUES('PRJ-R','Restricted','Active','RESTRICTED')"
+    );
+    await db.query(
+      "INSERT INTO projects(project_id,project_name,status,archived_at) VALUES('PRJ-ARC','Archived','Archived', now())"
+    );
+    await db.query(
+      "INSERT INTO tasks(task_id,project_id,task_name,status,due_date) VALUES('T-PUB','PRJ-A','Public work','In Progress','2026-12-01'),('T-RES','PRJ-R','Restricted work','In Progress','2026-12-01'),('T-ARC','PRJ-ARC','Archived work','In Progress','2026-12-01')"
+    );
+  }
+
+  it('shows MEMBER and VIEWER only INTERNAL, non-archived work', async () => {
+    await fixtures();
+    for (const employeeId of ['0010', '0020']) {
+      const headers = await login(employeeId);
+      const response = await app.inject({ url: '/api/work/tasks', headers: { cookie: headers.cookie! } });
+      expect(response.statusCode, response.body).toBe(200);
+      const ids = (response.json() as { data: { items: { taskId: string }[] } }).data.items.map((task) => task.taskId);
+      expect(ids).toContain('T-PUB');
+      expect(ids).not.toContain('T-RES');
+      expect(ids).not.toContain('T-ARC');
+      // Guessed and restricted identifiers are indistinguishable from a missing record.
+      for (const taskId of ['T-RES', 'T-ARC', 'TSK-GUESSED-0001']) {
+        const detail = await app.inject({ url: `/api/work/tasks/${taskId}`, headers: { cookie: headers.cookie! } });
+        expect(detail.statusCode, `${employeeId} ${taskId}`).toBe(404);
+        expect(detail.json().error.code).toBe('NOT_FOUND');
+        expect(detail.body).not.toContain('Restricted work');
+      }
+      const publicDetail = await app.inject({ url: '/api/work/tasks/T-PUB', headers: { cookie: headers.cookie! } });
+      expect(publicDetail.statusCode).toBe(200);
+    }
+  });
+
+  it('keeps restricted and archived work visible to a manager', async () => {
+    await fixtures();
+    const manager = await login('0002');
+    const response = await app.inject({
+      url: '/api/work/tasks?includeInactive=true',
+      headers: { cookie: manager.cookie! }
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    const ids = (response.json() as { data: { items: { taskId: string }[] } }).data.items.map((task) => task.taskId);
+    expect(ids).toEqual(expect.arrayContaining(['T-PUB', 'T-RES', 'T-ARC']));
+    for (const taskId of ['T-RES', 'T-ARC', 'T-PUB']) {
+      const detail = await app.inject({ url: `/api/work/tasks/${taskId}`, headers: { cookie: manager.cookie! } });
+      expect(detail.statusCode, taskId).toBe(200);
+    }
+  });
+
+  it('offers a paginated read-only project list and an allowlisted project detail', async () => {
+    await fixtures();
+    const member = await login('0010');
+    const list = await app.inject({ url: '/api/work/projects?pageSize=10', headers: { cookie: member.cookie! } });
+    expect(list.statusCode, list.body).toBe(200);
+    const body = list.json().data as { items: { projectId: string }[]; total: number; totalPages: number };
+    expect(body.items.map((project) => project.projectId)).toContain('PRJ-A');
+    expect(body.items.map((project) => project.projectId)).not.toContain('PRJ-R');
+    expect(body.items.map((project) => project.projectId)).not.toContain('PRJ-ARC');
+    expect(body.totalPages).toBeGreaterThanOrEqual(1);
+
+    const detail = await app.inject({ url: '/api/work/projects/PRJ-A', headers: { cookie: member.cookie! } });
+    expect(detail.statusCode, detail.body).toBe(200);
+    const record = detail.json().data.record as Record<string, unknown>;
+    expect(Object.keys(record).sort()).toEqual(
+      ['committedDeadline', 'health', 'priority', 'projectId', 'projectName', 'progressPercent', 'projectOwnerName', 'responsibilityName', 'status'].sort()
+    );
+    expect(detail.body).not.toContain('dashboardSummary');
+    expect(detail.body).not.toContain('notificationEnabled');
+
+    for (const projectId of ['PRJ-R', 'PRJ-ARC', 'PRJ-GUESSED']) {
+      const refused = await app.inject({ url: `/api/work/projects/${projectId}`, headers: { cookie: member.cookie! } });
+      expect(refused.statusCode, projectId).toBe(404);
+    }
+  });
+});
+
+describe('active list behaviour', () => {
+  it('excludes completed work from the default list and serves it through an explicit filter', async () => {
+    await db.query(
+      "INSERT INTO tasks(task_id,project_id,task_name,status,due_date) VALUES('T-OPEN','PRJ-A','Open work','In Progress','2026-12-01'),('T-DONE','PRJ-A','Finished work','Done','2026-12-01')"
+    );
+    for (const employeeId of ['0010', '0002']) {
+      const headers = await login(employeeId);
+      const standard = await app.inject({ url: '/api/work/tasks', headers: { cookie: headers.cookie! } });
+      const ids = (standard.json() as { data: { items: { taskId: string }[] } }).data.items.map((task) => task.taskId);
+      expect(ids).toContain('T-OPEN');
+      expect(ids).not.toContain('T-DONE');
+      const done = await app.inject({ url: '/api/work/tasks?displayStatus=DONE', headers: { cookie: headers.cookie! } });
+      expect(done.statusCode, done.body).toBe(200);
+      const doneIds = (done.json() as { data: { items: { taskId: string }[]; total: number } }).data;
+      expect(doneIds.items.map((task) => task.taskId)).toEqual(['T-DONE']);
+      expect(doneIds.total).toBe(1);
+    }
+  });
+
+  it('keeps pagination totals and the tree ancestry consistent with the filters', async () => {
+    const values: string[] = [];
+    for (let index = 0; index < 30; index += 1) {
+      values.push(`('T-${String(index).padStart(2, '0')}','PRJ-A','Bulk task ${index}','In Progress','2026-12-01')`);
+    }
+    await db.query(`INSERT INTO tasks(task_id,project_id,task_name,status,due_date) VALUES ${values.join(',')}`);
+    await db.query(
+      "INSERT INTO tasks(task_id,project_id,task_name,status,due_date) VALUES('T-DONE-BULK','PRJ-A','Finished bulk','Done','2026-12-01')"
+    );
+    const member = await login('0010');
+    const first = await app.inject({ url: '/api/work/tasks?pageSize=25&page=1', headers: { cookie: member.cookie! } });
+    const firstPage = first.json().data as { items: unknown[]; total: number; totalPages: number };
+    expect(firstPage.total).toBe(30);
+    expect(firstPage.totalPages).toBe(2);
+    expect(firstPage.items).toHaveLength(25);
+    const second = await app.inject({ url: '/api/work/tasks?pageSize=25&page=2', headers: { cookie: member.cookie! } });
+    expect((second.json().data as { items: unknown[] }).items).toHaveLength(5);
+
+    // A matching child keeps its parent as ancestry context, and the counts stay filter-scoped.
+    await db.query(
+      "INSERT INTO tasks(task_id,project_id,task_name,status,due_date) VALUES('T-ROOT','PRJ-A','Assembly','In Progress','2026-12-02'),('T-CHILD','PRJ-A','Unique wiring step','In Progress','2026-12-02')"
+    );
+    await db.query("UPDATE tasks SET parent_task_id = 'T-ROOT' WHERE task_id = 'T-CHILD'");
+    const tree = await app.inject({
+      url: '/api/work/tasks?tree=true&query=Unique%20wiring&pageSize=25',
+      headers: { cookie: member.cookie! }
+    });
+    expect(tree.statusCode, tree.body).toBe(200);
+    const treeBody = tree.json().data as { items: { taskId: string }[]; matchedTotal: number; total: number };
+    expect(treeBody.matchedTotal).toBe(1);
+    expect(treeBody.items.map((task) => task.taskId)).toEqual(['T-ROOT']);
+  });
+});
+
+describe('partial edits preserve recorded data', () => {
+  it('leaves deadline, assignment, planned start, hours, progress and duration untouched', async () => {
+    await db.query(
+      `INSERT INTO tasks(task_id,project_id,task_name,description,owner_member_id,status,priority,planned_start,
+         due_date,estimated_hours,actual_hours,progress_percent,planned_duration_value,planned_duration_unit,
+         planned_duration_basis,planned_start_source,assignment_version,assignment_approved_at)
+       VALUES('T-LEGACY','PRJ-A','Legacy task','Original','MEM-A','In Progress','High','2026-10-01',
+         '2026-12-01',12.5,4.25,35,5,'DAY','WORKING_DAYS','LEGACY',2,now())`
+    );
+    await db.query(
+      "INSERT INTO task_assignees(assignment_id,task_id,member_id,assigned_by) VALUES('ASG-1','T-LEGACY','MEM-B','fixture')"
+    );
+    const manager = await login('0002');
+    const detail = await app.inject({ url: '/api/manager/tasks/T-LEGACY', headers: { cookie: manager.cookie! } });
+    const revision = (detail.json() as { data: { record: { revision: number } } }).data.record.revision;
+
+    // A name-only edit is a partial patch.
+    const renamed = await app.inject({
+      method: 'PATCH',
+      url: '/api/manager/tasks/T-LEGACY',
+      headers: manager,
+      payload: { revision, taskName: 'Legacy task renamed' }
+    });
+    expect(renamed.statusCode, renamed.body).toBe(200);
+    const stored = await db.one<Record<string, unknown>>(
+      `SELECT task_name, due_date::text AS due_date, planned_start::text AS planned_start,
+              estimated_hours, actual_hours, progress_percent, planned_duration_value,
+              planned_start_source, owner_member_id, assignment_version
+         FROM tasks WHERE task_id = 'T-LEGACY'`
+    );
+    expect(stored).toMatchObject({
+      task_name: 'Legacy task renamed',
+      due_date: '2026-12-01',
+      planned_start: '2026-10-01',
+      progress_percent: 35,
+      planned_start_source: 'LEGACY',
+      owner_member_id: 'MEM-A',
+      assignment_version: 2
+    });
+    expect(Number(stored?.estimated_hours)).toBe(12.5);
+    expect(Number(stored?.actual_hours)).toBe(4.25);
+    expect(Number(stored?.planned_duration_value)).toBe(5);
+    const assignees = await db.many<{ member_id: string }>(
+      'SELECT member_id FROM task_assignees WHERE task_id = $1 AND removed_at IS NULL ORDER BY member_id',
+      ['T-LEGACY']
+    );
+    expect(assignees.map((row) => row.member_id)).toEqual(['MEM-B']);
+
+    // A deadline change on work without a duration keeps the stored start instead of inventing one.
+    await db.query(
+      `INSERT INTO tasks(task_id,project_id,task_name,owner_member_id,status,priority,planned_start,due_date,
+         estimated_hours,actual_hours,progress_percent,planned_start_source)
+       VALUES('T-NODUR','PRJ-A','Deadline only','MEM-A','In Progress','Medium','2026-10-01','2026-12-01',
+         8,2,20,'LEGACY')`
+    );
+    const moved = await app.inject({
+      method: 'PATCH',
+      url: '/api/manager/tasks/T-NODUR',
+      headers: manager,
+      payload: { revision: 1, deadline: '2026-12-15', confirmDeadlineChange: true }
+    });
+    expect(moved.statusCode, moved.body).toBe(200);
+    const afterDeadline = await db.one<{ due_date: string; planned_start: string; estimated_hours: string; actual_hours: string }>(
+      `SELECT due_date::text AS due_date, planned_start::text AS planned_start,
+              estimated_hours::text AS estimated_hours, actual_hours::text AS actual_hours
+         FROM tasks WHERE task_id = 'T-NODUR'`
+    );
+    expect(afterDeadline?.due_date).toBe('2026-12-15');
+    expect(afterDeadline?.planned_start).toBe('2026-10-01');
+    expect(Number(afterDeadline?.estimated_hours)).toBe(8);
+    expect(Number(afterDeadline?.actual_hours)).toBe(2);
+  });
+
+  it('keeps an existing inactive assignee and refuses a new inactive assignment', async () => {
+    await db.query(
+      "INSERT INTO tasks(task_id,project_id,task_name,owner_member_id,status,due_date) VALUES('T-INACT','PRJ-A','Inactive owner','MEM-B','In Progress','2026-12-01')"
+    );
+    await db.query("INSERT INTO members(member_id,name,active) VALUES('MEM-OLD','Former Staff',false)");
+    await db.query("UPDATE members SET active = false WHERE member_id = 'MEM-B'");
+    const manager = await login('0002');
+    const renamed = await app.inject({
+      method: 'PATCH',
+      url: '/api/manager/tasks/T-INACT',
+      headers: manager,
+      payload: { revision: 1, taskName: 'Inactive owner renamed' }
+    });
+    expect(renamed.statusCode, renamed.body).toBe(200);
+    const stored = await db.one<{ owner_member_id: string }>("SELECT owner_member_id FROM tasks WHERE task_id = 'T-INACT'");
+    expect(stored?.owner_member_id).toBe('MEM-B');
+
+    const revision = (renamed.json() as { data: { task: { revision: number } } }).data.task.revision;
+    const refused = await app.inject({
+      method: 'PATCH',
+      url: '/api/manager/tasks/T-INACT',
+      headers: manager,
+      payload: { revision, assigneeIds: ['MEM-B', 'MEM-OLD'] }
+    });
+    expect(refused.statusCode).toBe(400);
+    expect(refused.json().error.code).toBe('VALIDATION_FAILED');
+    // The refused assignment wrote nothing.
+    const untouched = await db.one<{ owner_member_id: string; revision: number }>(
+      "SELECT owner_member_id, revision FROM tasks WHERE task_id = 'T-INACT'"
+    );
+    expect(untouched?.owner_member_id).toBe('MEM-B');
+    expect(untouched?.revision).toBe(revision);
+  });
+
+  it('shows a pending completion indicator only to the member who submitted it', async () => {
+    await saveSettings(db, { REQUEST_SUBMISSION_ENABLED: 'true' }, 'MEM-ADMIN');
+    const manager = await login('0002');
+    const taskId = await createTaskAsManager(manager, { name: 'Shared report', assigneeIds: ['MEM-A', 'MEM-B'] });
+    const memberA = await login('0010');
+    const submitted = await app.inject({
+      method: 'POST',
+      url: '/api/employee/requests',
+      headers: memberA,
+      payload: { clientRequestId: 'shared-indicator-1', taskId, requestType: 'COMPLETION_REPORT', completionNote: 'Done by A' }
+    });
+    expect(submitted.statusCode, submitted.body).toBe(200);
+
+    const listA = await app.inject({ url: '/api/employee/my-work', headers: { cookie: memberA.cookie! } });
+    const itemA = (listA.json() as { data: { items: { taskId: string; pendingRequest: boolean; reviewState: string }[] } }).data.items.find(
+      (item) => item.taskId === taskId
+    );
+    expect(itemA?.pendingRequest).toBe(true);
+    expect(itemA?.reviewState).toBe('PENDING');
+
+    const memberB = await login('0011');
+    const listB = await app.inject({ url: '/api/employee/my-work', headers: { cookie: memberB.cookie! } });
+    const itemB = (listB.json() as { data: { items: { taskId: string; pendingRequest: boolean; reviewState: string }[] } }).data.items.find(
+      (item) => item.taskId === taskId
+    );
+    expect(itemB?.pendingRequest).toBe(false);
+    expect(itemB?.reviewState).toBe('NONE');
   });
 });
 

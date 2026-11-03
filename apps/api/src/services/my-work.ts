@@ -44,14 +44,18 @@ const MY_WORK_SELECT = `
          t.creation_channel, t.completed_at, t.revision,
          EXISTS (SELECT 1 FROM tasks c WHERE c.parent_task_id = t.task_id AND c.deleted_at IS NULL) AS container,
          EXISTS (SELECT 1 FROM task_requests rp
-                  WHERE rp.task_id = t.task_id AND rp.status IN ('PENDING','PROCESSING')) AS pending_request,
+                  WHERE rp.task_id = t.task_id AND rp.requester_member_id = $1
+                    AND rp.status IN ('PENDING','PROCESSING')) AS pending_request,
          (SELECT rr.status FROM task_requests rr
-           WHERE rr.task_id = t.task_id AND rr.request_type = 'COMPLETION_REPORT'
+           WHERE rr.task_id = t.task_id AND rr.requester_member_id = $1
+             AND rr.request_type = 'COMPLETION_REPORT'
            ORDER BY rr.submitted_at DESC LIMIT 1) AS last_completion_status,
          (SELECT rq.status FROM task_requests rq
-           WHERE rq.task_id = t.task_id ORDER BY rq.submitted_at DESC LIMIT 1) AS last_request_status,
+           WHERE rq.task_id = t.task_id AND rq.requester_member_id = $1
+           ORDER BY rq.submitted_at DESC LIMIT 1) AS last_request_status,
          (SELECT rq.request_type FROM task_requests rq
-           WHERE rq.task_id = t.task_id ORDER BY rq.submitted_at DESC LIMIT 1) AS last_request_type
+           WHERE rq.task_id = t.task_id AND rq.requester_member_id = $1
+           ORDER BY rq.submitted_at DESC LIMIT 1) AS last_request_type
     FROM tasks t
     JOIN projects p ON p.project_id = t.project_id
     LEFT JOIN subprojects s ON s.subproject_id = t.subproject_id`;
@@ -65,7 +69,7 @@ const ACTIVE_WORK = `t.deleted_at IS NULL AND t.status <> 'Cancelled'
   AND (t.subproject_id IS NULL OR NOT EXISTS (
         SELECT 1 FROM subprojects sp WHERE sp.subproject_id = t.subproject_id AND sp.status = 'Archived'))`;
 
-/** A compact review state for the member: what happened to the last completion report. */
+/** A compact review state for the member: what happened to *their own* last completion report. */
 export function reviewStateOf(row: { pending_request: boolean; last_completion_status: string | null }) {
   if (row.pending_request) return 'PENDING' as const;
   const status = row.last_completion_status ?? '';

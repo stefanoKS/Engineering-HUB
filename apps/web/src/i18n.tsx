@@ -9,6 +9,9 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { APP_NAME, DEFAULT_LANGUAGE, LANGUAGES, STORAGE_KEY, isLanguage, label as dictLabel, t as dictT, type Language } from '@eh/i18n';
 
 export const V2_LABELS = {
+ 'tasks.noChanges': { ja: '変更はありません。', en: 'No changes to save.' },
+ 'assignee.inactive': { ja: '無効', en: 'Inactive' },
+ 'action.open': { ja: '詳細を開く', en: 'Open' },
  'nav.allWork': { ja: 'すべてのタスク', en: 'All work' },
  'allWork.intro': {
    ja: '社内で共有されている作業を閲覧できます。閲覧のみで、変更はできません。',

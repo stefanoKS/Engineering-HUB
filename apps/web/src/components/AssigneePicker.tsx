@@ -51,8 +51,13 @@ export function AssigneePicker({
     );
   };
 
+  // Only active employees can be newly selected, but an inactive member who is already assigned
+  // stays visible below so the manager can see the current reality and remove them.
   const available = active.filter((member) => !selected.has(member.memberId) && matches(member));
-  const chosen = active.filter((member) => selected.has(member.memberId));
+  const chosen = useMemo(
+    () => sortMembers(members.filter((member) => selected.has(member.memberId))),
+    [members, selected]
+  );
 
   const add = (memberId: string): void => {
     if (selected.has(memberId)) return;
@@ -108,6 +113,7 @@ export function AssigneePicker({
             {chosen.map((member) => (
               <li key={member.memberId} className="chip">
                 <span>{member.name}</span>
+                {member.active ? null : <span className="chip-inactive">{t('assignee.inactive')}</span>}
                 <button
                   type="button"
                   className="chip-remove"

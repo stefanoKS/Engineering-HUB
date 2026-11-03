@@ -131,6 +131,9 @@ export async function planTaskDeadline(
     durationBasis: string | null | undefined;
     acknowledge?: boolean | undefined;
     milestones?: { name: string; targetDate: string | null }[];
+    /** The stored start, so an edit that supplies no duration can never erase a legacy value. */
+    currentPlannedStart?: string | null;
+    currentPlannedStartSource?: 'DERIVED' | 'LEGACY' | 'MANUAL' | null;
   }
 ): Promise<{ plannedStart: string | null; plannedStartSource: 'DERIVED' | 'LEGACY' | 'MANUAL' | null }> {
   if (!input.deadline) return { plannedStart: null, plannedStartSource: null };
@@ -141,8 +144,8 @@ export async function planTaskDeadline(
       plannedDurationValue: input.durationValue ?? null,
       plannedDurationUnit: (input.durationUnit as 'DAY' | 'WEEK' | null) ?? null,
       plannedDurationBasis: (input.durationBasis as 'WORKING_DAYS' | 'CALENDAR_DAYS' | null) ?? null,
-      plannedStart: null,
-      plannedStartSource: null
+      plannedStart: input.currentPlannedStart ?? null,
+      plannedStartSource: input.currentPlannedStartSource ?? null
     },
     createCalendar(holidays)
   );
@@ -325,15 +328,23 @@ export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<t
       next: body.deadline
     });
   }
+  const durationProvided =
+    body.plannedDurationValue !== undefined ||
+    body.plannedDurationUnit !== undefined ||
+    body.plannedDurationBasis !== undefined;
+  // A schedule is recomputed only when the deadline or the duration actually changed, and the
+  // stored start is carried through so an unrelated edit never rewrites it.
   const plan =
-    body.deadline !== undefined || body.plannedDurationValue !== undefined
+    deadlineChanged || durationProvided
       ? await planTaskDeadline(ctx, {
           deadline: body.deadline !== undefined ? body.deadline : task.dueDate,
           durationValue:
             body.plannedDurationValue !== undefined ? body.plannedDurationValue : task.plannedDurationValue,
           durationUnit: body.plannedDurationUnit !== undefined ? body.plannedDurationUnit : task.plannedDurationUnit,
           durationBasis:
-            body.plannedDurationBasis !== undefined ? body.plannedDurationBasis : task.plannedDurationBasis
+            body.plannedDurationBasis !== undefined ? body.plannedDurationBasis : task.plannedDurationBasis,
+          currentPlannedStart: task.plannedStart,
+          currentPlannedStartSource: task.plannedStartSource
         })
       : null;
 
@@ -374,8 +385,7 @@ export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<t
   if (plan) {
     changes.plannedStart = plan.plannedStart;
     changes.plannedStartSource = plan.plannedStartSource;
-  }
-  if (assignmentMoved) {
+  }  if (assignmentMoved) {
     changes.assignmentVersion = task.assignmentVersion + 1;
     changes.assignmentApprovedAt = null;
   }

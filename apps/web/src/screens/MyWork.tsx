@@ -12,7 +12,7 @@ import { api, ApiFailure } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
 import { Badge, ErrorBox } from '../components/ui';
-import { createIdempotencyKey, SelectInput, TextInput, useIdempotencyKey, useSave } from '../components/forms';
+import { ConfirmDialog, createIdempotencyKey, SelectInput, TextInput, useIdempotencyKey, useSave } from '../components/forms';
 
 const PAGE_SIZE = 25;
 
@@ -103,6 +103,7 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
           key={`${item.taskId}:${item.revision}`}
           item={item}
           canReport={canReport}
+          canManage={actor.role === 'ADMIN' || actor.role === 'MANAGER'}
           submissionEnabled={requests.data?.submissionEnabled ?? false}
           onChanged={refreshAll}
         />
@@ -253,16 +254,20 @@ function CreateTaskCard({
 function WorkCard({
   item,
   canReport,
+  canManage,
   submissionEnabled,
   onChanged
 }: {
   item: MyWorkList['items'][number];
   canReport: boolean;
+  canManage: boolean;
   submissionEnabled: boolean;
   onChanged: () => void;
 }): JSX.Element {
-  const { t } = useI18n();
+  const { t, label } = useI18n();
   const [reporting, setReporting] = useState(false);
+  const [completing, setCompleting] = useState(false);
+  const save = useSave();
 
   const finished = ['DONE', 'CANCELLED'].includes(item.displayStatus);
   const locked = finished || item.container;
@@ -270,10 +275,13 @@ function WorkCard({
 
   return (
     <div className="card stack">
-      <h3>{item.taskName}</h3>
+      <h3>
+        <a href={`#/task/${item.taskId}`}>{item.taskName}</a>
+      </h3>
       <p className="muted small">
         {item.projectName}
-        {item.subprojectName ? ` / ${item.subprojectName}` : ''} · {t('myWork.deadline')}: {item.dueDate ?? t('common.unset')}
+        {item.subprojectName ? ` / ${item.subprojectName}` : ''} · {t('myWork.deadline')}: {item.dueDate ?? t('common.unset')} ·{' '}
+        {label('priority', item.priority)}
       </p>
       <p className="small">
         <span className="muted">{t('myWork.status')}: </span>
@@ -302,6 +310,41 @@ function WorkCard({
             {t('myWork.reportCompletion')}
           </button>
         </div>
+      ) : null}
+      {canManage ? (
+        <div className="inline-actions">
+          <a className="button secondary" href={`#/task/${item.taskId}`}>{t('action.open')}</a>
+          {!locked ? (
+            <button type="button" className="button" onClick={() => setCompleting(true)}>
+              {t('tasks.completeDirect')}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      <ErrorBox error={save.error} onRetry={onChanged} />
+      {completing ? (
+        <ConfirmDialog
+          title={t('tasks.completeDirectTitle')}
+          message={t('tasks.completeDirectBody')}
+          destructive={false}
+          onCancel={() => setCompleting(false)}
+          onConfirm={async () => {
+            await save.run(
+              () =>
+                api.post(`/api/manager/tasks/${item.taskId}/complete`, {
+                  revision: item.revision,
+                  confirmed: true
+                }),
+              {
+                onSuccess: () => {
+                  setCompleting(false);
+                  queryCache.invalidate([keys.myWork, keys.tasks, keys.taskIndex, keys.overview, keys.task(item.taskId), keys.project(item.projectId)]);
+                  onChanged();
+                }
+              }
+            );
+          }}
+        />
       ) : null}
       {item.pendingRequest ? <p className="muted small">{t('myWork.review.pending')}</p> : null}
       {finished ? <p className="muted small">{t('myWork.doneNote')}</p> : null}

@@ -113,6 +113,25 @@ including another employee's task, without gaining the right to change it, reass
 completion for it. A new project is `RESTRICTED` until a manager selects `INTERNAL`, and only
 `INTERNAL` projects reach the employee snapshot.
 
+### 4.1 Visibility policy for the shared lists
+
+| Reader | `/api/work/tasks`, `/api/work/tasks/:id` | `/api/work/projects`, `/:id` | `includeInactive=true` |
+| --- | --- | --- | --- |
+| ADMIN, MANAGER | every task, including `RESTRICTED` and archived | every project | allowed |
+| MEMBER, VIEWER | only `INTERNAL`, non-archived projects/subprojects | only `INTERNAL`, non-archived | `403 AUTHORIZATION_DENIED` |
+
+A blank or unknown `dashboard_visibility` is treated as `RESTRICTED`. A resource the reader may not
+see answers `404` - never `403` - so a guessed task or project identifier reveals nothing. The
+default list excludes `Done`, `Cancelled`, archived and deleted work; completed work is available
+only through the explicit `displayStatus=DONE` filter. The manager routes keep their existing
+behaviour and management controls.
+
+Personal work (`/api/employee/my-work`) is a separate boundary: it is resolved from the verified
+session and shows the caller's own assignments. Because an assignment is itself the authorization,
+it does not apply the `INTERNAL` filter, and it still excludes archived projects, subtasks and
+cancelled work. The pending-completion indicator is filtered by the authenticated requester, so one
+assignee never sees another assignee's request state.
+
 Rules that are enforced in code **and** re-checked by a database trigger where a mistake would
 be destructive: task/subproject hierarchy limits and cycles, container tasks cannot be `Done`,
 `audit_log` and `deadline_history` are append-only, a project delete requires an empty

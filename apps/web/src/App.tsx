@@ -212,6 +212,10 @@ function renderScreen(route: Route, actor: Actor, isManager: boolean): JSX.Eleme
     if (!second) return <TasksScreen actor={actor} readOnly={!isManager} />;
     return <TaskDetailScreen actor={actor} taskId={second} readOnly={!isManager} />;
   }
+  // Read-only project detail stays reachable for MEMBER and VIEWER (the task detail links here).
+  if (first === 'project' && second && !isManager) {
+    return <ProjectDetailScreen actor={actor} projectId={second} readOnly />;
+  }
   if (!isManager) return <OverviewScreen actor={actor} />;
   switch (first) {
     case 'accounts':

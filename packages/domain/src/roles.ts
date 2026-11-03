@@ -77,6 +77,33 @@ export function canViewWork(identity: Identity | null): boolean {
   return !!identity && identity.verified && identity.active;
 }
 
+/**
+ * The documented visibility policy for the shared work lists.
+ *
+ * Only a project marked `INTERNAL` is employee-visible; `RESTRICTED` and archived work stays
+ * manager-visible. A blank or unknown value is RESTRICTED. Reading is still separate from
+ * editing: a manager capability is never implied by being able to see a task.
+ */
+export function canSeeRestrictedWork(identity: Identity | null): boolean {
+  return (
+    !!identity &&
+    identity.verified &&
+    identity.active &&
+    (identity.role === 'ADMIN' || identity.role === 'MANAGER')
+  );
+}
+
+export function canReadProjectVisibility(identity: Identity | null, visibility: string | null | undefined): boolean {
+  if (!canViewWork(identity)) return false;
+  if (canSeeRestrictedWork(identity)) return true;
+  return String(visibility ?? '').toUpperCase() === 'INTERNAL';
+}
+
+/** Archived and cancelled history is an explicit management view, never a default employee list. */
+export function canIncludeArchivedWork(identity: Identity | null): boolean {
+  return canSeeRestrictedWork(identity);
+}
+
 /** Assignments are accountability, never permission: any active member may be assigned. */
 export function isEffectiveAssignee(
   identity: Identity | null,

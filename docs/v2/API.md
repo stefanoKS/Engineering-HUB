@@ -164,11 +164,30 @@ or a stored status; the only completion path is the reviewed request below.
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| GET | `/api/work/tasks` | Server-paged active work. `projectId`, `subprojectId`, `responsibilityId`, `unassigned`, `status`, `displayStatus` (`IN_PROGRESS`/`OVERDUE`/`DONE`/`CANCELLED`), `ownerMemberId`, `query`, `containerOnly`, `overdueOnly`, `includeInactive`, `tree`, `treeParentId`, paging and sorting. Archived projects/subprojects and `Cancelled` work stay hidden unless `includeInactive=true` |
-| GET | `/api/work/tasks/:id` | Task detail for MEMBER/VIEWER: record, assignees and children; workflow history, confirmations, acceptance criteria, internal notes and notification fields are absent |
+| GET | `/api/work/tasks` | Server-paged active work. `projectId`, `subprojectId`, `responsibilityId`, `unassigned`, `status`, `displayStatus` (`IN_PROGRESS`/`OVERDUE`/`DONE`/`CANCELLED`), `ownerMemberId`, `query`, `containerOnly`, `overdueOnly`, `includeInactive`, `tree`, `treeParentId`, paging and sorting |
+| GET | `/api/work/tasks/:id` | Task detail for MEMBER/VIEWER: an allowlisted record plus assignees and children |
+| GET | `/api/work/projects` | `query`, `page`, `pageSize`; the assignment picker for the read-only screens |
+| GET | `/api/work/projects/:id` | Read-only project detail: allowlisted record, rollup, subprojects and active tasks |
 
-Managers use `/api/manager/tasks` for the same list with management controls; the server refuses
-every manager write for MEMBER and VIEWER.
+Visibility is resolved on the server before a page is cut:
+
+- A `MEMBER` or `VIEWER` sees only tasks whose project is `INTERNAL` and whose project, subproject
+  and task are not archived. `RESTRICTED`, archived, cancelled and deleted work is invisible, and a
+  guessed identifier answers `404` so existence is not disclosed.
+- `includeInactive=true` (archived/cancelled history) is a manager capability and answers `403`
+  `AUTHORIZATION_DENIED` for the other roles.
+- The default list excludes `Done`, `Cancelled`, archived and deleted work. Completed work stays
+  reachable through the explicit `displayStatus=DONE` filter (and `Cancelled` through
+  `displayStatus=CANCELLED` with `includeInactive=true`).
+- The read-only task record carries identity, name, description, owner, derived state, priority,
+  deadline, skill requirement and revision. Recorded effort, progress, duration, planned start,
+  notifications, notes, acceptance criteria and confirmation/deadline history are not copied.
+- The read-only project record carries identity, name, responsibility, owner name, status,
+  priority, deadline, progress and health. Notification settings, the dashboard summary,
+  milestones, phases and internal notes are absent.
+
+Managers use `/api/manager/tasks` and `/api/manager/projects` for the same data with management
+controls; the server refuses every manager write for MEMBER and VIEWER.
 
 ### Completion approval rules
 
