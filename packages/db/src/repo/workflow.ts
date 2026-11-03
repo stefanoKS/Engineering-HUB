@@ -17,7 +17,7 @@ const REQUEST_SELECT = `
          original_due_date, requested_due_date, reason, explanation, completion_note, status,
          reviewer, decided_at, decision_note, task_revision_at_submission, due_date_at_submission,
          reported_completion_at, accepted_completion_at, inbox_request_id, imported_at,
-         snapshot_version, stale_reason, revision
+         snapshot_version, stale_reason, revision, requester_member_id
     FROM task_requests`;
 
 export async function listRequests(db: Db, includeDecided: boolean, page = 1, pageSize = 25): Promise<TaskRequest[]> {
@@ -90,6 +90,7 @@ export type RequestInsert = {
   snapshotVersion: string;
   inboxRequestId: string | null;
   status?: string;
+  requesterMemberId?: string | null;
 };
 
 export async function insertRequest(db: Db, input: RequestInsert): Promise<TaskRequest> {
@@ -97,8 +98,9 @@ export async function insertRequest(db: Db, input: RequestInsert): Promise<TaskR
     `INSERT INTO task_requests
        (request_id, request_type, task_id, project_id, requester_name, original_due_date,
         requested_due_date, reason, explanation, completion_note, status,
-        task_revision_at_submission, due_date_at_submission, snapshot_version, inbox_request_id, imported_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        task_revision_at_submission, due_date_at_submission, snapshot_version, inbox_request_id,
+        imported_at, requester_member_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
      ON CONFLICT (inbox_request_id) DO NOTHING`,
     [
       input.requestId,
@@ -116,7 +118,8 @@ export async function insertRequest(db: Db, input: RequestInsert): Promise<TaskR
       input.dueDateAtSubmission,
       input.snapshotVersion,
       input.inboxRequestId,
-      input.inboxRequestId ? new Date().toISOString() : null
+      input.inboxRequestId ? new Date().toISOString() : null,
+      input.requesterMemberId ?? null
     ]
   );
   const created = await getRequest(db, input.requestId);

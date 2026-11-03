@@ -10,8 +10,7 @@ import { APP_NAME, DEFAULT_LANGUAGE, LANGUAGES, STORAGE_KEY, isLanguage, label a
 
 export const V2_LABELS = {
  'local.myWork': {ja:'自分の担当タスク',en:'My assigned work'},
- 'local.progressHint': {ja:'進捗は0～99%。完了と期限の変更は管理者の確認が必要です。',en:'Progress is 0–99%. Completion and deadline changes require manager review.'},
- 'local.actualHours': {ja:'実績工数（時間）',en:'Actual hours'},
+ 'local.progressHint': {ja:'進捗は0～99%。完了と期限の変更は管理者の確認が必要です。',en:'Progress is 0–99%. Completion and deadline changes require manager review.'}, 'local.actualHours': {ja:'実績工数（時間）',en:'Actual hours'},
  'local.progress': {ja:'進捗（%）',en:'Progress (%)'},
   'local.employeeId': { ja: '社員番号', en: 'Employee ID' },
   'local.password': { ja: 'パスワード', en: 'Password' },
@@ -31,6 +30,69 @@ export const V2_LABELS = {
   'local.saved': { ja: '保存しました。仮パスワードを本人に安全に伝えてください。', en: 'Saved. Deliver the temporary password securely to the employee.' },
   'local.next': { ja: '次へ', en: 'Next' },
   'local.previous': { ja: '前へ', en: 'Previous' },
+   'myWork.intro': {
+     ja: '自分の作業を登録し、進捗と完了報告を管理します。承認されるまで期限や状態は変わりません。',
+     en: 'File your own work and manage progress and completion reports. Nothing changes until a request is approved.'
+   },
+   'myWork.newTask': { ja: '新しいタスクを作成', en: 'Create a task' },
+   'myWork.project': { ja: 'プロジェクト', en: 'Project' },
+   'myWork.subproject': { ja: 'サブプロジェクト（任意）', en: 'Subproject (optional)' },
+   'myWork.subprojectNone': { ja: '指定しない', en: 'No subproject' },
+   'myWork.taskName': { ja: 'タスク名', en: 'Task name' },
+   'myWork.description': { ja: '説明（任意）', en: 'Description (optional)' },
+   'myWork.priority': { ja: '優先度', en: 'Priority' },
+   'myWork.deadline': { ja: '期限', en: 'Deadline' },
+   'myWork.create': { ja: 'タスクを作成', en: 'Create task' },
+   'myWork.created': {
+     ja: 'タスクを作成しました。自分の作業一覧と管理者のタスク一覧に表示されます。',
+     en: 'Task created. It appears in your work list and in the manager task list.'
+   },
+   'myWork.ownerNote': {
+     ja: '作成したタスクの担当者はあなたになります。期限は作成後に自分では変更できません。',
+     en: 'You become the owner of the task you create. The deadline can no longer be changed by you afterwards.'
+   },
+   'myWork.projectsEmpty': {
+     ja: '作業を登録できる有効なプロジェクトがありません。管理者にプロジェクトの有効化を依頼してください。',
+     en: 'No active project is available. Ask an administrator to activate a project.'
+   },
+   'myWork.projectsLoading': { ja: 'プロジェクトを読み込み中…', en: 'Loading projects…' },
+   'myWork.dueSoonWarning': {
+     ja: '期限が本日以前、または休業日にあたります。内容を確認してください。',
+     en: 'The deadline is today or earlier, or falls on a non-working day. Please review it.'
+   },
+   'myWork.acknowledge': { ja: 'この期限で作成する', en: 'Create with this deadline' },
+   'myWork.reportCompletion': { ja: '完了報告', en: 'Report completion' },
+   'myWork.completionHeading': { ja: '完了報告の提出', en: 'Submit a completion report' },
+   'myWork.completionNote': { ja: '完了した内容（必須）', en: 'What was completed (required)' },
+   'myWork.submitCompletion': { ja: '報告を送信', en: 'Send report' },
+   'myWork.reviewLabel': { ja: '完了報告の状況', en: 'Completion review' },
+   'myWork.review.none': { ja: '申請なし', en: 'No request' },
+   'myWork.review.pending': { ja: '承認待ち', en: 'Pending review' },
+   'myWork.review.approved': { ja: '承認済（完了）', en: 'Approved' },
+   'myWork.review.rejected': { ja: '却下', en: 'Rejected' },
+   'myWork.review.returned': { ja: '差戻し', en: 'Returned' },
+   'myWork.review.stale': { ja: '再確認が必要', en: 'Needs resubmission' },
+   'myWork.adminApprovalNote': {
+     ja: '自分で作成したタスクの完了は管理者（ADMIN）が承認します。',
+     en: 'Completion of a task you created is approved by an administrator (ADMIN).'
+   },
+   'myWork.requestsHeading': { ja: '自分の申請', en: 'My requests' },
+   'myWork.requestsEmpty': { ja: '申請はまだありません。', en: 'No requests yet.' },
+   'myWork.requestsClosed': {
+     ja: '現在、申請の受付は停止しています。管理者に連絡してください。',
+     en: 'Request submission is currently closed. Contact an administrator.'
+   },
+   'myWork.requestsClosedHint': {
+     ja: '受付は自動化設定の REQUEST_SUBMISSION_ENABLED が true のときだけ有効です（既定は停止）。',
+     en: 'Submissions are accepted only while the automation setting REQUEST_SUBMISSION_ENABLED is true (off by default).'
+   },
+   'myWork.containerNote': { ja: '親タスクは子タスクの完了から完了します。', en: 'A parent task completes through its child tasks.' },
+   'myWork.doneNote': { ja: '完了済みのタスクです。', en: 'This task is already Done.' },
+   'myWork.total': { ja: '全 {n} 件', en: '{n} total' },
+   'myWork.requestType.DEADLINE_CHANGE': { ja: '納期変更申請', en: 'Deadline change' },
+   'myWork.requestType.COMPLETION_REPORT': { ja: '完了報告', en: 'Completion report' },
+   'myWork.decisionNote': { ja: '判断メモ', en: 'Decision note' },
+   'myWork.submittedAt': { ja: '申請日時', en: 'Submitted' },
   'subprojects.new': { ja: '新規サブプロジェクト', en: 'New subproject' },
   'subprojects.edit': { ja: 'サブプロジェクトを編集', en: 'Edit subproject' },
   'subprojects.name': { ja: 'サブプロジェクト名', en: 'Subproject name' },
@@ -177,6 +239,9 @@ export const V2_LABELS = {
   'status.counts': { ja: '件数', en: 'Row counts' },
   'status.outbox': { ja: '送信キュー', en: 'Outbox' },
   'status.backup': { ja: '最終バックアップ', en: 'Last backup' },
+  'status.backupLocal': { ja: 'ローカルバックアップ', en: 'Local backup' },
+  'status.backupDrive': { ja: 'Google Drive への最終アップロード', en: 'Last Drive upload' },
+  'status.backupFailures': { ja: '直近のバックアップ失敗', en: 'Latest backup failure' },
   'workload.member': { ja: 'メンバー', en: 'Member' },
   'workload.week': { ja: '週', en: 'Week' },
   'workload.remaining': { ja: '残作業（時間）', en: 'Remaining hours' },

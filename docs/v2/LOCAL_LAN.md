@@ -10,7 +10,7 @@ This mode runs on the host Windows PC and serves colleagues through a browser. P
 - Five wrong passwords lock an account for 15 minutes; the login endpoint also limits attempts by IP. A correct password resets the failure counter after the lock expires. A reset clears the lock.
 - Administrators create local accounts, attach credentials to existing member IDs, and reset another employee's password. New/reset accounts must change the temporary password before accessing any work API. Password change/reset invalidates all old sessions.
 - Roles/activation remain in Members. Administrators manage these fields; existing self-change/last-administrator guards remain. Register a second administrator for recovery. There is no default password or public registration endpoint.
-- Managers retain the project, task, assignment and review screens. Members receive My assigned work: primary/additional assignments only, with revision-checked actual-hours and progress updates (0–99). Task reassignment, deadlines and completion are not editable there. Manager review remains necessary for completion/deadline changes; a new employee completion-request form is not included in this pass.
+- Managers retain the project, task, assignment and review screens. Members receive My assigned work: primary/additional assignments only, with revision-checked actual-hours and progress updates (0–99), a task they create for themselves, and a completion-request form. Reassignment, deadlines and completion remain manager/admin decisions; a member-created task is completed only by an ADMIN decision.
 - VIEWER retains the existing published read-only projection; publication must already be configured/populated. A fresh local installation does not automatically publish company data. Use MEMBER for employees who need assigned work.
 - Account linking retains an existing member's name/role and IDs; it does not duplicate project relationships. Existing Google bindings remain stored but are not used in local mode.
 
@@ -77,7 +77,7 @@ The example explicitly sets ALLOW_INSECURE_LAN_HTTP=true to support the requeste
 
 ## 4. Apply schema and create your administrator
 
-Migration 0007_local_accounts.sql permits members without email, adds local credential records and session credential versions. It preserves existing IDs/records and does not rewrite prior migration files. For an existing database, first create and verify a backup, then review/apply the new migration.
+Migration 0007_local_accounts.sql permits members without email, adds local credential records and session credential versions. Migration 0008_member_created_work.sql (2026-11-03) adds the member task-creation channel and the recorded request author; it is additive and rewrites no existing column. Both preserve existing IDs/records and do not rewrite prior migration files. For an existing database, first create and verify a backup, then review/apply the new migration.
 
 Run deploy/windows/Migrate-Lan.cmd and type APPLY MIGRATIONS when ready. This is an explicit one-shot action; startup never migrates.
 
@@ -104,6 +104,23 @@ For automatic start, an operator can create a Windows Task Scheduler task that r
 Use Accounts to create employee IDs, names, roles and temporary passwords. Deliver each password privately. Use Members to change roles or disable employees; do not delete their historical records. When attaching credentials to an existing member, enter its existing member ID; name/role inputs do not overwrite that member. Users change their own password from the header. Resetting another user's password revokes their current sessions and requires another first-login change.
 
 Create responsibility areas, then projects and tasks. Assign employees as primary/additional assignees so their My assigned work screen contains the appropriate tasks. Save conflicts require a fresh read; another user's update is never silently overwritten.
+
+### Member self-service (2026-11-03)
+
+* A member creates work from 自分の担当タスク: choose an active project, an optional subproject, a name, a
+  description, a deadline and a priority. The owner is the signed-in member and the task starts as
+  `Not Started` with 0 % progress. No administrator approval is needed to create it, and it appears
+  immediately in the member's list and the manager's task list.
+* The member updates progress/actual hours on their own active leaf work (0–99 %), then uses 完了報告
+  to submit a completion request with a required note.
+* `REQUEST_SUBMISSION_ENABLED` (Automation → 自動化設定, default **false**) must be `true` before any
+  request is accepted. The screen shows that submissions are closed and offers no request action
+  while it is off.
+* A pending request never changes the task. An ADMIN decision on a request for a member-created task
+  writes `Done`; a MANAGER decision on that request is refused. Older and manager-created tasks keep
+  the manager decision. Rejection or return leaves the task unfinished.
+* The member sees 承認待ち / 承認済 / 却下 / 差戻し / 再確認が必要 for their own requests only; another
+  member's receipt is not readable.
 
 ## 7. Hourly local backups
 

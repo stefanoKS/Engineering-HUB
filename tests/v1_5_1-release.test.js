@@ -8,14 +8,14 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('package, publisher, README and UI agree on the current release', () => {
+test('package, publisher, changelog and UI agree on the current release', () => {
   assert.match(read('package.json'), /"version": "1\.7\.7"/);
   assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.7\.0'/);
-  assert.match(read('README.md'), /## Current release — V1\.7/);
-  assert.match(read('README_JP.md'), /## 現行リリース — V1\.7/);
-  // The V1.5.1 result is kept as history, exactly as released.
-  assert.match(read('README.md'), /406 tests, 406 pass/);
-  assert.match(read('README_JP.md'), /406件すべて成功/);
+  // The entry pages point at the changelog; the released result is kept there as history.
+  assert.match(read('README.md'), /CHANGELOG\.md/);
+  assert.match(read('README_JP.md'), /CHANGELOG\.md/);
+  assert.match(read('CHANGELOG.md'), /406 tests, 406 pass/);
+  assert.match(read('CHANGELOG.md'), /406件すべて成功/);
   assert.match(read('src/ManagerWebIndex.html'), /V1\.7/);
 });
 

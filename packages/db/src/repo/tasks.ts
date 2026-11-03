@@ -16,6 +16,7 @@ const TASK_SELECT = `
          t.assignment_approved_at, t.notification_enabled, t.notification_baseline, t.public_note,
          t.planned_duration_value, t.planned_duration_unit, t.planned_duration_basis,
          t.planned_start_source, t.completed_at, t.created_at, t.updated_at, t.revision,
+         t.created_by_member_id, t.creation_channel,
          COALESCE((SELECT array_agg(td.depends_on_task_id ORDER BY td.depends_on_task_id)
                      FROM task_dependencies td WHERE td.task_id = t.task_id), '{}') AS dependency_ids
     FROM tasks t
@@ -402,6 +403,8 @@ export type TaskInput = {
   plannedDurationUnit?: string | null;
   plannedDurationBasis?: string | null;
   plannedStartSource?: string | null;
+  createdByMemberId?: string | null;
+  creationChannel?: 'LEGACY' | 'MANAGER' | 'MEMBER';
 };
 
 export async function insertTask(db: Db, input: TaskInput, taskId: string = newId('TSK')): Promise<Task> {
@@ -411,8 +414,8 @@ export async function insertTask(db: Db, input: TaskInput, taskId: string = newI
         status, priority, planned_start, due_date, estimated_hours, actual_hours, progress_percent,
         acceptance_criteria, next_action, required_skill_id, required_skill_level,
         notification_enabled, public_note, planned_duration_value, planned_duration_unit,
-        planned_duration_basis, planned_start_source)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)`,
+        planned_duration_basis, planned_start_source, created_by_member_id, creation_channel)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
     [
       taskId,
       input.projectId,
@@ -437,7 +440,9 @@ export async function insertTask(db: Db, input: TaskInput, taskId: string = newI
       input.plannedDurationValue ?? null,
       input.plannedDurationUnit ?? null,
       input.plannedDurationBasis ?? null,
-      input.plannedStartSource ?? null
+      input.plannedStartSource ?? null,
+      input.createdByMemberId ?? null,
+      input.creationChannel ?? 'LEGACY'
     ]
   );
   const created = await getTask(db, taskId);

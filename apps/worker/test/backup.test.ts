@@ -18,6 +18,7 @@ import {
   encrypt,
   keyId,
   parseEncryptionKey,
+  restoreContainer,
   restoreLogicalBackup
 } from '../src/backup';
 import { freshDatabase, pgBinDir } from '../../../packages/db/test/support/db';
@@ -101,6 +102,20 @@ describe('backup container', () => {
   it('refuses a restore into a populated database without an explicit reset', async () => {
     const { archive } = await createLogicalBackup(db);
     await expect(restoreLogicalBackup(db, archive)).rejects.toThrow(/not empty/);
+  });
+
+  it('refuses to restore a downloaded backup over the production database', async () => {
+    const { archive } = await createLogicalBackup(db);
+    await expect(
+      restoreContainer({
+        container: encrypt(archive, KEY),
+        key: KEY,
+        pgRestorePath: 'pg_restore',
+        targetDatabase: 'eh_production',
+        productionDatabase: 'eh_production',
+        connection: {}
+      })
+    ).rejects.toThrow(/production database/);
   });
 
   it('produces a custom-format dump only when the client tools exist', async (context) => {

@@ -70,9 +70,12 @@ test('the release notes describe the V1.4.1 behaviour', () => {
   assert.match(changelog, /328 passing/);
 });
 
-test('the package, publisher and README agree on the release version', () => {
+test('the package, publisher and changelog agree on the release version', () => {
   assert.match(read('package.json'), /"version": "1\.7\.7"/);
   assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.7\.0'/);
-  assert.match(read('README.md'), /328 passing/);
-  assert.match(read('README_JP.md'), /328件すべて成功/);
+  // The entry pages point at the changelog, which keeps the released verification record.
+  assert.match(read('README.md'), /CHANGELOG\.md/);
+  assert.match(read('README_JP.md'), /CHANGELOG\.md/);
+  assert.match(read('CHANGELOG.md'), /328 passing/);
+  assert.match(read('CHANGELOG.md'), /328件すべて成功/);
 });

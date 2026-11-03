@@ -59,7 +59,7 @@ beforeEach(async () => {
     DATABASE_URL: requireDatabase(),
     MANAGER_WEB_ALLOWED_DOMAINS: 'example.co.jp',
     DEV_AUTH_ENABLED: 'true',
-    DEV_AUTH_EMAILS: [ADMIN, MANAGER, MEMBER].join(','),
+    DEV_AUTH_EMAILS: [ADMIN, MANAGER, MEMBER, 'other@example.co.jp', 'viewer@example.co.jp'].join(','),
     PUBLIC_ORIGIN: 'http://localhost:5173',
     LOG_LEVEL: 'silent',
     MAIL_FROM_ADDRESS: 'noreply@example.co.jp',
@@ -309,7 +309,11 @@ describe('employee request flow', () => {
       { projectName: 'P', responsibilityId: responsibility.responsibilityId, dashboardVisibility: 'INTERNAL' },
       'PRJ-1'
     );
-    const task = await insertTask(db, { projectId: project.projectId, taskName: 'Task', dueDate: '2026-02-01' }, 'T1');
+    const task = await insertTask(
+      db,
+      { projectId: project.projectId, taskName: 'Task', dueDate: '2026-02-01', ownerMemberId: 'MEM-MEMBER' },
+      'T1'
+    );
     return { project, task };
   }
 
@@ -595,4 +599,271 @@ describe('workload effort', () => {
     expect(row.remainingHours).toBe(7);
     expect(row.actualHours).toBe(3);
   });
+});
+
+describe('member self-service task creation', () => {
+  async function activeProject() {
+    const responsibility = await insertResponsibility(db, { name: 'Area' }, 'RSP-M');
+    const project = await insertProject(
+      db,
+      { projectName: 'Member project', responsibilityId: responsibility.responsibilityId, status: 'Active' },
+      'PRJ-M'
+    );
+    await insertSubproject(db, { projectId: project.projectId, subprojectName: 'Phase 1' }, 'SUB-M');
+    return project;
+  }
+
+  const body = (overrides: Record<string, unknown> = {}) => ({
+    idempotencyKey: 'member-create-0001',
+    projectId: 'PRJ-M',
+    taskName: '�����̍��',
+    deadline: '2026-05-01',
+    priority: 'High',
+    ...overrides
+  });
+
+  it('lists only active projects and their non-archived subprojects', async () => {
+    const project = await activeProject();
+    await insertProject(db, { projectName: 'Planned only', status: 'Planned' }, 'PRJ-PLANNED');
+    await insertSubproject(db, { projectId: project.projectId, subprojectName: 'Closed phase', status: 'Archived' }, 'SUB-ARCHIVED');
+    const member = await signIn(MEMBER);
+    const response = await app.inject({ method: 'GET', url: '/api/employee/my-work/projects', headers: headers(member) });
+    expect(response.statusCode, response.body).toBe(200);
+    const body = response.json() as {
+      data: { items: { projectId: string; subprojects: { subprojectId: string }[] }[] };
+    };
+    expect(body.data.items.map((entry) => entry.projectId)).toEqual(['PRJ-M']);
+    expect(body.data.items[0]!.subprojects.map((entry) => entry.subprojectId)).toEqual(['SUB-M']);
+  });
+
+  it('creates a task owned by the verified member, visible immediately', async () => {
+    await activeProject();
+    const auth = await signIn(MEMBER);
+    const response = await app.inject({ method: 'POST', url: '/api/employee/my-work', headers: headers(auth, true), payload: body() });
+    expect(response.statusCode, response.body).toBe(200);
+    const taskId = (response.json() as { data: { taskId: string } }).data.taskId;
+
+    const stored = await db.one<{ owner_member_id: string; status: string; progress_percent: number; creation_channel: string }>(
+      'SELECT owner_member_id, status, progress_percent, creation_channel FROM tasks WHERE task_id = $1',
+      [taskId]
+    );
+    expect(stored).toMatchObject({ owner_member_id: 'MEM-MEMBER', status: 'Not Started', creation_channel: 'MEMBER' });
+    expect(Number(stored?.progress_percent)).toBe(0);
+
+    const mine = await app.inject({ method: 'GET', url: '/api/employee/my-work', headers: headers(auth) });
+    expect((mine.json() as { data: { items: { taskId: string }[] } }).data.items.map((item) => item.taskId)).toContain(taskId);
+
+    const manager = await signIn(MANAGER);
+    const list = await app.inject({ method: 'GET', url: '/api/manager/tasks?page=1&pageSize=50', headers: headers(manager) });
+    expect((list.json() as { data: { items: { taskId: string }[] } }).data.items.map((item) => item.taskId)).toContain(taskId);
+
+    const audit = await db.one<{ count: string }>(
+      "SELECT count(*)::text AS count FROM audit_log WHERE action = 'TASK_CREATED' AND entity_id = $1",
+      [taskId]
+    );
+    expect(Number(audit?.count)).toBe(1);
+  });
+
+  it('replays one creation for one idempotency key', async () => {
+    await activeProject();
+    const auth = await signIn(MEMBER);
+    const first = await app.inject({ method: 'POST', url: '/api/employee/my-work', headers: headers(auth, true), payload: body() });
+    const second = await app.inject({ method: 'POST', url: '/api/employee/my-work', headers: headers(auth, true), payload: body() });
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    const ids = new Set([
+      (first.json() as { data: { taskId: string } }).data.taskId,
+      (second.json() as { data: { taskId: string } }).data.taskId
+    ]);
+    expect(ids.size).toBe(1);
+    const count = await db.one<{ count: string }>('SELECT count(*)::text AS count FROM tasks');
+    expect(Number(count?.count)).toBe(1);
+  });
+
+  it('refuses an owner, an assignee, a status or a project in the payload', async () => {
+    await activeProject();
+    const auth = await signIn(MEMBER);
+    for (const extra of [
+      { ownerMemberId: 'MEM-ADMIN' },
+      { assigneeIds: ['MEM-MANAGER'] },
+      { status: 'Done' },
+      { parentTaskId: null }
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/employee/my-work',
+        headers: headers(auth, true),
+        payload: { ...body(), ...extra }
+      });
+      expect(response.statusCode, JSON.stringify(extra)).toBe(400);
+    }
+  });
+
+  it('refuses VIEWER, MANAGER, an inactive project and another project hierarchy', async () => {
+    const project = await activeProject();
+    await insertMember(db, { name: 'Viewer', email: 'viewer@example.co.jp', role: 'VIEWER' }, 'MEM-VIEWER');
+    const viewer = await signIn('viewer@example.co.jp');
+    const denied = await app.inject({ method: 'POST', url: '/api/employee/my-work', headers: headers(viewer, true), payload: body() });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json().error.code).toBe('AUTHORIZATION_DENIED');
+
+    // A manager files work through the manager task form, not the member self-service path.
+    const manager = await signIn(MANAGER);
+    const managerAttempt = await app.inject({
+      method: 'POST',
+      url: '/api/employee/my-work',
+      headers: headers(manager, true),
+      payload: body({ idempotencyKey: 'member-create-manager' })
+    });
+    expect(managerAttempt.statusCode).toBe(403);
+    expect(managerAttempt.json().error.code).toBe('AUTHORIZATION_DENIED');
+
+    const other = await insertProject(db, { projectName: 'Other', status: 'Active' }, 'PRJ-O');
+    await insertSubproject(db, { projectId: other.projectId, subprojectName: 'Elsewhere' }, 'SUB-O');
+    const member = await signIn(MEMBER);
+    const crossSubproject = await app.inject({
+      method: 'POST',
+      url: '/api/employee/my-work',
+      headers: headers(member, true),
+      payload: body({ subprojectId: 'SUB-O' })
+    });
+    expect(crossSubproject.statusCode).toBeGreaterThanOrEqual(400);
+    expect(crossSubproject.json().error.code).toBe('HIERARCHY_INVALID');
+
+    await db.query("UPDATE projects SET status = 'Archived', archived_at = now() WHERE project_id = $1", [project.projectId]);
+    const archived = await app.inject({ method: 'POST', url: '/api/employee/my-work', headers: headers(member, true), payload: body() });
+    expect(archived.statusCode).toBe(409);
+    expect(archived.json().error.code).toBe('INVALID_TRANSITION');
+  });
+});
+
+describe('member completion requests', () => {
+  async function memberTask() {
+    await insertResponsibility(db, { name: 'Area' }, 'RSP-C');
+    await insertProject(db, { projectName: 'Member project', status: 'Active', dashboardVisibility: 'INTERNAL' }, 'PRJ-C');
+    const member = await signIn(MEMBER);
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/employee/my-work',
+      headers: headers(member, true),
+      payload: { idempotencyKey: 'member-completion-1', projectId: 'PRJ-C', taskName: 'Report me', deadline: '2026-06-01' }
+    });
+    const taskId = (created.json() as { data: { taskId: string } }).data.taskId;
+    await saveSettings(db, { REQUEST_SUBMISSION_ENABLED: 'true' }, ADMIN);
+    return { taskId, member };
+  }
+
+  async function submitCompletion(member: { cookie: string; csrf: string }, taskId: string, key = 'completion-request-1') {
+    return app.inject({
+      method: 'POST',
+      url: '/api/employee/requests',
+      headers: headers(member, true),
+      payload: { clientRequestId: key, taskId, requestType: 'COMPLETION_REPORT', completionNote: 'Finished and checked' }
+    });
+  }
+
+  it('keeps the task unfinished while the request is pending', async () => {
+    const { taskId, member } = await memberTask();
+    const response = await submitCompletion(member, taskId);
+    expect(response.statusCode, response.body).toBe(200);
+    const stored = await db.one<{ status: string; requester_member_id: string }>(
+      'SELECT status, requester_member_id FROM task_requests WHERE task_id = $1',
+      [taskId]
+    );
+    expect(stored?.status).toBe('PENDING');
+    expect(stored?.requester_member_id).toBe('MEM-MEMBER');
+    const task = await db.one<{ status: string }>('SELECT status FROM tasks WHERE task_id = $1', [taskId]);
+    expect(task?.status).toBe('Not Started');
+  });
+
+  it('refuses a request for work the member is not assigned to', async () => {
+    await insertResponsibility(db, { name: 'Area' }, 'RSP-X');
+    await insertProject(db, { projectName: 'Foreign', dashboardVisibility: 'INTERNAL' }, 'PRJ-X');
+    await insertTask(db, { projectId: 'PRJ-X', taskName: 'Not mine', dueDate: '2026-06-01' }, 'TSK-X');
+    await saveSettings(db, { REQUEST_SUBMISSION_ENABLED: 'true' }, ADMIN);
+    const member = await signIn(MEMBER);
+    const response = await submitCompletion(member, 'TSK-X');
+    expect(response.statusCode).toBe(403);
+    expect(response.json().error.code).toBe('AUTHORIZATION_DENIED');
+  });
+
+  it('requires an ADMIN decision to complete a member-created task', async () => {
+    const { taskId, member } = await memberTask();
+    const submitted = await submitCompletion(member, taskId);
+    const requestId = (submitted.json() as { data: { requestId: string } }).data.requestId;
+
+    const manager = await signIn(MANAGER);
+    const refused = await app.inject({
+      method: 'POST',
+      url: `/api/manager/requests/${requestId}/decide`,
+      headers: headers(manager, true),
+      payload: { decision: 'APPROVE', revision: 1, confirmed: true }
+    });
+    expect(refused.statusCode).toBe(403);
+    expect(refused.json().error.code).toBe('AUTHORIZATION_DENIED');
+    // A refused decision never claims the request or touches the task.
+    const afterRefusal = await db.one<{ status: string }>('SELECT status FROM task_requests WHERE request_id = $1', [requestId]);
+    expect(afterRefusal?.status).toBe('PENDING');
+    const untouched = await db.one<{ status: string }>('SELECT status FROM tasks WHERE task_id = $1', [taskId]);
+    expect(untouched?.status).toBe('Not Started');
+
+    const admin = await signIn(ADMIN);
+    const approved = await app.inject({
+      method: 'POST',
+      url: `/api/manager/requests/${requestId}/decide`,
+      headers: headers(admin, true),
+      payload: { decision: 'APPROVE', revision: 1, confirmed: true }
+    });
+    expect(approved.statusCode, approved.body).toBe(200);
+    const done = await db.one<{ status: string; progress_percent: number }>(
+      'SELECT status, progress_percent FROM tasks WHERE task_id = $1',
+      [taskId]
+    );
+    expect(done?.status).toBe('Done');
+    expect(Number(done?.progress_percent)).toBe(100);
+  });
+
+  it('leaves the task unfinished after a rejection or a return', async () => {
+    const { taskId, member } = await memberTask();
+    const first = await submitCompletion(member, taskId, 'completion-request-reject');
+    const firstId = (first.json() as { data: { requestId: string } }).data.requestId;
+    const manager = await signIn(MANAGER);
+    const rejected = await app.inject({
+      method: 'POST',
+      url: `/api/manager/requests/${firstId}/decide`,
+      headers: headers(manager, true),
+      payload: { decision: 'REJECT', revision: 1, confirmed: true, note: 'Not finished' }
+    });
+    expect(rejected.statusCode).toBe(200);
+    const afterReject = await db.one<{ status: string }>('SELECT status FROM tasks WHERE task_id = $1', [taskId]);
+    expect(afterReject?.status).toBe('Not Started');
+    const stored = await db.one<{ status: string }>('SELECT status FROM task_requests WHERE request_id = $1', [firstId]);
+    expect(stored?.status).toBe('REJECTED');
+  });
+
+  it('shows the member only their own receipts', async () => {
+    const { taskId, member } = await memberTask();
+    const submitted = await submitCompletion(member, taskId);
+    const requestId = (submitted.json() as { data: { requestId: string } }).data.requestId;
+
+    const mine = await app.inject({ method: 'GET', url: '/api/employee/requests/mine', headers: headers(member) });
+    expect((mine.json() as { data: { items: { requestId: string }[] } }).data.items.map((item) => item.requestId)).toContain(requestId);
+
+    await insertMember(db, { name: 'Other', email: 'other@example.co.jp', role: 'MEMBER' }, 'MEM-OTHER');
+    const other = await app.inject({ method: 'GET', url: '/api/employee/requests/mine', headers: headers(await signInOther()) });
+    expect((other.json() as { data: { items: unknown[] } }).data.items).toHaveLength(0);
+
+    const receipt = await app.inject({ method: 'GET', url: `/api/employee/requests/${requestId}`, headers: headers(await signInOther()) });
+    expect(receipt.statusCode).toBe(404);
+    const ownReceipt = await app.inject({ method: 'GET', url: `/api/employee/requests/${requestId}`, headers: headers(member) });
+    expect(ownReceipt.statusCode).toBe(200);
+  });
+
+  async function signInOther() {
+    const response = await app.inject({ method: 'POST', url: '/api/session', payload: { devEmail: 'other@example.co.jp' } });
+    expect(response.statusCode).toBe(200);
+    const cookie = String(response.headers['set-cookie'] ?? '').split(';')[0] ?? '';
+    const body = response.json() as { data: { csrfToken: string } };
+    return { cookie, csrf: body.data.csrfToken };
+  }
 });

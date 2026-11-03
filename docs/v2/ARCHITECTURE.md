@@ -1,5 +1,16 @@
 # V2 Architecture
 
+## Member self-service — 2026-11-03
+
+A member files their own work through `POST /api/employee/my-work`
+(`apps/api/src/services/my-work.ts`). The path reuses the same domain rules as the manager command
+(`assertTaskPlacement`, `planTaskDeadline`, `runIdempotent`, hierarchy limits, audit and outbox) but
+a narrower contract, so creation never becomes a way to assign other people or to bypass review.
+Migration `0008_member_created_work` adds `tasks.created_by_member_id`, `tasks.creation_channel`
+(`LEGACY|MANAGER|MEMBER`, default `LEGACY`) and `task_requests.requester_member_id`; existing rows
+keep their meaning. `assertCompletionDecisionRole` in `packages/domain` makes an ADMIN decision
+mandatory for a member-created task's completion.
+
 ## Local LAN update — 2026-11-02
 
 [LOCAL_LAN.md](LOCAL_LAN.md) specifies the employee-ID/password mode, schema 7, optional email, first-login change, administrator reset, employee-owned progress editing, Windows launcher, durable local backup and optional Shared Drive upload. It supersedes Google-only or Linux-only assumptions below for this mode. [Verification record](LOCAL_LAN_ACCEPTANCE.md).

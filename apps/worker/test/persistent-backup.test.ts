@@ -25,3 +25,29 @@ it('saves encrypted backups without any Google configuration',async()=>{
  const result=await persistentBackup(db,config,{configured:false,upload,listOld:async()=>[],remove:async()=>{}},'local',async()=>fixture());
  expect((await readFile(result.localFile)).subarray(0,6).toString()).toBe('EHBAK1');expect(upload).not.toHaveBeenCalled();expect(result.driveFileId).toBeNull();
 });
+
+it('keeps the local backup and reports the reason when the Drive folder is refused',async()=>{
+ const create=vi.fn(async()=>fixture());const upload=vi.fn();
+ const drive={configured:true,verifyFolder:async()=>{throw new Error('Drive permission denied (403). Share the backup folder with the service account as Editor.');},upload,listOld:async()=>[],remove:async()=>{}};
+ const config=loadWorkerConfig({BACKUP_DIRECTORY:directory,BACKUP_ENCRYPTION_KEY:key.toString('base64'),DRIVE_BACKUP_FOLDER_ID:'folder',BACKUP_INSTANCE_ID:'test-instance'});
+ await expect(persistentBackup(db,config,drive,'job-refused',create)).rejects.toThrow(/Drive permission denied/);
+ expect((await readdir(directory)).filter(f=>f.endsWith('.dump.enc'))).toHaveLength(1);
+ expect(upload).not.toHaveBeenCalled();
+ const row=await db.one<{result:string;error_details:string}>('SELECT result,error_details FROM backup_log');
+ expect(row?.result).toBe('FAILED');expect(row?.error_details).toContain('permission denied');
+});
+
+it('never uploads twice when the artifact already exists in Drive',async()=>{
+ const create=vi.fn(async()=>fixture());const upload=vi.fn();
+ const drive={configured:true,verifyFolder:async()=>({folderId:'folder',name:'Backups'}),findBackup:async()=>({fileId:'existing',webViewLink:''}),upload,listOld:async()=>[],remove:async()=>{}};
+ const config=loadWorkerConfig({BACKUP_DIRECTORY:directory,BACKUP_ENCRYPTION_KEY:key.toString('base64'),DRIVE_BACKUP_FOLDER_ID:'folder',BACKUP_INSTANCE_ID:'test-instance'});
+ const first=await persistentBackup(db,config,drive,'job-duplicate',create);
+ expect(first.driveFileId).toBe('existing');
+ expect(upload).not.toHaveBeenCalled();
+ // A later run of the same job finds the recorded file ID and performs no remote call at all.
+ await persistentBackup(db,config,drive,'job-duplicate',create);
+ expect(upload).not.toHaveBeenCalled();
+ expect(create).toHaveBeenCalledTimes(1);
+ const manifest=JSON.parse(await readFile(join(directory,'BAK-'+createHash('sha256').update('test-instance:job-duplicate').digest('hex').slice(0,32)+'.json'),'utf8')) as {driveFileId:string};
+ expect(manifest.driveFileId).toBe('existing');
+});

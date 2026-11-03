@@ -4,7 +4,7 @@ import { SubmitRequestBody } from '@eh/contracts';
 import { DomainError } from '@eh/domain';
 import { actorOf, ok, type AppDependencies } from '../http';
 import { sendError } from '../errors';
-import { employeeSnapshot, requestReceipt, submitRequest } from '../services/requests';
+import { employeeSnapshot, myRequests, requestReceipt, submitRequest } from '../services/requests';
 import type { ServiceCtx } from '../services/common';
 
 function ctx(request: Parameters<typeof actorOf>[0]): ServiceCtx {
@@ -29,6 +29,14 @@ export function registerEmployeeRoutes(app: FastifyInstance, _deps: AppDependenc
     try {
       const body = SubmitRequestBody.parse(request.body ?? {});
       return ok(reply, request, await submitRequest(ctx(request), body));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  app.get('/api/employee/requests/mine', async (request, reply) => {
+    try {
+      return ok(reply, request, await myRequests(ctx(request)));
     } catch (error) {
       return sendError(reply, request.state, error);
     }

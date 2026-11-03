@@ -93,10 +93,11 @@ test('the release documents every confirmed defect', () => {
 });
 
 test('the overviews and the architecture notes describe the current release', () => {
-  assert.match(read('README.md'), /## Current release — V1\.7\.7/);
-  assert.match(read('README.md'), /## Historical V1\.7\.6 release record/);
-  assert.match(read('README_JP.md'), /## 現行リリース — V1\.7\.7/);
-  assert.match(read('README_JP.md'), /## 過去のリリース記録（V1\.7\.6）/);
+  // Version history is centralised in the changelog; the entry pages link to it.
+  assert.match(read('README.md'), /CHANGELOG\.md/);
+  assert.match(read('README_JP.md'), /CHANGELOG\.md/);
+  assert.match(read('CHANGELOG.md'), /## V1\.7\.7/);
+  assert.match(read('CHANGELOG.md'), /## V1\.7\.6/);
   const architecture = read('ARCHITECTURE.md');
   assert.match(architecture, /## V1\.7\.7 corrective architecture notes/);
   assert.match(architecture, /isAuthorizationDenied/);

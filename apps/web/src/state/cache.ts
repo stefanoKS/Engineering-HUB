@@ -151,7 +151,10 @@ export const keys = {
   status: 'manager/status',
   workload: 'manager/workload',
   references: 'manager/references',
-  employee: 'employee/snapshot'
+  employee: 'employee/snapshot',
+  myWork: 'employee/my-work',
+  myProjects: 'employee/my-work/projects',
+  myRequests: 'employee/requests/mine'
 };
 
 export function useQuery<T>(

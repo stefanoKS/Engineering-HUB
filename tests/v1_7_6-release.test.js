@@ -90,12 +90,11 @@ test('the corrective release documents every confirmed defect', () => {
 });
 
 test('the overviews describe the current release', () => {
-  const readme = read('README.md');
-  assert.match(readme, /## Current release — V1\.7\.7/);
-  assert.match(readme, /## Historical V1\.7\.6 release record/);
-  const japanese = read('README_JP.md');
-  assert.match(japanese, /## 現行リリース — V1\.7\.7/);
-  assert.match(japanese, /## 過去のリリース記録（V1\.7\.6）/);
+  // Version history is centralised in the changelog; the entry pages link to it.
+  assert.match(read('README.md'), /CHANGELOG\.md/);
+  assert.match(read('README_JP.md'), /CHANGELOG\.md/);
+  assert.match(read('CHANGELOG.md'), /## V1\.7\.7/);
+  assert.match(read('CHANGELOG.md'), /## V1\.7\.6/);
 });
 
 test('the architecture notes describe the invalidation and revocation boundaries', () => {

@@ -5,6 +5,7 @@ import type { AutomationSaveBody, AutomationSettingsView, PlanPreview, StatusVie
 import {
   KNOWN_SETTINGS,
   activeAdministratorIds,
+  backupStatus,
   getSettingRows,
   getSettings,
   lastBackup,
@@ -166,12 +167,13 @@ export async function emergencyStop(ctx: ServiceCtx): Promise<AutomationSettings
 
 export async function statusView(ctx: ServiceCtx, config: AppConfig): Promise<StatusView> {
   requireRole(ctx.identity, 'MANAGER');
-  const [counts, outbox, backup, rows, version] = await Promise.all([
+  const [counts, outbox, backup, rows, version, backupDetail] = await Promise.all([
     tableCounts(ctx.db),
     outboxStats(ctx.db),
     lastBackup(ctx.db),
     getSettingRows(ctx.db),
-    schemaVersion(ctx.db.pool)
+    schemaVersion(ctx.db.pool),
+    backupStatus(ctx.db)
   ]);
   const settings: Record<string, string> = {};
   for (const row of rows) settings[row.setting_id] = row.value;
@@ -188,6 +190,7 @@ export async function statusView(ctx: ServiceCtx, config: AppConfig): Promise<St
     dashboardPublicationEnabled: settingFlag(settings, SETTING_KEYS.SHARED_DASHBOARD_PUBLISH_ENABLED, false),
     lastBackupAt: backup?.created_at ?? null,
     lastBackupOk: backup?.result === 'OK' || backup?.result === 'SENT',
+    backup: backupDetail,
     valid: true,
     errorCount: 0,
     rowCounts: counts,

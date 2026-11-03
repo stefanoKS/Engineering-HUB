@@ -95,11 +95,13 @@ export function App(): JSX.Element {
 
   const signedIn = session ? session.actor : null;
   const isManager = !!signedIn && (signedIn.role === 'ADMIN' || signedIn.role === 'MANAGER');
+  const isMember = !!signedIn && signedIn.role === 'MEMBER';
 
   const nav = useMemo(
     () =>
       [
         { path: 'overview', label: t('nav.overview') },
+        { path: 'my-work', label: t('local.myWork') },
         { path: 'projects', label: t('nav.projects') },
         { path: 'tasks', label: t('nav.tasks') },
         { path: 'responsibilities', label: t('nav.responsibilities') },
@@ -109,8 +111,8 @@ export function App(): JSX.Element {
         { path: 'workload', label: t('nav.workload') },
         { path: 'automation', label: t('nav.automation') },
         { path: 'status', label: t('nav.status') }
-      ].filter((entry) => isManager || entry.path === 'overview'),
-    [t, isManager]
+      ].filter((entry) => isManager || entry.path === 'overview' || (isMember && entry.path === 'my-work')),
+    [t, isManager, isMember]
   );
 
   if (session === undefined) {
@@ -175,7 +177,7 @@ export function App(): JSX.Element {
 
       <main className="app-main" id="main-content" tabIndex={-1}>
         <Suspense fallback={<p role="status">{t('state.loading')}</p>}>
-          <div key={route.path}>{session.authMode === 'local' && !isManager && session.actor.role === 'MEMBER' ? <MyWorkScreen/> : renderScreen(route, session.actor, isManager)}</div>
+          <div key={route.path}>{session.authMode === 'local' && !isManager && session.actor.role === 'MEMBER' && route.segments[0] !== 'my-work' ? <MyWorkScreen/> : renderScreen(route, session.actor, isManager)}</div>
         </Suspense>
       </main>
     </div>
@@ -183,8 +185,12 @@ export function App(): JSX.Element {
 }
 
 function renderScreen(route: Route, actor: Actor, isManager: boolean): JSX.Element {
-  if (!isManager) return <OverviewScreen actor={actor} />;
   const [first, second] = route.segments;
+  // A member files their own work in both authentication modes; the published dashboard stays
+  // the member's overview.
+  if (!isManager) {
+    return first === 'my-work' && actor.role === 'MEMBER' ? <MyWorkScreen /> : <OverviewScreen actor={actor} />;
+  }
   switch (first) {
     case 'accounts':
       return actor.role === 'ADMIN' ? <LocalAccountsScreen/> : <OverviewScreen actor={actor}/>;

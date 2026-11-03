@@ -1,9 +1,436 @@
-import {useState} from 'react';
-import {api} from '../api/client';
-import {useQuery} from '../state/cache';
-import {useI18n} from '../i18n';
-import {ErrorBox} from '../components/ui';
-import {useSave} from '../components/forms';
-type Work={taskId:string;taskName:string;projectName:string;dueDate:string|null;status:string;progressPercent:number|null;actualHours:number|null;revision:number};
-export function MyWorkScreen(){const {t}=useI18n();const [page,setPage]=useState(1);const list=useQuery<{items:Work[]}>('my-work:'+page,()=>api.get('/api/employee/my-work?page='+page));return <div className="screen stack"><h2>{t('local.myWork')}</h2><p>{t('local.progressHint')}</p><ErrorBox error={list.error}/>{list.data?.items.map(item=><WorkCard key={item.taskId+':'+item.revision} item={item} saved={()=>list.refresh()}/>)}<div className="inline-actions"><button disabled={page===1} onClick={()=>setPage(page-1)}>{t('local.previous')}</button><span>{page}</span><button disabled={(list.data?.items.length??0)<25} onClick={()=>setPage(page+1)}>{t('local.next')}</button></div></div>;}
-function WorkCard({item,saved}:{item:Work;saved:()=>void}){const {t,label}=useI18n();const [progress,setProgress]=useState(String(item.progressPercent??0)),[actual,setActual]=useState(String(item.actualHours??0));const save=useSave();return <form className="card stack" onSubmit={e=>{e.preventDefault();void save.run(()=>api.patch('/api/employee/my-work/'+item.taskId,{revision:item.revision,progressPercent:Number(progress),actualHours:Number(actual)}),{onSuccess:saved});}}><h3>{item.taskName}</h3><p>{item.projectName} · {label('task.status',item.status)} · {item.dueDate??t('common.unset')}</p><div className="field-row"><label className="field"><span>{t('local.progress')}</span><input type="number" min={0} max={99} required value={progress} onChange={e=>setProgress(e.target.value)}/></label><label className="field"><span>{t('local.actualHours')}</span><input type="number" min={0} max={99999} step="0.1" required value={actual} onChange={e=>setActual(e.target.value)}/></label></div><ErrorBox error={save.error} onRetry={saved}/><button className="button" disabled={save.state==='saving'||['Done','Cancelled'].includes(item.status)}>{t('action.save')}</button></form>;}
+﻿/**
+ * My Work: the member screen.
+ *
+ * A member files their own tasks, records progress and asks for a completion review. The owner of
+ * a created task, the request author and the review decision are all decided by the server; the
+ * browser only chooses a project, a subproject, a name, a description, a deadline and a priority.
+ */
+import { useMemo, useState } from 'react';
+import type { MemberRequest, MemberRequests, MyWorkList, MyWorkProjectOptions } from '@eh/contracts';
+import { api, ApiFailure } from '../api/client';
+import { keys, queryCache, useQuery } from '../state/cache';
+import { useI18n } from '../i18n';
+import { Badge, ErrorBox } from '../components/ui';
+import { SelectInput, TextInput, useIdempotencyKey, useSave } from '../components/forms';
+
+const PAGE_SIZE = 25;
+
+export function MyWorkScreen(): JSX.Element {
+  const { t } = useI18n();
+  const [page, setPage] = useState(1);
+  const list = useQuery<MyWorkList>(`${keys.myWork}:${page}`, () => api.get<MyWorkList>(`/api/employee/my-work?page=${page}`));
+  const projects = useQuery<MyWorkProjectOptions>(keys.myProjects, () => api.get<MyWorkProjectOptions>('/api/employee/my-work/projects'));
+  const requests = useQuery<MemberRequests>(keys.myRequests, () => api.get<MemberRequests>('/api/employee/requests/mine'));
+
+  const refreshAll = (): void => {
+    queryCache.invalidate([keys.myWork, keys.myRequests]);
+  };
+
+  const total = list.data?.total ?? 0;
+  const items = list.data?.items ?? [];
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  return (
+    <div className="screen stack">
+      <h2>{t('local.myWork')}</h2>
+      <p className="muted small">{t('myWork.intro')}</p>
+
+      {requests.data && !requests.data.submissionEnabled ? (
+        <div className="banner warning">
+          <strong>{t('myWork.requestsClosed')}</strong>
+          <p className="muted small">{t('myWork.requestsClosedHint')}</p>
+        </div>
+      ) : null}
+
+      <CreateTaskCard
+        projects={projects.data?.items ?? []}
+        loading={projects.loading}
+        onCreated={() => {
+          refreshAll();
+          list.refresh();
+        }}
+      />
+
+      <ErrorBox error={list.error ?? projects.error ?? requests.error} onRetry={() => {
+        list.refresh();
+        projects.refresh();
+        requests.refresh();
+      }} />
+
+      <div className="inline-actions">
+        <span className="muted small">{t('myWork.total', { n: total })}</span>
+      </div>
+
+      {items.map((item) => (
+        <WorkCard
+          key={`${item.taskId}:${item.revision}`}
+          item={item}
+          submissionEnabled={requests.data?.submissionEnabled ?? false}
+          onChanged={refreshAll}
+        />
+      ))}
+
+      <div className="inline-actions">
+        <button type="button" className="button secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+          {t('local.previous')}
+        </button>
+        <span>
+          {page} / {totalPages}
+        </span>
+        <button type="button" className="button secondary" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
+          {t('local.next')}
+        </button>
+      </div>
+
+      <MyRequestsCard requests={requests.data?.items ?? []} />
+    </div>
+  );
+}
+
+function CreateTaskCard({
+  projects,
+  loading,
+  onCreated
+}: {
+  projects: MyWorkProjectOptions['items'];
+  loading: boolean;
+  onCreated: () => void;
+}): JSX.Element {
+  const { t, label } = useI18n();
+  const idempotencyKey = useIdempotencyKey();
+  const save = useSave();
+  const [projectId, setProjectId] = useState('');
+  const [subprojectId, setSubprojectId] = useState('');
+  const [taskName, setTaskName] = useState('');
+  const [description, setDescription] = useState('');
+  const [deadline, setDeadline] = useState('');
+  const [priority, setPriority] = useState('Medium');
+  const [acknowledge, setAcknowledge] = useState(false);
+  const [notice, setNotice] = useState('');
+
+  const current = useMemo(() => projects.find((entry) => entry.projectId === projectId), [projects, projectId]);
+  const subprojects = current?.subprojects ?? [];
+  const needsAcknowledgement = save.state === 'failed' && save.error instanceof ApiFailure && save.error.code === 'CONFIRMATION_REQUIRED';
+  const valid = !!projectId && taskName.trim().length > 0 && !!deadline;
+
+  return (
+    <form
+      className="card stack"
+      onSubmit={(event) => {
+        event.preventDefault();
+        setNotice('');
+        void save.run(
+          () =>
+            api.post('/api/employee/my-work', {
+              idempotencyKey,
+              projectId,
+              subprojectId: subprojectId || null,
+              taskName: taskName.trim(),
+              description: description.trim() || undefined,
+              deadline,
+              priority,
+              acknowledgeNonWorking: acknowledge
+            }),
+          {
+            onSuccess: () => {
+              setNotice(t('myWork.created'));
+              setTaskName('');
+              setDescription('');
+              setDeadline('');
+              setAcknowledge(false);
+              onCreated();
+            }
+          }
+        );
+      }}
+    >
+      <h3>{t('myWork.newTask')}</h3>
+      <p className="muted small">{t('myWork.ownerNote')}</p>
+      {loading ? <p className="muted">{t('myWork.projectsLoading')}</p> : null}
+      {!loading && projects.length === 0 ? <div className="banner warning">{t('myWork.projectsEmpty')}</div> : null}
+
+      <div className="field-row">
+        <label className="field">
+          <span className="field-label">{t('myWork.project')}</span>
+          <SelectInput
+            value={projectId}
+            onChange={(value) => {
+              setProjectId(value);
+              setSubprojectId('');
+            }}
+            allowEmpty={t('common.unset')}
+            options={projects.map((entry) => ({
+              value: entry.projectId,
+              label: entry.responsibilityName ? entry.projectName + " / " + entry.responsibilityName : entry.projectName
+            }))}
+          />
+        </label>
+        <label className="field">
+          <span className="field-label">{t('myWork.subproject')}</span>
+          <SelectInput
+            value={subprojectId}
+            onChange={setSubprojectId}
+            allowEmpty={t('myWork.subprojectNone')}
+            options={subprojects.map((entry) => ({ value: entry.subprojectId, label: entry.subprojectName }))}
+          />
+        </label>
+      </div>
+
+      <label className="field">
+        <span className="field-label">{t('myWork.taskName')}</span>
+        <TextInput value={taskName} onChange={setTaskName} required />
+      </label>
+
+      <label className="field">
+        <span className="field-label">{t('myWork.description')}</span>
+        <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} />
+      </label>
+
+      <div className="field-row">
+        <label className="field">
+          <span className="field-label">{t('myWork.deadline')}</span>
+          <TextInput type="date" value={deadline} onChange={setDeadline} required />
+        </label>
+        <label className="field">
+          <span className="field-label">{t('myWork.priority')}</span>
+          <SelectInput
+            value={priority}
+            onChange={setPriority}
+            options={['Low', 'Medium', 'High', 'Critical'].map((value) => ({ value, label: label('priority', value) }))}
+          />
+        </label>
+      </div>
+
+      {needsAcknowledgement ? (
+        <div className="banner warning">
+          <p>{t('myWork.dueSoonWarning')}</p>
+          <label className="inline-field">
+            <input type="checkbox" checked={acknowledge} onChange={(event) => setAcknowledge(event.target.checked)} />
+            <span>{t('myWork.acknowledge')}</span>
+          </label>
+        </div>
+      ) : null}
+
+      <ErrorBox error={save.state === 'failed' && !needsAcknowledgement ? save.error : undefined} onRetry={onCreated} />
+      {notice ? <div className="banner ok">{notice}</div> : null}
+
+      <div className="inline-actions">
+        <button type="submit" className="button" disabled={!valid || save.state === 'saving'}>
+          {save.state === 'saving' ? t('state.saving') : t('myWork.create')}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function WorkCard({
+  item,
+  submissionEnabled,
+  onChanged
+}: {
+  item: MyWorkList['items'][number];
+  submissionEnabled: boolean;
+  onChanged: () => void;
+}): JSX.Element {
+  const { t, label } = useI18n();
+  const [progress, setProgress] = useState(String(item.progressPercent ?? 0));
+  const [actual, setActual] = useState(String(item.actualHours ?? 0));
+  const [reporting, setReporting] = useState(false);
+  const save = useSave();
+
+  const finished = ['Done', 'Cancelled'].includes(item.status);
+  const review = reviewKey(item.reviewState);
+
+  return (
+    <div className="card stack">
+      <form
+        className="stack"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void save.run(
+            () =>
+              api.patch(`/api/employee/my-work/${item.taskId}`, {
+                revision: item.revision,
+                progressPercent: Number(progress),
+                actualHours: Number(actual)
+              }),
+            { onSuccess: onChanged }
+          );
+        }}
+      >
+        <h3>{item.taskName}</h3>
+        <p className="muted small">
+          {item.projectName}
+          {item.subprojectName ? ` / ${item.subprojectName}` : ''} ﾂｷ {label('status', item.status)} ﾂｷ{' '}
+          {item.dueDate ?? t('common.unset')}
+        </p>
+        <p className="small">
+          <span className="muted">{t('myWork.reviewLabel')}: </span>
+          <Badge tone={review.tone}>{t(review.label)}</Badge>
+          {item.creationChannel === 'MEMBER' ? <span className="muted small"> ﾂｷ {t('myWork.adminApprovalNote')}</span> : null}
+        </p>
+        <div className="field-row">
+          <label className="field">
+            <span className="field-label">{t('local.progress')}</span>
+            <TextInput type="number" min={0} max={99} value={progress} onChange={setProgress} required />
+          </label>
+          <label className="field">
+            <span className="field-label">{t('local.actualHours')}</span>
+            <TextInput type="number" min={0} max={99999} step={0.1} value={actual} onChange={setActual} required />
+          </label>
+        </div>
+        <ErrorBox error={save.error} onRetry={onChanged} />
+        <div className="inline-actions">
+          <button type="submit" className="button" disabled={save.state === 'saving' || finished}>
+            {t('action.save')}
+          </button>
+          <button
+            type="button"
+            className="button secondary"
+            disabled={finished || item.pendingRequest || !submissionEnabled}
+            title={submissionEnabled ? undefined : t('myWork.requestsClosed')}
+            onClick={() => setReporting(true)}
+          >
+            {t('myWork.reportCompletion')}
+          </button>
+        </div>
+        {item.pendingRequest ? <p className="muted small">{t('myWork.review.pending')}</p> : null}
+        {finished ? <p className="muted small">{t('myWork.doneNote')}</p> : null}
+      </form>
+
+      {reporting ? (
+        <CompletionRequestForm
+          taskId={item.taskId}
+          onCancel={() => {
+            setReporting(false);
+            onChanged();
+          }}
+          onSubmitted={onChanged}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function reviewKey(reviewState: MyWorkList['items'][number]['reviewState']): { label: string; tone: 'ok' | 'warn' | 'danger' | 'neutral' } {
+  switch (reviewState) {
+    case 'PENDING':
+      return { label: 'myWork.review.pending', tone: 'warn' };
+    case 'APPROVED':
+      return { label: 'myWork.review.approved', tone: 'ok' };
+    case 'REJECTED':
+      return { label: 'myWork.review.rejected', tone: 'danger' };
+    case 'RETURNED':
+      return { label: 'myWork.review.returned', tone: 'warn' };
+    case 'STALE':
+      return { label: 'myWork.review.stale', tone: 'warn' };
+    default:
+      return { label: 'myWork.review.none', tone: 'neutral' };
+  }
+}
+
+/**
+ * Completion report submission.
+ *
+ * The receipt ID stays on screen only: the client is non-blocking and an unobservable outcome is
+ * reported as unknown instead of being retried automatically.
+ */
+function CompletionRequestForm({
+  taskId,
+  onCancel,
+  onSubmitted
+}: {
+  taskId: string;
+  onCancel: () => void;
+  onSubmitted: () => void;
+}): JSX.Element {
+  const { t } = useI18n();
+  const [note, setNote] = useState('');
+  const [state, setState] = useState<'idle' | 'sending' | 'done' | 'unknown'>('idle');
+  const [message, setMessage] = useState<{ tone: string; text: string } | null>(null);
+  const clientRequestId = useIdempotencyKey();
+
+  const submit = async (): Promise<void> => {
+    if (!note.trim() || state === 'sending' || state === 'done') return;
+    setState('sending');
+    setMessage(null);
+    try {
+      const result = await api.post<{ requestId: string }>('/api/employee/requests', {
+        clientRequestId,
+        taskId,
+        requestType: 'COMPLETION_REPORT',
+        completionNote: note.trim()
+      });
+      setState('done');
+      setMessage({ tone: 'ok', text: `${t('request.completion.heading')} ${t('request.confirm.id')}: ${result.requestId}` });
+      onSubmitted();
+    } catch (failure) {
+      if (failure instanceof ApiFailure && ['NETWORK', 'INVALID_RESPONSE'].includes(failure.code)) {
+        setState('unknown');
+        setMessage({ tone: 'warning', text: t('request.transport.OUTCOME_UNKNOWN') });
+        return;
+      }
+      setState('idle');
+      setMessage({
+        tone: 'danger',
+        text: failure instanceof ApiFailure ? failure.message : t('common.error')
+      });
+    }
+  };
+
+  return (
+    <div className="card stack">
+      <h4>{t('myWork.completionHeading')}</h4>
+      <label className="field">
+        <span className="field-label">{t('myWork.completionNote')}</span>
+        <textarea
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          rows={3}
+          disabled={state !== 'idle'}
+        />
+      </label>
+      {message ? <div className={`banner ${message.tone}`}>{message.text}</div> : null}
+      {state === 'done' ? <p className="muted small">{t('request.completion.body')}</p> : null}
+      <div className="inline-actions">
+        <button type="button" className="button secondary" onClick={onCancel} disabled={state === 'sending'}>
+          {state === 'done' ? t('request.activity.dismiss') : t('request.form.cancel')}
+        </button>
+        <button
+          type="button"
+          className="button"
+          disabled={!note.trim() || state === 'sending' || state === 'done'}
+          onClick={() => void submit()}
+        >
+          {state === 'sending' ? t('request.form.submitting') : t('myWork.submitCompletion')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MyRequestsCard({ requests }: { requests: MemberRequest[] }): JSX.Element {
+  const { t, label } = useI18n();
+  return (
+    <section className="card stack">
+      <h3>{t('myWork.requestsHeading')}</h3>
+      {requests.length === 0 ? <p className="muted">{t('myWork.requestsEmpty')}</p> : null}
+      {requests.length > 0 ? (
+        <ul className="list">
+          {requests.map((request) => (
+            <li key={request.requestId}>
+              <strong>{request.taskName || request.taskId}</strong>
+              <span className="muted small">
+                {' '}
+                ﾂｷ {t(`myWork.requestType.${request.requestType}`)} ﾂｷ {label('request.status', request.status)} ﾂｷ{' '}
+                {request.submittedAt.slice(0, 10)} ({request.requestId})
+              </span>
+              {request.decisionNote ? <div className="muted small">{t('myWork.decisionNote')}: {request.decisionNote}</div> : null}
+              {request.staleReason ? <div className="muted small">{t('myWork.review.stale')}: {request.staleReason}</div> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}

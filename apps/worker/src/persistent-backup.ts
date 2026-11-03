@@ -6,7 +6,15 @@ import { createBackupArtifact, decrypt, parseEncryptionKey, type BackupArtifact 
 import type { WorkerConfig } from './config';
 import type { DriveTransport } from './transports';
 import type { Database } from '@eh/db';
-type Manifest={fileName:string;plainChecksum:string;encryptedChecksum:string;keyId:string;createdAt:string;driveFileId?:string};
+type Manifest = {
+  fileName: string;
+  plainChecksum: string;
+  encryptedChecksum: string;
+  keyId: string;
+  createdAt: string;
+  driveFileId?: string;
+  driveUploadedAt?: string;
+};
 export async function persistentBackup(db:Database,config:WorkerConfig,drive:DriveTransport,jobId:string,create=createBackupArtifact){
  const key=parseEncryptionKey(config.BACKUP_ENCRYPTION_KEY??'');
  if(config.DRIVE_BACKUP_FOLDER_ID&&config.BACKUP_INSTANCE_ID==='local')throw new Error('Set a unique BACKUP_INSTANCE_ID before enabling Drive uploads');
@@ -30,9 +38,13 @@ export async function persistentBackup(db:Database,config:WorkerConfig,drive:Dri
  if(config.DRIVE_BACKUP_FOLDER_ID&&!manifest.driveFileId){
   try{
    if(!drive.configured)throw new Error('DRIVE_NOT_CONFIGURED');
+   // Fail with a readable reason (missing folder, wrong type, permission) before a large upload.
+   await drive.verifyFolder?.(config.DRIVE_BACKUP_FOLDER_ID);
+   // A retry after a lost answer must find the stored file instead of uploading it again.
    const existing=await drive.findBackup?.(config.DRIVE_BACKUP_FOLDER_ID,id);
    const uploaded=existing??await drive.upload({name:manifest.fileName,content,mimeType:'application/octet-stream',folderId:config.DRIVE_BACKUP_FOLDER_ID,appProperties:{backupId:id,plainChecksum:manifest.plainChecksum,keyId:manifest.keyId}});
    manifest.driveFileId=uploaded.fileId;
+   manifest.driveUploadedAt=new Date().toISOString();
    await writeFile(manifestPath+'.tmp',JSON.stringify(manifest),{mode:0o600});await rename(manifestPath+'.tmp',manifestPath);
   }catch(error){uploadError=(error as Error).message.slice(0,500);}
  }

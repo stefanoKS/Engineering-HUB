@@ -164,6 +164,25 @@ export const CreateTaskBody = z
   })
   .strict();
 
+/**
+ * Member self-service task creation.
+ *
+ * Deliberately narrower than the manager command: the owner, the assignees, the status, the
+ * progress and the hierarchy parent are decided by the server, never by the browser.
+ */
+export const CreateMyTaskBody = z
+  .object({
+    idempotencyKey: IdempotencyKey,
+    projectId: Id,
+    subprojectId: Id.nullable().optional(),
+    taskName: Text(200).min(1),
+    description: Text(20000).optional(),
+    deadline: IsoDate,
+    priority: Priority.optional(),
+    acknowledgeNonWorking: z.boolean().optional()
+  })
+  .strict();
+
 export const PatchTaskBody = z
   .object({
     revision: Revision,

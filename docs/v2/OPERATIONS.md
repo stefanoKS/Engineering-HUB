@@ -4,6 +4,17 @@
 
 [LOCAL_LAN.md](LOCAL_LAN.md) specifies the employee-ID/password mode, schema 7, optional email, first-login change, administrator reset, employee-owned progress editing, Windows launcher, durable local backup and optional Shared Drive upload. It supersedes Google-only or Linux-only assumptions below for this mode. [Verification record](LOCAL_LAN_ACCEPTANCE.md).
 
+## Member self-service and backup status — 2026-11-03
+
+* A member files their own work in 自分の担当タスク. The task is created unapproved, owned by the
+  verified member and starts as `Not Started`; managers see it immediately.
+* A completion report is only accepted while `REQUEST_SUBMISSION_ENABLED` is exactly `true`. A task
+  the member created is completed by an **ADMIN** decision; older work keeps the manager decision.
+  A refused decision leaves the request `PENDING`.
+* Backup health is reported per destination: last local backup, last Drive upload and the latest
+  failure (`GET /api/manager/status`, or `cli.ts backup-status` on the host). A Drive failure never
+  removes the local artefact, and a retry never uploads the same artefact twice.
+
 ## Calendar and reminder changes — 2026-11-01
 
 The opt-in hourly Calendar scan includes tasks and milestones. Events use deterministic identities and ownership/ETag checks; missing or foreign linked events require investigation and are not silently replaced. Pending-request reminders use an independent switch and recheck status before delivery. See [compatibility and release gates](RELEASE_HARDENING.md). All existing activation gates remain required.
@@ -32,7 +43,7 @@ account.
 | API ready | `curl -fsS https://<APP_DOMAIN>/readyz` | database ok, schema version current |
 | Worker progress | `docker compose logs --since 1h worker \| grep 'job failed'` | no permanent failures |
 | Outbox backlog | 状態 screen, or `SELECT count(*) FROM outbox_jobs WHERE status IN ('PENDING','LEASED')` | small and draining |
-| Backup | `backup_log` latest row | `OK`, checksum present, `verify-restore` PASS monthly |
+| Backup | `backup_log` latest row and **Status** (local / Drive / failure) | local `OK`, checksum present, `verify-restore` PASS monthly |
 | Ledger | `notification_ledger` for `DELIVERY_UNCERTAIN` / `FAILED` | reviewed, not silently retried |
 | Disk | `df -h` | above 20 % free |
 | Certificate | browser / `curl -vI` | valid, renewed |

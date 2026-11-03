@@ -85,6 +85,8 @@ Treat every remaining **PASS** below as "implemented and covered by the named lo
 | Completion report | dashboard form | `POST /api/employee/requests` | PASS (container refused) |
 | Submission states | 送信中 / 受付完了 / 送信結果不明 | `EmployeeHome`, receipt metadata in `localStorage` | PASS (receipt limited to task/type/time/state/ID) |
 | Submission switch | `REQUEST_SUBMISSION_ENABLED` | Same setting key, fails closed | PASS |
+| Member task creation | not available in V1 | `POST /api/employee/my-work`, 自分の担当タスク | PASS (owner from the session, `Not Started`/0 %, no approval needed to create) |
+| Member completion request | completion report in the dashboard | 完了報告 in My Work, same request queue | PASS (pending never completes; a member-created task needs an ADMIN decision) |
 | Privacy boundary | allowlisted snapshot | One allowlist in `publication.ts`; `contracts.test` | PASS |
 
 ## 3. Integrations and operations
@@ -93,7 +95,7 @@ Treat every remaining **PASS** below as "implemented and covered by the named lo
 | --- | --- | --- | --- |
 | Email notifications | `Notifications.gs` (MailApp) | `worker` + Gmail API adapter, outbox, ledger | PASS locally with transport doubles; BLOCKED live (mailbox/OAuth) |
 | Calendar sync | `CalendarSync.gs` | `worker` calendar job, `calendar_links` | BLOCKED live (Workspace) |
-| Backups | Drive backup of the workbook | `pg_dump`/logical archive + AES-256-GCM + Drive adapter + `backup_log` | PASS (encryption + logical restore tested); pg_dump path NOT_RUN (client tools absent locally) |
+| Backups | Drive backup of the workbook | `pg_dump`/logical archive + AES-256-GCM + Drive adapter + `backup_log` | PASS (encryption + logical restore tested; resumable Drive upload tested with a transport double); pg_dump path and live Drive NOT_RUN (client tools and credentials absent locally) |
 | Reporting export | generated sheets | one-way append to a dedicated sheet | BLOCKED live (Sheets credentials) |
 | Shared dashboard publication | A/B snapshot workbook | A/B slots in PostgreSQL, same allowlist | PASS locally; BLOCKED against the real snapshot spreadsheet |
 | Triggers | installable Apps Script triggers | worker scheduler + outbox | PASS (dedupe keys, lease reclaim) |

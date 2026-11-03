@@ -101,7 +101,7 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | GET | `/api/manager/requests` | `includeDecided` |
 | GET | `/api/manager/automation` | Settings, revision, effective mode, LIVE requirements |
 | GET | `/api/manager/publication` | Slot, contract, hash, row counts, last error |
-| GET | `/api/manager/status` | Version, schema, counts, outbox, backup |
+| GET | `/api/manager/status` | Version, schema, counts, outbox, backup (local / Drive / latest failure) |
 | GET | `/api/manager/reports/workload` | Four weeks of utilisation |
 | GET | `/api/manager/plan/preview` | `deadline`, `durationValue`, `durationUnit`, `durationBasis` |
 | GET | `/api/manager/deletion/preflight` | `entityType`, `entityId` (ADMIN only) |
@@ -140,13 +140,32 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | POST | `/api/manager/reports/refresh` | MANAGER |
 | POST | `/api/manager/deletion/reconcile` | ADMIN, `confirmed`, `confirmation: "RECONCILE DELETIONS"` |
 
-## 5. Employee endpoints (any authenticated internal identity)
+## 5. Employee / member endpoints
+
+`MEMBER` and above may read. Creation, progress and request submission are member self-service; a
+`VIEWER` is refused. The owner of a created task, the request author and the deadline/status effect
+are decided on the server.
 
 | Method | Path | Notes |
 | --- | --- | --- |
 | GET | `/api/employee/snapshot` | Published contract 1.6, `INTERNAL` projects only, `submissionEnabled` |
-| POST | `/api/employee/requests` | `clientRequestId`, `taskId`, `requestType`, `requestedDueDate?`, `reason?`, `explanation?`, `completionNote?`; idempotent |
-| GET | `/api/employee/requests/:id` | Receipt state only |
+| GET | `/api/employee/my-work` | `page`; the signed-in member's own tasks with review state, never another member's work |
+| GET | `/api/employee/my-work/projects` | Active projects and non-archived subprojects a member may file work under (id, name, responsibility name only) |
+| POST | `/api/employee/my-work` | MEMBER only. `idempotencyKey`, `projectId`, `subprojectId?`, `taskName`, `description?`, `deadline`, `priority?`, `acknowledgeNonWorking?`. The owner is the verified member, the status is `Not Started` and progress is 0. A MANAGER or ADMIN uses the manager task form instead |
+| PATCH | `/api/employee/my-work/:id` | `revision`, `progressPercent` (0–99), `actualHours`; own active leaf work only |
+| POST | `/api/employee/requests` | `clientRequestId`, `taskId`, `requestType`, `requestedDueDate?`, `reason?`, `explanation?`, `completionNote?`; idempotent; only for work the member is assigned to |
+| GET | `/api/employee/requests/mine` | The member's own requests with `submissionEnabled`; state and decision note only |
+| GET | `/api/employee/requests/:id` | Receipt state only; another member's receipt is `404` |
+
+### Completion approval rules
+
+* A pending, rejected or returned request never changes the task.
+* `APPROVE` on a `COMPLETION_REPORT` writes `Done` once.
+* A task created by a member (`creationChannel: MEMBER`) is completed by an **ADMIN** decision; a
+  `MANAGER` decision is refused with `AUTHORIZATION_DENIED` before the request is claimed, so the
+  request stays `PENDING`. Legacy and manager-created tasks keep the ordinary manager decision.
+* `REQUEST_SUBMISSION_ENABLED` must be exactly `true`; the default is `false` (closed) and the
+  employee screen states that submissions are closed.
 
 ## 6. Health and public configuration
 

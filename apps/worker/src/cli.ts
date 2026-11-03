@@ -3,7 +3,10 @@
  * Operator CLI.
  *
  *   tsx src/cli.ts backup-now        create and verify one backup (upload when configured)
+ *   tsx src/cli.ts backup-status     report the last local backup, the last Drive upload and failures
  *   tsx src/cli.ts verify-restore    prove a logical archive restores into a scratch database
+ *   tsx src/cli.ts verify-restore <path/to/downloaded.dump.enc>
+ *                                    restore a downloaded encrypted backup into a scratch database
  *   tsx src/cli.ts run-once          drain the outbox once and exit (cron-friendly)
  *   tsx src/cli.ts authorize-delivery-retry <notificationId> <actorEmail>
  *                                    the only way an uncertain delivery becomes sendable again
@@ -16,6 +19,7 @@ import { persistentBackup } from './persistent-backup';
 import pg from 'pg';
 import {
   authorizeDeliveryRetry,
+  backupStatus,
   claimNext,
   completeJob,
   createPool,
@@ -49,6 +53,14 @@ function connectionFromUrl(url: string): pg.ClientConfig {
 async function backupNow(config: ReturnType<typeof loadWorkerConfig>, db: Database): Promise<void> {
  const drive=new GoogleDriveTransport({credentialsJson:config.GOOGLE_SERVICE_ACCOUNT_JSON,delegatedUser:config.GOOGLE_DRIVE_DELEGATED_USER});
  process.stdout.write(JSON.stringify(await persistentBackup(db,config,drive,'manual:'+randomUUID()))+'\n');
+}
+
+/** Local and Drive health are reported separately: a Drive outage keeps the local backup usable. */
+async function backupStatusCommand(config: ReturnType<typeof loadWorkerConfig>, db: Database): Promise<void> {
+  const status = await backupStatus(db);
+  process.stdout.write(
+    JSON.stringify({ ...status, driveUploadConfigured: !!config.DRIVE_BACKUP_FOLDER_ID }, null, 2) + '\n'
+  );
 }
 
 async function verifyRestore(config: ReturnType<typeof loadWorkerConfig>, db: Database): Promise<void> {
@@ -150,6 +162,7 @@ async function main(): Promise<void> {
   try {
     const command = process.argv[2] ?? '';
     if (command === 'backup-now') await backupNow(config, db);
+    else if (command === 'backup-status') await backupStatusCommand(config, db);
     else if (command === 'verify-restore') await verifyRestore(config, db);
     else if (command === 'run-once') await runOnce(config, db);
     else if (command === 'authorize-delivery-retry') {

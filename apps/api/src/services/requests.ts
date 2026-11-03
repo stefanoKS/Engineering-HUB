@@ -9,7 +9,6 @@ import type { z } from 'zod';
 import type { DecisionBody, SubmitRequestBody, TaskRequest } from '@eh/contracts';
 import {
   claimRequest,
-  failClaim,
   finalizeRequest,
   getProject,
   getRequest,
@@ -28,6 +27,7 @@ import {
   DomainError,
   applyTaskPlan,
   assertCompletableByDecision,
+  assertCompletionDecisionRole,
   assertReportable,
   createCalendar,
   effectiveEmailMode,
@@ -244,12 +244,22 @@ export async function submitRequest(
   ctx: ServiceCtx,
   body: z.infer<typeof SubmitRequestBody>
 ): Promise<{ requestId: string; state: 'RECEIVED' | 'DUPLICATE'; requestType: string; taskId: string; submittedAt: string }> {
+  requireRole(ctx.identity, 'MEMBER');
   const settings = await getSettings(ctx.db);
   if (!settingFlag(settings, SETTING_KEYS.REQUEST_SUBMISSION_ENABLED, false)) {
     throw new DomainError('REQUEST_SUBMISSION_CLOSED', 'Request submission is closed');
   }
   const task = await getTask(ctx.db, body.taskId);
   if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${body.taskId}`);
+  const assigned = await ctx.db.one(
+    `SELECT task_id FROM tasks WHERE task_id = $1 AND deleted_at IS NULL
+       AND (owner_member_id = $2 OR EXISTS (
+         SELECT 1 FROM task_assignees WHERE task_id = $1 AND member_id = $2 AND removed_at IS NULL))`,
+    [task.taskId, ctx.identity.memberId]
+  );
+  if (!assigned) {
+    throw new DomainError('AUTHORIZATION_DENIED', 'Only your assigned work can be requested');
+  }
   const project = await getProject(ctx.db, task.projectId);
   if (!project || project.dashboardVisibility !== 'INTERNAL') {
     throw new DomainError('NOT_FOUND', 'This task is not published');
@@ -303,7 +313,8 @@ export async function submitRequest(
         taskRevisionAtSubmission: snap.taskRevisionAtSubmission,
         dueDateAtSubmission: snap.dueDateAtSubmission,
         snapshotVersion: snap.snapshotVersion,
-        inboxRequestId: body.clientRequestId
+        inboxRequestId: body.clientRequestId,
+        requesterMemberId: ctx.identity.memberId
       });
       await audit(tx, ctx, {
         entityType: 'TASK_REQUESTS',
@@ -357,14 +368,20 @@ export async function decideRequest(ctx: ServiceCtx, body: z.infer<typeof Decisi
         status: locked.status
       });
     }
+    const task = await getTask(tx, locked.taskId);
+    if (!task) {
+      throw new DomainError('NOT_FOUND', `Task not found: ${locked.taskId}`);
+    }
+    // Refused before the request is claimed, so a refusal never leaves a request PROCESSING.
+    if (body.decision === 'APPROVE' && locked.requestType === 'COMPLETION_REPORT') {
+      assertCompletionDecisionRole({
+        actorRole: ctx.identity.role,
+        creationChannel: task.creationChannel
+      });
+    }
     const claimed = await claimRequest(tx, body.requestId);
     if (!claimed) {
       throw new DomainError('DUPLICATE_DECISION', 'This request is no longer open for a decision');
-    }
-    const task = await getTask(tx, locked.taskId);
-    if (!task) {
-      await failClaim(tx, body.requestId, 'TASK_NOT_FOUND');
-      throw new DomainError('NOT_FOUND', `Task not found: ${locked.taskId}`);
     }
     const childRow = await tx.one<{ count: string }>(
       'SELECT count(*)::text AS count FROM tasks WHERE parent_task_id = $1 AND deleted_at IS NULL',
@@ -550,14 +567,85 @@ export async function requestReceipt(
   ctx: ServiceCtx,
   requestId: string
 ): Promise<{ requestId: string; state: string; requestType: string; taskId: string; submittedAt: string }> {
+  requireRole(ctx.identity, 'MEMBER');
   const request = await getRequest(ctx.db, requestId);
   if (!request) throw new DomainError('NOT_FOUND', 'Request not found');
+  const manager = ctx.identity.role === 'ADMIN' || ctx.identity.role === 'MANAGER';
+  if (!manager && request.requesterMemberId !== ctx.identity.memberId) {
+    // An unrelated member must not learn that this receipt exists.
+    throw new DomainError('NOT_FOUND', 'Request not found');
+  }
   return {
     requestId: request.requestId,
     state: request.status,
     requestType: request.requestType,
     taskId: request.taskId,
     submittedAt: request.submittedAt
+  };
+}
+
+/**
+ * The member's own request history.
+ *
+ * It is filtered by the verified identity, so one member never sees another member's
+ * submission, and it carries state only: no reviewer address and no manager-only note.
+ */
+export async function myRequests(ctx: ServiceCtx, limit = 50): Promise<{
+  items: {
+    requestId: string;
+    requestType: string;
+    taskId: string;
+    taskName: string;
+    projectName: string;
+    status: string;
+    submittedAt: string;
+    decidedAt: string | null;
+    decisionNote: string;
+    staleReason: string;
+    revision: number;
+  }[];
+  submissionEnabled: boolean;
+}> {
+  requireRole(ctx.identity, 'MEMBER');
+  const settings = await getSettings(ctx.db);
+  const rows = await ctx.db.many<{
+    request_id: string;
+    request_type: string;
+    task_id: string;
+    task_name: string | null;
+    project_name: string | null;
+    status: string;
+    submitted_at: string;
+    decided_at: string | null;
+    decision_note: string;
+    stale_reason: string;
+    revision: number;
+  }>(
+    `SELECT r.request_id, r.request_type, r.task_id, t.task_name, p.project_name, r.status,
+            r.submitted_at, r.decided_at, r.decision_note, r.stale_reason, r.revision
+       FROM task_requests r
+       LEFT JOIN tasks t ON t.task_id = r.task_id
+       LEFT JOIN projects p ON p.project_id = t.project_id
+      WHERE r.requester_member_id = $1
+      ORDER BY r.submitted_at DESC, r.request_id DESC
+      LIMIT $2`,
+    [ctx.identity.memberId, Math.min(Math.max(limit, 1), 100)]
+  );
+  return {
+    submissionEnabled: settingFlag(settings, SETTING_KEYS.REQUEST_SUBMISSION_ENABLED, false),
+    items: rows.map((row) => ({
+      requestId: row.request_id,
+      requestType: row.request_type,
+      taskId: row.task_id,
+      taskName: row.task_name ?? '',
+      projectName: row.project_name ?? '',
+      status: row.status,
+      submittedAt: row.submitted_at,
+      decidedAt: row.decided_at,
+      decisionNote: row.decision_note,
+      staleReason: row.stale_reason,
+      revision: row.revision
+    }))
   };
 }
 

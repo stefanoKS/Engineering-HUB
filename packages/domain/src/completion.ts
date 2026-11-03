@@ -70,3 +70,21 @@ export function assertNotDirectCompletion(currentStatus: string, nextStatus: str
     );
   }
 }
+
+/**
+ * Work a member filed for themselves is completed by an ADMIN decision.
+ *
+ * The creator owns the record, so a manager deciding it would be a self-review one level up.
+ * Older (LEGACY) and manager-created tasks keep the ordinary manager decision.
+ */
+export function assertCompletionDecisionRole(input: {
+  actorRole: string;
+  creationChannel: 'LEGACY' | 'MANAGER' | 'MEMBER' | null | undefined;
+}): void {
+  if (input.creationChannel === 'MEMBER' && input.actorRole !== 'ADMIN') {
+    throw new DomainError(
+      'AUTHORIZATION_DENIED',
+      'A task created by a member can only be completed by an ADMIN decision'
+    );
+  }
+}

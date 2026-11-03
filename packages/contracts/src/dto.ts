@@ -216,6 +216,8 @@ export const Task = z.object({
   plannedDurationBasis: DurationBasis.nullable(),
   plannedStartSource: PlannedStartSource.nullable(),
   completedAt: IsoTimestamp.nullable(),
+  createdByMemberId: z.string().nullable().optional(),
+  creationChannel: z.enum(['LEGACY', 'MANAGER', 'MEMBER']).optional(),
   createdAt: IsoTimestamp,
   updatedAt: IsoTimestamp,
   revision: Revision
@@ -361,6 +363,7 @@ export const TaskRequest = z.object({
   importedAt: IsoTimestamp.nullable(),
   snapshotVersion: z.string(),
   staleReason: z.string(),
+  requesterMemberId: z.string().nullable().optional(),
   revision: Revision
 });
 export type TaskRequest = z.infer<typeof TaskRequest>;
@@ -461,6 +464,15 @@ export const HealthStatus = z.object({
   calendarEnabled: z.boolean(),
   dashboardPublicationEnabled: z.boolean(),
   lastBackupAt: IsoTimestamp.nullable(),
-  lastBackupOk: z.boolean()
+  lastBackupOk: z.boolean(),
+  backup: z
+    .object({
+      lastLocalAt: IsoTimestamp.nullable(),
+      lastLocalOk: z.boolean(),
+      lastDriveAt: IsoTimestamp.nullable(),
+      lastFailureAt: IsoTimestamp.nullable(),
+      lastFailure: z.string()
+    })
+    .optional()
 });
 export type HealthStatus = z.infer<typeof HealthStatus>;

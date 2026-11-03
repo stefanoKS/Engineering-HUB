@@ -1,6 +1,48 @@
 # Changelog
 
 
+## V2 member self-service, completion approval and Drive backup — 2026-11-03
+
+Schema **8** (additive migration `0008_member_created_work`); employee contract, migrations 0001–0007,
+the V1 Apps Script project and the published contracts are unchanged.
+
+### Added
+
+* **Member task creation.** `POST /api/employee/my-work` and 自分の担当タスク let a member file work
+  under an active project/subproject with a name, description, deadline and priority. The owner is
+  the verified member, the status is `Not Started` and progress is 0, so the task appears at once in
+  the member's list and the manager's task list. Creation needs no approval and cannot assign other
+  people, create projects, delete tasks, change completion or gain manager rights. It is a separate
+  employee service; the manager command's authorization was not lowered.
+* **Completion requests from My Work.** A member submits a completion report for their own active
+  leaf work; the request keeps its own identity, audit rows and review queue. A pending, rejected or
+  returned request never changes the task. A task created by a member is completed only by an ADMIN
+  decision; older tasks keep the manager decision. The member sees 承認待ち / 承認済 / 却下 / 差戻し /
+  再確認が必要, and another member's receipt is not readable.
+* `tasks.created_by_member_id`, `tasks.creation_channel` and `task_requests.requester_member_id`
+  (additive; existing rows stay `LEGACY` / unrecorded).
+* Google Drive backup: resumable chunked upload with in-transfer resume, folder validation with
+  readable permission errors, retry without duplicate cloud copies, and a separate backup status
+  (`GET /api/manager/status`, `cli.ts backup-status`).
+* Documentation: rewritten English/Japanese README entry pages; member workflow in
+  `docs/v2/LOCAL_LAN.md`, `API.md`, `SECURITY.md`, `ARCHITECTURE.md`, `BACKUP_RESTORE.md`.
+
+### Changed
+
+* `REQUEST_SUBMISSION_ENABLED` (default `false`) is explained on the member screen; submissions are
+  accepted only while it is exactly `true`.
+* A request may only target work the member is assigned to; the requester is recorded from the
+  session. A refused completion decision leaves the request `PENDING` instead of `PROCESSING`.
+
+### Tests
+
+* API: member creation (ownership, idempotency, forbidden payload fields, VIEWER/archived/cross-project
+  refusal), completion requests (pending does not complete, ADMIN-only approval for member-created
+  tasks, rejection leaves work unfinished, receipt isolation).
+* Worker: resumable upload, chunk resume, permission/folder errors, local-backup-on-Drive-failure and
+  no second upload for an already uploaded artefact; production restore refusal.
+* Web: member creation form (no owner/assignee in the payload) and the closed-submission state.
+
 ## Employee-ID LAN mode — 2026-11-02
 
 The user-selected deployment now supports local employee ID/password accounts, a Windows LAN host, and local-first encrypted PostgreSQL backups with optional Google Drive upload. Google sign-in/email is not required in this mode. See [setup and operating guide](docs/v2/LOCAL_LAN.md) and its acceptance record. Existing V1 documentation below remains historical.
@@ -812,6 +854,8 @@ automatic deployment, migration or initialization.
   NOT_RUN**; `docs/PRODUCTION_READINESS.md` stays **NOT APPROVED FOR PRODUCTION**.
 ## V1.5.1 — 2026-10-28
 
+Recorded local verification at the time: **406 tests, 406 pass** (406件すべて成功).
+
 Local-first performance release for the manager browser UI. No schema change (still **6**), no
 employee contract change (still **1.4**), no migration, no execute-as change, no trigger, mail or
 Calendar activation, and no change to the sidebar or the employee dashboard.
@@ -912,6 +956,8 @@ database correctness patch found during live Google Workspace testing; no featur
 Nothing was deployed, migrated or emailed; live Workspace verification remains outstanding.
 
 ## V1.4.1 — simplified authorization and pre-trial hardening
+
+Recorded local verification at the time: **328 passing** (328件すべて成功).
 
 No schema change (still **6**) and no snapshot contract change (still **1.4**). Every change was
 validated locally with mocks and a static browser preview; nothing was deployed, migrated or

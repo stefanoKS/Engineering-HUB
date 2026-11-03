@@ -12,16 +12,14 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
-test('package, publisher, README and the manager page agree on V1.6.1', () => {
+test('package, publisher, changelog and the manager page agree on V1.6.1', () => {
   assert.match(read('package.json'), /"version": "1\.7\.7"/);
   assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.7\.0'/);
-  assert.match(read('README.md'), /## Current release — V1\.7/);
-  assert.match(read('README_JP.md'), /## 現行リリース — V1\.7/);
+  assert.match(read('README.md'), /CHANGELOG\.md/);
+  assert.match(read('README_JP.md'), /CHANGELOG\.md/);
   assert.match(read('src/ManagerWebIndex.html'), /V1\.7/);
   assert.match(read('CHANGELOG.md'), /## V1\.6\.1/);
-  // The V1.6 and V1.6.1 records are kept as history, never overwritten.
-  assert.match(read('README.md'), /## Historical V1\.6 release record/);
-  assert.match(read('README.md'), /## Historical V1\.6\.1 release record/);
+  // The V1.6 and V1.6.1 records are kept as history in the changelog, never overwritten.
   assert.match(read('CHANGELOG.md'), /## V1\.6 — /);
 });
 

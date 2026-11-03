@@ -49,7 +49,11 @@ import { audit, enqueueJob, requireConfirmation, runIdempotent, type ServiceCtx 
 
 const WRITE_ROLES = 'MANAGER' as const;
 
-async function assertPlacement(
+/**
+ * Placement validation shared by the manager create command and the member self-service
+ * command: one implementation of the hierarchy, subproject and depth rules.
+ */
+export async function assertTaskPlacement(
   ctx: ServiceCtx,
   candidate: { id: string | null; projectId: string; subprojectId: string | null; parentTaskId: string | null }
 ): Promise<void> {
@@ -112,7 +116,7 @@ async function assertDependencies(ctx: ServiceCtx, taskId: string, projectId: st
   void projectId;
 }
 
-async function planForDeadline(
+export async function planTaskDeadline(
   ctx: ServiceCtx,
   input: {
     deadline: string | null | undefined;
@@ -162,14 +166,14 @@ export async function createTask(
   if (body.status === 'Done') {
     throw new DomainError('INVALID_TRANSITION', 'Done is written only by the reviewed completion workflow');
   }
-  await assertPlacement(ctx, {
+  await assertTaskPlacement(ctx, {
     id: null,
     projectId: body.projectId,
     subprojectId: body.subprojectId ?? null,
     parentTaskId: body.parentTaskId ?? null
   });
   await assertMembersActive(ctx, [body.ownerMemberId, ...(body.assigneeIds ?? [])]);
-  const plan = await planForDeadline(ctx, {
+  const plan = await planTaskDeadline(ctx, {
     deadline: body.deadline,
     durationValue: body.plannedDurationValue,
     durationUnit: body.plannedDurationUnit,
@@ -204,7 +208,9 @@ export async function createTask(
         plannedDurationValue: body.plannedDurationValue,
         plannedDurationUnit: body.plannedDurationUnit,
         plannedDurationBasis: body.plannedDurationBasis,
-        plannedStartSource: plan.plannedStartSource
+        plannedStartSource: plan.plannedStartSource,
+        createdByMemberId: ctx.identity.memberId,
+        creationChannel: 'MANAGER'
       });
       if (body.assigneeIds?.length) {
         await setTaskAssignees(tx, task.taskId, body.assigneeIds, ctx.identity.email);
@@ -248,7 +254,7 @@ export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<t
   const nextSubproject = body.subprojectId !== undefined ? body.subprojectId : task.subprojectId;
   const nextParent = body.parentTaskId !== undefined ? body.parentTaskId : task.parentTaskId;
   if (body.subprojectId !== undefined || body.parentTaskId !== undefined) {
-    await assertPlacement(ctx, {
+    await assertTaskPlacement(ctx, {
       id: taskId,
       projectId: task.projectId,
       subprojectId: nextSubproject,
@@ -277,7 +283,7 @@ export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<t
   }
   const plan =
     body.deadline !== undefined || body.plannedDurationValue !== undefined
-      ? await planForDeadline(ctx, {
+      ? await planTaskDeadline(ctx, {
           deadline: body.deadline !== undefined ? body.deadline : task.dueDate,
           durationValue:
             body.plannedDurationValue !== undefined ? body.plannedDurationValue : task.plannedDurationValue,

@@ -13,17 +13,15 @@ const root = path.resolve(__dirname, '..');
 const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 const exists = file => fs.existsSync(path.join(root, file));
 
-test('package, publisher, README, UI and changelog agree on the current version', () => {
+test('package, publisher, UI and changelog agree on the current version', () => {
   assert.match(read('package.json'), /"version": "1\.7\.7"/);
   assert.match(read('src/SharedDashboardPublisher.gs'), /PUBLISHER_VERSION = '1\.7\.0'/);
-  assert.match(read('README.md'), /## Current release — V1\.7/);
-  assert.match(read('README_JP.md'), /## 現行リリース — V1\.7/);
+  // Version history and the released verification record live in the changelog.
+  assert.match(read('README.md'), /CHANGELOG\.md/);
+  assert.match(read('README_JP.md'), /CHANGELOG\.md/);
   assert.match(read('src/ManagerWebIndex.html'), /V1\.7/);
   assert.match(read('CHANGELOG.md'), /## V1\.6\.2 — /);
-  // Earlier records are kept as history, never overwritten.
-  assert.match(read('README.md'), /## Historical V1\.6\.1 release record/);
-  assert.match(read('README.md'), /## Historical V1\.6 release record/);
-  assert.match(read('README_JP.md'), /## 過去のリリース記録（V1\.6\.1）/);
+  // Earlier records are kept as history in the changelog, never overwritten.
   assert.match(read('CHANGELOG.md'), /## V1\.6\.1 — /);
   assert.match(read('CHANGELOG.md'), /## V1\.6 — /);
   // The overview payload, the status page and the sidebar report one application version.

@@ -57,6 +57,26 @@ export function StatusScreen({ actor }: { actor: Actor }): JSX.Element {
                 {status.data.lastBackupOk ? <Badge tone="ok">OK</Badge> : <Badge tone="warn">CHECK</Badge>}
               </dd>
             </div>
+            <div>
+              <dt>{t('status.backupLocal')}</dt>
+              <dd>
+                {status.data.backup?.lastLocalAt ?? t('common.unset')}{' '}
+                {status.data.backup?.lastLocalOk ? <Badge tone="ok">OK</Badge> : <Badge tone="warn">CHECK</Badge>}
+              </dd>
+            </div>
+            <div>
+              <dt>{t('status.backupDrive')}</dt>
+              <dd>{status.data.backup?.lastDriveAt ?? t('common.unset')}</dd>
+            </div>
+            <div>
+              <dt>{t('status.backupFailures')}</dt>
+              <dd>
+                {status.data.backup?.lastFailureAt ?? t('common.none')}
+                {status.data.backup?.lastFailure ? (
+                  <span className="muted small"> {status.data.backup.lastFailure.slice(0, 200)}</span>
+                ) : null}
+              </dd>
+            </div>
           </div>
         )}
       </Section>

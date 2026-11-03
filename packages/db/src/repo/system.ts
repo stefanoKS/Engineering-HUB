@@ -558,6 +558,43 @@ export async function lastBackup(db: Db) {
   );
 }
 
+export type BackupStatus = {
+  lastLocalAt: string | null;
+  lastLocalOk: boolean;
+  lastDriveAt: string | null;
+  lastFailureAt: string | null;
+  lastFailure: string;
+};
+
+/**
+ * Backup health for the manager status screen.
+ *
+ * "Local" and "Drive" are reported separately because the local encrypted artifact is written
+ * before any remote I/O: a Drive outage must never hide a usable local backup.
+ */
+export async function backupStatus(db: Db): Promise<BackupStatus> {
+  const local = await db.one<{ created_at: string; result: string }>(
+    `SELECT created_at, result FROM backup_log
+      WHERE COALESCE((manifest->>'localSaved')::boolean, true)
+      ORDER BY created_at DESC LIMIT 1`
+  );
+  const drive = await db.one<{ created_at: string }>(
+    `SELECT created_at FROM backup_log
+      WHERE COALESCE(manifest->>'driveFileId', '') <> ''
+      ORDER BY created_at DESC LIMIT 1`
+  );
+  const failure = await db.one<{ created_at: string; error_details: string }>(
+    "SELECT created_at, error_details FROM backup_log WHERE result = 'FAILED' ORDER BY created_at DESC LIMIT 1"
+  );
+  return {
+    lastLocalAt: local?.created_at ?? null,
+    lastLocalOk: local?.result === 'OK',
+    lastDriveAt: drive?.created_at ?? null,
+    lastFailureAt: failure?.created_at ?? null,
+    lastFailure: failure?.error_details ?? ''
+  };
+}
+
 export async function newCsrfToken(): Promise<string> {
   return newToken();
 }

@@ -178,6 +178,8 @@ export type TaskRow = {
   created_at: string;
   updated_at: string;
   revision: number;
+  created_by_member_id?: string | null;
+  creation_channel?: 'LEGACY' | 'MANAGER' | 'MEMBER' | null;
   dependency_ids?: string[] | null;
 };
 
@@ -213,6 +215,8 @@ export function toTask(row: TaskRow): Task {
     plannedDurationBasis: row.planned_duration_basis,
     plannedStartSource: row.planned_start_source,
     completedAt: row.completed_at,
+    createdByMemberId: row.created_by_member_id ?? null,
+    creationChannel: row.creation_channel ?? 'LEGACY',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     revision: row.revision
@@ -286,6 +290,7 @@ export type RequestRow = {
   snapshot_version: string;
   stale_reason: string;
   revision: number;
+  requester_member_id?: string | null;
 };
 
 export function toRequest(row: RequestRow): TaskRequest {
@@ -313,6 +318,7 @@ export function toRequest(row: RequestRow): TaskRequest {
     importedAt: row.imported_at,
     snapshotVersion: row.snapshot_version,
     staleReason: row.stale_reason,
+    requesterMemberId: row.requester_member_id ?? null,
     revision: row.revision
   };
 }

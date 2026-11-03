@@ -3,6 +3,22 @@
 **NOT APPROVED FOR PRODUCTION.** This change is implemented in the local checkout; no deployment or company database migration was performed.
 
 - Schema: additive 0007_local_accounts.sql; existing Google accounts, IDs and prior migrations retained.
+
+## Member self-service and completion approval — 2026-11-03
+
+- Schema: additive 0008_member_created_work.sql (`tasks.created_by_member_id`, `tasks.creation_channel`
+  defaulting to `LEGACY`, `task_requests.requester_member_id`). No existing column is rewritten; 0001–0007
+  are unchanged, so an existing database applies exactly one new file.
+- Member task creation: owner from the session, `Not Started`/0 %, idempotent replay, strict payload
+  refusal (owner/assignee/status/parent), VIEWER refusal, archived-project refusal, cross-project
+  subproject refusal.
+- Completion requests: a pending request leaves the task unfinished; a MANAGER approval of a
+  member-created task is refused and the request stays `PENDING`; an ADMIN approval writes `Done`;
+  rejection leaves the task unfinished; another member's receipt is `404`.
+- Regression at this change: V1 776/776 PASS; V2 177 passed, 1 skipped (skipped test needs pg_dump);
+  typecheck, lint, validation, build, `smoke:prod` and Chromium smoke PASS.
+- NOT_RUN: live Google Drive upload/download with a real service account, `pg_restore` from a
+  downloaded file on the host, and the physical Windows-host checks.
 - Local account tests: login/leading zeros, invalid credentials/role injection, required password changes, session revocation, CSRF/origin, admin provisioning/reset, lockout, deactivation and own-task progress.
 - Backup tests: encrypted persistent local files, remote outage/retry, reuse of the same artifact and corruption rejection. Google API calls use mocks.
 - Chromium production-mode LAN smoke: PASS for employee-ID login, project/subproject/task flows, admin creation of employee account, required first-login password change and role-specific employee screen.

@@ -1,5 +1,27 @@
 # V2 Security Model
 
+## Member self-service and completion approval — 2026-11-03
+
+* A member may create a task **for themselves only**. The owner is the verified `memberId`, the
+  status starts as `Not Started` and progress at 0. The request body cannot carry an owner, an
+  assignee, a status, a progress value or a parent task; those fields are rejected as unknown by
+  the strict schema, and no browser-supplied role, owner or actor is ever read. The path is limited
+  to the `MEMBER` role — a manager uses the manager task form, which carries the assignment,
+  hierarchy and scheduling controls this path deliberately lacks.
+* Creation is a dedicated employee service (`apps/api/src/services/my-work.ts`). The manager task
+  command keeps `MANAGER` authorization; its requirement was not lowered, so a member cannot reach
+  assignment, hierarchy, project or completion powers through the new endpoint.
+* A request is accepted only for work the member is assigned to (primary owner or an active
+  additional assignee). The request records `requester_member_id` from the session, never from the
+  body.
+* A receipt is readable by its requester or a manager; another member receives `NOT_FOUND`, so the
+  endpoint cannot be used to enumerate requests.
+* Completion of a task created by a member requires an **ADMIN** decision. The refusal happens
+  before the request is claimed, so a refused decision leaves the request `PENDING` and the task
+  untouched. Legacy and manager-created tasks keep the manager decision.
+* `REQUEST_SUBMISSION_ENABLED` stays off by default; the employee screen states that submissions
+  are closed and offers no completion action while it is off.
+
 ## Local LAN update — 2026-11-02
 
 [LOCAL_LAN.md](LOCAL_LAN.md) specifies the employee-ID/password mode, schema 7, optional email, first-login change, administrator reset, employee-owned progress editing, Windows launcher, durable local backup and optional Shared Drive upload. It supersedes Google-only or Linux-only assumptions below for this mode. [Verification record](LOCAL_LAN_ACCEPTANCE.md).

@@ -258,6 +258,71 @@ export const EmployeeSubmission = z.object({
 });
 export type EmployeeSubmission = z.infer<typeof EmployeeSubmission>;
 
+/** One row of the member's own work list. Only the member's own assignment is present. */
+export const MyWorkItem = z.object({
+  taskId: z.string(),
+  taskName: z.string(),
+  projectId: z.string(),
+  projectName: z.string(),
+  subprojectName: z.string(),
+  status: TaskStatus,
+  priority: z.string(),
+  dueDate: IsoDate.nullable(),
+  progressPercent: z.number().nullable(),
+  actualHours: z.number().nullable(),
+  reviewState: z.enum(['NONE', 'PENDING', 'APPROVED', 'REJECTED', 'RETURNED', 'STALE']),
+  lastRequestStatus: z.string(),
+  lastRequestType: z.string(),
+  pendingRequest: z.boolean(),
+  creationChannel: z.enum(['LEGACY', 'MANAGER', 'MEMBER']),
+  completedAt: IsoTimestamp.nullable(),
+  revision: Revision
+});
+export type MyWorkItem = z.infer<typeof MyWorkItem>;
+
+export const MyWorkList = z.object({ items: z.array(MyWorkItem), total: z.number().int().min(0) });
+export type MyWorkList = z.infer<typeof MyWorkList>;
+
+/** The active projects (and their non-archived subprojects) a member may file work under. */
+export const MyWorkProjectOption = z.object({
+  projectId: z.string(),
+  projectName: z.string(),
+  responsibilityName: z.string(),
+  subprojects: z.array(z.object({ subprojectId: z.string(), subprojectName: z.string() }))
+});
+export type MyWorkProjectOption = z.infer<typeof MyWorkProjectOption>;
+
+export const MyWorkProjectOptions = z.object({
+  items: z.array(MyWorkProjectOption),
+  taskCreationEnabled: z.boolean()
+});
+export type MyWorkProjectOptions = z.infer<typeof MyWorkProjectOptions>;
+
+/**
+ * A member's own request receipt. It carries state only: never a manager note, a reviewer
+ * address or another member's submission.
+ */
+export const MemberRequest = z.object({
+  requestId: z.string(),
+  requestType: RequestType,
+  taskId: z.string(),
+  taskName: z.string(),
+  projectName: z.string(),
+  status: z.string(),
+  submittedAt: IsoTimestamp,
+  decidedAt: IsoTimestamp.nullable(),
+  decisionNote: z.string(),
+  staleReason: z.string(),
+  revision: Revision
+});
+export type MemberRequest = z.infer<typeof MemberRequest>;
+
+export const MemberRequests = z.object({
+  items: z.array(MemberRequest),
+  submissionEnabled: z.boolean()
+});
+export type MemberRequests = z.infer<typeof MemberRequests>;
+
 export const RequestQueueView = RequestQueue;
 export type RequestQueueView = z.infer<typeof RequestQueueView>;
 
