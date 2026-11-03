@@ -193,11 +193,14 @@ function MemberForm({
                       weeklyCapacityHours: capacity === '' ? null : Number(capacity)
                     };
                     if (canChangeRole) {
-                      payload.role = role;
-                      payload.active = active;
+                      if (!member || role !== member.role) payload.role = role;
+                      if (!member || active !== member.active) payload.active = active;
                     }
                     if (!member) {
                       return api.post('/api/manager/members', { ...payload, idempotencyKey });
+                    }
+                    for (const key of Object.keys(payload)) {
+                      if (payload[key] === member[key as keyof Member]) delete payload[key];
                     }
                     return api.patch(`/api/manager/members/${member.memberId}`, {
                       ...payload,

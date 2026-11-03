@@ -140,3 +140,10 @@ previously mistaken for a working artifact; that specific gap is now closed and 
 | Implementation (AI assistant, Copilot SDK in VS Code) | — | 2026-10-31 | Local implementation complete; live verification **BLOCKED**; production **NOT APPROVED** |
 | Reviewer | _pending_ | — | — |
 | Deployment authorisation | _pending_ | — | — |
+
+## Member self-rename correction — 2026-11-03
+
+- PASS: targeted API/local-authentication suites, 36 tests, using isolated embedded PostgreSQL with REQUIRE_DATABASE=1 and external database URLs removed. The regression confirms a name-only self-edit preserves ADMIN, active state, manager and capacity, keeps the current session usable, and continues to refuse explicit self-demotion.
+- PASS: ESLint for the three changed source/test files; npm run typecheck; npm run validate.
+- NOT_RUN: updated browser flow on the live LAN host; no rebuild, restart or live database mutation performed.
+- Earlier evidence remains historical. Production readiness remains NOT APPROVED FOR PRODUCTION.

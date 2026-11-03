@@ -5,7 +5,7 @@ import { DomainError, effectiveRole } from '@eh/domain';
 import { newToken, createSession, type Database } from '@eh/db';
 import { dummyPassword, hashPassword, verifyPassword } from './password';
 export const EmployeeId = z.string().regex(/^[A-Za-z0-9_-]{1,32}$/);
-export const Password = z.string().min(12).max(128);
+export const Password = z.string().min(4).max(128);
 export async function localLogin(db: Database, employeeId: string, password: string, ttl: number, userAgent: string) {
  const found = await db.one<{ member_id: string; password_hash: string }>('SELECT member_id, password_hash FROM local_accounts WHERE employee_id=$1', [employeeId]);
  const matches = await verifyPassword(password, found?.password_hash ?? await dummyPassword);

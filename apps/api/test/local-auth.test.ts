@@ -35,3 +35,36 @@ describe('local employee authentication',()=>{
  });
  it('requires explicit opt-in for production HTTP and secure cookies on HTTPS',()=>{expect(()=>loadConfig({NODE_ENV:'production',AUTH_MODE:'local',DATABASE_URL:'postgres://localhost/test',PUBLIC_ORIGIN:'http://10.1.6.253:8050'})).toThrow(/HTTPS/);expect(loadConfig({NODE_ENV:'production',AUTH_MODE:'local',DATABASE_URL:'postgres://localhost/test',PUBLIC_ORIGIN:'https://hub.test'}).secureCookies).toBe(true);});
 });
+
+it('accepts four-character account passwords, changes and resets; rejects out-of-range values',async()=>{
+ const headers=await auth();
+ const create=(id:string,value:string)=>app.inject({method:'POST',url:'/api/admin/accounts',headers,payload:{idempotencyKey:'password-boundary-'+id,employeeId:id,name:'Boundary fixture',role:'MEMBER',password:value}});
+ expect((await create('0040','123')).statusCode).toBe(400);
+ expect((await create('0041','x'.repeat(129))).statusCode).toBe(400);
+ expect((await create('0042','1234')).statusCode).toBe(200);
+ expect((await create('0043','x'.repeat(128))).statusCode).toBe(200);
+ const session=await login('0042','1234');
+ const own={cookie:String(session.headers['set-cookie']).split(';')[0]!, 'x-csrf-token':session.json().data.csrfToken,origin:'http://localhost:8050'};
+ expect((await app.inject({method:'POST',url:'/api/account/password',headers:own,payload:{currentPassword:'1234',password:'5678'}})).statusCode).toBe(200);
+ expect((await login('0042','5678')).statusCode).toBe(200);
+ expect((await app.inject({method:'POST',url:'/api/admin/accounts/OTHER/reset-password',headers,payload:{password:'2468',confirmed:true}})).statusCode).toBe(200);
+ expect((await login('0003','2468')).statusCode).toBe(200);
+});
+
+it('keeps an administrator signed in and preserves omitted member fields after a name-only edit', async () => {
+ const headers = await auth();
+ await db.query("UPDATE members SET manager_id='OTHER', weekly_capacity_hours=35 WHERE member_id='ADMIN'");
+ const before = await db.one<{revision:number}>("SELECT revision FROM members WHERE member_id='ADMIN'");
+ const saved = await app.inject({method:'PATCH',url:'/api/manager/members/ADMIN',headers,payload:{name:'Renamed Admin',revision:before!.revision}});
+ expect(saved.statusCode).toBe(200);
+ const row = await db.one("SELECT name, role, active, manager_id, weekly_capacity_hours FROM members WHERE member_id='ADMIN'");
+ expect(row).toMatchObject({name:'Renamed Admin',role:'ADMIN',active:true,manager_id:'OTHER'});
+ expect(Number((row as {weekly_capacity_hours:unknown}).weekly_capacity_hours)).toBe(35);
+ const session = await app.inject({url:'/api/session',headers});
+ expect(session.statusCode).toBe(200);
+ expect(session.json().data.actor).toMatchObject({name:'Renamed Admin',role:'ADMIN'});
+ expect((await app.inject({url:'/api/manager/members',headers})).statusCode).toBe(200);
+ const current = await db.one<{revision:number}>("SELECT revision FROM members WHERE member_id='ADMIN'");
+ expect((await app.inject({method:'PATCH',url:'/api/manager/members/ADMIN',headers,payload:{revision:current!.revision,role:'MEMBER'}})).statusCode).toBe(403);
+ expect((await db.one<{role:string}>("SELECT role FROM members WHERE member_id='ADMIN'"))?.role).toBe('ADMIN');
+});

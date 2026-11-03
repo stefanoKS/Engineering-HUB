@@ -60,7 +60,7 @@ export async function browserSmoke(origin, email, local = null) {
       await page.getByRole('link',{name:'Accounts',exact:true}).click();
       await page.getByLabel('Employee ID',{exact:true}).fill('0009');
       await page.getByLabel('Name',{exact:true}).fill('Local employee');
-      await page.getByLabel('Temporary password (12–128 characters)',{exact:true}).fill('Temporary-user-password');
+      await page.getByLabel('Temporary password (4–128 characters)',{exact:true}).fill('1234');
       await page.getByRole('button',{name:'Save',exact:true}).click();
       await expect(page.getByText('Saved. Deliver the temporary password securely to the employee.')).toBeVisible();
     }
@@ -68,16 +68,16 @@ export async function browserSmoke(origin, email, local = null) {
     await expect(page.locator('.login-card')).toBeVisible();
     if(local){
       await page.getByLabel('Employee ID',{exact:true}).fill('0009');
-      await page.getByLabel('Password',{exact:true}).fill('Temporary-user-password');
+      await page.getByLabel('Password',{exact:true}).fill('1234');
       await page.getByRole('button',{name:'Sign in',exact:true}).click();
       await expect(page.getByText('Change your temporary password before continuing. Sign in again after changing it.')).toBeVisible();
-      await page.getByLabel('Current password',{exact:true}).fill('Temporary-user-password');
-      await page.getByLabel('New password (12–128 characters)',{exact:true}).fill('Changed-user-password');
-      await page.getByLabel('Repeat new password',{exact:true}).fill('Changed-user-password');
+      await page.getByLabel('Current password',{exact:true}).fill('1234');
+      await page.getByLabel('New password (4–128 characters)',{exact:true}).fill('5678');
+      await page.getByLabel('Repeat new password',{exact:true}).fill('5678');
       await page.getByRole('button',{name:'Change password',exact:true}).click();
       await expect(page.locator('.login-card')).toBeVisible();
       await page.getByLabel('Employee ID',{exact:true}).fill('0009');
-      await page.getByLabel('Password',{exact:true}).fill('Changed-user-password');
+      await page.getByLabel('Password',{exact:true}).fill('5678');
       await page.getByRole('button',{name:'Sign in',exact:true}).click();
       await expect(page.getByRole('heading',{name:'My assigned work',exact:true})).toBeVisible();
       await expect(page.getByRole('link',{name:'Accounts',exact:true})).toHaveCount(0);

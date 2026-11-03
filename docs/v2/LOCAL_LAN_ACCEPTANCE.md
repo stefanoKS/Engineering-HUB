@@ -15,3 +15,9 @@
 - NOT_RUN: installed PostgreSQL Windows service, host reboot/task scheduler, second-PC firewall routing, real pg_dump/pg_restore recovery, Google Drive authorization/upload/download, TLS host configuration.
 
 HTTP LAN access requires explicit ALLOW_INSECURE_LAN_HTTP=true. It is not encrypted and is not suitable for public exposure. HTTPS remains the recommended operating configuration.
+
+## Password policy update — 2026-11-03
+
+At the operator’s request, local account creation, reset and change-password inputs now consistently accept 4–128 characters. Japanese/English labels and setup instructions match the API policy. Existing password hashes are unchanged. Boundary regression checks 3/4/128/129 characters and four-character reset/change flows against isolated PostgreSQL; 11 local-auth tests PASS. Production build PASS. Browser verification uses synthetic four-character credentials; no real account password was changed.
+
+Chromium local onboarding PASS with four-character temporary/new passwords. LAN host rebuilt/restarted; readiness returns 200 and served UI contains 4–128 labels and matching input limits. Other-subnet connectivity still requires a client-side test.

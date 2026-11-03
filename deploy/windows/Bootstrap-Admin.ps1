@@ -4,7 +4,7 @@ Set-Location (Join-Path $PSScriptRoot '../..')
 if (!(Test-Path -LiteralPath 'data/lan/api.env')) { throw 'Prepare data/lan/api.env first.' }
 $employeeId = Read-Host 'First administrator employee ID (preserve leading zeros)'
 $displayName = Read-Host 'Administrator display name'
-$securePassword = Read-Host 'Temporary password (12-128 characters)' -AsSecureString
+$securePassword = Read-Host 'Temporary password (4-128 characters)' -AsSecureString
 $pointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
 try {
  $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($pointer)

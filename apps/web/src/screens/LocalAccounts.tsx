@@ -9,7 +9,7 @@ export function PasswordScreen({required,onChanged,onCancel}:{required:boolean;o
  return <main className="login-screen"><form className="login-card stack" onSubmit={e=>{e.preventDefault();if(password===repeat)void save.run(()=>api.post('/api/account/password',{currentPassword:current,password}),{onSuccess:onChanged});}}>
   <h2>{t('local.change')}</h2>{required&&<p>{t('local.required')}</p>}
   <label className="field"><span>{t('local.current')}</span><input type="password" autoComplete="current-password" value={current} onChange={e=>setCurrent(e.target.value)} required maxLength={128}/></label>
-  <label className="field"><span>{t('local.newPassword')}</span><input type="password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} required minLength={12} maxLength={128}/></label>
+  <label className="field"><span>{t('local.newPassword')}</span><input type="password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} required minLength={4} maxLength={128}/></label>
   <label className="field"><span>{t('local.repeat')}</span><input type="password" autoComplete="new-password" value={repeat} onChange={e=>setRepeat(e.target.value)} required maxLength={128}/></label>
   <ErrorBox error={save.error}/><button className="button" disabled={save.state==='saving'||password!==repeat}>{t('local.change')}</button><button type="button" className="button secondary" onClick={onCancel}>{t(required?'nav.signOut':'action.cancel')}</button>
  </form></main>;
@@ -32,7 +32,7 @@ export function LocalAccountsScreen(){
  <label className="field"><span>{t('members.name')}</span><input value={name} onChange={e=>setName(e.target.value)} required maxLength={200}/></label>
  <label className="field"><span>{t('members.role')}</span><select value={role} onChange={e=>setRole(e.target.value)}>{['ADMIN','MANAGER','MEMBER','VIEWER'].map(r=><option key={r}>{r}</option>)}</select></label>
  <label className="field"><span>{t('local.linkMember')}</span><input value={memberId} onChange={e=>setMemberId(e.target.value)}/></label></>}
- <label className="field"><span>{t('local.temporary')}</span><input type="password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} required minLength={12} maxLength={128}/></label>
+ <label className="field"><span>{t('local.temporary')}</span><input type="password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)} required minLength={4} maxLength={128}/></label>
  {reset&&<label><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/>{t('local.resetConfirm')}</label>}
  </fieldset><ErrorBox error={save.error}/>{notice&&<p role="status">{notice}</p>}<button className="button" disabled={save.state==='saving'||(!!reset&&!confirmed)}>{t('action.save')}</button>{reset&&<button type="button" onClick={()=>{setReset(null);setPassword('');}}>{t('action.cancel')}</button>}
  </form></div>;

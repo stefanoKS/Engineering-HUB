@@ -124,11 +124,11 @@ export async function updateMember(
       patch.department ?? null,
       patch.position ?? null,
       patch.active ?? null,
-      'managerId' in patch,
+      patch.managerId !== undefined,
       patch.managerId ?? null,
-      'weeklyCapacityHours' in patch,
+      patch.weeklyCapacityHours !== undefined,
       patch.weeklyCapacityHours ?? null,
-      'role' in patch,
+      patch.role !== undefined,
       patch.role ?? null
     ]
   );

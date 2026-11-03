@@ -6,7 +6,7 @@ This mode runs on the host Windows PC and serves colleagues through a browser. P
 
 - AUTH_MODE=local accepts only employee ID + password. Google tokens and development identities cannot log in to this mode.
 - Employee IDs are case-sensitive text (letters, digits, underscore, hyphen; 1–32 characters). Leading zeros are preserved. IDs are unique and immutable through the UI.
-- Passwords require 12–128 characters and use salted scrypt (N=131072, r=8, p=1), following the [OWASP recommendation](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html). Passwords/hashes are never returned in account lists or audit payloads.
+- Passwords require 4–128 characters and use salted scrypt (N=131072, r=8, p=1), following the [OWASP recommendation](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html). Passwords/hashes are never returned in account lists or audit payloads.
 - Five wrong passwords lock an account for 15 minutes; the login endpoint also limits attempts by IP. A correct password resets the failure counter after the lock expires. A reset clears the lock.
 - Administrators create local accounts, attach credentials to existing member IDs, and reset another employee's password. New/reset accounts must change the temporary password before accessing any work API. Password change/reset invalidates all old sessions.
 - Roles/activation remain in Members. Administrators manage these fields; existing self-change/last-administrator guards remain. Register a second administrator for recovery. There is no default password or public registration endpoint.
@@ -136,3 +136,9 @@ Without a file argument, verify-restore performs only a logical archive test of 
 ## Verification status
 
 Automated evidence is in LOCAL_LAN_ACCEPTANCE.md. Required host checks: PostgreSQL service and persistent storage, Windows ACLs, second-PC network/firewall access, restart/reboot behavior, scheduled hourly backup, actual pg_dump restore, and live Drive upload/download. No real credentials or company data were used in automated tests.
+
+## Member name edits — 2026-11-03
+
+The member editor sends only changed fields. A name-only edit does not submit unchanged role or activation fields, so editing your own display name does not invoke the self-permission-change guard. The repository preserves omitted role, manager and weekly-capacity fields (undefined is omission; explicit null remains a clear). Explicit self-role/activation changes remain refused. Employee ID and password are unchanged by a display-name edit.
+
+Deploy both the rebuilt web bundle and API together, then restart the LAN host and reload the browser. A source edit alone does not update the running host. No migration or operational-data repair is required for the rejected name edit.
