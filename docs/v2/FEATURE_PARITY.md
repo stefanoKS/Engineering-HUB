@@ -60,7 +60,7 @@ Treat every remaining **PASS** below as "implemented and covered by the named lo
 | Task scope counting | `TaskScope.gs` | — | One policy for cards, KPIs, reports; container/archived exclusion; `domain.test` | `packages/domain/src/scope.ts` | — | PASS |
 | Eligibility (archive-aware) | `Eligibility.gs` | — | Whole ancestor chain, bounded walk; `domain.test`, `db` integration | `eligibility.ts` | — | PASS |
 | Dashboard/overview | `ManagerWeb` `overview`, `Client.html` | MANAGER | Bounded scope, upcoming window, area cards, pending requests; `api.test` bootstrap/overview | `screens/Overview.tsx`, `buildOverview` | — | PASS |
-| Workload report | `ManagerWeb` `member`, `Planning.workloadData` | MANAGER | Weekly utilisation, unknown estimates, no capacity blocking; `Workload.tsx`, `workloadReport` | `automation.ts` | — | PASS |
+| Workload report | `ManagerWeb` `member`, `Planning.workloadData` | MANAGER | Date-based task counts for day/week/month/year/custom, per-member table, paginated drilldown, no hours or utilisation; `Workload.tsx`, `workloadReport` | `services/workload.ts`, `repo/reports.ts` | — | PASS |
 | Member profile | `ManagerWeb` `member` | MANAGER | Current/previous work, audit attribution, no invented events; `buildMemberProfile` | `MemberProfile.tsx` | — | PASS |
 | Assignment approval | `approveAssignment`, `taskApprove` | ADMIN, MANAGER + confirmation | Version-bound approval, notification enqueued only after approval; `api.test`, `integration.test` | `services/tasks.ts`, outbox | — | PASS |
 | Schedule confirmation | `confirmSchedule`, `SCHEDULE_CONFIRMATIONS` | ADMIN, MANAGER | One active confirmation, version increments; `schedule_confirmations` | `confirmScheduleCommand` | PRESERVED | PASS |

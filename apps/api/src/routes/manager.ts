@@ -31,7 +31,10 @@ import {
   RemoveBody,
   SaveMemberBody,
   SaveResponsibilityBody,
-  TaskListQuery
+  TaskListQuery,
+  OverviewQuery,
+  WorkloadDrilldownQuery,
+  WorkloadQuery
 } from '@eh/contracts';
 import {
   compactTaskIndex,
@@ -96,9 +99,9 @@ import {
   getAutomation,
   planPreview,
   saveAutomation,
-  statusView,
-  workloadReport
+  statusView
 } from '../services/automation';
+import { workloadDrilldown, workloadReport } from '../services/workload';
 import { publicationStatus, publishNow } from '../services/publication';
 import {
   deleteEntity,
@@ -166,11 +169,8 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
   );
 
   read('/api/manager/overview', async (request) => {
-    const query = request.query as { responsibilityId?: string; unassigned?: string };
-    return buildOverview(readCtx(request), {
-      responsibilityId: query.responsibilityId,
-      unassigned: query.unassigned === 'true'
-    });
+    const query = OverviewQuery.parse(request.query ?? {});
+    return buildOverview(readCtx(request), query);
   });
 
   app.get('/api/manager/projects', async (request, reply) => {
@@ -286,6 +286,16 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
     }
   });
 
+  app.post('/api/admin/subprojects/:id/purge', async (request, reply) => {
+    try {
+      const body = DeleteBody.parse(request.body ?? {});
+      const { id } = request.params as { id: string };
+      return ok(reply, request, await deleteEntity(serviceCtx(request), 'SUBPROJECTS', id, body));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
   app.post('/api/admin/subprojects/:id/remove', async (request, reply) => {
     try {
       const body = RemoveBody.parse(request.body ?? {});
@@ -300,9 +310,10 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
     try {
       managerOf(request);
       const query = TaskListQuery.parse(request.query ?? {});
+      const filters = { ...query, today: readCtx(request).today };
       const result = query.tree === 'true'
-        ? await listTaskTreeSummaries(request.state.db, query, query.treeParentId, query.page, query.pageSize)
-        : await listTaskSummaries(request.state.db, query, query.page, query.pageSize);
+        ? await listTaskTreeSummaries(request.state.db, filters, query.treeParentId, query.page, query.pageSize)
+        : await listTaskSummaries(request.state.db, filters, query.page, query.pageSize);
       return ok(reply, request, {
         items: result.items,
         ...('matchedTotal' in result ? { matchedTotal: result.matchedTotal } : {}),
@@ -425,6 +436,16 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
   });
 
   app.delete('/api/manager/tasks/:id', async (request, reply) => {
+    try {
+      const body = DeleteBody.parse(request.body ?? {});
+      const { id } = request.params as { id: string };
+      return ok(reply, request, await deleteEntity(serviceCtx(request), 'TASKS', id, body));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  app.post('/api/admin/tasks/:id/purge', async (request, reply) => {
     try {
       const body = DeleteBody.parse(request.body ?? {});
       const { id } = request.params as { id: string };
@@ -683,14 +704,23 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
 
   app.post('/api/manager/reports/refresh', async (request, reply) => {
     try {
-      const workout = await workloadReport(serviceCtx(request));
-      return ok(reply, request, { refreshedAt: new Date().toISOString(), workload: workout });
+      const query = WorkloadQuery.parse(request.query ?? {});
+      const workload = await workloadReport(serviceCtx(request), query);
+      return ok(reply, request, { refreshedAt: new Date().toISOString(), workload });
     } catch (error) {
       return sendError(reply, request.state, error);
     }
   });
 
-  read('/api/manager/reports/workload', async (request) => workloadReport(serviceCtx(request)));
+  read('/api/manager/reports/workload', async (request) => {
+    const query = WorkloadQuery.parse(request.query ?? {});
+    return workloadReport(serviceCtx(request), query);
+  });
+
+  read('/api/manager/reports/workload/tasks', async (request) => {
+    const query = WorkloadDrilldownQuery.parse(request.query ?? {});
+    return workloadDrilldown(serviceCtx(request), query);
+  });
 
   read('/api/manager/plan/preview', async (request) => {
     const query = request.query as {

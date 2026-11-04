@@ -18,6 +18,7 @@ import { api, queryString } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
 import { Badge, EmptyState, ErrorBox, Pagination } from '../components/ui';
+import { DeleteEntityDialog } from '../components/DeleteEntityDialog';
 import { ConfirmDialog } from '../components/forms';
 import { TaskForm } from './TaskForm';
 import { MAX_TASK_DEPTH, projectColor } from '@eh/domain';
@@ -25,12 +26,35 @@ import { useRouteMemoryState } from '../state/navigation';
 
 type Page = { items: TaskSummary[]; matchedTotal?: number; total: number; page: number; pageSize: number; totalPages: number };
 type References = {
+  responsibilities?: { id: string; name: string; status: string }[];
   members: { memberId: string; name: string; active: boolean; employeeId?: string; role?: string }[];
   skills: { skillId: string; skillName: string }[];
   subprojects: Reference[];
 };
 
 const DISPLAY_STATUSES = ['IN_PROGRESS', 'OVERDUE', 'DONE'] as const;
+const NAVIGATION_FILTERS = ['workState', 'displayStatus', 'responsibilityId', 'unassigned'] as const;
+type TaskSort = 'dueDate' | 'name' | 'project' | 'owner' | 'status' | 'priority' | 'updated';
+
+export function taskNavigationFilters(search: string): {
+  explicit: boolean;
+  workState: '' | 'OPEN';
+  displayStatus: '' | (typeof DISPLAY_STATUSES)[number];
+  responsibilityId: string;
+  unassigned: boolean;
+} {
+  const params = new URLSearchParams(search);
+  const rawStatus = params.get('displayStatus') ?? '';
+  return {
+    explicit: NAVIGATION_FILTERS.some((key) => params.has(key)),
+    workState: params.get('workState') === 'OPEN' ? 'OPEN' : '',
+    displayStatus: DISPLAY_STATUSES.includes(rawStatus as (typeof DISPLAY_STATUSES)[number])
+      ? (rawStatus as (typeof DISPLAY_STATUSES)[number])
+      : '',
+    responsibilityId: (params.get('responsibilityId') ?? '').slice(0, 64),
+    unassigned: params.get('unassigned') === 'true'
+  };
+}
 
 export function displayTone(status: TaskSummary['displayStatus']): 'ok' | 'warn' | 'danger' | 'neutral' | 'info' {
   switch (status) {
@@ -45,14 +69,37 @@ export function displayTone(status: TaskSummary['displayStatus']): 'ok' | 'warn'
   }
 }
 
-export function TasksScreen({ actor, readOnly = false }: { actor: Actor; readOnly?: boolean }): JSX.Element {
+export function TasksScreen({
+  actor,
+  readOnly = false,
+  routeSearch = ''
+}: {
+  actor: Actor;
+  readOnly?: boolean;
+  routeSearch?: string;
+}): JSX.Element {
   const { t } = useI18n();
   const memoryKey = readOnly ? 'all-work:read' : 'all-work:manager';
-  const [projectId, setProjectId] = useRouteMemoryState(`${memoryKey}:project`, '');
-  const [displayStatus, setDisplayStatus] = useRouteMemoryState(`${memoryKey}:status`, '');
-  const [query, setQuery] = useRouteMemoryState(`${memoryKey}:query`, '');
-  const [includeInactive, setIncludeInactive] = useRouteMemoryState(`${memoryKey}:inactive`, false);
-  const [page, setPage] = useRouteMemoryState(`${memoryKey}:page`, 1);
+  const navigation = taskNavigationFilters(routeSearch);
+  const reset = { resetToInitial: navigation.explicit };
+  const [projectId, setProjectId] = useRouteMemoryState(`${memoryKey}:project`, '', reset);
+  const [responsibilityId, setResponsibilityId] = useRouteMemoryState(
+    `${memoryKey}:responsibility`,
+    navigation.unassigned ? '' : navigation.responsibilityId,
+    reset
+  );
+  const [unassigned, setUnassigned] = useRouteMemoryState(`${memoryKey}:unassigned`, navigation.unassigned, reset);
+  const [workState, setWorkState] = useRouteMemoryState(`${memoryKey}:workState`, navigation.workState, reset);
+  const [displayStatus, setDisplayStatus] = useRouteMemoryState(
+    `${memoryKey}:status`,
+    navigation.workState ? '' : navigation.displayStatus,
+    reset
+  );
+  const [query, setQuery] = useRouteMemoryState(`${memoryKey}:query`, '', reset);
+  const [includeInactive, setIncludeInactive] = useRouteMemoryState(`${memoryKey}:inactive`, false, reset);
+  const [page, setPage] = useRouteMemoryState(`${memoryKey}:page`, 1, reset);
+  const [sort, setSort] = useRouteMemoryState<TaskSort>(`${memoryKey}:sort`, 'dueDate', reset);
+  const [direction, setDirection] = useRouteMemoryState<'asc' | 'desc'>(`${memoryKey}:direction`, 'asc', reset);
   const [expanded, setExpanded] = useRouteMemoryState<Set<string>>(`${memoryKey}:expanded`, () => new Set());
   const toggle = (id: string): void => setExpanded(current => {
     const next = new Set(current);
@@ -60,17 +107,41 @@ export function TasksScreen({ actor, readOnly = false }: { actor: Actor; readOnl
     return next;
   });
   const [editing, setEditing, loadEditor, editorError, editorLoading] = useEditorState<{ mode: 'create' } | { mode: 'edit'; detail: TaskDetail } | null>(null);
-  const [action, setAction] = useState<{ kind: 'approve' | 'confirm' | 'override' | 'complete'; task: TaskSummary } | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ task: TaskSummary; confirmation: string; blockers: string[] } | null>(null);
+  const [action, setAction] = useState<{ kind: 'override' | 'complete'; task: TaskSummary } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<TaskSummary | null>(null);
 
   const endpoint = readOnly ? '/api/work/tasks' : '/api/manager/tasks';
   const keyPrefix = readOnly ? 'work/tasks' : keys.tasks;
   const references = useQuery<References>(keys.references, () =>
     readOnly
-      ? Promise.resolve({ members: [], skills: [], subprojects: [] })
+      ? api
+          .get<{ responsibilities: { responsibilityId: string; name: string }[] }>(
+            '/api/work/projects?page=1&pageSize=1'
+          )
+          .then((result) => ({
+            responsibilities: result.responsibilities.map((entry) => ({
+              id: entry.responsibilityId,
+              name: entry.name,
+              status: 'Active'
+            })),
+            members: [],
+            skills: [],
+            subprojects: []
+          }))
       : api.get<References>('/api/manager/references')
   );
-  const filters = { projectId, displayStatus, query, includeInactive, page };
+  const filters = {
+    projectId,
+    responsibilityId,
+    unassigned,
+    workState,
+    displayStatus,
+    query,
+    includeInactive,
+    sort,
+    direction,
+    page
+  };
   const listKey = `${keyPrefix}${queryString({ ...filters, tree: true })}`;
   const list = useQuery<Page>(listKey, () =>
     api.get<Page>(
@@ -78,20 +149,23 @@ export function TasksScreen({ actor, readOnly = false }: { actor: Actor; readOnl
     )
   );
   const canManage = !readOnly && (actor.role === 'ADMIN' || actor.role === 'MANAGER');
+  const setSortOrder = (next: TaskSort): void => {
+    setDirection(next === sort ? (direction === 'asc' ? 'desc' : 'asc') : 'asc');
+    setSort(next);
+    setPage(1);
+  };
+  const sortHeader = (key: TaskSort, text: string): JSX.Element => (
+    <button type="button" className="table-sort" onClick={() => setSortOrder(key)} aria-label={`${text}: ${t('workload.sort.toggle')}`}>
+      {text} {sort === key ? <span aria-hidden="true">{direction === 'asc' ? '↑' : '↓'}</span> : null}
+    </button>
+  );
 
   async function openEdit(summary: TaskSummary): Promise<void> {
     await loadEditor(async () => ({ mode: 'edit', detail: await api.get<TaskDetail>(`/api/manager/tasks/${summary.taskId}`) }));
   }
 
   async function startDelete(summary: TaskSummary): Promise<void> {
-    const preflight = await api.get<{ confirmationText: string; blockers: { code: string; detail: string }[] }>(
-      `/api/manager/deletion/preflight${queryString({ entityType: 'TASKS', entityId: summary.taskId })}`
-    );
-    setDeleteTarget({
-      task: summary,
-      confirmation: preflight.confirmationText,
-      blockers: preflight.blockers.map((blocker) => `${blocker.code}: ${blocker.detail}`)
-    });
+    setDeleteTarget(summary);
   }
 
   return (
@@ -104,14 +178,38 @@ export function TasksScreen({ actor, readOnly = false }: { actor: Actor; readOnl
         <div className="filters">
           <ProjectPicker scope={readOnly ? 'read' : 'manager'} value={projectId} onChange={id => { setProjectId(id); setPage(1); }} />
           <select
-            value={displayStatus}
+            value={unassigned ? '__unassigned__' : responsibilityId}
             onChange={(event) => {
-              setDisplayStatus(event.target.value);
+              const value = event.target.value;
+              setUnassigned(value === '__unassigned__');
+              setResponsibilityId(value === '__unassigned__' ? '' : value);
+              setProjectId('');
+              setPage(1);
+            }}
+            aria-label={t('filter.responsibility')}
+          >
+            <option value="">{t('filter.all')}</option>
+            {(references.data?.responsibilities ?? []).map((entry) => (
+              <option key={entry.id} value={entry.id}>{entry.name}</option>
+            ))}
+            <option value="__unassigned__">{t('overview.unassigned')}</option>
+          </select>
+          <select
+            value={workState || displayStatus}
+            onChange={(event) => {
+              const value = event.target.value;
+              setWorkState(value === 'OPEN' ? 'OPEN' : '');
+              setDisplayStatus(
+                value !== 'OPEN' && DISPLAY_STATUSES.includes(value as (typeof DISPLAY_STATUSES)[number])
+                  ? (value as (typeof DISPLAY_STATUSES)[number])
+                  : ''
+              );
               setPage(1);
             }}
             aria-label={t('column.status')}
           >
             <option value="">{t('filter.all')}</option>
+            <option value="OPEN">{t('overview.openWork')}</option>
             {DISPLAY_STATUSES.map((value) => (
               <option key={value} value={value}>
                 {t(`taskStatus.${value}`)}
@@ -159,11 +257,11 @@ export function TasksScreen({ actor, readOnly = false }: { actor: Actor; readOnl
         <table className="table">
           <thead>
             <tr>
-              <th>{t('column.name')}</th>
-              <th>{t('nav.projects')}</th>
-              <th>{t('column.owner')}</th>
-              <th>{t('column.status')}</th>
-              <th>{t('column.deadline')}</th>
+              <th>{sortHeader('name', t('column.name'))}</th>
+              <th>{sortHeader('project', t('nav.projects'))}</th>
+              <th>{sortHeader('owner', t('column.owner'))}</th>
+              <th>{sortHeader('status', t('column.status'))}</th>
+              <th>{sortHeader('dueDate', t('column.deadline'))}</th>
               {canManage ? <th>{t('column.actions')}</th> : null}
             </tr>
           </thead>
@@ -206,11 +304,7 @@ export function TasksScreen({ actor, readOnly = false }: { actor: Actor; readOnl
       {action ? (
         <ConfirmDialog
           title={
-            action.kind === 'approve'
-              ? t('tasks.approve')
-              : action.kind === 'confirm'
-                ? t('tasks.confirmSchedule')
-                : action.kind === 'complete'
+            action.kind === 'complete'
                   ? t('tasks.completeDirectTitle')
                   : t('tasks.override')
           }
@@ -220,17 +314,7 @@ export function TasksScreen({ actor, readOnly = false }: { actor: Actor; readOnl
           destructive={action.kind === 'override'}
           onCancel={() => setAction(null)}
           onConfirm={async ({ confirmation, reason }) => {
-            if (action.kind === 'approve') {
-              await api.post(`/api/manager/tasks/${action.task.taskId}/approve`, {
-                revision: action.task.revision,
-                confirmed: true
-              });
-            } else if (action.kind === 'confirm') {
-              await api.post(`/api/manager/tasks/${action.task.taskId}/confirm-schedule`, {
-                revision: action.task.revision,
-                confirmed: true
-              });
-            } else if (action.kind === 'complete') {
+            if (action.kind === 'complete') {
               await api.post(`/api/manager/tasks/${action.task.taskId}/complete`, {
                 revision: action.task.revision,
                 confirmed: true,
@@ -257,35 +341,27 @@ export function TasksScreen({ actor, readOnly = false }: { actor: Actor; readOnl
       ) : null}
 
       {deleteTarget ? (
-        <ConfirmDialog
-          title={t('confirm.deleteTitle')}
-          destructive
-          confirmText={deleteTarget.confirmation}
-          reasonRequired
-          message={
-            deleteTarget.blockers.length ? (
-              <div className="stack">
-                <strong>{t('confirm.blocked')}</strong>
-                <ul>
-                  {deleteTarget.blockers.map((blocker) => (
-                    <li key={blocker}>{blocker}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : (
-              <p>{deleteTarget.task.taskName}</p>
-            )
-          }
-          onCancel={() => setDeleteTarget(null)}
-          onConfirm={async ({ confirmation, reason }) => {
-            await api.del(`/api/manager/tasks/${deleteTarget.task.taskId}`, {
-              revision: deleteTarget.task.revision,
-              confirmed: true,
-              reason,
-              confirmation
-            });
+        <DeleteEntityDialog
+          entityType="TASKS"
+          entityId={deleteTarget.taskId}
+          entityName={deleteTarget.taskName}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => {
+            const removed = deleteTarget;
             setDeleteTarget(null);
-            queryCache.invalidate([keys.tasks, keys.taskIndex, keys.overview, keys.project(deleteTarget.task.projectId)]);
+            queryCache.invalidate([
+              keys.tasks,
+              keys.task(removed.taskId),
+              keys.taskIndex,
+              keys.overview,
+              keys.project(removed.projectId),
+              keys.myWork,
+              keys.workload,
+              keys.employee,
+              'work/tasks',
+              'work/project/',
+              'work/projects'
+            ]);
           }}
         />
       ) : null}
@@ -300,10 +376,21 @@ type TreeProps = {
   keyPrefix: string;
   expanded: Set<string>;
   toggle: (id: string) => void;
-  filters: { projectId: string; displayStatus: string; query: string; includeInactive: boolean; page: number };
+  filters: {
+    projectId: string;
+    responsibilityId: string;
+    unassigned: boolean;
+    workState: string;
+    displayStatus: string;
+    query: string;
+    includeInactive: boolean;
+    sort: TaskSort;
+    direction: 'asc' | 'desc';
+    page: number;
+  };
   openEdit: (task: TaskSummary) => Promise<void>;
   startDelete: (task: TaskSummary) => Promise<void>;
-  setAction: (action: { kind: 'approve' | 'confirm' | 'override' | 'complete'; task: TaskSummary }) => void;
+  setAction: (action: { kind: 'override' | 'complete'; task: TaskSummary }) => void;
 };
 
 function TaskTreeRows(props: TreeProps & { items: TaskSummary[] }): JSX.Element {
@@ -344,12 +431,6 @@ function TaskTreeRows(props: TreeProps & { items: TaskSummary[] }): JSX.Element 
                         {t('tasks.completeDirect')}
                       </button>
                     ) : null}
-                    <button type="button" className="link-button" onClick={() => setAction({ kind: 'approve', task })}>
-                      {t('tasks.approve')}
-                    </button>
-                    <button type="button" className="link-button" onClick={() => setAction({ kind: 'confirm', task })}>
-                      {t('tasks.confirmSchedule')}
-                    </button>
                     {actor.role === 'ADMIN' ? (
                       <>
                         <button type="button" className="link-button" onClick={() => setAction({ kind: 'override', task })}>

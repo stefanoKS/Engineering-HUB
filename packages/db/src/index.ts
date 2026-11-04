@@ -5,6 +5,7 @@ export * from './migrate';
 export * from './repo/directory';
 export * from './repo/work';
 export * from './repo/tasks';
+export * from './repo/reports';
 export * from './repo/workflow';
 export * from './repo/system';
 export { updateWithRevision } from './repo/patch';

@@ -14,6 +14,7 @@ import { useI18n } from '../i18n';
 import { Badge, EmptyState, ErrorBox, ProgressBar, ProjectAccent, Section, statusTone } from '../components/ui';
 import { navigate } from '../App';
 import { projectColor } from '@eh/domain';
+import { useRouteMemoryState } from '../state/navigation';
 
 type BootstrapShape = { references: { responsibilities: Reference[] } };
 
@@ -27,11 +28,12 @@ function ManagerOverview(): JSX.Element {
   const { t, label } = useI18n();
   const [responsibilityId, setResponsibilityId] = useState('');
   const [unassigned, setUnassigned] = useState(false);
+  const [upcomingDays, setUpcomingDays] = useRouteMemoryState<7 | 14 | 30>('overview:upcomingDays', 7);
 
   const bootstrap = useQuery<BootstrapShape>(keys.bootstrap, () => api.get<BootstrapShape>('/api/manager/bootstrap'));
-  const key = `${keys.overview}${queryString({ responsibilityId, unassigned })}`;
+  const key = `${keys.overview}${queryString({ responsibilityId, unassigned, upcomingDays })}`;
   const overview = useQuery<Overview>(key, () =>
-    api.get<Overview>(`/api/manager/overview${queryString({ responsibilityId, unassigned })}`)
+    api.get<Overview>(`/api/manager/overview${queryString({ responsibilityId, unassigned, upcomingDays })}`)
   );
 
   const data = overview.data;
@@ -75,42 +77,128 @@ function ManagerOverview(): JSX.Element {
       ) : (
         <>
           <div className="kpi-grid">
-            <Kpi label={t('overview.openWork')} value={data.counts.openWork} tone="info" />
-            <Kpi label={t('overview.overdue')} value={data.counts.overdueWork} tone="danger" />
-            <Kpi label={t('overview.completed')} value={data.counts.completedWork} tone="ok" />
+            <Kpi
+              label={t('overview.openWork')}
+              value={data.counts.openWork}
+              tone="info"
+              onClick={() => navigate(taskDestination({ workState: 'OPEN', responsibilityId, unassigned }))}
+            />
+            <Kpi
+              label={t('overview.overdue')}
+              value={data.counts.overdueWork}
+              tone="danger"
+              onClick={() => navigate(taskDestination({ displayStatus: 'OVERDUE', responsibilityId, unassigned }))}
+            />
+            <Kpi
+              label={t('overview.completed')}
+              value={data.counts.completedWork}
+              tone="ok"
+              onClick={() => navigate(taskDestination({ displayStatus: 'DONE', responsibilityId, unassigned }))}
+            />
             <Kpi label={t('overview.containers')} value={data.counts.containers} tone="neutral" />
           </div>
 
-          <Section title={t('overview.upcoming')}>
-            {data.upcoming.length === 0 ? (
+          <Section
+            title={t('overview.overdueWork')}
+            actions={data.overdueTotal > 10 ? (
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => navigate(taskDestination({ displayStatus: 'OVERDUE', responsibilityId, unassigned }))}
+              >
+                {t('overview.viewAll')}
+              </button>
+            ) : undefined}
+          >
+            {data.overdue.length === 0 ? (
               <EmptyState />
             ) : (
-              <table className="table">
+              <table className="table overview-work-table">
                 <thead>
                   <tr>
                     <th>{t('column.name')}</th>
-                    <th>{t('column.status')}</th>
+                    <th>{t('nav.projects')}</th>
+                    <th>{t('column.owner')}</th>
                     <th>{t('column.deadline')}</th>
-                    <th>{t('column.progress')}</th>
+                    <th>{t('overview.daysOverdue')}</th>
+                    <th>{t('column.status')}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.upcoming.map((task) => (
+                  {data.overdue.map((task) => (
                     <tr key={task.taskId}>
+                      <td><a href={`#/task/${task.taskId}`}>{task.taskName}</a></td>
                       <td>
-                        <a href={`#/task/${task.taskId}`}>{task.taskName}</a>
-                        <span className="muted small"> · {task.projectName}</span>
+                        <a
+                          href={`#/project/${task.projectId}`}
+                          aria-label={t('overview.openProject', { name: task.projectName })}
+                        >
+                          {task.projectName}
+                        </a>
                       </td>
+                      <td>{taskAssignees(task, t('common.unset'))}</td>
+                      <td>{task.dueDate}</td>
+                      <td>{daysBetween(task.dueDate, data.upcomingWindow.from)}</td>
                       <td>
-                        <Badge tone={statusTone(task.status)}>{label('task.status', task.status)}</Badge>
-                      </td>
-                      <td>{task.dueDate ?? t('common.unset')}</td>
-                      <td>
-                        <ProgressBar value={task.progressPercent} />
+                        <Badge tone="danger">{t(`taskStatus.${task.displayStatus}`)}</Badge>
+                        {task.reviewState === 'PENDING' ? <Badge tone="warn">{t('overview.extensionPending')}</Badge> : null}
                       </td>
                     </tr>
                   ))}
                 </tbody>
+              </table>
+            )}
+          </Section>
+
+          <Section
+            title={t('overview.upcoming')}
+            actions={(
+              <label className="inline-field">
+                <span>{t('overview.period')}</span>
+                <select
+                  value={upcomingDays}
+                  onChange={(event) => setUpcomingDays(Number(event.target.value) as 7 | 14 | 30)}
+                  aria-label={t('overview.period')}
+                >
+                  <option value={7}>{t('overview.days7')}</option>
+                  <option value={14}>{t('overview.days14')}</option>
+                  <option value={30}>{t('overview.days30')}</option>
+                </select>
+              </label>
+            )}
+          >
+            <p className="muted small overview-date-range">
+              {data.upcomingWindow.from} – {data.upcomingWindow.to}
+            </p>
+            {data.upcoming.length === 0 ? <EmptyState /> : (
+              <table className="table overview-work-table">
+                <thead><tr>
+                  <th>{t('column.name')}</th>
+                  <th>{t('nav.projects')}</th>
+                  <th>{t('column.owner')}</th>
+                  <th>{t('column.deadline')}</th>
+                  <th>{t('column.status')}</th>
+                </tr></thead>
+                <tbody>{data.upcoming.map((task) => (
+                  <tr key={task.taskId}>
+                    <td><a href={`#/task/${task.taskId}`}>{task.taskName}</a></td>
+                    <td>
+                      <a
+                        href={`#/project/${task.projectId}`}
+                        aria-label={t('overview.openProject', { name: task.projectName })}
+                      >
+                        {task.projectName}
+                      </a>
+                    </td>
+                    <td>{taskAssignees(task, t('common.unset'))}</td>
+                    <td>{task.dueDate}</td>
+                    <td>
+                      <Badge tone={task.displayStatus === 'OVERDUE' ? 'danger' : 'info'}>
+                        {t(`taskStatus.${task.displayStatus}`)}
+                      </Badge>
+                    </td>
+                  </tr>
+                ))}</tbody>
               </table>
             )}
           </Section>
@@ -167,13 +255,47 @@ function ManagerOverview(): JSX.Element {
   );
 }
 
-function Kpi({ label, value, tone }: { label: string; value: number; tone: 'info' | 'danger' | 'ok' | 'neutral' }): JSX.Element {
-  return (
-    <div className={`kpi ${tone}`}>
+function taskDestination(input: {
+  workState?: 'OPEN';
+  displayStatus?: 'OVERDUE' | 'DONE';
+  responsibilityId: string;
+  unassigned: boolean;
+}): string {
+  return `all-work${queryString(input)}`;
+}
+
+function daysBetween(dueDate: string | null, today: string): number {
+  if (!dueDate) return 0;
+  return Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${dueDate}T00:00:00Z`)) / 86_400_000);
+}
+
+function taskAssignees(task: Overview['upcoming'][number], unset: string): string {
+  const names = [...new Set([task.ownerName, ...task.assigneeNames].filter(Boolean))];
+  return names.join(', ') || unset;
+}
+
+function Kpi({
+  label,
+  value,
+  tone,
+  onClick
+}: {
+  label: string;
+  value: number;
+  tone: 'info' | 'danger' | 'ok' | 'neutral';
+  onClick?: () => void;
+}): JSX.Element {
+  const content = (
+    <>
       <span className="kpi-value">{value}</span>
       <span className="kpi-label">{label}</span>
-    </div>
+    </>
   );
+  return onClick ? (
+    <button type="button" className={`kpi kpi-button ${tone}`} onClick={onClick} aria-label={`${label}: ${value}`}>
+      {content}
+    </button>
+  ) : <div className={`kpi ${tone}`}>{content}</div>;
 }
 
 type Receipt = {

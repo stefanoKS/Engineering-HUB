@@ -7,6 +7,7 @@ export * from './hierarchy';
 export * from './eligibility';
 export * from './progress';
 export * from './scope';
+export * from './workload-period';
 export * from './planning';
 export * from './roles';
 export * from './requests';

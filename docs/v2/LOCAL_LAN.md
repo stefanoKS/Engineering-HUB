@@ -77,7 +77,7 @@ The example explicitly sets ALLOW_INSECURE_LAN_HTTP=true to support the requeste
 
 ## 4. Apply schema and create your administrator
 
-Migration 0007_local_accounts.sql permits members without email, adds local credential records and session credential versions. Migration 0008_member_created_work.sql (2026-11-03) adds the member task-creation channel and the recorded request author. Migration 0009_subproject_description.sql (2026-11-04) adds `subprojects.description` as `TEXT NOT NULL DEFAULT ''`, so an existing subproject reads back with an empty description. Each is additive and rewrites no existing column. All of them preserve existing IDs/records and do not rewrite prior migration files. For an existing database, first create and verify a backup, then review/apply the new migration. The current build requires schema 9.
+Migration 0007_local_accounts.sql permits members without email, adds local credential records and session credential versions. Migration 0008_member_created_work.sql (2026-11-03) adds the member task-creation channel and the recorded request author. Migration 0009_subproject_description.sql (2026-11-04) adds `subprojects.description` as `TEXT NOT NULL DEFAULT ''`, so an existing subproject reads back with an empty description. Each is additive and rewrites no existing column. All of them preserve existing IDs/records and do not rewrite prior migration files. For an existing database, first create and verify a backup, then review/apply the new migration. Migration 0010_workload_report_indexes.sql (2026-11-04) adds one partial index, tasks_completed_at_idx, for the completion filter of the date-based workload report; it rewrites no column and no row. The current build requires schema 10.
 
 Run deploy/windows/Migrate-Lan.cmd and type APPLY MIGRATIONS when ready. This is an explicit one-shot action; startup never migrates.
 
@@ -179,3 +179,21 @@ Automated evidence is in LOCAL_LAN_ACCEPTANCE.md. Required host checks: PostgreS
 The member editor sends only changed fields. A name-only edit does not submit unchanged role or activation fields, so editing your own display name does not invoke the self-permission-change guard. The repository preserves omitted role, manager and weekly-capacity fields (undefined is omission; explicit null remains a clear). Explicit self-role/activation changes remain refused. Employee ID and password are unchanged by a display-name edit.
 
 Deploy both the rebuilt web bundle and API together, then restart the LAN host and reload the browser. A source edit alone does not update the running host. No migration or operational-data repair is required for the rejected name edit.
+
+## Overview visual/filter update — 2026-11-04
+
+The crimson theme, Overview 7/14/30-day selector, overdue preview and KPI-to-All-Work filters are
+web/API code only. They add no migration and require no operational-data repair. On an authorized
+Windows LAN host:
+
+1. Stop the running `Start-Lan.cmd` / `npm.cmd run start:lan` supervisor with Ctrl+C and confirm it
+   exited. Do not start a second copy.
+2. Update the working tree through the normal reviewed release process.
+3. Run `npm.cmd ci`, `npm.cmd run typecheck`, `npm.cmd run lint:v2`, `npm.cmd run test:v2`,
+   `npm.cmd run validate:v2`, `npm.cmd run build` and `npm.cmd run smoke:prod`.
+4. Restart with `deploy\windows\Start-Lan.cmd` (or `npm.cmd run start:lan`), confirm `/readyz`, then
+   reload the browser. Verify the Overview defaults to 7 days and that an Overdue card click keeps
+   the selected responsibility.
+
+Do not run the migration command for this UI/API-only update, and do not point the validation
+commands at the operational database.

@@ -81,6 +81,19 @@ describe('smart back navigation', () => {
     expect(navigation.routeAllowed('https://example.invalid', ADMIN)).toBe(false);
   });
 
+  it('keeps an authorized filtered All Work route in browser history', async () => {
+    const navigation = await import('../src/state/navigation');
+    navigation.recordRoute('all-work?displayStatus=OVERDUE&responsibilityId=RSP-1');
+    window.history.pushState({}, '', '#/task/T1');
+    navigation.recordRoute('task/T1');
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
+
+    navigation.backOrFallback(ADMIN, 'all-work');
+
+    expect(back).toHaveBeenCalledOnce();
+    expect(navigation.routeAllowed('all-work?workState=OPEN', MEMBER)).toBe(true);
+  });
+
   it('keeps route-scoped scroll state in memory only', async () => {
     const navigation = await import('../src/state/navigation');
     navigation.rememberScroll('project/P1', 640);

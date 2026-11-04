@@ -73,17 +73,6 @@ export function TaskDetailScreen({
                 {t('tasks.completeDirect')}
               </button>
             ) : null}
-            <button type="button" className="button secondary" onClick={() => setAction('approve')}>
-              {t('tasks.approve')}
-            </button>
-            <button type="button" className="button secondary" onClick={() => setAction('confirm')}>
-              {t('tasks.confirmSchedule')}
-            </button>
-            {actor.role === 'ADMIN' ? (
-              <button type="button" className="button secondary" onClick={() => setAction('override')}>
-                {t('tasks.override')}
-              </button>
-            ) : null}
           </div>
         ) : null}
       </div>
@@ -139,6 +128,28 @@ export function TaskDetailScreen({
           ) : null}
         </div>
       </Section>
+
+      {canManage ? (
+        <details className="advanced-actions">
+          <summary>詳細操作 / Advanced</summary>
+          <p className="muted small">
+            割当承認と日程確定は監査・通知のワークフローを保持します。 / Assignment approval and schedule confirmation retain their audit and notification workflows.
+          </p>
+          <div className="inline-actions">
+            <button type="button" className="button secondary" onClick={() => setAction('approve')}>
+              {t('tasks.approve')}
+            </button>
+            <button type="button" className="button secondary" onClick={() => setAction('confirm')}>
+              {t('tasks.confirmSchedule')}
+            </button>
+            {actor.role === 'ADMIN' ? (
+              <button type="button" className="button secondary" onClick={() => setAction('override')}>
+                {t('tasks.override')}
+              </button>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
 
       <Section title={t('tasks.descriptionTitle')}>
         <DescriptionText text={record.description} />

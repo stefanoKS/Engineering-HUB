@@ -121,6 +121,7 @@ export type TaskFilters = {
   responsibilityId?: string;
   unassigned?: boolean;
   status?: string;
+  workState?: 'OPEN';
   /** Derived display state; resolved on the server with an explicit Asia/Tokyo business date. */
   displayStatus?: 'IN_PROGRESS' | 'OVERDUE' | 'DONE' | 'CANCELLED';
   today?: string;
@@ -134,21 +135,54 @@ export type TaskFilters = {
   includeCompleted?: boolean;
   /** Visibility policy: only `INTERNAL` projects are employee-visible. */
   internalOnly?: boolean;
-  sort?: 'dueDate' | 'priority' | 'name' | 'status' | 'updated';
+  sort?: 'dueDate' | 'priority' | 'name' | 'project' | 'owner' | 'status' | 'updated';
   direction?: 'asc' | 'desc';
+  dueFrom?: string;
+  dueTo?: string;
 };
 
 const SUMMARY_SORTS: Record<NonNullable<TaskFilters['sort']>, string> = {
   dueDate: 't.due_date',
   priority: "CASE t.priority WHEN 'Critical' THEN 0 WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END",
   name: 'lower(t.task_name)',
-  status: 't.status',
+  project: 'lower(p.project_name)',
+  owner: "lower(COALESCE(owner.name, ''))",
+  status: `CASE
+    WHEN t.status = 'Done' THEN 0
+    WHEN t.status <> 'Cancelled' AND t.due_date IS NOT NULL
+      AND t.due_date < (now() AT TIME ZONE 'Asia/Tokyo')::date THEN 1
+    WHEN t.status = 'Cancelled' THEN 3
+    ELSE 2
+  END`,
   updated: 't.updated_at'
 };
 
 function taskWhere(filters: TaskFilters): { where: string; params: unknown[] } {
-  const where: string[] = ['t.deleted_at IS NULL'];
+  const where: string[] = ['t.deleted_at IS NULL', 'p.deleted_at IS NULL'];
   const params: unknown[] = [];
+  const leafWork = `NOT EXISTS (
+    SELECT 1 FROM tasks child
+     WHERE child.parent_task_id = t.task_id AND child.deleted_at IS NULL
+  )`;
+  const activeSubprojectChain = `(t.subproject_id IS NULL OR NOT EXISTS (
+    WITH RECURSIVE chain AS (
+      SELECT s.subproject_id, s.parent_subproject_id, s.status, s.deleted_at, 1 AS depth
+        FROM subprojects s WHERE s.subproject_id = t.subproject_id
+      UNION ALL
+      SELECT parent.subproject_id, parent.parent_subproject_id, parent.status, parent.deleted_at, chain.depth + 1
+        FROM chain
+        JOIN subprojects parent ON parent.subproject_id = chain.parent_subproject_id
+       WHERE chain.depth < 8
+    )
+    SELECT 1 FROM chain
+     WHERE status = 'Archived' OR deleted_at IS NOT NULL
+  ))`;
+  const activeWork = (): void => {
+    where.push("t.status IN ('Not Started','Assigned','In Progress','Blocked','On Hold')");
+    where.push(leafWork);
+    where.push("p.status IN ('Planned','Active') AND p.archived_at IS NULL");
+    where.push(activeSubprojectChain);
+  };
   // An explicit terminal filter (完了 / 取消) is the authorized history view; otherwise the default
   // active list never contains completed work.
   const terminalRequested =
@@ -177,6 +211,7 @@ function taskWhere(filters: TaskFilters): { where: string; params: unknown[] } {
     params.push(filters.status);
     where.push(`t.status = $${params.length}`);
   }
+  if (filters.workState === 'OPEN') activeWork();
   if (filters.displayStatus) {
     // The derived state is resolved here, with the Asia/Tokyo date supplied by the caller, so a
     // page is never filtered in the browser after it was cut.
@@ -184,21 +219,21 @@ function taskWhere(filters: TaskFilters): { where: string; params: unknown[] } {
     switch (filters.displayStatus) {
       case 'DONE':
         where.push("t.status = 'Done'");
+        where.push(leafWork);
         break;
       case 'CANCELLED':
         where.push("t.status = 'Cancelled'");
+        where.push(leafWork);
         break;
       case 'OVERDUE':
+        activeWork();
         params.push(today);
-        where.push(
-          `t.status NOT IN ('Done','Cancelled') AND t.due_date IS NOT NULL AND t.due_date < $${params.length}`
-        );
+        where.push(`t.due_date IS NOT NULL AND t.due_date < $${params.length}`);
         break;
       default:
+        activeWork();
         params.push(today);
-        where.push(
-          `t.status NOT IN ('Done','Cancelled') AND (t.due_date IS NULL OR t.due_date >= $${params.length})`
-        );
+        where.push(`(t.due_date IS NULL OR t.due_date >= $${params.length})`);
         break;
     }
   }
@@ -221,11 +256,15 @@ function taskWhere(filters: TaskFilters): { where: string; params: unknown[] } {
   if (filters.includeInactive !== true) {
     if (!cancelledRequested) where.push("t.status <> 'Cancelled'");
     where.push("p.status <> 'Archived' AND p.archived_at IS NULL");
-    where.push(
-      `(t.subproject_id IS NULL OR NOT EXISTS (
-         SELECT 1 FROM subprojects sp
-          WHERE sp.subproject_id = t.subproject_id AND sp.status = 'Archived'))`
-    );
+    where.push(activeSubprojectChain);
+  }
+  if (filters.dueFrom) {
+    params.push(filters.dueFrom);
+    where.push(`t.due_date >= $${params.length}`);
+  }
+  if (filters.dueTo) {
+    params.push(filters.dueTo);
+    where.push(`t.due_date <= $${params.length}`);
   }
   if (filters.internalOnly === true) {
     where.push("p.dashboard_visibility = 'INTERNAL'");
@@ -251,7 +290,7 @@ export async function listTaskSummaries(
       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
     [...params, pageSize, (page - 1) * pageSize]
   );
-  return { items: rows.map((row) => toTaskSummary(row)), total: Number(total?.count ?? 0) };
+  return { items: rows.map((row) => toTaskSummary(row, filters.today)), total: Number(total?.count ?? 0) };
 }
 
 /** Pages siblings, retaining ancestors of filter matches so a matching child stays reachable. */
@@ -280,7 +319,7 @@ export async function listTaskTreeSummaries(
     `${cte} ${SUMMARY_SELECT} ${branch} ORDER BY ${order} ${direction} NULLS LAST, t.task_id
       LIMIT $${values.length+1} OFFSET $${values.length+2}`, [...values,pageSize,(page-1)*pageSize]
   );
-  return {items:rows.map(row=>toTaskSummary(row)),total:Number(total?.count??0),matchedTotal:Number(total?.matched??0)};
+  return {items:rows.map(row=>toTaskSummary(row, filters.today)),total:Number(total?.count??0),matchedTotal:Number(total?.matched??0)};
 }
 
 /** Bounded root-task search, used where a full task table must never reach the browser. */

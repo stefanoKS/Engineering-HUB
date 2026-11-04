@@ -100,6 +100,19 @@ Status mix per task: `Done` every 7th, `In Progress` every 5th, `Blocked` every 
 | GET /api/employee/snapshot | 181.80 | 197.72 | 197.72 | 181.37 | 2 | 808 311 |
 | POST /api/manager/tasks | 11.44 | 27.54 | 27.54 | 18.15 | 9 | 913 |
 
+The `GET /api/manager/reports/workload` row above was measured against the superseded four-week
+utilisation implementation (5 queries, in-memory week computation). The date-based report replaces
+it with three bounded SQL aggregates over one shared scope CTE plus the indexed completion filter
+(`tasks_completed_at_idx`, schema 10), and returns buckets for at most ~31 dates.
+
+Re-measured on the large dataset (10 000 tasks, embedded PostgreSQL 18.6, in-process
+`app.inject`, `--dataset large --iterations 15`, 2026-11-04):
+`GET /api/manager/reports/workload` p50 **173.66 ms**, p95 **223.00 ms**, 3 database calls,
+**18 003 bytes** (previously 5 calls and 106 602 bytes for the four-week table). The drilldown is a
+separate paginated call (maximum 100 rows). Local numbers are not production latency; TLS, proxy
+and network RTT are excluded. Raw result:
+[results-2026-11-04T05-36-51-155Z.json](bench/results-2026-11-04T05-36-51-155Z.json).
+
 ## 4. Growth trend (same endpoints, three sizes)
 
 | Endpoint | p50 small | p50 medium | p50 large | Trend |

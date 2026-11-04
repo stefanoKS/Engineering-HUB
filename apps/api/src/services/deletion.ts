@@ -33,7 +33,7 @@ const REMOVAL_REASON = 'Administrative removal of a mistakenly created record';
 const NON_OPERATIONAL_AUDIT_ACTIONS: Record<EntityType, readonly string[]> = {
   PROJECTS: ['PROJECT_CREATED'],
   SUBPROJECTS: ['SUBPROJECT_CREATED', 'SUBPROJECT_UPDATED'],
-  TASKS: ['TASK_CREATED']
+  TASKS: ['TASK_CREATED', 'TASK_UPDATED', 'RECORD_REMOVED']
 };
 
 async function countRows(db: DbLike, sql: string, params: unknown[]): Promise<number> {
@@ -118,6 +118,7 @@ async function evaluatePreflight(
       entityId,
       deletable: result.deletable,
       blockers: result.blockers,
+      erasePlan: [{ code: 'PROJECT_ROW', count: 1, detail: `Project row ${entityId}` }],
       dependencyCount: 0,
       descendantCount: descendants,
       confirmationText: result.confirmationText,
@@ -165,6 +166,7 @@ async function evaluatePreflight(
       entityId,
       deletable: result.deletable,
       blockers: result.blockers,
+      erasePlan: [{ code: 'SUBPROJECT_ROW', count: 1, detail: `Subproject row ${entityId}` }],
       dependencyCount: 0,
       descendantCount: descendants,
       confirmationText: result.confirmationText,
@@ -186,33 +188,166 @@ async function evaluatePreflight(
       revision: null
     };
   }
-  const children = await countRows(db, 'SELECT count(*)::text AS count FROM tasks WHERE parent_task_id = $1 AND deleted_at IS NULL', [entityId]);
+  const children = await countRows(db, 'SELECT count(*)::text AS count FROM tasks WHERE parent_task_id = $1', [entityId]);
   const referenced = await countRows(db, 'SELECT count(*)::text AS count FROM task_dependencies WHERE depends_on_task_id = $1', [entityId]);
   const requests = await countRows(db, 'SELECT count(*)::text AS count FROM task_requests WHERE task_id = $1', [entityId]);
+  const approvedCompletions = await countRows(
+    db,
+    `SELECT count(*)::text AS count
+       FROM task_requests
+      WHERE task_id = $1 AND request_type = 'COMPLETION_REPORT' AND status = 'APPROVED'`,
+    [entityId]
+  );
   const notifications = await countRows(db, 'SELECT count(*)::text AS count FROM notification_ledger WHERE task_id = $1', [entityId]);
   const deadlineHistory = await countRows(db, 'SELECT count(*)::text AS count FROM task_deadline_history WHERE task_id = $1', [entityId]);
   const scheduleConfirmations = await countRows(db, 'SELECT count(*)::text AS count FROM schedule_confirmations WHERE task_id = $1', [entityId]);
-  const project = await getProject(db, task.projectId);
-  const history = await hasDisallowedAuditHistory(db, entityType, entityId);
+  const assignmentRows = await countRows(db, 'SELECT count(*)::text AS count FROM task_assignees WHERE task_id = $1', [entityId]);
+  const outgoingDependencies = await countRows(
+    db,
+    'SELECT count(*)::text AS count FROM task_dependencies WHERE task_id = $1',
+    [entityId]
+  );
+  const linkedIssues = await countRows(db, 'SELECT count(*)::text AS count FROM issues WHERE task_id = $1', [entityId]);
+  const calendarLinks = await countRows(
+    db,
+    "SELECT count(*)::text AS count FROM calendar_links WHERE entity_type = 'TASK' AND entity_id = $1",
+    [entityId]
+  );
+  const activeJobs = await countRows(
+    db,
+    `SELECT count(*)::text AS count
+       FROM outbox_jobs
+      WHERE status IN ('PENDING','LEASED')
+        AND (payload->>'taskId' = $1 OR payload->>'entityId' = $1)`,
+    [entityId]
+  );
+  const publicationReferences = await countRows(
+    db,
+    `SELECT count(*)::text AS count
+       FROM published_snapshots snapshot
+      WHERE EXISTS (
+        SELECT 1
+          FROM jsonb_array_elements(snapshot.rows) row
+         WHERE row->>'taskId' = $1
+      )`,
+    [entityId]
+  );
+  const auditedEffort = await countRows(
+    db,
+    `SELECT count(*)::text AS count
+       FROM audit_log
+      WHERE entity_type = 'TASKS'
+        AND entity_id = $1
+        AND action = 'TASK_UPDATED'
+        AND CASE
+              WHEN new_value->>'actualHours' ~ '^[0-9]+([.][0-9]+)?$'
+                THEN (new_value->>'actualHours')::numeric
+              ELSE 0
+            END > 0
+        AND (previous_value->>'actualHours') IS DISTINCT FROM (new_value->>'actualHours')`,
+    [entityId]
+  );
+  const protectedAudit = await db.many<{ action: string; count: string }>(
+    `SELECT action, count(*)::text AS count
+       FROM audit_log
+      WHERE entity_type = 'TASKS'
+        AND entity_id = $1
+        AND NOT (action = ANY($2::text[]))
+      GROUP BY action
+      ORDER BY action`,
+    [entityId, NON_OPERATIONAL_AUDIT_ACTIONS.TASKS]
+  );
+  const actualHours = task.actualHours ?? 0;
+  const completedWork = task.status === 'Done' || approvedCompletions > 0;
+  const corroboratedEffort = actualHours > 0 && auditedEffort > 0;
   const result = deletionPreflight({
     entityType,
     entityId,
     descendantCount: children,
     dependencyCount: referenced,
-    recordedEffort: (task.actualHours ?? 0) > 0 || task.status === 'Done',
+    recordedEffort: completedWork || corroboratedEffort,
     approvals: !!task.assignmentApprovedAt,
     requests: requests > 0,
     notifications: notifications > 0,
     deadlineHistory: deadlineHistory > 0,
     scheduleConfirmations: scheduleConfirmations > 0,
-    published: project?.dashboardVisibility === 'INTERNAL',
-    auditHistory: history
+    published: publicationReferences > 0,
+    auditHistory: protectedAudit.length > 0
   });
+  const blockers = result.blockers.map((blocker) => {
+    if (blocker.code === 'HAS_DESCENDANTS') {
+      return { ...blocker, detail: `${children} child task row(s) still reference this task` };
+    }
+    if (blocker.code === 'DEPENDENCY_REFERENCED') {
+      return { ...blocker, detail: `${referenced} other task dependency row(s) reference this task` };
+    }
+    if (blocker.code === 'RECORDED_EFFORT') {
+      const reasons = [
+        task.status === 'Done' ? 'task status is Done' : '',
+        approvedCompletions > 0 ? `${approvedCompletions} approved completion request(s)` : '',
+        corroboratedEffort ? `${actualHours} actual hour(s) recorded by an audited task update` : ''
+      ].filter(Boolean);
+      return { ...blocker, detail: `Protected completed work or recorded effort: ${reasons.join('; ')}` };
+    }
+    if (blocker.code === 'REQUESTS') {
+      return {
+        ...blocker,
+        detail: `${requests} employee request(s) reference this task` +
+          (approvedCompletions ? `, including ${approvedCompletions} approved completion request(s)` : '')
+      };
+    }
+    if (blocker.code === 'PUBLISHED') {
+      return { ...blocker, detail: `${publicationReferences} stored publication snapshot(s) reference this task` };
+    }
+    if (blocker.code === 'NOTIFICATIONS') {
+      return { ...blocker, detail: `${notifications} notification ledger row(s) reference this task` };
+    }
+    if (blocker.code === 'DEADLINE_HISTORY') {
+      return { ...blocker, detail: `${deadlineHistory} deadline history row(s) reference this task` };
+    }
+    if (blocker.code === 'SCHEDULE_CONFIRMATIONS') {
+      return { ...blocker, detail: `${scheduleConfirmations} schedule confirmation row(s) reference this task` };
+    }
+    if (blocker.code === 'APPROVALS') {
+      return { ...blocker, detail: 'The task has a current assignment approval timestamp' };
+    }
+    if (blocker.code === 'AUDIT_HISTORY') {
+      return {
+        ...blocker,
+        detail: `Protected audit evidence exists: ${protectedAudit.map((row) => `${row.action} (${row.count})`).join(', ')}`
+      };
+    }
+    return blocker;
+  });
+  if (actualHours > 0 && !corroboratedEffort && !completedWork) {
+    blockers.push({
+      code: 'UNVERIFIED_LEGACY_EFFORT',
+      detail: `${actualHours} legacy actual hour(s) are stored without corroborating work evidence; the value is not assumed to be genuine, but physical erasure cannot discard it automatically`
+    });
+  }
+  if (linkedIssues > 0) {
+    blockers.push({ code: 'ACTIVE_WORKFLOW', detail: `${linkedIssues} issue record(s) reference this task` });
+  }
+  if (calendarLinks > 0) {
+    blockers.push({ code: 'ACTIVE_WORKFLOW', detail: `${calendarLinks} external calendar link(s) reference this task` });
+  }
+  if (activeJobs > 0) {
+    blockers.push({ code: 'NOTIFICATIONS', detail: `${activeJobs} pending or leased worker job(s) reference this task` });
+  }
   return {
     entityType,
     entityId,
-    deletable: result.deletable,
-    blockers: result.blockers,
+    deletable: blockers.length === 0,
+    blockers,
+    erasePlan: [
+      { code: 'TASK_ROW', count: 1, detail: `Task row ${entityId}` },
+      ...(assignmentRows
+        ? [{ code: 'TASK_ASSIGNEES', count: assignmentRows, detail: `${assignmentRows} task assignee relationship row(s)` }]
+        : []),
+      ...(outgoingDependencies
+        ? [{ code: 'TASK_DEPENDENCIES', count: outgoingDependencies, detail: `${outgoingDependencies} outgoing dependency row(s)` }]
+        : [])
+    ],
     dependencyCount: referenced,
     descendantCount: children,
     confirmationText: result.confirmationText,

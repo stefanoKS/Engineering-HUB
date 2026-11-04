@@ -1,5 +1,72 @@
 # Changelog
 
+## V2 unified task removal and explicit mistaken-record purge — 2026-11-04
+
+- All Work and Project Detail now use the same ADMIN logical-removal dialog and
+  `POST /api/admin/tasks/:id/remove`; ordinary Delete is a simple confirmation and preserves the
+  task row, requests, deadline history, assignee history and audit evidence.
+- The separate **Permanently erase mistaken record** action loads the strict physical preflight,
+  displays every row eligible for erasure, and requires a reason plus typed confirmation before
+  `POST /api/admin/tasks/:id/purge`.
+- Physical eligibility checks actual snapshot references rather than treating an `INTERNAL`
+  project setting as publication evidence. Routine task edits do not by themselves block purge.
+- Completed work, approved completion requests and audited effort remain protected. A nonzero
+  uncorroborated legacy hours value is reported separately and retained instead of being assumed
+  to be genuine work or silently erased.
+- Purge rechecks all blockers under the target-row lock, removes only enumerated administrative
+  task-assignee/outgoing-dependency rows, preserves the tombstone and append-only audit evidence,
+  and leaves child/incoming foreign-key and operational evidence untouched.
+
+## V2 crimson overview and exact work navigation — 2026-11-04
+
+No schema or migration change. The manager Overview now uses the approved crimson brand palette,
+keeps semantic overdue/in-progress/completed/pending colors distinct, and leaves both supplied PNG
+assets and stable project accent colors unchanged.
+
+- Upcoming Deadlines defaults to 7 calendar days and can switch to 14 or 30 days. The API resolves
+  the inclusive Asia/Tokyo range (`today` through `today + 6/13/29`) and returns the exact dates.
+- A bounded Overdue Work preview (oldest deadline first, 10 rows) is independent of that window;
+  larger results link to the server-filtered All Work list.
+- Open Work, Overdue and Completed (history) cards are accessible buttons. Their explicit hash
+  query clears stale project/search/page state, preserves responsibility or unassigned scope and
+  remains intact through browser Back/Forward and Task Detail.
+- `workState=OPEN` means unfinished leaf work in active project/subproject scope and includes
+  overdue work. `displayStatus=OVERDUE` and `displayStatus=DONE` use the same leaf-work policy;
+  hierarchy ancestors may be returned for navigation but do not inflate `matchedTotal`.
+- Upcoming, overdue and All Work filters run in PostgreSQL before pagination/limits. The browser
+  does not receive a full task table and does not recompute the KPI result.
+
+## V2 date-based workload report — 2026-11-04
+
+Schema 10: one additive partial index (`tasks_completed_at_idx`); no existing migration, column,
+row or stored value changed, and no database was migrated or deployed.
+
+- The 工数レポート screen offers **日 / 週 / 月 / 年 / カスタム** instead of a fixed four-week
+  table. A week is Monday–Sunday; Saturday and Sunday are ordinary days and no Japanese holiday is
+  filtered; every period is resolved on the server in Asia/Tokyo terms. Custom ranges are
+  inclusive, validated (start ≤ end) and capped at 366 days.
+- The report counts **tasks**, never hours: 対象期限タスク, 期間内完了, 期限超過, 期限未設定 plus
+  期間内で期限超過, 期間前からの持ち越し, 一意のタスク and 割当（延べ）. Remaining hours, capacity,
+  utilisation, overload warnings and unestimated-task counts are removed; a missing estimate is
+  never zero workload.
+- A shared task is counted once in the unique total and once per active assignee in the member
+  table; a removed assignee contributes nothing; container tasks are organisation and are never
+  counted as work.
+- `GET /api/manager/reports/workload` resolves the period and returns summary counts, timeline
+  buckets and member rows; the new paginated `GET /api/manager/reports/workload/tasks` backs the
+  card, timeline-bucket and member-row breakdowns. `POST /api/manager/reports/refresh` accepts the
+  same query. ADMIN and MANAGER only.
+- Counting happens in `packages/db/src/repo/reports.ts` with date-filtered, parameterized SQL over
+  one shared scope CTE; `packages/domain/src/workload-period.ts` owns period and bucket
+  resolution. The browser receives counts it cannot recompute differently.
+- Assignment tables record who is assigned **now**, so the response states
+  `assignmentBasis: 'CURRENT_ASSIGNMENTS'` and the screen says the view groups current assignments
+  by the selected dates rather than reconstructing a historical as-of snapshot.
+- Tests: `workload-period.test.ts` (period boundaries, leap year, custom limits, Asia/Tokyo
+  boundary), `workload-report.test.ts` (figures, multi-assignee dedupe, hierarchy exclusions,
+  filters, drilldown pagination, validation, roles) and `workload.test.tsx` (modes, cards,
+  drilldown, invalid range).
+
 ## V2 project detail hierarchy and ADMIN-only permanent removal — 2026-11-04
 
 No schema change: migrations 0001–0008 and their checksums are untouched, and no database was
@@ -1595,4 +1662,3 @@ Repository
 
 No previous prototype, production deployment, benchmark, or live Google Workspace verification is included in this
 release record. The V1.1 scale measurement is a local mock benchmark, not a Workspace benchmark.
-

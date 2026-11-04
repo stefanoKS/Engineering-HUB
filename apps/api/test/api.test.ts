@@ -583,21 +583,28 @@ function configToEnv(value: ReturnType<typeof loadConfig>): NodeJS.ProcessEnv {
 }
 
 
-describe('workload effort', () => {
-  it('subtracts actual effort and counts an owner also listed as assignee only once', async () => {
+describe('date-based workload report', () => {
+  it('counts tasks, not hours, and counts an owner also listed as assignee only once', async () => {
+    const today = businessDate();
     await db.query("INSERT INTO projects (project_id, project_name) VALUES ('PRJ-W', 'Workload')");
     await db.query(
       "INSERT INTO tasks (task_id, project_id, task_name, owner_member_id, due_date, estimated_hours, actual_hours) VALUES ('TSK-W', 'PRJ-W', 'Work', 'MEM-MEMBER', $1, 10, 3)",
-      [businessDate()]
+      [today]
     );
     await db.query("INSERT INTO task_assignees (assignment_id, task_id, member_id) VALUES ('ASG-W', 'TSK-W', 'MEM-MEMBER')");
     const auth = await signIn(MANAGER);
-    const result = await app.inject({ method: 'GET', url: '/api/manager/reports/workload', headers: headers(auth) });
+    const result = await app.inject({
+      method: 'GET',
+      url: `/api/manager/reports/workload?mode=DAY&anchor=${today}`,
+      headers: headers(auth)
+    });
     expect(result.statusCode).toBe(200);
     const data = result.json().data;
-    const row = data.rows.find((entry: { memberId: string; weekStart: string }) => entry.memberId === 'MEM-MEMBER' && entry.weekStart === data.weeks[0]);
-    expect(row.remainingHours).toBe(7);
-    expect(row.actualHours).toBe(3);
+    expect(data.summary).toMatchObject({ dueTasks: 1, uniqueTasks: 1, assignments: 1 });
+    const row = data.employees.find((entry: { memberId: string }) => entry.memberId === 'MEM-MEMBER');
+    expect(row.dueTasks).toBe(1);
+    // The stored estimate and actual hours no longer produce a workload figure.
+    expect(JSON.stringify(data)).not.toMatch(/remainingHours|actualHours|capacityHours|utilization/);
   });
 });
 

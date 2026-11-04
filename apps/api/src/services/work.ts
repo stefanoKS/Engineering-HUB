@@ -55,7 +55,7 @@ export const WORK_PROJECT_PAGE_SIZE = 25;
  * work is hidden by default and only an explicit filter brings it back.
  */
 export async function listActiveWork(
-  ctx: ServiceCtx,
+  ctx: WorkCtx,
   query: z.infer<typeof TaskListQuery>
 ): Promise<WorkPage> {
   requireRole(ctx.identity, 'VIEWER');
@@ -69,7 +69,9 @@ export async function listActiveWork(
     responsibilityId: query.responsibilityId,
     unassigned: query.unassigned,
     status: query.status,
+    workState: query.workState,
     displayStatus: query.displayStatus,
+    today: ctx.today,
     ownerMemberId: query.ownerMemberId,
     query: query.query,
     containerOnly: query.containerOnly,

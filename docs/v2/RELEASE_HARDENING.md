@@ -12,7 +12,7 @@
 - Logical backups read all tables from one repeatable-read snapshot. pg_dump passwords are removed from command arguments; pg_restore stops on error and runs in one transaction. Missing client binaries are reported as a skipped test.
 - Notification recipient caps resume at eligible recipients instead of repeatedly visiting completed deliveries. Pending request reminders have their own daily producer and delivery-time status check. Weekly reports use canonical scope and a Monday-based deduplication bucket.
 - Calendar scanning includes tasks and milestones. Deterministic event identities, ownership checks, conditional updates and exclusive all-day end dates protect retries. Missing or foreign linked events fail safely. Google calls are tested with mocks, not a live tenant.
-- Workload computation indexes tasks by assigned member, subtracts actual hours, and deduplicates primary/additional ownership. Actual hours are cumulative task effort for overlapping weeks, not a timesheet attribution; multi-week tasks still contribute their remaining effort to each overlapping week.
+- Workload computation indexes tasks by assigned member, subtracts actual hours, and deduplicates primary/additional ownership. Actual hours are cumulative task effort for overlapping weeks, not a timesheet attribution; multi-week tasks still contribute their remaining effort to each overlapping week. *(Superseded 2026-11-04 by the date-based workload report: task counts per selected period, no hour or utilisation figure. See [ACCEPTANCE.md](ACCEPTANCE.md) and [API.md](API.md).)*
 
 ## Local evidence
 

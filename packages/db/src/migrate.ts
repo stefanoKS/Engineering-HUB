@@ -23,7 +23,7 @@ const LOCK_KEY = 947_311_002;
  * false "ready", and nothing ever migrates automatically: applying migrations stays an explicit,
  * reviewed one-shot step against a verified backup.
  */
-export const REQUIRED_SCHEMA_VERSION = 9;
+export const REQUIRED_SCHEMA_VERSION = 10;
 
 export type MigrationRow = {
   version: number;

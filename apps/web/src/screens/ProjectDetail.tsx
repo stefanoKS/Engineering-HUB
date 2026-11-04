@@ -10,18 +10,19 @@
  * and it always goes through the reviewed preflight; MANAGER, MEMBER and VIEWER never see it. A MEMBER or
  * VIEWER reads the narrow `/api/work/projects/:id` projection with no actions at all.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ProjectForm } from './Projects';
 import { SubprojectForm } from './SubprojectForm';
 import { TaskForm } from './TaskForm';
-import type { Actor, DeletionPreflight, Project, Reference, ProgressRollup, Subproject, TaskSummary } from '@eh/contracts';
-import { api, ApiFailure } from '../api/client';
+import type { Actor, Project, Reference, ProgressRollup, Subproject, TaskSummary } from '@eh/contracts';
+import { api } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
-import { Badge, Breadcrumbs, DescriptionText, EmptyState, ErrorBox, Modal, ProgressBar, Section, statusTone } from '../components/ui';
+import { Badge, Breadcrumbs, DescriptionText, EmptyState, ErrorBox, ProgressBar, Section, statusTone } from '../components/ui';
 import { displayTone } from './Tasks';
 import { projectColor } from '@eh/domain';
 import { BackButton, useRouteMemoryState } from '../state/navigation';
+import { DeleteEntityDialog } from '../components/DeleteEntityDialog';
 
 /* ------------------------------------------------------------------ data shapes */
 
@@ -638,148 +639,6 @@ function TaskItem({
   );
 }
 
-/* ------------------------------------------------------------------ delete dialog */
-
-const BLOCKER_LABELS: Record<string, string> = {
-  HAS_DESCENDANTS: 'delete.blocker.HAS_DESCENDANTS',
-  HAS_TASKS: 'delete.blocker.HAS_TASKS',
-  AUDIT_HISTORY: 'delete.blocker.AUDIT_HISTORY',
-  PUBLISHED: 'delete.blocker.PUBLISHED',
-  RECORDED_EFFORT: 'delete.blocker.RECORDED_EFFORT',
-  APPROVALS: 'delete.blocker.APPROVALS',
-  REQUESTS: 'delete.blocker.REQUESTS',
-  NOTIFICATIONS: 'delete.blocker.NOTIFICATIONS',
-  DEADLINE_HISTORY: 'delete.blocker.DEADLINE_HISTORY',
-  SCHEDULE_CONFIRMATIONS: 'delete.blocker.SCHEDULE_CONFIRMATIONS',
-  ACTIVE_WORKFLOW: 'delete.blocker.ACTIVE_WORKFLOW',
-  ARCHIVED_RECORD: 'delete.blocker.ARCHIVED_RECORD',
-  DEPENDENCY_REFERENCED: 'delete.blocker.DEPENDENCY_REFERENCED',
-  NOT_FOUND_OR_DELETED: 'delete.blocker.NOT_FOUND_OR_DELETED'
-};
-
-export function DeleteEntityDialog({
-  entityType,
-  entityId,
-  entityName,
-  onClose,
-  onDeleted,
-  onRevealChildren
-}: {
-  entityType: 'TASKS' | 'SUBPROJECTS';
-  entityId: string;
-  entityName: string;
-  onClose: () => void;
-  onDeleted: () => void;
-  onRevealChildren?: () => void;
-}): JSX.Element {
-  const { t } = useI18n();
-  const [preflight, setPreflight] = useState<DeletionPreflight | null>(null);
-  const [loadError, setLoadError] = useState<unknown>(null);
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<unknown>(null);
-
-  useEffect(() => {
-    let current = true;
-    setPreflight(null);
-    setLoadError(null);
-    api
-      .get<DeletionPreflight>(
-        `/api/manager/removal/preflight?entityType=${entityType}&entityId=${encodeURIComponent(entityId)}`
-      )
-      .then((value) => {
-        if (current) setPreflight(value);
-      })
-      .catch((error: unknown) => {
-        if (current) setLoadError(error);
-      });
-    return () => {
-      current = false;
-    };
-  }, [entityType, entityId]);
-
-  const deletable = preflight?.deletable === true;
-  const canSubmit = deletable && !!preflight && !busy;
-
-  const submit = async (): Promise<void> => {
-    if (!canSubmit || !preflight) return;
-    setBusy(true);
-    setFailure(null);
-    try {
-      const path = entityType === 'TASKS' ? 'tasks' : 'subprojects';
-      await api.post(`/api/admin/${path}/${entityId}/remove`, {
-        revision: preflight.revision,
-        confirmed: true
-      });
-      onDeleted();
-    } catch (error) {
-      setFailure(error);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal
-      title={t('delete.confirmTitle')}
-      onClose={onClose}
-      footer={
-        <>
-          <button type="button" className="button secondary" onClick={onClose} disabled={busy}>
-            {t('action.cancel')}
-          </button>
-          {onRevealChildren && preflight && !deletable ? (
-            <button type="button" className="button secondary" onClick={onRevealChildren}>
-              {t('delete.revealChildren')}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="button danger"
-            disabled={!canSubmit}
-            onClick={() => void submit()}
-          >
-            {busy ? t('state.saving') : t('delete.submit')}
-          </button>
-        </>
-      }
-    >
-      <div className="stack">
-        <p className="small">
-          <span className="muted">{t('delete.target')}: </span>
-          <strong>{entityName}</strong>
-        </p>
-        {!preflight && !loadError ? <p role="status">{t('delete.checking')}</p> : null}
-        <ErrorBox error={loadError} />
-        {preflight ? (
-          deletable ? (
-            <>
-              <p>{t(entityType === 'TASKS' ? 'delete.confirmTask' : 'delete.confirmSubproject')}</p>
-              <div className="banner info">{t('delete.allowed')}</div>
-            </>
-          ) : (
-            <div className="banner warning">
-              <strong>{t('delete.blocked')}</strong>
-              <ul>
-                {preflight.blockers.map((blocker) => (
-                  <li key={blocker.code}>
-                    {t(BLOCKER_LABELS[blocker.code] ?? 'delete.blocker.generic')}
-                    <span className="muted small"> — {blocker.detail}</span>
-                  </li>
-                ))}
-              </ul>
-              <p className="muted small">{t('delete.blockedHint')}</p>
-            </div>
-          )
-        ) : null}
-        <ErrorBox error={failure} />
-        {failure instanceof ApiFailure && failure.isConflict ? (
-          <p className="muted small">{t('delete.staleRevision')}</p>
-        ) : null}
-      </div>
-    </Modal>
-  );
-}
-
 /* ------------------------------------------------------------------ screen */
 
 export function ProjectDetailScreen({
@@ -855,7 +714,9 @@ export function ProjectDetailScreen({
       keys.taskIndex,
       keys.myWork,
       keys.workload,
+      keys.employee,
       // The read-only projection and the employee lists show the same records.
+      'work/tasks',
       'work/project/',
       'work/projects'
     ]);

@@ -1,5 +1,77 @@
 # V2 HTTP API
 
+## Manager Overview and All Work filters (2026-11-04)
+
+`GET /api/manager/overview` remains `ADMIN`/`MANAGER` only and accepts:
+
+| Parameter | Values | Notes |
+| --- | --- | --- |
+| `upcomingDays` | `7`, `14`, `30` | Default `7`; any other value is `400 VALIDATION_FAILED` |
+| `responsibilityId` | identifier | Filters counts and both preview lists before their limits |
+| `unassigned` | exact `true` or `false` | Selects projects with no responsibility |
+
+The server uses the Asia/Tokyo business date. The inclusive end is `today + 6`, `+13` or `+29`;
+weekends are ordinary dates. `upcomingWindow` returns `days`, `from` and `to`. `upcoming` is a
+nearest-deadline-first preview (20 rows) with `upcomingTotal`; `overdue` is an oldest-deadline-first
+preview (10 rows) with `overdueTotal`. Both contain leaf work only, exclude Done, Cancelled,
+archived/deleted work and archived subproject ancestry, and apply responsibility scope in SQL
+before the limit.
+
+`GET /api/manager/tasks` and the signed-in read-only `GET /api/work/tasks` accept the existing
+responsibility filters plus `workState=OPEN`. OPEN is unfinished active leaf work and includes
+overdue work. `displayStatus=OVERDUE` returns that subset due before today;
+`displayStatus=DONE` is completed leaf history and does not include Cancelled or archived work.
+With `tree=true`, `matchedTotal` counts matching work units while `items`/`total` may also contain
+ancestor containers needed for navigation.
+
+## Date-based workload report (2026-11-04)
+
+`GET /api/manager/reports/workload` is now a date-based task-count report instead of a fixed
+four-week utilisation table. `ADMIN` and `MANAGER` only; `MEMBER`, `VIEWER` and an unauthenticated
+caller are refused before any query runs.
+
+| Parameter | Values | Notes |
+| --- | --- | --- |
+| `mode` | `DAY`, `WEEK`, `MONTH`, `YEAR`, `CUSTOM` | Default `WEEK` |
+| `anchor` | `YYYY-MM-DD` | Defaults to the business date; ignored by `CUSTOM` |
+| `start`, `end` | `YYYY-MM-DD` | Required by `CUSTOM`, inclusive, start ≤ end, at most 366 days |
+| `granularity` | `DAY`, `WEEK`, `MONTH` | `CUSTOM` only; otherwise derived (≤14 days daily, 15–90 weekly, >90 monthly) |
+| `memberId`, `projectId`, `responsibilityId` | identifier | Applied inside PostgreSQL, before anything is aggregated |
+| `memberQuery` | text (max 100) | Member-table name filter |
+| `sort`, `direction` | `overdue` \| `due` \| `name`; `asc` \| `desc` | Default `overdue` descending, then most due |
+
+A week is Monday–Sunday. Saturday and Sunday are ordinary calendar days and no Japanese public
+holiday is filtered. Every period is resolved on the server in Asia/Tokyo terms, and a validation
+failure is `400 VALIDATION_FAILED` with the offending field in `details`.
+
+The response carries `mode`, the resolved `start`/`end`, `today`, `granularity`, `summary`,
+`buckets`, `employees`, `assignmentBasis: 'CURRENT_ASSIGNMENTS'` and `generatedAt`. Every figure is
+a task count; no hour, capacity or utilisation field exists.
+
+| Figure | Definition |
+| --- | --- |
+| `dueTasks` | Current due date inside the period (cancelled work excluded) |
+| `completedTasks` | Stored completion instant inside the period (Asia/Tokyo date) |
+| `overdueTasks` | Unfinished, current due date before today |
+| `undatedTasks` | Unfinished, no due date |
+| `overdueWithinPeriod` | Unfinished, due inside the period, already overdue today |
+| `backlogBeforePeriod` | Unfinished, due before the period starts |
+| `uniqueTasks` | Distinct tasks behind the four cards — never the sum of the member rows |
+| `assignments` | Employee–task pairs of those tasks; a shared task counts once per active assignee |
+
+`GET /api/manager/reports/workload/tasks` returns one paginated list behind a figure:
+`kind` (`DUE`, `COMPLETED`, `OVERDUE`, `OVERDUE_IN_PERIOD`, `UNDATED`, `BACKLOG`), the same period
+parameters plus optional `from`/`to` bucket bounds, `page` (default 1) and `pageSize` (default 25,
+maximum 100). `POST /api/manager/reports/refresh` accepts the same query and returns the report for
+that period.
+
+Assignment tables record who is assigned now, so the answer states
+`assignmentBasis: 'CURRENT_ASSIGNMENTS'`: it groups current assignments by the selected dates and
+never claims to reconstruct a historical as-of assignment. Removed assignees contribute nothing;
+a container task is organisation and is never counted as work.
+
+Schema 10 adds `tasks_completed_at_idx` (additive, partial) for the completion filter.
+
 ## Member project explorer (2026-11-04)
 
 `MEMBER` and `VIEWER` now have a Projects navigation entry that opens a read-only explorer backed
@@ -96,11 +168,11 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | Method | Path | Query / notes |
 | --- | --- | --- |
 | GET | `/api/manager/bootstrap` | Actor, references, bounded project index, compact task index |
-| GET | `/api/manager/overview` | `responsibilityId`, `unassigned` |
+| GET | `/api/manager/overview` | `responsibilityId`, `unassigned`, `upcomingDays=7|14|30` |
 | GET | `/api/manager/projects` | `responsibilityId`, `unassigned`, `status`, `query`, `page`, `pageSize`, `sort`, `direction` |
 | GET | `/api/manager/projects/:id` | Record, rollup, subprojects with rollup, task summaries, milestones, phases |
 | GET | `/api/manager/subprojects` | `projectId` |
-| GET | `/api/manager/tasks` | `projectId`, `subprojectId`, `responsibilityId`, `status`, `ownerMemberId`, `query`, `containerOnly`, `overdueOnly`, paging, sorting |
+| GET | `/api/manager/tasks` | `projectId`, `subprojectId`, `responsibilityId`, `unassigned`, `workState=OPEN`, `displayStatus`, `status`, `ownerMemberId`, `query`, `containerOnly`, paging, sorting |
 | GET | `/api/manager/tasks/parent-options` | `projectId`, `subprojectId?`, `excludeTaskId?` |
 | GET | `/api/manager/tasks/:id` | Record, effective assignees, history, confirmations, deadline history, children |
 | GET | `/api/manager/task-index` | Compact navigation index (bounded) |
@@ -115,7 +187,8 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | GET | `/api/manager/automation` | Settings, revision, effective mode, LIVE requirements |
 | GET | `/api/manager/publication` | Slot, contract, hash, row counts, last error |
 | GET | `/api/manager/status` | Version, schema, counts, outbox, backup (local / Drive / latest failure) |
-| GET | `/api/manager/reports/workload` | Four weeks of utilisation |
+| GET | `/api/manager/reports/workload` | Date-based task counts for `DAY`/`WEEK`/`MONTH`/`YEAR`/`CUSTOM` (see above) |
+| GET | `/api/manager/reports/workload/tasks` | Paginated drilldown behind a card, a timeline bucket or a member row |
 | GET | `/api/manager/plan/preview` | `deadline`, `durationValue`, `durationUnit`, `durationBasis` |
 | GET | `/api/manager/deletion/preflight` | `entityType`, `entityId` (ADMIN only) |
 | GET | `/api/manager/removal/preflight` | `entityType=TASKS|SUBPROJECTS`, `entityId` (ADMIN only); returns active child/dependency/workflow blockers and the current revision |
@@ -131,16 +204,18 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | POST | `/api/manager/subprojects` | `idempotencyKey`, `projectId`, `parentSubprojectId?`, `subprojectName`, `description?` (max 2000) |
 | PATCH | `/api/manager/subprojects/:id` | `revision` + partial fields; an omitted `description` keeps the stored text |
 | POST | `/api/manager/subprojects/:id/archive` \| `/reactivate` | `revision`, `confirmed`, `reason?` |
-| DELETE | `/api/manager/subprojects/:id` | As projects |
+| DELETE | `/api/manager/subprojects/:id` | Compatibility physical-purge route; as projects |
 | POST | `/api/admin/subprojects/:id/remove` | ADMIN logical removal: `revision`, `confirmed: true`; sets `deleted_at`, increments the revision and writes `RECORD_REMOVED` without deleting history |
+| POST | `/api/admin/subprojects/:id/purge` | ADMIN advanced permanent erasure: `revision`, `confirmed`, required `reason`, `confirmation: "DELETE <id>"` |
 | POST | `/api/manager/tasks` | `idempotencyKey`, `projectId`, `taskName`, `deadline`, optional planning fields, `assigneeIds`, `dependencyIds` |
 | PATCH | `/api/manager/tasks/:id` | `revision` + fields, `confirmDeadlineChange`, `acknowledgeNonWorking` |
 | POST | `/api/manager/tasks/:id/approve` | `revision`, `confirmed` |
 | POST | `/api/manager/tasks/:id/confirm-schedule` | `revision`, `confirmed`, `notes?` |
 | POST | `/api/manager/tasks/:id/complete` | MANAGER/ADMIN: `revision`, `confirmed: true`, `note?`. Direct completion; the container, cancelled and already-done refusals still apply, and a pending completion report is withdrawn |
 | POST | `/api/manager/tasks/:id/override-complete` | ADMIN: `revision`, `reason`, `confirmation: "COMPLETE <id>"` |
-| DELETE | `/api/manager/tasks/:id` | ADMIN, as projects |
+| DELETE | `/api/manager/tasks/:id` | Compatibility physical-purge route; ADMIN, as projects |
 | POST | `/api/admin/tasks/:id/remove` | ADMIN logical removal: `revision`, `confirmed: true`; preserves requests, deadline/audit/assignee history and queues A/B publication reconciliation |
+| POST | `/api/admin/tasks/:id/purge` | ADMIN advanced permanent erasure: `revision`, `confirmed`, required `reason`, `confirmation: "DELETE <id>"` |
 | POST | `/api/manager/members` | ADMIN for `role`/`active` |
 | PATCH | `/api/manager/members/:id` | `revision` + fields (role/active ADMIN only) |
 | POST | `/api/manager/responsibilities` | `name`, `ownerMemberId`, `additionalMemberIds`, `colorHex`, `sortOrder` |
@@ -157,9 +232,13 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | POST | `/api/manager/reports/refresh` | MANAGER |
 | POST | `/api/manager/deletion/reconcile` | ADMIN, `confirmed`, `confirmation: "RECONCILE DELETIONS"` |
 
-`DELETE` on a task, subproject or project is the only destructive command. It is ADMIN-only, it
-re-runs the preflight under a row lock inside the same transaction, and it answers the stored
-`tombstoneId` from `record_deletions` after `RECORD_DELETE_PREPARED` and `RECORD_DELETED` exist.
+The normal Delete action in All Work and Project Detail always uses
+`POST /api/admin/.../remove`; it is a simple explicit confirmation and never asks for a typed task
+ID. The separate **Permanently erase mistaken record** advanced action uses
+`POST /api/admin/.../purge`. The older physical `DELETE` routes remain compatibility aliases, are
+not used by the normal UI, and have the same strict policy. A physical purge is ADMIN-only, re-runs
+the preflight under a row lock inside the same transaction, and answers the stored `tombstoneId`
+only after `RECORD_DELETE_PREPARED`, the row removal and `RECORD_DELETED` all succeed.
 
 The POST `/api/admin/.../remove` commands are deliberately separate from these physical DELETE
 commands. Ordinary administrative removal keeps the task/subproject row and all foreign-key
@@ -169,13 +248,22 @@ standard mistaken-record reason in `RECORD_REMOVED`. A repeat after success retu
 dependants, pending/processing requests, pending or leased notification/calendar jobs, current
 assignment approval, completed work and recorded effort block task removal. Routine edits, audit
 rows, deadline history, historical assignees, decided requests and prior publication do not.
-`GET /api/manager/deletion/preflight` is the read-only companion; it reports `deletable`, the
-blocker codes and the exact `confirmationText`. Nothing cascades: a record that still owns tasks,
-descendants, dependencies, recorded effort, approvals, requests, notifications, deadline history,
-schedule decisions, audit history or a publication is refused and must be archived instead.
-Audit checks query the complete history, not a capped recent page. For subprojects, only
-`SUBPROJECT_CREATED` and `SUBPROJECT_UPDATED` are non-operational deletion history; every other or
-unknown action blocks permanent deletion. Audit rows are append-only and survive removal.
+`GET /api/manager/deletion/preflight` is the read-only physical-purge companion. It reports
+`deletable`, exact blocker details, `confirmationText` and `erasePlan`. For a task, `erasePlan`
+enumerates the task row plus the task's assignee and outgoing-dependency relationship rows; audit
+rows are append-only and are never in the erase plan. Children (including logically removed
+children), incoming dependencies, completion requests, deadline history, schedule decisions,
+notifications, active worker jobs, issues, Calendar links, protected audit actions and stored
+publication-snapshot references block the purge, so no foreign-key row is blindly cascaded.
+
+An `INTERNAL` project setting alone is not publication evidence: a purge is blocked only when a
+stored A/B snapshot actually references the task. `actual_hours > 0` is also not automatically
+called genuine work. A value corroborated by an audited task update is `RECORDED_EFFORT`; a
+completed task or approved completion request is protected completed work; a nonzero imported
+value without corroboration is reported separately as `UNVERIFIED_LEGACY_EFFORT` and retained
+rather than silently erased. Routine `TASK_UPDATED` history does not itself block a purge, while
+unknown or operational audit actions do. Audit checks query the complete history, not a capped
+recent page.
 
 ## 5. Employee / member endpoints
 

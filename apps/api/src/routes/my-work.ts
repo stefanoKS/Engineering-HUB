@@ -12,7 +12,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { CreateMyTaskBody } from '@eh/contracts';
 import { actorOf, ok, type AppDependencies } from '../http';
 import { sendError } from '../errors';
-import { createMyTask, listMyWork, myWorkProjectOptions } from '../services/my-work';
+import { createMyTask, listMyWork, myWorkProjectOptions, type MyWorkSection } from '../services/my-work';
 import type { ServiceCtx } from '../services/common';
 
 function ctx(request: FastifyRequest): ServiceCtx {
@@ -23,13 +23,16 @@ function ctx(request: FastifyRequest): ServiceCtx {
   };
 }
 
-const PageQuery = z.object({ page: z.coerce.number().int().min(1).max(100000).default(1) });
+const PageQuery = z.object({
+  page: z.coerce.number().int().min(1).max(100000).default(1),
+  section: z.enum(['active', 'completed']).default('active')
+});
 
 export function registerMyWork(app: FastifyInstance, _deps: AppDependencies): void {
   app.get('/api/employee/my-work', async (request, reply) => {
     try {
-      const { page } = PageQuery.parse(request.query ?? {});
-      return ok(reply, request, await listMyWork(ctx(request), page));
+      const { page, section } = PageQuery.parse(request.query ?? {});
+      return ok(reply, request, await listMyWork(ctx(request), page, section as MyWorkSection));
     } catch (error) {
       return sendError(reply, request.state, error);
     }

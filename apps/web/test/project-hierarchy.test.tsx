@@ -9,11 +9,11 @@ if (typeof HTMLDialogElement !== 'undefined') {
 import { I18nProvider } from '../src/i18n';
 import {
   buildProjectHierarchy,
-  DeleteEntityDialog,
   ProjectDetailScreen,
   ProjectHierarchy,
   type HierarchySubproject
 } from '../src/screens/ProjectDetail';
+import { DeleteEntityDialog } from '../src/components/DeleteEntityDialog';
 import { queryCache } from '../src/state/cache';
 import type { TaskSummary } from '@eh/contracts';
 
@@ -339,6 +339,59 @@ describe('delete dialog', () => {
     expect(JSON.parse(String(call[1]!.body))).toEqual({
       revision: 7,
       confirmed: true
+    });
+  });
+
+  it('keeps permanent erasure separate and displays the exact erase plan', async () => {
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return response({ tombstoneId: 'DEL-1' });
+      if (url.includes('deletion/preflight')) {
+        return response({
+          entityType: 'TASKS',
+          entityId: 'T-A1',
+          deletable: true,
+          blockers: [],
+          erasePlan: [
+            { code: 'TASK_ROW', count: 1, detail: 'Task row T-A1' },
+            { code: 'TASK_ASSIGNEES', count: 2, detail: '2 task assignee relationship row(s)' }
+          ],
+          dependencyCount: 0,
+          descendantCount: 0,
+          confirmationText: 'DELETE T-A1',
+          revision: 7
+        });
+      }
+      return response({
+        entityType: 'TASKS',
+        entityId: 'T-A1',
+        deletable: true,
+        blockers: [],
+        dependencyCount: 0,
+        descendantCount: 0,
+        confirmationText: '',
+        revision: 7
+      });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    const onDeleted = vi.fn();
+    render(
+      <I18nProvider>
+        <DeleteEntityDialog entityType="TASKS" entityId="T-A1" entityName="Area A work" onClose={() => undefined} onDeleted={onDeleted} />
+      </I18nProvider>
+    );
+    fireEvent.click(await screen.findByRole('button', { name: '誤作成記録を完全に消去' }));
+    expect(await screen.findByText('Task row T-A1')).toBeTruthy();
+    expect(screen.getByText('2 task assignee relationship row(s)')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('理由（必須）'), { target: { value: 'Created by mistake' } });
+    fireEvent.change(screen.getByLabelText(/DELETE T-A1/), { target: { value: 'DELETE T-A1' } });
+    fireEvent.click(screen.getByRole('button', { name: '確認' }));
+    await waitFor(() => expect(onDeleted).toHaveBeenCalled());
+    const call = fetcher.mock.calls.find(([url, init]) => url === '/api/admin/tasks/T-A1/purge' && init?.method === 'POST')!;
+    expect(JSON.parse(String(call[1]!.body))).toEqual({
+      revision: 7,
+      confirmed: true,
+      reason: 'Created by mistake',
+      confirmation: 'DELETE T-A1'
     });
   });
 

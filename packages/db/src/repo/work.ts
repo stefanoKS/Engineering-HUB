@@ -25,7 +25,7 @@ export type ProjectFilters = {
   query?: string;
   /** The member explorer searches the project name only, never a private column. */
   queryProjectNameOnly?: boolean;
-  sort?: 'deadline' | 'name' | 'status' | 'priority' | 'updated';
+  sort?: 'deadline' | 'name' | 'responsibility' | 'owner' | 'status' | 'priority' | 'updated';
   direction?: 'asc' | 'desc';
   /** Visibility policy: only `INTERNAL` projects are employee-visible. */
   internalOnly?: boolean;
@@ -36,6 +36,8 @@ export type ProjectFilters = {
 const PROJECT_SORTS: Record<NonNullable<ProjectFilters['sort']>, string> = {
   deadline: 'p.committed_deadline',
   name: 'lower(p.project_name)',
+  responsibility: "lower(COALESCE(r.name, ''))",
+  owner: "lower(COALESCE(owner.name, ''))",
   status: 'p.status',
   priority: "CASE p.priority WHEN 'Critical' THEN 0 WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END",
   updated: 'p.updated_at'

@@ -29,7 +29,7 @@ const APP_ROUTES = new Set([
 ]);
 
 export function routeAllowed(path: string, actor: Actor): boolean {
-  const first = path.split('/').filter(Boolean)[0] ?? 'overview';
+  const first = path.split('?')[0]?.split('/').filter(Boolean)[0] ?? 'overview';
   if (!APP_ROUTES.has(first)) return false;
   if (actor.role === 'ADMIN' || actor.role === 'MANAGER') return true;
   return new Set(['overview', 'my-work', 'all-work', 'tasks', 'task', 'projects', 'project']).has(first);
@@ -77,11 +77,17 @@ export function rememberedScroll(path: string): number {
 
 export function useRouteMemoryState<T>(
   key: string,
-  initialValue: T | (() => T)
+  initialValue: T | (() => T),
+  options: { resetToInitial?: boolean } = {}
 ): [T, Dispatch<SetStateAction<T>>] {
   const [value, setValue] = useState<T>(() => {
+    const initial = initialValue instanceof Function ? initialValue() : initialValue;
+    if (options.resetToInitial) {
+      routeMemory.set(key, initial);
+      return initial;
+    }
     if (routeMemory.has(key)) return routeMemory.get(key) as T;
-    return initialValue instanceof Function ? initialValue() : initialValue;
+    return initial;
   });
   const update = useCallback<Dispatch<SetStateAction<T>>>((next) => {
     setValue((current) => {

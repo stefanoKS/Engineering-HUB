@@ -292,6 +292,59 @@ describe('administrative logical removal', () => {
       });
 
 describe('eligible removals', () => {
+  it('physically purges an edited INTERNAL mistaken task and its administrative relationships', async () => {
+    await db.query(
+      `INSERT INTO tasks(task_id,project_id,task_name,status) VALUES
+        ('T-BASE','PRJ-PRIV','Existing work','Not Started'),
+        ('T-PURGE','PRJ-INT','Mistaken internal task','Not Started')`
+    );
+    await db.query(
+      `INSERT INTO task_assignees(assignment_id,task_id,member_id,assigned_by)
+       VALUES('ASG-PURGE','T-PURGE','MEM-A','MEM-ADMIN')`
+    );
+    await db.query(
+      "INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES('T-PURGE','T-BASE')"
+    );
+    await db.query(
+      `INSERT INTO audit_log(entity_type,entity_id,action,actor_member_id)
+       VALUES('TASKS','T-PURGE','TASK_UPDATED','MEM-ADMIN')`
+    );
+    const admin = await login('0001');
+    const checked = await preflight(admin, 'TASKS', 'T-PURGE');
+    expect(checked.statusCode, checked.body).toBe(200);
+    const body = checked.json().data as {
+      deletable: boolean;
+      blockers: unknown[];
+      revision: number;
+      confirmationText: string;
+      erasePlan: { code: string; count: number; detail: string }[];
+    };
+    expect(body.deletable).toBe(true);
+    expect(body.blockers).toEqual([]);
+    expect(body.erasePlan).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'TASK_ROW', count: 1 }),
+        expect.objectContaining({ code: 'TASK_ASSIGNEES', count: 1 }),
+        expect.objectContaining({ code: 'TASK_DEPENDENCIES', count: 1 })
+      ])
+    );
+
+    const purged = await administrativeRemove(admin, '/api/admin/tasks/T-PURGE/purge', {
+      revision: body.revision,
+      confirmed: true,
+      reason: 'Mistaken duplicate',
+      confirmation: body.confirmationText
+    });
+    expect(purged.statusCode, purged.body).toBe(200);
+    expect(await db.one("SELECT 1 FROM tasks WHERE task_id = 'T-PURGE'")).toBeFalsy();
+    expect(await db.one("SELECT 1 FROM task_assignees WHERE task_id = 'T-PURGE'")).toBeFalsy();
+    expect(await db.one("SELECT 1 FROM task_dependencies WHERE task_id = 'T-PURGE'")).toBeFalsy();
+    expect(await db.one("SELECT 1 FROM tasks WHERE task_id = 'T-BASE'")).toBeTruthy();
+    expect(await db.one("SELECT 1 FROM record_deletions WHERE entity_type = 'TASKS' AND entity_id = 'T-PURGE'")).toBeTruthy();
+    expect(await db.one("SELECT 1 FROM audit_log WHERE entity_id = 'T-PURGE' AND action = 'TASK_UPDATED'")).toBeTruthy();
+    expect(await db.one("SELECT 1 FROM audit_log WHERE entity_id = 'T-PURGE' AND action = 'RECORD_DELETED'")).toBeTruthy();
+  });
+
   it('removes an empty subproject and records the intent, tombstone and completion', async () => {
     await db.query(
       "INSERT INTO subprojects(subproject_id,project_id,subproject_name,status) VALUES('SUB-EMPTY','PRJ-PRIV','Empty area','Planned')"
@@ -529,9 +582,46 @@ describe('deletion blockers', () => {
     expect(kid.data.deletable).toBe(true);
   });
 
-  it('refuses a published project record and an archived branch', async () => {
+  it('classifies uncorroborated legacy hours separately from genuine completed work', async () => {
     await db.query(
-      `INSERT INTO tasks(task_id,project_id,task_name,status,due_date) VALUES('T-PUB','PRJ-INT','Published work','In Progress','2026-12-01')`
+      `INSERT INTO tasks(task_id,project_id,task_name,status,actual_hours) VALUES
+        ('T-LEGACY-HOURS','PRJ-PRIV','Imported default','Not Started',2),
+        ('T-AUDITED-HOURS','PRJ-PRIV','Recorded work','In Progress',3)`
+    );
+    await db.query(
+      `INSERT INTO audit_log(entity_type,entity_id,action,previous_value,new_value,actor_member_id)
+       VALUES('TASKS','T-AUDITED-HOURS','TASK_UPDATED','{"actualHours":0}','{"actualHours":3}','MEM-ADMIN')`
+    );
+    const admin = await login('0001');
+    const legacy = (await preflight(admin, 'TASKS', 'T-LEGACY-HOURS')).json().data as {
+      blockers: { code: string; detail: string }[];
+    };
+    expect(legacy.blockers).toEqual([
+      expect.objectContaining({
+        code: 'UNVERIFIED_LEGACY_EFFORT',
+        detail: expect.stringContaining('not assumed to be genuine')
+      })
+    ]);
+    const audited = (await preflight(admin, 'TASKS', 'T-AUDITED-HOURS')).json().data as {
+      blockers: { code: string; detail: string }[];
+    };
+    expect(audited.blockers).toEqual([
+      expect.objectContaining({
+        code: 'RECORDED_EFFORT',
+        detail: expect.stringContaining('audited task update')
+      })
+    ]);
+  });
+
+  it('blocks actual publication references but not an INTERNAL setting alone', async () => {
+    await db.query(
+      `INSERT INTO tasks(task_id,project_id,task_name,status,due_date) VALUES
+        ('T-PUB','PRJ-INT','Published work','In Progress','2026-12-01'),
+        ('T-INTERNAL-ONLY','PRJ-INT','Never published','Not Started',NULL)`
+    );
+    await db.query(
+      `INSERT INTO published_snapshots(slot,contract_version,publisher_version,hash,row_counts,rows)
+       VALUES('A','1.6','test','hash','{"tasks":1}','[{"taskId":"T-PUB"}]')`
     );
     await db.query(
       `INSERT INTO subprojects(subproject_id,project_id,subproject_name,status) VALUES('SUB-ARCH','PRJ-PRIV','Retired area','Archived')`
@@ -540,6 +630,10 @@ describe('deletion blockers', () => {
     const published = (await preflight(admin, 'TASKS', 'T-PUB')).json() as { data: { deletable: boolean; blockers: { code: string }[] } };
     expect(published.data.deletable).toBe(false);
     expect(published.data.blockers.map((entry) => entry.code)).toContain('PUBLISHED');
+    const internalOnly = (await preflight(admin, 'TASKS', 'T-INTERNAL-ONLY')).json() as {
+      data: { deletable: boolean; blockers: { code: string }[] };
+    };
+    expect(internalOnly.data).toMatchObject({ deletable: true, blockers: [] });
     const archived = (await preflight(admin, 'SUBPROJECTS', 'SUB-ARCH')).json() as { data: { deletable: boolean; blockers: { code: string }[] } };
     expect(archived.data.deletable).toBe(false);
     expect(archived.data.blockers.map((entry) => entry.code)).toContain('ARCHIVED_RECORD');

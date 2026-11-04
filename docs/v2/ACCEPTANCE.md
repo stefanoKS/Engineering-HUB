@@ -1,5 +1,95 @@
 # V2 Acceptance Record
 
+## Unified task removal and mistaken-record purge — 2026-11-04
+
+Latest local working tree; pre-existing uncommitted Overview, workload, navigation, database and
+documentation changes were preserved. No production database or deployment was accessed. All
+database tests used `freshDatabase()` and disposable PostgreSQL.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| Gate 0 inspection | PASS | inspected All Work, Project Detail, deletion service/routes, lifecycle policy, workflow repository, every PostgreSQL task foreign key, append-only audit/deadline triggers and existing dirty worktree |
+| Gate 1 normal deletion | PASS | shared `DeleteEntityDialog`; both screens call removal preflight + `POST /api/admin/tasks/:id/remove`; no typed ID/reason; ADMIN-only controls and server role check; success invalidates All Work, project structure, My Work, Overview, workload and employee projections |
+| Gate 2 effort classification | PASS | Done/approved completion/audited hours are protected; an uncorroborated nonzero legacy value is `UNVERIFIED_LEGACY_EFFORT` with its exact value and is retained rather than assumed or erased |
+| Gate 3 physical purge | PASS | separate **Permanently erase mistaken record** UI; exact erase plan; reason + typed confirmation; row lock and second preflight in the deleting transaction; task-assignee/outgoing-dependency rows only; durable tombstone plus prepared/deleted audit |
+| Integrity evidence | PASS | child rows (including removed rows), incoming dependencies, requests, deadline history, schedule confirmations, notifications, active jobs, issues, Calendar links, protected audit and stored publication snapshot references block purge; INTERNAL alone does not |
+| Focused web tests | PASS | `project-hierarchy.test.tsx` + `workflows.test.tsx`: **37 passed**; includes shared logical removal, no physical DELETE call, advanced erase plan and purge request |
+| Focused PostgreSQL tests | PASS | `deletion.test.ts`: **23 passed** against disposable PostgreSQL, including transaction cleanup, tombstone/audit retention, publication classification and effort classification |
+| Full V2 tests | PASS | `REQUIRE_DATABASE=1 npm run test:v2`: **349 passed, 1 skipped** across 26 files; database suites were required rather than silently skipped |
+| Typecheck / lint / build | PASS | `npm run typecheck`; `npm run lint:v2`; `npm run build` for API, web, worker and migration CLI |
+| Validation | PASS | `npm run validate:v2`: **152 files checked** |
+| Production artifact smoke | PASS | `npm run smoke:prod`: built migration CLI applied schema 10 to isolated PostgreSQL; built API health/readiness/session/read/mutation and built worker claim/completion passed |
+| Browser regression | PASS | `npm run test:browser`: Chromium hierarchy, contextual creation, blocked deletion, ADMIN logical removal, manager/member/viewer journeys, list refresh and responsive flow |
+| Production / deployment | NOT_RUN | no live production database, deployment, mailbox, Drive, Calendar or publication operation was used |
+
+Production remains **NOT APPROVED FOR PRODUCTION**.
+
+## Crimson Overview, deadline windows and KPI navigation — 2026-11-04
+
+Implemented on HEAD `b457a39dedb463c1638ffb44c5c405bd28b24f1b` while preserving the
+pre-existing uncommitted workload, branding, hierarchy and operating-document changes. Baseline
+before this feature: `npm run typecheck` PASS and `npm run test:v2` **332 passed, 1 skipped** across
+24 files. No schema, migration or operational PostgreSQL data changed; all database validation
+used `freshDatabase()` or the smoke harness's disposable PostgreSQL instance.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| 0 baseline and preservation | PASS | HEAD above; dirty tree recorded before edits; supplied `companyLogo.png` and `designTeam.png` remained unmodified; no migration/deployment/operational write |
+| 1 crimson theme | PASS | approved `#A8182F` / `#871326` / `#FBECEF` brand palette and warm surface/border/text values in `styles.css`; prior V2 blue/indigo brand literals are absent; semantic info `#176B87`, overdue red, completed green and pending amber remain distinct; stable project accents unchanged |
+| 2 deadline selector | PASS | first visit 7 days; 7/14/30 options kept in page-only route memory; exact inclusive windows are `today + 6/13/29`, weekends included; API returns `upcomingWindow { days, from, to }` |
+| 3 strict Overview API | PASS | `OverviewQuery` accepts only `7`, `14`, `30` and exact boolean scope; unsupported `365` returns 400; responsibility predicates and leaf/active-work predicates execute in PostgreSQL before the 20-row limit |
+| 4 overdue section | PASS | independent of selected upcoming window, oldest deadline first, 10-row server limit plus `overdueTotal` and View all; task/project links, assignees, deadline, days overdue, derived red status and pending-request badge |
+| 5 clickable KPI cards | PASS | real buttons with focus/accessible names; Open → `workState=OPEN`, Overdue → `displayStatus=OVERDUE`, Completed → `displayStatus=DONE`; container card intentionally remains non-clickable |
+| 6 responsibility scope | PASS | responsibility ID or `unassigned=true` is encoded in KPI destinations and available in All Work for every signed-in role; unit test covers scoped navigation |
+| 7 navigation state | PASS | existing hash router now retains validated query strings; an explicit destination atomically clears remembered project/search/inactive/page filters, preserves scope, and browser history recognizes a query-bearing All Work route |
+| 8 count consistency | PASS | disposable PostgreSQL test asserts Overview `openWork`, `overdueWork`, `completedWork` equal All Work tree `matchedTotal`; OPEN includes overdue; leaf tasks count once, while ancestor containers remain navigation rows |
+| 9 Overview layout | PASS | order is title/scope → KPI cards → Overdue → Upcoming/period → responsibilities → requests; obsolete upcoming progress bars removed; exact date range shown |
+| 10 authorization | PASS | Overview API 200 for ADMIN and MANAGER; 403 for MEMBER and VIEWER; generic `/api/work/tasks` remains read-only and existing visibility predicates remain server-side |
+| 11 performance | PASS | upcoming/overdue reads are bounded and apply scope before limit; All Work remains paginated ≤100; assignee names use the existing aggregate projection (no per-row query); cache key includes period and responsibility scope |
+| 12 tests | PASS | `overview.test.ts` (9 PostgreSQL tests), `overview.test.tsx` (3 UI/theme tests), and the query-bearing Back case in `navigation.test.ts`; final `npm run test:v2`: **345 passed, 1 skipped** across 26 files |
+| 13 validation | PASS | `npm run typecheck`; `npm run lint:v2`; `npm run validate:v2` (151 files); `npm run build`; `npm run smoke:prod`; final `npm run test:browser`; `npm run test:lan` |
+| 14 visual evidence | PASS | local stub-data preview at 1920×1280, 1366×768 and 390×844; no page-level horizontal overflow at any viewport; narrow tables scroll inside their card; screenshots were attached to the implementation session |
+| Evidence limit | DOCUMENTED | screenshots prove rendering/layout only and use allowlisted stub data; production browser and LAN smoke used disposable data; no live operational host, production database or Workspace deployment was accessed |
+
+The first browser-smoke attempt exposed an accessible-name collision while navigating away from
+Overview (the newly clickable project name matched the project explorer link). Overview project
+links now have contextual `Open project: …` accessible names; the rebuilt browser and LAN journeys
+both pass. Production remains **NOT APPROVED FOR PRODUCTION**.
+
+## Date-based workload report — 2026-11-04
+
+Baseline `b457a39` with a clean working tree; the pre-change V2 suite was **299 passed, 1 skipped**
+across 21 files. The fixed four-week utilisation table is replaced by a date-based task-count
+report: `apps/web/src/screens/Workload.tsx`, `apps/api/src/services/workload.ts`,
+`packages/db/src/repo/reports.ts` and `packages/domain/src/workload-period.ts`. V1 (`src/`,
+`dashboard-app/`, `shared/`, `scripts/`) is untouched; no operational database, deployment, trigger,
+mail/Calendar activation or publication ran. Every database below was disposable
+(`freshDatabase()`, the smoke harness or the benchmark's own embedded server).
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| 0 baseline and safety | PASS | clean tree at `b457a39`; pre-change `npm run test:v2` 299 pass / 1 skipped; AGENTS.md rules 150–162, 89–90 and 136–144 applied; local branding, navigation and other screens untouched |
+| 1 date modes | PASS | `resolveWorkloadPeriod` covers DAY, WEEK (Mon–Sun), MONTH, YEAR and CUSTOM (inclusive, start ≤ end, ≤ 366 days); previous/next/this-period controls and two date inputs; the mode and anchor survive leaving and reopening the screen (`useRouteMemoryState`, web test "keeps the selected mode") |
+| 2 metrics | PASS | `dueTasks`, `completedTasks`, `overdueTasks`, `undatedTasks`, `overdueWithinPeriod`, `backlogBeforePeriod`, `uniqueTasks`, `assignments`; no remaining-hours, capacity, utilisation, overload or unestimated-task field exists in the contract or payload (`workload-report.test` asserts the payload has none) |
+| 3 summary cards | PASS | four cards (対象期限タスク / 期間内完了 / 期限超過 / 期限未設定) with info/ok/danger/neutral tones, each card opens its paginated breakdown |
+| 4 timeline | PASS | DAY/WEEK = seven daily columns, MONTH = 28–31 numbered daily columns, YEAR = twelve monthly columns, CUSTOM picks daily ≤14 days, weekly 15–90 and monthly >90 with a manual override; a bar opens that bucket's task list; CSS-only chart with `aria-label` and `title` per bar |
+| 5 member table | PASS | member search (server `memberQuery`), member/project/responsibility filters, sort by overdue/due/name with a direction toggle, default most-overdue-then-most-due on the server; a row expands into project, subproject, task, deadline, status, completion date and task links |
+| 6 multi-assignee | PASS | effective set = `tasks.owner_member_id` ∪ `task_assignees WHERE removed_at IS NULL`; `uniqueTasks` 1 against `assignments` 2 for one shared task, a removed assignee counts 0 (`workload-report.test` "counts a shared task once…") |
+| 7 API | PASS | `GET /api/manager/reports/workload`, `GET /api/manager/reports/workload/tasks`, `POST /api/manager/reports/refresh`; Zod validates mode, dates, inclusive range, 366-day cap and filter IDs; ADMIN/MANAGER 200, MEMBER/VIEWER `403 AUTHORIZATION_DENIED`, unauthenticated 401, invalid input `400 VALIDATION_FAILED` |
+| 8 PostgreSQL | PASS | three date-filtered SQL aggregates over one shared scope CTE, parameterized, bounded (`LIMIT 500` member rows, paginated drilldown ≤100); migration `0010_workload_report_indexes.sql` adds `tasks_completed_at_idx`; large-dataset benchmark: p50 **173.66 ms**, p95 **223.00 ms**, 3 DB calls, 18 003 bytes |
+| 9 date and status correctness | PASS | deadline today is not overdue, yesterday is; Done is not overdue; undated is neither due nor overdue; container tasks are excluded and their leaf children counted; archived projects and cancelled work excluded; completion uses the stored instant converted to Asia/Tokyo |
+| 10 UI/UX | PASS | order = title → mode → navigation and filters → cards → timeline → member table → expandable details; Japanese default with English labels; measured `documentElement.scrollWidth == clientWidth` at 1920, 1366, 1024 and 820 CSS px; no page-level horizontal overflow, month columns stay inside the card |
+| 11 regression tests | PASS | `packages/domain/test/workload-period.test.ts` (9), `apps/api/test/workload-report.test.ts` (18), `apps/web/test/workload.test.tsx` (6) and the replaced contract test in `api.test.ts`; the obsolete remaining-hours assertion was replaced by task-count assertions, not deleted |
+| 12 full validation | PASS | `npm run typecheck`, `npm run lint` (V1 + V2), `npm run test:v2` **332 passed, 1 skipped** across 24 files, `npm run validate` (V1 42 files / 970 keys, V2 149 files, deploy templates), `npm run build`, `npm run smoke:prod` (schema 10), `npm run test:browser` and `npm run test:lan` (Chromium, schema 10) |
+| Evidence limit | DOCUMENTED | the UI screenshots (day/week/month/year/custom, drilldown) were captured from the built application served with a **stub API** in a local preview; they show layout and labels, not live data |
+| Live Workspace / LAN | NOT_RUN | no production database, mailbox, Drive, Calendar or deployment was accessed; live latency and Workspace behaviour remain unverified |
+
+The previous four-week utilisation figures are no longer produced. `docs/v2/PERFORMANCE.md` and
+`docs/v2/RELEASE_HARDENING.md` keep their historical measurements and mark the superseded
+implementation as such; the new report's numbers above are local, in-process measurements.
+
+Production remains **NOT APPROVED FOR PRODUCTION**.
+
 ## Back button position and alignment — 2026-11-04
 
 Layout-only follow-up to the member explorer release above; no API route, contract, migration,

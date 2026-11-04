@@ -123,12 +123,29 @@ permission checks against PostgreSQL and never calls Apps Script or Sheets.
   browser history only when the previous entry is a known, role-authorized application route;
   otherwise it replaces the URL with Projects or All Work. Route filters, expanded hierarchy
   nodes, pagination and scroll offsets are kept in page memory only, never browser storage.
+  Overview KPI links encode a validated `workState`/`displayStatus` and responsibility scope in the
+  existing hash query. All Work applies those values atomically, resets incompatible project,
+  search and page state, and records the full query-bearing route so Back/Forward returns to the
+  same list.
   One shared `BackButton` renders as the first child of the detail content column; `.back-button`
   keeps it compact and self-aligned (`align-self: flex-start`, no left padding), so its arrow starts
   exactly at the page-title left margin at every viewport width instead of stretching to the column
   width and centring its label.
 * The API memoizes table reads for the lifetime of one request (`ReadCtx`), so assembling a
   screen does not re-read a table. There is no cross-user server cache of the private data.
+* Overview's 7/14/30-day deadline period is resolved from the Asia/Tokyo business date on the
+  server. Upcoming and overdue projections apply leaf-work, active hierarchy and responsibility
+  predicates in PostgreSQL before their 20/10-row limits. The same task repository predicates back
+  All Work `OPEN`, `OVERDUE` and `DONE`; tree ancestors remain navigation rows and never increase
+  `matchedTotal`.
+* The date-based workload report follows the same rule with SQL aggregation instead of an
+  in-memory computation: `packages/domain/src/workload-period.ts` resolves the period and its
+  buckets, and `packages/db/src/repo/reports.ts` counts inside PostgreSQL over one shared
+  `scope` CTE (open leaf work in a working project and whole subproject chain, attributed through
+  the effective assignment set). Date filtering happens before rows leave the database, the
+  drilldown is paginated, and the browser receives counts it cannot recompute differently. The
+  report carries no hour, capacity or utilisation figure, because the task system no longer
+  requires an estimate and a missing estimate is never zero workload.
 
 ## 7. Background processing
 
@@ -156,9 +173,21 @@ queries and workers already require `deleted_at IS NULL`, so removed work cannot
 assigned, requested, reminded or republished. Task removal queues a deduplicated
 `publication.run`; the worker rebuilds and commits the next allowlisted A/B snapshot.
 
-Physical purge remains the separate strict DELETE path with backup/tombstone preparation, typed
-`DELETE <id>` confirmation and the historical-evidence blockers. Logical removal does not weaken
-that contract and introduces no migration.
+All Work and Project Detail share the same logical-removal dialog and invalidate All Work, project
+structure, My Work, Overview, workload and employee projection cache keys after success. The
+separate **Permanently erase mistaken record** action loads the physical preflight, displays its
+exact erase plan, and requires a reason plus typed `DELETE <id>` confirmation before the ADMIN
+`POST /api/admin/.../purge` command. Compatibility `DELETE` routes retain the same service policy
+but are not used for normal deletion.
+
+Physical eligibility is evidence-based. Project `INTERNAL` visibility is not evidence that a
+particular task was published; stored A/B snapshot rows are checked instead. Completed state,
+approved completion requests and audited actual-hours changes are protected work. A nonzero
+uncorroborated legacy hours value is classified separately and retained because its provenance
+cannot be proven. Routine create/edit/removal audit rows may coexist with a purge, but operational
+or unknown audit actions, children, incoming foreign keys and workflow evidence block it. The
+transaction explicitly removes only the enumerated task-assignee and outgoing-dependency rows,
+writes the durable tombstone and audit records, and then removes the task. No migration is needed.
 
 ## 8. Published employee projection
 

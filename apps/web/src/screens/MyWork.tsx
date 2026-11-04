@@ -32,12 +32,19 @@ function displayTone(status: MyWorkList['items'][number]['displayStatus']): 'ok'
 
 export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
   const { t } = useI18n();
-  const [page, setPage] = useRouteMemoryState('my-work:page', 1);
+  const [page, setPage] = useRouteMemoryState('my-work:active-page', 1);
+  const [completedPage, setCompletedPage] = useRouteMemoryState('my-work:completed-page', 1);
+  const [completedExpanded, setCompletedExpanded] = useRouteMemoryState('my-work:completed-expanded', false);
   const canCreate = actor.role === 'MEMBER';
   const canReport = actor.role === 'MEMBER';
 
   const list = useQuery<MyWorkList>(`${keys.myWork}:${page}`, () =>
-    api.get<MyWorkList>(`/api/employee/my-work?page=${page}`)
+    api.get<MyWorkList>(`/api/employee/my-work?page=${page}&section=active`)
+  );
+  const completed = useQuery<MyWorkList>(`${keys.myWork}:completed:${completedPage}:${completedExpanded}`, () =>
+    completedExpanded
+      ? api.get<MyWorkList>(`/api/employee/my-work?page=${completedPage}&section=completed`)
+      : Promise.resolve({ items: [], total: 0, activeTotal: list.data?.activeTotal ?? 0, completedTotal: list.data?.completedTotal ?? 0 })
   );
   const projects = useQuery<MyWorkProjectOptions>(keys.myProjects, () =>
     canCreate
@@ -52,7 +59,8 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
     queryCache.invalidate([keys.myWork, keys.myRequests]);
   };
 
-  const total = list.data?.total ?? 0;
+  const total = list.data?.activeTotal ?? 0;
+  const completedTotal = list.data?.completedTotal ?? 0;
   const items = list.data?.items ?? [];
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -85,9 +93,10 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
       ) : null}
 
       <ErrorBox
-        error={list.error ?? (canCreate ? projects.error : null) ?? requests.error}
+        error={list.error ?? completed.error ?? (canCreate ? projects.error : null) ?? requests.error}
         onRetry={() => {
           list.refresh();
+          completed.refresh();
           if (canCreate) projects.refresh();
           requests.refresh();
         }}
@@ -99,8 +108,9 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
 
       {items.length === 0 ? <p className="muted">{t('myWork.requestsEmpty')}</p> : null}
 
+      <div className="my-work-list" aria-label={t('local.myWork')}>
       {items.map((item) => (
-        <WorkCard
+        <WorkRow
           key={`${item.taskId}:${item.revision}`}
           item={item}
           canReport={canReport}
@@ -109,6 +119,7 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
           onChanged={refreshAll}
         />
       ))}
+      </div>
 
       <div className="inline-actions">
         <button type="button" className="button secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>
@@ -121,6 +132,43 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
           {t('local.next')}
         </button>
       </div>
+
+      <section className="completed-work">
+        <button
+          type="button"
+          className="completed-work-toggle"
+          aria-expanded={completedExpanded}
+          onClick={() => setCompletedExpanded((value) => !value)}
+        >
+          {completedExpanded ? '▾' : '▸'} 完了したタスク / Completed tasks ({completedTotal})
+        </button>
+        {completedExpanded ? (
+          <>
+            {completed.data?.items.length === 0 ? <p className="muted small">{t('myWork.requestsEmpty')}</p> : null}
+            <div className="my-work-list">
+              {(completed.data?.items ?? []).map((item) => (
+                <WorkRow
+                  key={`${item.taskId}:${item.revision}`}
+                  item={item}
+                  canReport={false}
+                  canManage={false}
+                  submissionEnabled={false}
+                  onChanged={refreshAll}
+                />
+              ))}
+            </div>
+            <div className="inline-actions">
+              <button type="button" className="button secondary" disabled={completedPage <= 1} onClick={() => setCompletedPage(completedPage - 1)}>
+                {t('local.previous')}
+              </button>
+              <span>{completedPage} / {Math.max(1, Math.ceil((completed.data?.total ?? completedTotal) / PAGE_SIZE))}</span>
+              <button type="button" className="button secondary" disabled={completedPage >= Math.max(1, Math.ceil((completed.data?.total ?? completedTotal) / PAGE_SIZE))} onClick={() => setCompletedPage(completedPage + 1)}>
+                {t('local.next')}
+              </button>
+            </div>
+          </>
+        ) : null}
+      </section>
 
       <MyRequestsCard requests={requests.data?.items ?? []} />
     </div>
@@ -252,7 +300,7 @@ function CreateTaskCard({
   );
 }
 
-function WorkCard({
+function WorkRow({
   item,
   canReport,
   canManage,
@@ -275,7 +323,8 @@ function WorkCard({
   const review = reviewKey(item.reviewState);
 
   return (
-    <div className="card stack">
+    <article className="my-work-row">
+      <div className="my-work-row-title">
       <h3>
         <a href={`#/task/${item.taskId}`}>{item.taskName}</a>
       </h3>
@@ -284,6 +333,8 @@ function WorkCard({
         {item.subprojectName ? ` / ${item.subprojectName}` : ''} · {t('myWork.deadline')}: {item.dueDate ?? t('common.unset')} ·{' '}
         {label('priority', item.priority)}
       </p>
+      </div>
+      <div className="my-work-row-status">
       <p className="small">
         <span className="muted">{t('myWork.status')}: </span>
         <Badge tone={displayTone(item.displayStatus)}>{t(`taskStatus.${item.displayStatus}`)}</Badge>
@@ -292,15 +343,11 @@ function WorkCard({
           <span className="muted small"> · {t('myWork.adminApprovalNote')}</span>
         ) : null}
       </p>
-      {canReport ? (
-        <p className="small">
-          <span className="muted">{t('myWork.reviewLabel')}: </span>
-          <Badge tone={review.tone}>{t(review.label)}</Badge>
-        </p>
-      ) : null}
+      {canReport ? <Badge tone={review.tone}>{t(review.label)}</Badge> : null}
+      </div>
 
+      <div className="my-work-row-actions">
       {canReport ? (
-        <div className="inline-actions">
           <button
             type="button"
             className="button secondary"
@@ -310,22 +357,18 @@ function WorkCard({
           >
             {t('myWork.reportCompletion')}
           </button>
-        </div>
       ) : null}
       {canManage ? (
-        <div className="inline-actions">
           <a className="button secondary" href={`#/task/${item.taskId}`}>{t('action.open')}</a>
           {!locked ? (
             <button type="button" className="button" onClick={() => setCompleting(true)}>
               {t('tasks.completeDirect')}
             </button>
           ) : null}
-        </div>
       ) : (
-        <div className="inline-actions">
           <a className="button secondary" href={`#/task/${item.taskId}`}>{t('action.open')}</a>
-        </div>
       )}
+      </div>
       <ErrorBox error={save.error} onRetry={onChanged} />
       {completing ? (
         <ConfirmDialog
@@ -351,9 +394,6 @@ function WorkCard({
           }}
         />
       ) : null}
-      {item.pendingRequest ? <p className="muted small">{t('myWork.review.pending')}</p> : null}
-      {finished ? <p className="muted small">{t('myWork.doneNote')}</p> : null}
-      {item.container ? <p className="muted small">{t('myWork.containerNote')}</p> : null}
 
       {reporting ? (
         <CompletionRequestForm
@@ -365,7 +405,7 @@ function WorkCard({
           onSubmitted={onChanged}
         />
       ) : null}
-    </div>
+    </article>
   );
 }
 

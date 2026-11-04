@@ -15,6 +15,7 @@ import { audit, enqueueJob, hashRequest, runIdempotent, type ServiceCtx } from '
 import { assertTaskPlacement, planTaskDeadline } from './tasks';
 
 const PAGE_SIZE = 25;
+export type MyWorkSection = 'active' | 'completed';
 
 type MyWorkRow = {
   task_id: string;
@@ -86,25 +87,43 @@ export function reviewStateOf(row: { pending_request: boolean; last_completion_s
  * the departmental one, and a MEMBER, a MANAGER, an ADMIN and a VIEWER each see only their own
  * assignments. Nothing is filtered by a role or an identifier supplied by the browser.
  */
-export async function listMyWork(ctx: ServiceCtx, page: number): Promise<MyWorkList> {
+export async function listMyWork(ctx: ServiceCtx, page: number, section: MyWorkSection = 'active'): Promise<MyWorkList> {
   requireRole(ctx.identity, 'VIEWER');
-  const [rows, total] = await Promise.all([
+  const sectionWhere = section === 'completed' ? "t.status = 'Done'" : "t.status <> 'Done'";
+  const order = section === 'completed'
+    ? 't.completed_at DESC NULLS LAST, t.task_id ASC'
+    : 't.due_date ASC NULLS LAST, t.task_id ASC';
+  const [rows, total, activeTotal, completedTotal] = await Promise.all([
     ctx.db.many<MyWorkRow>(
       `${MY_WORK_SELECT}
-        WHERE ${ACTIVE_WORK} AND ${OWN_WORK}
-        ORDER BY t.due_date NULLS LAST, t.task_id
+        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND ${sectionWhere}
+        ORDER BY ${order}
         LIMIT ${PAGE_SIZE} OFFSET $2`,
       [ctx.identity.memberId, (page - 1) * PAGE_SIZE]
     ),
     ctx.db.one<{ count: string }>(
       `SELECT count(*)::text AS count
          FROM tasks t JOIN projects p ON p.project_id = t.project_id
-        WHERE ${ACTIVE_WORK} AND ${OWN_WORK}`,
+        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND ${sectionWhere}`,
+      [ctx.identity.memberId]
+    ),
+    ctx.db.one<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM tasks t JOIN projects p ON p.project_id = t.project_id
+        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND t.status <> 'Done'`,
+      [ctx.identity.memberId]
+    ),
+    ctx.db.one<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM tasks t JOIN projects p ON p.project_id = t.project_id
+        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND t.status = 'Done'`,
       [ctx.identity.memberId]
     )
   ]);
   return {
     total: Number(total?.count ?? 0),
+    activeTotal: Number(activeTotal?.count ?? 0),
+    completedTotal: Number(completedTotal?.count ?? 0),
     items: rows.map((row) => ({
       container: row.container,
       taskId: row.task_id,

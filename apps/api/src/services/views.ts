@@ -11,7 +11,7 @@ import {
   listAllProjects,
   listAllTasksForScope,
   listAudit,
-  listDueWindowSummaries,
+  listTaskSummaries,
   listMembers,
   listPendingRequests,
   listResponsibilities,
@@ -173,7 +173,7 @@ function toRollupTasks(
 
 export async function buildOverview(
   ctx: ReadCtx,
-  input: { responsibilityId?: string; unassigned?: boolean }
+  input: { responsibilityId?: string; unassigned?: boolean; upcomingDays: 7 | 14 | 30 }
 ): Promise<Overview> {
   const { scope, dir } = await taskScope(ctx);
   const responsibilityOfProject = new Map<string, string | null>(
@@ -186,15 +186,56 @@ export async function buildOverview(
     return true;
   };
 
-  const counts = scope.counts(scopeFilter, ctx.today);
-
-  const windowTasks = await listDueWindowSummaries(ctx.db, ctx.today, addDaysIso(ctx.today, 14), 200);
-  const upcoming = windowTasks
-    .filter((summary) => {
-      const scopeTask = scope.tasks.find((task) => task.taskId === summary.taskId);
-      return !!scopeTask && scopeFilter(scopeTask) && scope.inActiveWork(scopeTask);
-    })
-    .slice(0, 20);
+  const activeHistoryFilter = (task: { projectId: string; subprojectId: string | null }): boolean => {
+    const project = dir.projects.find((entry) => entry.projectId === task.projectId);
+    if (!project || project.status === 'Archived') return false;
+    let subprojectId = task.subprojectId;
+    const seen = new Set<string>();
+    while (subprojectId) {
+      if (seen.has(subprojectId)) return false;
+      seen.add(subprojectId);
+      const subproject = dir.subprojects.find((entry) => entry.subprojectId === subprojectId);
+      if (!subproject || subproject.status === 'Archived') return false;
+      subprojectId = subproject.parentSubprojectId;
+    }
+    return true;
+  };
+  const counts = scope.counts(
+    (task) => scopeFilter(task) && activeHistoryFilter(task),
+    ctx.today
+  );
+  const commonFilters = {
+    responsibilityId: input.responsibilityId,
+    unassigned: input.unassigned,
+    today: ctx.today
+  };
+  const upcomingTo = addDaysIso(ctx.today, input.upcomingDays - 1);
+  const [upcomingPage, overduePage] = await Promise.all([
+    listTaskSummaries(
+      ctx.db,
+      {
+        ...commonFilters,
+        workState: 'OPEN',
+        dueFrom: ctx.today,
+        dueTo: upcomingTo,
+        sort: 'dueDate',
+        direction: 'asc'
+      },
+      1,
+      20
+    ),
+    listTaskSummaries(
+      ctx.db,
+      {
+        ...commonFilters,
+        displayStatus: 'OVERDUE',
+        sort: 'dueDate',
+        direction: 'asc'
+      },
+      1,
+      10
+    )
+  ]);
 
   const cards: ResponsibilityCard[] = dir.responsibilities.map((responsibility) => {
     const projectIds = new Set(
@@ -256,7 +297,11 @@ export async function buildOverview(
         : dir.responsibilities.find((entry) => entry.responsibilityId === input.responsibilityId)?.name ?? ''
     },
     counts,
-    upcoming,
+    upcomingWindow: { days: input.upcomingDays, from: ctx.today, to: upcomingTo },
+    overdue: overduePage.items,
+    overdueTotal: overduePage.total,
+    upcoming: upcomingPage.items,
+    upcomingTotal: upcomingPage.total,
     responsibilities: cards,
     projects: visibleProjects,
     pendingRequests,

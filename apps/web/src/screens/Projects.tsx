@@ -18,6 +18,7 @@ type References = { responsibilities: Reference[]; members: { memberId: string; 
 
 const STATUSES: Project['status'][] = ['Planned', 'Active', 'On Hold', 'Completed', 'Cancelled', 'Archived'];
 const PRIORITIES: Project['priority'][] = ['Low', 'Medium', 'High', 'Critical'];
+type ProjectSort = 'deadline' | 'name' | 'responsibility' | 'owner' | 'status' | 'priority' | 'updated';
 
 export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
   const { t, label } = useI18n();
@@ -25,16 +26,43 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
   const [status, setStatus] = useRouteMemoryState('projects:status', '');
   const [query, setQuery] = useRouteMemoryState('projects:query', '');
   const [page, setPage] = useRouteMemoryState('projects:page', 1);
+  const [sort, setSort] = useRouteMemoryState<ProjectSort>('projects:sort', 'deadline');
+  const [direction, setDirection] = useRouteMemoryState<'asc' | 'desc'>('projects:direction', 'asc');
+  const [collapsedGroups, setCollapsedGroups] = useRouteMemoryState<Set<string>>('projects:collapsed-groups', () => new Set());
   const [editing, setEditing, loadEditor, editorError, editorLoading] = useEditorState<{ mode: 'create' } | { mode: 'edit'; project: Project } | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<ProjectRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ summary: ProjectRow; confirmation: string; blockers: string[] } | null>(null);
 
   const references = useQuery<References>(keys.references, () => api.get<References>('/api/manager/references'));
-  const listKey = `${keys.projects}${queryString({ responsibilityId, status, query, page })}`;
+  const listKey = `${keys.projects}${queryString({ responsibilityId, status, query, sort, direction, page })}`;
   const list = useQuery<Page>(listKey, () =>
-    api.get<Page>(`/api/manager/projects${queryString({ responsibilityId, status, query, page, pageSize: 25 })}`)
+    api.get<Page>(`/api/manager/projects${queryString({ responsibilityId, status, query, sort, direction, page, pageSize: 25 })}`)
   );
   const canManage = actor.role === 'ADMIN' || actor.role === 'MANAGER';
+  const grouped = !responsibilityId && list.data
+    ? Array.from(list.data.items.reduce((groups, project) => {
+        const key = project.responsibilityId ?? '__unassigned__';
+        const existing = groups.get(key) ?? { name: project.responsibilityName || t('overview.unassigned'), items: [] as ProjectRow[] };
+        existing.items.push(project);
+        groups.set(key, existing);
+        return groups;
+      }, new Map<string, { name: string; items: ProjectRow[] }>()))
+    : [];
+  const setSortOrder = (next: ProjectSort): void => {
+    setDirection(next === sort ? (direction === 'asc' ? 'desc' : 'asc') : 'asc');
+    setSort(next);
+    setPage(1);
+  };
+  const toggleGroup = (group: string): void => setCollapsedGroups((current) => {
+    const next = new Set(current);
+    if (next.has(group)) next.delete(group); else next.add(group);
+    return next;
+  });
+  const sortHeader = (key: ProjectSort, text: string): JSX.Element => (
+    <button type="button" className="table-sort" onClick={() => setSortOrder(key)} aria-label={`${text}: ${t('workload.sort.toggle')}`}>
+      {text} {sort === key ? <span aria-hidden="true">{direction === 'asc' ? '↑' : '↓'}</span> : null}
+    </button>
+  );
 
   async function openEditor(summary: ProjectRow): Promise<void> {
     await loadEditor(async () => {
@@ -107,14 +135,65 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
         <table className="table">
           <thead>
             <tr>
-              <th>{t('column.name')}</th>
-              <th>{t('projects.responsibility')}</th>
-              <th>{t('column.status')}</th>
-              <th>{t('column.deadline')}</th>
+              <th>{sortHeader('name', t('column.name'))}</th>
+              <th>{sortHeader('responsibility', t('projects.responsibility'))}</th>
+              <th>{sortHeader('status', t('column.status'))}</th>
+              <th>{sortHeader('deadline', t('column.deadline'))}</th>
               <th>{t('column.progress')}</th>
               <th>{t('column.actions')}</th>
             </tr>
           </thead>
+          {grouped.length ? grouped.map(([groupId, group]) => (
+            <tbody key={groupId}>
+              <tr className="project-group-heading">
+                <th colSpan={6}>
+                  <button type="button" className="link-button" aria-expanded={!collapsedGroups.has(groupId)} onClick={() => toggleGroup(groupId)}>
+                    {collapsedGroups.has(groupId) ? '▸' : '▾'} {group.name} ({group.items.length})
+                  </button>
+                </th>
+              </tr>
+              {!collapsedGroups.has(groupId) ? group.items.map((project) => (
+              <tr key={project.projectId} style={{ ['--project-accent' as string]: projectColor(project.projectId) }}>
+                <td>
+                  <span className="project-dot" style={{ background: projectColor(project.projectId) }} aria-hidden="true" />
+                  <a href={`#/project/${project.projectId}`}>{project.projectName}</a>
+                  <div className="muted small">{project.nextAction}</div>
+                </td>
+                <td>{project.responsibilityName || t('overview.unassigned')}</td>
+                <td>
+                  <Badge tone={statusTone(project.status)}>{label('project.status', project.status)}</Badge>
+                </td>
+                <td>
+                  {project.committedDeadline ?? t('common.unset')}
+                  {project.deadlineState === 'OVERDUE' ? <Badge tone="danger">{t('overview.overdue')}</Badge> : null}
+                </td>
+                <td>
+                  <ProgressBar value={project.progressPercent} />
+                  <div className="muted small">
+                    {t('overview.openWork')}: {project.openWork} · {t('overview.overdue')}: {project.overdueWork}
+                  </div>
+                </td>
+                <td className="actions">
+                  {canManage ? (
+                    <>
+                      <button type="button" className="link-button" onClick={() => void openEditor(project)}>
+                        {t('action.edit')}
+                      </button>
+                      <button type="button" className="link-button" onClick={() => setArchiveTarget(project)}>
+                        {t('projects.archive')}
+                      </button>
+                      {actor.role === 'ADMIN' ? (
+                        <button type="button" className="link-button danger" onClick={() => void startDelete(project)}>
+                          {t('projects.delete')}
+                        </button>
+                      ) : null}
+                    </>
+                  ) : null}
+                </td>
+              </tr>
+              )) : null}
+            </tbody>
+          )) : (
           <tbody>
             {list.data.items.map((project) => (
               <tr key={project.projectId} style={{ ['--project-accent' as string]: projectColor(project.projectId) }}>
@@ -157,6 +236,7 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
               </tr>
             ))}
           </tbody>
+          )}
         </table>
       )}
 

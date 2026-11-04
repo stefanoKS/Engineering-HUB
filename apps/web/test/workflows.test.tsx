@@ -357,6 +357,69 @@ describe('manager actions on the personal list', () => {
 });
 
 describe('collapsible task tree', () => {
+  it('uses logical removal from All Work and never calls the physical DELETE endpoint', async () => {
+    const task = {
+      taskId: 'T-REMOVE',
+      projectId: 'PRJ-A',
+      projectName: 'Alpha',
+      subprojectId: null,
+      responsibilityId: null,
+      parentTaskId: null,
+      taskName: 'Mistaken task',
+      status: 'Not Started',
+      displayStatus: 'IN_PROGRESS',
+      priority: 'Medium',
+      ownerName: '',
+      assigneeNames: [],
+      assigneeIds: [],
+      dueDate: null,
+      progressPercent: 0,
+      overdue: false,
+      reviewState: 'NONE',
+      container: false,
+      depth: 1,
+      revision: 3
+    };
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return response({ alreadyRemoved: false, revision: 4 });
+      if (url.includes('/api/manager/removal/preflight')) {
+        return response({
+          entityType: 'TASKS',
+          entityId: 'T-REMOVE',
+          deletable: true,
+          blockers: [],
+          dependencyCount: 0,
+          descendantCount: 0,
+          confirmationText: '',
+          revision: 3
+        });
+      }
+      if (url.includes('/api/manager/references')) {
+        return response({ responsibilities: [], members: [], skills: [], subprojects: [] });
+      }
+      if (url.includes('/api/manager/projects')) return response({ items: [], total: 0, totalPages: 1 });
+      if (url.includes('/api/manager/tasks')) {
+        return response({ items: [task], total: 1, matchedTotal: 1, page: 1, pageSize: 25, totalPages: 1 });
+      }
+      return response({});
+    });
+    vi.stubGlobal('fetch', fetcher);
+    render(
+      <I18nProvider>
+        <TasksScreen actor={{memberId:'A',name:'Admin',email:'fixture@example.invalid',role:'ADMIN',active:true,verified:true,selfServiceEnabled:false}} />
+      </I18nProvider>
+    );
+    await screen.findByText('Mistaken task');
+    fireEvent.click(screen.getByRole('button', { name: '削除' }));
+    fireEvent.click(await screen.findByRole('button', { name: '削除する' }));
+    await waitFor(() => {
+      expect(fetcher.mock.calls.some(([url, init]) =>
+        url === '/api/admin/tasks/T-REMOVE/remove' && init?.method === 'POST'
+      )).toBe(true);
+    });
+    expect(fetcher.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+  });
+
   it('opens children directly below their parent and preserves nested expansion after collapse', async () => {
     const task=(taskId:string,taskName:string,parentTaskId:string|null,depth:number,container:boolean)=>({taskId,taskName,parentTaskId,depth,container,projectId:'PRJ-TREE',projectName:'Tree',status:'Not Started',displayStatus:'IN_PROGRESS',priority:'Medium',ownerName:'',assigneeNames:[],assigneeIds:[],dueDate:null,progressPercent:0,overdue:false,reviewState:'NONE',revision:1});
     const root=task('ROOT','Root',null,1,true),child=task('CHILD','Child','ROOT',2,true),leaf=task('LEAF','Leaf','CHILD',3,false),other=task('OTHER','Other',null,1,false);

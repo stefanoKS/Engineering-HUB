@@ -390,6 +390,8 @@ export const TaskListQuery = z
     responsibilityId: Id.optional(),
     unassigned: z.coerce.boolean().default(false),
     status: TaskStatus.optional(),
+    /** All unfinished leaf work in the active project/subproject scope, including overdue work. */
+    workState: z.literal('OPEN').optional(),
     /** Filter by the derived, user-facing state (進行中 / 期限超過 / 完了 / 取消). */
     displayStatus: z.enum(['IN_PROGRESS', 'OVERDUE', 'DONE', 'CANCELLED']).optional(),
     ownerMemberId: Id.optional(),
@@ -400,7 +402,7 @@ export const TaskListQuery = z
     includeInactive: z.coerce.boolean().default(false),
     page: z.coerce.number().int().min(1).max(10000).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(25),
-    sort: z.enum(['dueDate', 'priority', 'name', 'status', 'updated']).default('dueDate'),
+    sort: z.enum(['dueDate', 'priority', 'name', 'project', 'owner', 'status', 'updated']).default('dueDate'),
     direction: z.enum(['asc', 'desc']).default('asc')
   })
   .strict();
@@ -413,7 +415,7 @@ export const ProjectListQuery = z
     query: z.string().trim().max(200).optional(),
     page: z.coerce.number().int().min(1).max(10000).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(25),
-    sort: z.enum(['deadline', 'name', 'status', 'priority', 'updated']).default('deadline'),
+    sort: z.enum(['deadline', 'name', 'responsibility', 'owner', 'status', 'priority', 'updated']).default('deadline'),
     direction: z.enum(['asc', 'desc']).default('asc')
   })
   .strict();

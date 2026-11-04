@@ -1,0 +1,182 @@
+{
+  "environment": {
+    "startedAt": "2026-11-04T05:36:51.155Z",
+    "node": "v24.21.0",
+    "platform": "win32 10.0.22000",
+    "cpu": "AMD Ryzen 7 5700X 8-Core Processor             ",
+    "cores": 16,
+    "memoryGb": 15.91,
+    "iterations": 15,
+    "concurrency": 1,
+    "transport": "in-process app.inject (no TLS, no network)",
+    "postgres": "embedded PostgreSQL 18.6 (test binaries)"
+  },
+  "results": [
+    {
+      "dataset": "large",
+      "rows": {
+        "projects": 1000,
+        "tasks": 10000,
+        "members": 120
+      },
+      "endpoints": [
+        {
+          "name": "overview",
+          "method": "GET",
+          "url": "/api/manager/overview",
+          "coldMs": 136.71,
+          "p50": 83.29,
+          "p95": 109.49,
+          "p99": 109.49,
+          "max": 109.49,
+          "dbCalls": 9,
+          "bytes": 44545
+        },
+        {
+          "name": "projects page (50)",
+          "method": "GET",
+          "url": "/api/manager/projects",
+          "coldMs": 52.25,
+          "p50": 40.17,
+          "p95": 65.28,
+          "p99": 65.28,
+          "max": 65.28,
+          "dbCalls": 9,
+          "bytes": 20462
+        },
+        {
+          "name": "tasks page (50)",
+          "method": "GET",
+          "url": "/api/manager/tasks",
+          "coldMs": 268.15,
+          "p50": 279.09,
+          "p95": 323.08,
+          "p99": 323.08,
+          "max": 323.08,
+          "dbCalls": 2,
+          "bytes": 27122
+        },
+        {
+          "name": "task detail",
+          "method": "GET",
+          "url": "/api/manager/tasks/T-0000001",
+          "coldMs": 4.57,
+          "p50": 2.64,
+          "p95": 3.22,
+          "p99": 3.22,
+          "max": 3.22,
+          "dbCalls": 6,
+          "bytes": 1417
+        },
+        {
+          "name": "references",
+          "method": "GET",
+          "url": "/api/manager/references",
+          "coldMs": 8.04,
+          "p50": 7.91,
+          "p95": 24.81,
+          "p99": 24.81,
+          "max": 24.81,
+          "dbCalls": 6,
+          "bytes": 10551
+        },
+        {
+          "name": "requests",
+          "method": "GET",
+          "url": "/api/manager/requests",
+          "coldMs": 3.65,
+          "p50": 1.99,
+          "p95": 2.45,
+          "p99": 2.45,
+          "max": 2.45,
+          "dbCalls": 4,
+          "bytes": 15400
+        },
+        {
+          "name": "workload",
+          "method": "GET",
+          "url": "/api/manager/reports/workload",
+          "coldMs": 171.34,
+          "p50": 173.66,
+          "p95": 223,
+          "p99": 223,
+          "max": 223,
+          "dbCalls": 3,
+          "bytes": 18003
+        },
+        {
+          "name": "status",
+          "method": "GET",
+          "url": "/api/manager/status",
+          "coldMs": 4.56,
+          "p50": 2.15,
+          "p95": 3.04,
+          "p99": 3.04,
+          "max": 3.04,
+          "dbCalls": 7,
+          "bytes": 755
+        },
+        {
+          "name": "employee snapshot",
+          "method": "GET",
+          "url": "/api/employee/snapshot",
+          "coldMs": 169.06,
+          "p50": 169.62,
+          "p95": 181.74,
+          "p99": 181.74,
+          "max": 181.74,
+          "dbCalls": 2,
+          "bytes": 863670
+        },
+        {
+          "name": "member project explorer",
+          "method": "GET",
+          "url": "/api/work/projects",
+          "coldMs": 52.35,
+          "p50": 26.52,
+          "p95": 56.07,
+          "p99": 56.07,
+          "max": 56.07,
+          "dbCalls": 10,
+          "bytes": 7906
+        },
+        {
+          "name": "member project detail",
+          "method": "GET",
+          "url": "/api/work/projects/P-000001",
+          "coldMs": 35.48,
+          "p50": 26.51,
+          "p95": 41,
+          "p99": 41,
+          "max": 41,
+          "dbCalls": 10,
+          "bytes": 5907
+        },
+        {
+          "name": "member task detail",
+          "method": "GET",
+          "url": "/api/work/tasks/T-0000001",
+          "coldMs": 3.67,
+          "p50": 2.6,
+          "p95": 2.8,
+          "p99": 2.8,
+          "max": 2.8,
+          "dbCalls": 5,
+          "bytes": 1390
+        },
+        {
+          "name": "task create (write)",
+          "method": "POST",
+          "url": "/api/manager/tasks",
+          "coldMs": 16.57,
+          "p50": 10.89,
+          "p95": 20.8,
+          "p99": 20.8,
+          "max": 20.8,
+          "dbCalls": 10,
+          "bytes": 1003
+        }
+      ]
+    }
+  ]
+}

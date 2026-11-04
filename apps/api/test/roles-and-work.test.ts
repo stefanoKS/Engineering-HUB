@@ -933,11 +933,11 @@ describe('schema readiness', () => {
     const ledger = await db.one<{ version: number; name: string; checksum: string; duration_ms: number }>(
       'SELECT version, name, checksum, duration_ms FROM schema_migrations ORDER BY version DESC LIMIT 1'
     );
-    expect(ledger?.version).toBe(9);
+    expect(ledger?.version).toBe(10);
     await db.query('DELETE FROM schema_migrations WHERE version = $1', [ledger!.version]);
     const response = await app.inject({ url: '/readyz' });
     expect(response.statusCode).toBe(503);
-    expect(response.json()).toMatchObject({ status: 'migration-required', requiredSchemaVersion: 9 });
+    expect(response.json()).toMatchObject({ status: 'migration-required', requiredSchemaVersion: 10 });
     expect(response.json().error.code).toBe('DATABASE_MIGRATION_REQUIRED');
     await db.query(
       'INSERT INTO schema_migrations(version, name, checksum, duration_ms) VALUES($1,$2,$3,$4)',

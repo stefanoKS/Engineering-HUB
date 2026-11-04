@@ -15,7 +15,7 @@ import {
   TaskRequest,
   TaskSummary
 } from './dto';
-import { IsoDate, IsoTimestamp, Revision } from './common';
+import { Id, IsoDate, IsoTimestamp, Revision, paged } from './common';
 import { Priority, ProjectStatus, RequestType, TaskStatus } from './enums';
 
 export const ScopeCounts = z.object({
@@ -56,13 +56,33 @@ export const Overview = z.object({
     label: z.string()
   }),
   counts: ScopeCounts,
+  upcomingWindow: z.object({
+    days: z.union([z.literal(7), z.literal(14), z.literal(30)]),
+    from: IsoDate,
+    to: IsoDate
+  }),
+  overdue: z.array(TaskSummary),
+  overdueTotal: z.number().int().min(0),
   upcoming: z.array(TaskSummary),
+  upcomingTotal: z.number().int().min(0),
   responsibilities: z.array(ResponsibilityCard),
   projects: z.array(ProjectSummary),
   pendingRequests: z.array(TaskRequest),
   generatedAt: IsoTimestamp
 });
 export type Overview = z.infer<typeof Overview>;
+
+export const OverviewQuery = z
+  .object({
+    responsibilityId: Id.optional(),
+    unassigned: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
+    upcomingDays: z.coerce
+      .number()
+      .pipe(z.union([z.literal(7), z.literal(14), z.literal(30)]))
+      .default(7)
+  })
+  .strict();
+export type OverviewQuery = z.infer<typeof OverviewQuery>;
 
 export const Actor = z.object({
   memberId: z.string(),
@@ -120,26 +140,144 @@ export const MemberProfileView = z.object({
 });
 export type MemberProfileView = z.infer<typeof MemberProfileView>;
 
-export const WorkloadRow = z.object({
-  memberId: z.string(),
-  memberName: z.string(),
-  weekStart: IsoDate,
-  remainingHours: z.number().min(0),
-  capacityHours: z.number().min(0),
-  utilization: z.number().nullable(),
-  unknownEstimateTasks: z.number().int().min(0),
-  actualHours: z.number().min(0),
-  overdueTasks: z.number().int().min(0),
-  overloadWarning: z.boolean()
+/**
+ * Date-based workload report.
+ *
+ * Every figure is a task count over calendar dates. There is no hour, capacity or utilisation
+ * field: the task system no longer requires an estimate, and a missing estimate is never zero
+ * working time.
+ */
+export const WorkloadMode = z.enum(['DAY', 'WEEK', 'MONTH', 'YEAR', 'CUSTOM']);
+export type WorkloadMode = z.infer<typeof WorkloadMode>;
+
+export const WorkloadGranularity = z.enum(['DAY', 'WEEK', 'MONTH']);
+export type WorkloadGranularity = z.infer<typeof WorkloadGranularity>;
+
+export const WorkloadDrilldownKind = z.enum([
+  'DUE',
+  'COMPLETED',
+  'OVERDUE',
+  'OVERDUE_IN_PERIOD',
+  'UNDATED',
+  'BACKLOG'
+]);
+export type WorkloadDrilldownKind = z.infer<typeof WorkloadDrilldownKind>;
+
+export const WorkloadEmployeeSort = z.enum(['overdue', 'due', 'name']);
+export type WorkloadEmployeeSort = z.infer<typeof WorkloadEmployeeSort>;
+
+const WORKLOAD_FILTERS = {
+  mode: WorkloadMode.default('WEEK'),
+  anchor: IsoDate.optional(),
+  start: IsoDate.optional(),
+  end: IsoDate.optional(),
+  memberId: Id.optional(),
+  projectId: Id.optional(),
+  responsibilityId: Id.optional()
+};
+
+/** Query for `GET /api/manager/reports/workload`; the server resolves the period. */
+export const WorkloadQuery = z.object({
+  ...WORKLOAD_FILTERS,
+  granularity: WorkloadGranularity.optional(),
+  memberQuery: z.string().trim().max(100).optional(),
+  sort: WorkloadEmployeeSort.default('overdue'),
+  direction: z.enum(['asc', 'desc']).optional()
 });
-export type WorkloadRow = z.infer<typeof WorkloadRow>;
+export type WorkloadQuery = z.infer<typeof WorkloadQuery>;
+
+/** Query for the paginated drilldown behind a summary card, a timeline bar or an employee row. */
+export const WorkloadDrilldownQuery = z.object({
+  ...WORKLOAD_FILTERS,
+  kind: WorkloadDrilldownKind.default('DUE'),
+  /** Bounds a timeline bucket; the period still bounds the report itself. */
+  from: IsoDate.optional(),
+  to: IsoDate.optional(),
+  page: z.coerce.number().int().min(1).max(10000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25)
+});
+export type WorkloadDrilldownQuery = z.infer<typeof WorkloadDrilldownQuery>;
+
+export const WorkloadSummary = z.object({
+  /** Tasks whose current due date falls inside the period, cancelled work excluded. */
+  dueTasks: z.number().int().min(0),
+  /** Tasks whose stored completion instant falls inside the period. */
+  completedTasks: z.number().int().min(0),
+  /** Unfinished tasks whose current due date is before today in Asia/Tokyo. */
+  overdueTasks: z.number().int().min(0),
+  /** Unfinished tasks with no due date at all. */
+  undatedTasks: z.number().int().min(0),
+  /** Unfinished tasks due inside the period that are already overdue as of today. */
+  overdueWithinPeriod: z.number().int().min(0),
+  /** Unfinished tasks already due before the period starts. */
+  backlogBeforePeriod: z.number().int().min(0),
+  /** Distinct tasks behind the four cards; never the sum of the employee rows. */
+  uniqueTasks: z.number().int().min(0),
+  /** Employee-task pairs of those tasks: one shared task counts once per assignee here. */
+  assignments: z.number().int().min(0)
+});
+export type WorkloadSummary = z.infer<typeof WorkloadSummary>;
+
+export const WorkloadBucketCounts = z.object({
+  key: z.string(),
+  start: IsoDate,
+  end: IsoDate,
+  dueTasks: z.number().int().min(0),
+  completedTasks: z.number().int().min(0),
+  overdueTasks: z.number().int().min(0)
+});
+export type WorkloadBucketCounts = z.infer<typeof WorkloadBucketCounts>;
+
+export const WorkloadEmployeeRow = z.object({
+  memberId: Id,
+  memberName: z.string(),
+  active: z.boolean(),
+  dueTasks: z.number().int().min(0),
+  completedTasks: z.number().int().min(0),
+  overdueTasks: z.number().int().min(0),
+  undatedTasks: z.number().int().min(0)
+});
+export type WorkloadEmployeeRow = z.infer<typeof WorkloadEmployeeRow>;
 
 export const WorkloadReport = z.object({
-  weeks: z.array(IsoDate),
-  rows: z.array(WorkloadRow),
-  asOf: IsoDate
+  mode: WorkloadMode,
+  /** Inclusive Asia/Tokyo calendar dates the server resolved from the requested mode. */
+  start: IsoDate,
+  end: IsoDate,
+  today: IsoDate,
+  granularity: WorkloadGranularity,
+  summary: WorkloadSummary,
+  buckets: z.array(WorkloadBucketCounts),
+  employees: z.array(WorkloadEmployeeRow),
+  /**
+   * Assignment tables record who is assigned now. The report is therefore a view of current
+   * assignments grouped by the selected dates, never a reconstructed historical snapshot.
+   */
+  assignmentBasis: z.literal('CURRENT_ASSIGNMENTS'),
+  generatedAt: IsoTimestamp
 });
 export type WorkloadReport = z.infer<typeof WorkloadReport>;
+
+export const WorkloadTaskRow = z.object({
+  taskId: Id,
+  taskName: z.string(),
+  projectId: Id,
+  projectName: z.string(),
+  subprojectName: z.string().nullable(),
+  status: TaskStatus,
+  dueDate: IsoDate.nullable(),
+  completedDate: IsoDate.nullable(),
+  assigneeNames: z.array(z.string()),
+  revision: Revision
+});
+export type WorkloadTaskRow = z.infer<typeof WorkloadTaskRow>;
+
+export const WorkloadTaskPage = paged(WorkloadTaskRow).extend({
+  kind: WorkloadDrilldownKind,
+  from: IsoDate,
+  to: IsoDate
+});
+export type WorkloadTaskPage = z.infer<typeof WorkloadTaskPage>;
 
 export const PlanPreview = z.object({
   plannedStart: IsoDate.nullable(),
@@ -213,6 +351,11 @@ export const DeletionPreflight = z.object({
   entityId: z.string(),
   deletable: z.boolean(),
   blockers: z.array(z.object({ code: z.string(), detail: z.string() })),
+  erasePlan: z.array(z.object({
+    code: z.string(),
+    count: z.number().int().min(0),
+    detail: z.string()
+  })).optional(),
   dependencyCount: z.number().int().min(0),
   descendantCount: z.number().int().min(0),
   confirmationText: z.string(),
@@ -284,7 +427,13 @@ export const MyWorkItem = z.object({
 });
 export type MyWorkItem = z.infer<typeof MyWorkItem>;
 
-export const MyWorkList = z.object({ items: z.array(MyWorkItem), total: z.number().int().min(0) });
+export const MyWorkList = z.object({
+  items: z.array(MyWorkItem),
+  /** Total for the requested section, never a browser-side split of a mixed page. */
+  total: z.number().int().min(0),
+  activeTotal: z.number().int().min(0),
+  completedTotal: z.number().int().min(0)
+});
 export type MyWorkList = z.infer<typeof MyWorkList>;
 
 /** The active projects (and their non-archived subprojects) a member may file work under. */

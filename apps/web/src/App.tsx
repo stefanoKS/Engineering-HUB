@@ -31,12 +31,18 @@ import { recordRoute, rememberScroll, rememberedScroll } from './state/navigatio
 
 export type Session = { authMode?: 'local' | 'google'; mustChangePassword?: boolean; actor: Actor; csrfToken: string; expiresAt: string };
 
-export type Route = { path: string; segments: string[] };
+export type Route = { path: string; segments: string[]; search: string; location: string };
 
 function readRoute(): Route {
   const hash = window.location.hash.replace(/^#\/?/, '');
-  const path = hash.split('?')[0] ?? '';
-  return { path: path || 'overview', segments: (path || 'overview').split('/').filter(Boolean) };
+  const [rawPath = '', search = ''] = hash.split('?', 2);
+  const path = rawPath || 'overview';
+  return {
+    path,
+    segments: path.split('/').filter(Boolean),
+    search,
+    location: `${path}${search ? `?${search}` : ''}`
+  };
 }
 
 export function navigate(path: string): void {
@@ -48,7 +54,7 @@ export function App(): JSX.Element {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [route, setRoute] = useState<Route>(() => {
     const initial = readRoute();
-    recordRoute(initial.path);
+    recordRoute(initial.location);
     return initial;
   });
   const [notice, setNotice] = useState('');
@@ -57,7 +63,7 @@ export function App(): JSX.Element {
   useEffect(() => {
     const onHash = (): void => {
       const next = readRoute();
-      recordRoute(next.path);
+      recordRoute(next.location);
       setRoute(next);
     };
     window.addEventListener('hashchange', onHash);
@@ -210,8 +216,8 @@ export function App(): JSX.Element {
       ) : null}
 
       <main className="app-main" id="main-content" tabIndex={-1}>
-        <Suspense fallback={<p role="status">{t('state.loading')}</p>}>
-          <div key={route.path}>{renderScreen(route, session.actor, isManager)}</div>
+        <Suspense key={route.location} fallback={<p role="status">{t('state.loading')}</p>}>
+          <div>{renderScreen(route, session.actor, isManager)}</div>
         </Suspense>
       </main>
     </div>
@@ -224,7 +230,7 @@ function renderScreen(route: Route, actor: Actor, isManager: boolean): JSX.Eleme
   if (first === 'my-work') return <MyWorkScreen actor={actor} />;
   // All Work is the same read-only list for MEMBER and VIEWER, and the management list otherwise.
   if (first === 'all-work' || first === 'tasks') {
-    return <TasksScreen actor={actor} readOnly={!isManager} />;
+    return <TasksScreen actor={actor} readOnly={!isManager} routeSearch={route.search} />;
   }
   if (first === 'task') {
     if (!second) return <TasksScreen actor={actor} readOnly={!isManager} />;
