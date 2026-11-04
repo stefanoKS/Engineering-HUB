@@ -166,6 +166,7 @@ export const Subproject = z.object({
   projectId: Id,
   parentSubprojectId: z.string().nullable(),
   subprojectName: z.string(),
+  description: z.string(),
   ownerId: z.string().nullable(),
   ownerName: z.string(),
   status: ProjectStatus,
@@ -264,6 +265,16 @@ export type TaskSummary = z.infer<typeof TaskSummary>;
 
 export const TaskDetail = z.object({
   record: Task,
+  /**
+   * Display-only context: the project name and the subproject chain (root first). It carries no
+   * owner, deadline or other private field, so the read-only task screen can show the same
+   * breadcrumb a manager sees.
+   */
+  context: z.object({
+    projectId: Id,
+    projectName: z.string(),
+    subprojects: z.array(z.object({ subprojectId: z.string(), subprojectName: z.string() }))
+  }),
   assignees: z.array(ResponsibilityMember),
   additionalAssigneeIds: z.array(Id),
   /** The unified effective assignment: primary owner plus active additional assignees. */

@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   AutomationSaveBody,
   CreateProjectBody,
+  CreateSubprojectBody,
   CreateTaskBody,
   DecisionBody,
   PUBLISHED_HEADERS,
+  PatchSubprojectBody,
   PublishedTaskRow,
   PatchProjectBody,
-  SubmitRequestBody
+  SubmitRequestBody,
+  WorkProject
 } from '@eh/contracts';
 
 describe('strict mutation bodies', () => {
@@ -60,6 +63,42 @@ describe('strict mutation bodies', () => {
       deadline: '2026-02-31'
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('read-only member projection', () => {
+  it('accepts an optional subproject description on create and patch and rejects an over-long one', () => {
+    const base = { idempotencyKey: 'key-00000010', projectId: 'P1', subprojectName: 'Area' };
+    expect(CreateSubprojectBody.safeParse(base).success).toBe(true);
+    expect(CreateSubprojectBody.safeParse({ ...base, description: 'Line one\nLine two' }).success).toBe(true);
+    expect(CreateSubprojectBody.safeParse({ ...base, description: 'x'.repeat(2001) }).success).toBe(false);
+    expect(PatchSubprojectBody.safeParse({ revision: 1, description: 'Only the description' }).success).toBe(true);
+    // A browser-supplied role or owner never rides along with a description.
+    expect(PatchSubprojectBody.safeParse({ revision: 1, description: 'x', role: 'ADMIN' }).success).toBe(false);
+  });
+
+  it('requires the description and the TaskScope counts in the read-only project projection', () => {
+    const base = {
+      projectId: 'PRJ-1',
+      projectName: 'Alpha',
+      description: 'Overview',
+      responsibilityName: 'Design',
+      projectOwnerName: 'Owner',
+      status: 'Active',
+      priority: 'High',
+      committedDeadline: null,
+      progressPercent: 25,
+      health: 'OK',
+      activeTaskCount: 2,
+      completedTaskCount: 1
+    };
+    expect(WorkProject.safeParse(base).success).toBe(true);
+    expect(WorkProject.safeParse({ ...base, description: undefined }).success).toBe(false);
+    expect(WorkProject.safeParse({ ...base, activeTaskCount: undefined }).success).toBe(false);
+    // The projection has no field for a private project value at all.
+    expect(Object.keys(WorkProject.shape)).not.toContain('dashboardSummary');
+    expect(Object.keys(WorkProject.shape)).not.toContain('nextAction');
+    expect(Object.keys(WorkProject.shape)).not.toContain('notificationEnabled');
   });
 });
 

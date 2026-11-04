@@ -231,6 +231,7 @@ export type SubprojectRow = {
   project_id: string;
   parent_subproject_id: string | null;
   subproject_name: string;
+  description: string;
   owner_id: string | null;
   owner_name: string | null;
   status: Subproject['status'];
@@ -252,6 +253,7 @@ export function toSubproject(row: SubprojectRow): Subproject {
     projectId: row.project_id,
     parentSubprojectId: row.parent_subproject_id,
     subprojectName: row.subproject_name,
+    description: row.description ?? '',
     ownerId: row.owner_id,
     ownerName: row.owner_name ?? '',
     status: row.status,

@@ -6,11 +6,14 @@ workbook, and it never sends a notification.
 
 ## 1. Commands
 
-### Schema 7 → 8 on an existing installation (Windows LAN)
+### Schema 8 → 9 on an existing installation (Windows LAN)
 
-A deployment built from this repository requires **schema 8** (the last migration is the unchanged,
-checksummed `0008_member_created_work.sql`). `/readyz` answers `503 DATABASE_MIGRATION_REQUIRED`
-until the ledger reaches 8; the API never migrates at startup.
+A deployment built from this repository requires **schema 9** (the last migration is the unchanged,
+checksummed `0009_subproject_description.sql`, an additive `ALTER TABLE subprojects ADD COLUMN IF
+NOT EXISTS description TEXT NOT NULL DEFAULT ''`). `/readyz` answers `503
+DATABASE_MIGRATION_REQUIRED` until the ledger reaches 9; the API never migrates at startup. Every
+existing subproject keeps its identifier, parent link, owner, deadline, estimate and next action,
+and a row written before the migration reads back with an empty description.
 
 ```powershell
 # 1. Verified encrypted backup first (a failed backup stops the upgrade)

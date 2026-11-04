@@ -12,13 +12,15 @@ import {
   getProject,
   getSubproject,
   getTask,
+  getTaskContext,
   listChildSummaries,
   listProjects,
   listSubprojects,
   listTaskAssignees,
   listTaskSummaries,
   listTaskSummariesForProject,
-  listTaskTreeSummaries
+  listTaskTreeSummaries,
+  listWorkResponsibilityOptions
 } from '@eh/db';
 import {
   DomainError,
@@ -30,6 +32,10 @@ import {
 } from '@eh/domain';
 import type { z } from 'zod';
 import type { ServiceCtx } from './common';
+import { taskScope, type ReadCtx } from './views';
+
+/** A read context plus the verified identity: one task-scope pass serves the whole request. */
+export type WorkCtx = ServiceCtx & ReadCtx;
 
 export type WorkPage = {
   items: Awaited<ReturnType<typeof listTaskSummaries>>['items'];
@@ -124,9 +130,10 @@ export async function readOnlyTaskDetail(ctx: ServiceCtx, taskId: string): Promi
       throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
     }
   }
-  const [children, assignees] = await Promise.all([
+  const [children, assignees, context] = await Promise.all([
     listChildSummaries(ctx.db, taskId),
-    listTaskAssignees(ctx.db, taskId)
+    listTaskAssignees(ctx.db, taskId),
+    getTaskContext(ctx.db, task.projectId, task.subprojectId)
   ]);
   const effective = [
     ...(task.ownerMemberId
@@ -193,6 +200,7 @@ export async function readOnlyTaskDetail(ctx: ServiceCtx, taskId: string): Promi
       updatedAt: task.updatedAt,
       revision: task.revision
     },
+    context: context ?? { projectId: task.projectId, projectName: project.projectName, subprojects: [] },
     assignees: effective,
     additionalAssigneeIds: effective.filter((row) => !row.primary).map((row) => row.memberId),
     assigneeIds: effective.map((row) => row.memberId),
@@ -207,39 +215,51 @@ export async function readOnlyTaskDetail(ctx: ServiceCtx, taskId: string): Promi
  * Paginated project options for the read-only screens.
  *
  * MEMBER and VIEWER see only `INTERNAL`, non-archived projects; the projection omits internal
- * notes, notification settings and the dashboard summary.
+ * notes, notification settings and the dashboard summary. Open and completed counts come from the
+ * one `TaskScope` pass, so a card never counts a raw task row or a container.
  */
 export async function listWorkProjects(
-  ctx: ServiceCtx,
-  input: { query?: string; page: number; pageSize?: number }
+  ctx: WorkCtx,
+  input: { query?: string; responsibilityId?: string; page: number; pageSize?: number }
 ): Promise<WorkProjectList> {
   requireRole(ctx.identity, 'VIEWER');
   const manager = canSeeRestrictedWork(ctx.identity);
   const pageSize = Math.min(Math.max(input.pageSize ?? WORK_PROJECT_PAGE_SIZE, 1), 100);
-  const page = await listProjects(
-    ctx.db,
-    {
-      query: input.query,
-      internalOnly: !manager,
-      includeArchived: manager ? undefined : false,
-      sort: 'name',
-      direction: 'asc'
-    },
-    input.page,
-    pageSize
-  );
+  const [page, responsibilities, scope] = await Promise.all([
+    listProjects(
+      ctx.db,
+      {
+        query: input.query,
+        queryProjectNameOnly: true,
+        responsibilityId: input.responsibilityId,
+        internalOnly: !manager,
+        includeArchived: manager ? undefined : false,
+        sort: 'name',
+        direction: 'asc'
+      },
+      input.page,
+      pageSize
+    ),
+    listWorkResponsibilityOptions(ctx.db, !manager),
+    taskScope(ctx).then((loaded) => loaded.scope)
+  ]);
+  const counts = scope.countsBy((task) => task.projectId, ctx.today);
   return {
     items: page.items.map((project) => ({
       projectId: project.projectId,
       projectName: project.projectName,
+      description: project.description,
       responsibilityName: project.responsibilityName,
       projectOwnerName: project.projectOwnerName,
       status: project.status,
       priority: project.priority,
       committedDeadline: project.committedDeadline,
       progressPercent: project.progressPercent,
-      health: project.health
+      health: project.health,
+      activeTaskCount: counts.get(project.projectId)?.openWork ?? 0,
+      completedTaskCount: counts.get(project.projectId)?.completedWork ?? 0
     })),
+    responsibilities,
     total: page.total,
     page: input.page,
     pageSize,
@@ -254,17 +274,19 @@ export async function listWorkProjects(
  * notification settings never leave the server. Completed and cancelled tasks are excluded from
  * this default view, matching the All Work list.
  */
-export async function readOnlyProjectDetail(ctx: ServiceCtx, projectId: string): Promise<WorkProjectDetail> {
+export async function readOnlyProjectDetail(ctx: WorkCtx, projectId: string): Promise<WorkProjectDetail> {
   requireRole(ctx.identity, 'VIEWER');
   const project = await getProject(ctx.db, projectId);
   if (!project || !projectVisibleToReader(ctx, project)) {
     throw new DomainError('NOT_FOUND', `Project not found: ${projectId}`);
   }
   const manager = canSeeRestrictedWork(ctx.identity);
-  const [tasks, allSubprojects] = await Promise.all([
+  const [tasks, allSubprojects, scope] = await Promise.all([
     listTaskSummariesForProject(ctx.db, projectId),
-    listSubprojects(ctx.db, projectId)
+    listSubprojects(ctx.db, projectId),
+    taskScope(ctx).then((loaded) => loaded.scope)
   ]);
+  const counts = scope.countsBy((task) => task.projectId, ctx.today).get(projectId);
   const allById = new Map(allSubprojects.map((subproject) => [subproject.subprojectId, subproject]));
   const ancestorArchived = (subprojectId: string): boolean => {
     let current = allById.get(subprojectId);
@@ -322,18 +344,22 @@ export async function readOnlyProjectDetail(ctx: ServiceCtx, projectId: string):
     record: {
       projectId: project.projectId,
       projectName: project.projectName,
+      description: project.description,
       responsibilityName: project.responsibilityName,
       projectOwnerName: project.projectOwnerName,
       status: project.status,
       priority: project.priority,
       committedDeadline: project.committedDeadline,
       progressPercent: project.progressPercent,
-      health: project.health
+      health: project.health,
+      activeTaskCount: counts?.openWork ?? 0,
+      completedTaskCount: counts?.completedWork ?? 0
     },
     progress: rollupOf(visibleTasks),
     subprojects: visibleSubprojects.map((subproject) => ({
       subprojectId: subproject.subprojectId,
       subprojectName: subproject.subprojectName,
+      description: subproject.description,
       parentSubprojectId: subproject.parentSubprojectId,
       status: subproject.status,
       deadline: subproject.deadline,

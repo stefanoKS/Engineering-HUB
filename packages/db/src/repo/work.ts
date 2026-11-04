@@ -23,6 +23,8 @@ export type ProjectFilters = {
   unassigned?: boolean;
   status?: string;
   query?: string;
+  /** The member explorer searches the project name only, never a private column. */
+  queryProjectNameOnly?: boolean;
   sort?: 'deadline' | 'name' | 'status' | 'priority' | 'updated';
   direction?: 'asc' | 'desc';
   /** Visibility policy: only `INTERNAL` projects are employee-visible. */
@@ -58,7 +60,11 @@ export async function listProjects(
   }
   if (filters.query) {
     params.push(`%${filters.query.toLowerCase()}%`);
-    where.push(`(lower(p.project_name) LIKE $${params.length} OR lower(p.next_action) LIKE $${params.length})`);
+    where.push(
+      filters.queryProjectNameOnly === true
+        ? `lower(p.project_name) LIKE $${params.length}`
+        : `(lower(p.project_name) LIKE $${params.length} OR lower(p.next_action) LIKE $${params.length})`
+    );
   }
   if (filters.internalOnly === true) {
     where.push("p.dashboard_visibility = 'INTERNAL'");
@@ -214,7 +220,8 @@ export async function archiveProject(
 /* ------------------------------------------------------------------------- */
 
 const SUBPROJECT_SELECT = `
-  SELECT s.subproject_id, s.project_id, s.parent_subproject_id, s.subproject_name, s.owner_id,
+  SELECT s.subproject_id, s.project_id, s.parent_subproject_id, s.subproject_name, s.description,
+         s.owner_id,
          owner.name AS owner_name, s.status, s.planned_start, s.planned_end, s.deadline,
          s.progress_percent, s.estimated_hours, s.next_action,
          eh_subproject_depth(s.subproject_id) AS depth,
@@ -244,6 +251,7 @@ export type SubprojectInput = {
   projectId: string;
   parentSubprojectId?: string | null;
   subprojectName: string;
+  description?: string;
   ownerId?: string | null;
   status?: string;
   plannedStart?: string | null;
@@ -260,14 +268,15 @@ export async function insertSubproject(
 ): Promise<Subproject> {
   await db.query(
     `INSERT INTO subprojects
-       (subproject_id, project_id, parent_subproject_id, subproject_name, owner_id, status,
-        planned_start, planned_end, deadline, estimated_hours, next_action)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+       (subproject_id, project_id, parent_subproject_id, subproject_name, description, owner_id,
+        status, planned_start, planned_end, deadline, estimated_hours, next_action)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
     [
       subprojectId,
       input.projectId,
       input.parentSubprojectId ?? null,
       input.subprojectName,
+      input.description ?? '',
       input.ownerId ?? null,
       input.status ?? 'Planned',
       input.plannedStart ?? null,
@@ -286,6 +295,7 @@ const SUBPROJECT_COLUMNS: Record<string, string> = {
   projectId: 'project_id',
   parentSubprojectId: 'parent_subproject_id',
   subprojectName: 'subproject_name',
+  description: 'description',
   ownerId: 'owner_id',
   status: 'status',
   plannedStart: 'planned_start',
@@ -315,6 +325,69 @@ export async function updateSubproject(
   });
   if (!row) return null;
   return getSubproject(db, subprojectId);
+}
+
+/**
+ * The responsibilities that currently group at least one readable project.
+ *
+ * Only an identifier and a display name leave the server, and only for a project the reader may
+ * already see, so the member filter never reveals an area that has no visible work.
+ */
+export async function listWorkResponsibilityOptions(
+  db: Db,
+  internalOnly: boolean
+): Promise<{ responsibilityId: string; name: string }[]> {
+  const where = ['p.deleted_at IS NULL', "p.status <> 'Archived'", 'p.archived_at IS NULL'];
+  if (internalOnly) where.push("p.dashboard_visibility = 'INTERNAL'");
+  return db.many<{ responsibilityId: string; name: string }>(
+    `SELECT DISTINCT r.responsibility_id AS "responsibilityId", r.name
+       FROM projects p
+       JOIN responsibilities r ON r.responsibility_id = p.responsibility_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY r.name`,
+    []
+  );
+}
+
+export type TaskContext = {
+  projectId: string;
+  projectName: string;
+  subprojects: { subprojectId: string; subprojectName: string }[];
+};
+
+/**
+ * Display context for one task: its project name and its subproject chain, root first.
+ *
+ * The chain is walked in one bounded recursive query (depth < 8 covers the four permitted levels
+ * with headroom) and carries names only - no owner, deadline or private column.
+ */
+export async function getTaskContext(
+  db: Db,
+  projectId: string,
+  subprojectId: string | null
+): Promise<TaskContext | null> {
+  const project = await db.one<{ projectId: string; projectName: string }>(
+    'SELECT project_id AS "projectId", project_name AS "projectName" FROM projects WHERE project_id = $1 AND deleted_at IS NULL',
+    [projectId]
+  );
+  if (!project) return null;
+  if (!subprojectId) return { ...project, subprojects: [] };
+  const rows = await db.many<{ subprojectId: string; subprojectName: string }>(
+    `WITH RECURSIVE chain AS (
+       SELECT s.subproject_id, s.parent_subproject_id, s.subproject_name, 0 AS depth
+         FROM subprojects s
+        WHERE s.subproject_id = $1 AND s.deleted_at IS NULL
+       UNION ALL
+       SELECT s.subproject_id, s.parent_subproject_id, s.subproject_name, chain.depth + 1
+         FROM subprojects s
+         JOIN chain ON s.subproject_id = chain.parent_subproject_id
+        WHERE s.deleted_at IS NULL AND chain.depth < 8
+     )
+     SELECT subproject_id AS "subprojectId", subproject_name AS "subprojectName"
+       FROM chain ORDER BY depth DESC`,
+    [subprojectId]
+  );
+  return { ...project, subprojects: rows };
 }
 
 export async function listMilestones(db: Db, projectId: string) {  return db.many<{

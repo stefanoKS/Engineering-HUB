@@ -273,7 +273,7 @@ describe('role-aware read-only screens', () => {  it('uses the read-only project
       <I18nProvider>
         <TaskForm
           task={legacyTask as never}
-          detail={{ record: legacyTask as never, assignees: [], additionalAssigneeIds: [], assigneeIds: ['MEM-A'], assigneeHistory: [], confirmations: [], deadlineHistory: [], children: [] }}
+          detail={{ record: legacyTask as never, context: { projectId: 'PRJ-A', projectName: 'Alpha', subprojects: [] }, assignees: [], additionalAssigneeIds: [], assigneeIds: ['MEM-A'], assigneeHistory: [], confirmations: [], deadlineHistory: [], children: [] }}
           references={{ members: [{ memberId: 'MEM-A', name: 'Active Person', active: true }], skills: [], subprojects: [] }}
           onClose={() => undefined}
           onSaved={() => undefined}
@@ -350,7 +350,9 @@ describe('manager actions on the personal list', () => {
     expect(await screen.findByText('Member work')).toBeTruthy();
     expect(screen.getByRole('button', { name: '完了報告' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '完了にする' })).toBeNull();
-    expect(screen.queryByRole('link', { name: '詳細を開く' })).toBeNull();
+    // A member reaches the read-only task detail without gaining any management action.
+    expect(screen.getByRole('link', { name: '詳細を開く' }).getAttribute('href')).toBe('#/task/TSK-A');
+    expect(screen.getByRole('link', { name: 'Alpha' }).getAttribute('href')).toBe('#/project/PRJ-A');
   });
 });
 

@@ -11,6 +11,34 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
 
+  /** Blur the focused control and return to the top before capturing evidence. */
+  async function capture(path) {
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      window.scrollTo(0, 0);
+    });
+    await page.screenshot({ path, fullPage: true });
+  }
+
+  /**
+   * The shared Back control has to sit at the top-left of the content column: aligned with the page
+   * title's left edge, above it, and never centred or right-aligned at any viewport width.
+   */
+  async function expectBackButtonLeftAligned(titleName) {
+    const back = page.getByRole('button', { name: '← Back', exact: true });
+    await expect(back).toBeVisible();
+    const backBox = await back.boundingBox();
+    const titleBox = await page.getByRole('heading', { name: titleName, exact: true }).boundingBox();
+    expect(backBox && titleBox).toBeTruthy();
+    expect(Math.abs(backBox.x - titleBox.x)).toBeLessThanOrEqual(2);
+    expect(backBox.y).toBeLessThan(titleBox.y);
+    const viewport = page.viewportSize();
+    expect(backBox.x + backBox.width).toBeLessThan(viewport.width / 2);
+    const gap = titleBox.y - (backBox.y + backBox.height);
+    expect(gap).toBeGreaterThanOrEqual(0);
+    expect(gap).toBeLessThanOrEqual(120);
+  }
+
   async function signInAs(identity) {
     // A fresh language state so the Japanese login labels are deterministic; the page must be on
     // the application origin before localStorage is reachable.
@@ -35,6 +63,54 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
    * personal list stays available.
    */
   async function readOnlyJourney(roleName) {
+    // The Projects entry opens the read-only explorer; the management list is never used.
+    await page.locator('.app-nav').getByRole('link', { name: 'Projects', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
+    await expect(page.getByRole('searchbox', { name: 'Search by project name', exact: true })).toBeVisible();
+    await expect(page.getByRole('combobox', { name: 'Responsibility', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'New project', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Browser edited project', exact: true })).toBeVisible();
+    // The allowlisted project description reaches the card; nothing private does.
+    await expect(page.getByText(/Browser verified description/).first()).toBeVisible();
+    await mkdir('work/screenshots', { recursive: true });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await capture(`work/screenshots/member-project-explorer-${roleName}.png`);
+    await page.setViewportSize({ width: 1920, height: 1280 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false);
+    await capture(`work/screenshots/member-project-explorer-${roleName}-1920.png`);
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false);
+    await capture(`work/screenshots/member-project-explorer-${roleName}-mobile.png`);
+    await page.setViewportSize({ width: 1366, height: 768 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false);
+
+    // The server-side search narrows the list and the term survives navigation.
+    await page.getByRole('searchbox', { name: 'Search by project name', exact: true }).fill('Edited');
+    await expect(page.getByRole('link', { name: 'Browser edited project', exact: true })).toBeVisible();
+    await page.getByRole('link', { name: 'Browser edited project', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Browser edited project', exact: true })).toBeVisible();
+    await expectBackButtonLeftAligned('Browser edited project');
+    await expect(page.getByText('Project information', { exact: true })).toBeVisible();
+    await expect(page.getByText(/Browser verified description/).first()).toBeVisible();
+    // The subproject description is readable in place, without a separate page.
+    await expect(page.getByText(/Browser subproject description/).first()).toBeVisible();
+    await page.getByRole('button', { name: 'View details', exact: true }).first().click();
+    await expect(page.getByRole('button', { name: 'Hide details', exact: true }).first()).toBeVisible();
+    await capture(`work/screenshots/member-project-detail-${roleName}.png`);
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false);
+    await expectBackButtonLeftAligned('Browser edited project');
+    await capture(`work/screenshots/member-project-detail-${roleName}-mobile.png`);
+    await page.setViewportSize({ width: 1920, height: 1280 });
+    await expectBackButtonLeftAligned('Browser edited project');
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await expect(page.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'New subproject', exact: true })).toHaveCount(0);
+    // Smart Back returns to the explorer the reader actually came from, with its search term intact.
+    await page.getByRole('button', { name: '← Back', exact: true }).click();
+    await expect(page.getByRole('searchbox', { name: 'Search by project name', exact: true })).toHaveValue('Edited');
+    await page.getByRole('searchbox', { name: 'Search by project name', exact: true }).fill('');
+
     await page.locator('.app-nav').getByRole('link', { name: 'All work', exact: true }).click();
     await expect(page.getByRole('link', { name: 'Browser verified task', exact: true })).toBeVisible();
     // The read-only project picker is populated (a manager-route failure would leave it empty).
@@ -50,8 +126,15 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     // Task detail is readable and offers no action.
     await page.getByRole('link', { name: 'Browser verified task', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Browser verified task', exact: true })).toBeVisible();
+    await expectBackButtonLeftAligned('Browser verified task');
+    await expect(page.getByText('Task description', { exact: true })).toBeVisible();
+    await expect(page.getByText(/Browser task description/).first()).toBeVisible();
+    await capture(`work/screenshots/member-task-detail-${roleName}.png`);
     await expect(page.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Mark done', exact: true })).toHaveCount(0);
+    // Manager-only workflow sections are not part of a reader's task detail.
+    await expect(page.getByText('Deadline history', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Confirm schedule', { exact: true })).toHaveCount(0);
 
     // Read-only project detail is reachable from the task's project link.
     await page.locator('a[href^="#/project/"]').first().click();
@@ -85,6 +168,7 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await page.locator('.app-nav').getByRole('link', { name: 'Projects', exact: true }).click();
     await page.getByRole('link', { name: 'Browser edited project', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Browser edited project', exact: true })).toBeVisible();
+    await expectBackButtonLeftAligned('Browser edited project');
     await expect(page.getByRole('button', { name: 'Collapse Browser verified subproject', exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Browser verified task', exact: true })).toBeVisible();
     const subprojectRow = page.locator('.hierarchy-row-subproject').filter({ hasText: 'Browser verified subproject' });
@@ -104,6 +188,7 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await page.getByRole('button', { name: 'New project', exact: true }).click();
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel('Project name', { exact: true }).fill('Browser verified project');
+    await dialog.getByLabel('Description', { exact: true }).fill('Browser verified description\nsecond line');
     await dialog.getByLabel(/^Responsibility/).selectOption('RSP-SMOKE');
     // Employee-visible so the MEMBER and VIEWER journeys can read this work.
     await dialog.getByLabel(/Shared dashboard visibility/).selectOption('INTERNAL');
@@ -112,6 +197,7 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await expect(page.getByRole('heading', { name: 'Browser verified project', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'New subproject', exact: true }).click();
     await dialog.getByLabel('Subproject name', { exact: true }).fill('Browser verified subproject');
+    await dialog.getByLabel('Description', { exact: true }).fill('Browser subproject description');
     await dialog.getByRole('button', { name: 'Create', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Collapse Browser verified subproject', exact: true })).toBeVisible();
@@ -127,6 +213,7 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await page.getByRole('button', { name: 'New task', exact: true }).click();
     await dialog.getByRole('combobox', { name: 'Projects', exact: true }).selectOption({ label: 'Browser edited project' });
     await dialog.getByLabel('Task name', { exact: true }).fill('Browser verified task');
+    await dialog.getByLabel('Description', { exact: true }).fill('Browser task description\nsecond line');
     await dialog.getByLabel('Deadline', { exact: true }).fill('2026-11-05');
     await dialog.getByRole('button', { name: 'Create', exact: true }).click();
     await expect(dialog).toHaveCount(0);

@@ -110,6 +110,47 @@ export function EmptyState({ text }: { text?: string }): JSX.Element {
   return <p className="empty">{text ?? t('state.empty')}</p>;
 }
 
+/**
+ * Breadcrumb trail. Every entry except the last is a hash link, so the existing SPA navigation
+ * (and its smart Back behaviour) is preserved and no page reload happens.
+ */
+export function Breadcrumbs({
+  items
+}: {
+  items: { label: string; href?: string }[];
+}): JSX.Element {
+  const { t } = useI18n();
+  return (
+    <nav className="breadcrumbs" aria-label={t('breadcrumb.label')}>
+      {items.map((item, index) => (
+        <span className="breadcrumb-item" key={`${item.label}:${index}`}>
+          {index > 0 ? (
+            <span className="breadcrumb-sep" aria-hidden="true">
+              /
+            </span>
+          ) : null}
+          {item.href ? (
+            <a href={item.href}>{item.label}</a>
+          ) : (
+            <span aria-current="page">{item.label}</span>
+          )}
+        </span>
+      ))}
+    </nav>
+  );
+}
+
+/** Plain multi-line text: line breaks are preserved and no markup is interpreted. */
+export function DescriptionText({ text }: { text: string }): JSX.Element {
+  const { t } = useI18n();
+  const value = text.trim();
+  return (
+    <p className={value ? 'description-text' : 'description-text empty-description'}>
+      {value || t('common.noDescription')}
+    </p>
+  );
+}
+
 export function ErrorBox({ error, onRetry }: { error: unknown; onRetry?: () => void }): JSX.Element {
   const { t } = useI18n();
   if (!error) return <span />;

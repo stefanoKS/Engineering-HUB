@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { I18nProvider, useI18n } from '../src/i18n';
 import { LanguageSwitch } from '../src/components/ui';
 import { LoginScreen } from '../src/screens/Login';
+import { App } from '../src/App';
 import { AssigneePicker } from '../src/components/AssigneePicker';
 import { APP_NAME, dictionarySize, t } from '@eh/i18n';
 import { formatSkillGrade } from '@eh/domain';
@@ -116,6 +117,69 @@ describe('sign-in configuration', () => {
       </I18nProvider>
     );
     expect(await screen.findByText(/サインイン設定を読み込めませんでした/)).toBeTruthy();
+  });
+});
+
+describe('supplied branding assets', () => {
+  it('shows the company logo above the local sign-in form, without the department logo', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        configResponse({
+          appVersion: '2.0.0',
+          environment: 'DEVELOPMENT',
+          authMode: 'local',
+          googleClientId: '',
+          authConfigured: true,
+          devSignInEnabled: false
+        })
+      )
+    );
+    render(
+      <I18nProvider>
+        <LoginScreen notice="" onSignedIn={() => undefined} />
+      </I18nProvider>
+    );
+    const logo = (await screen.findByRole('img', { name: '広島化成' })) as HTMLImageElement;
+    expect(logo.getAttribute('src')).toBe('/branding/companyLogo.png');
+    expect(logo.className).toBe('company-login-logo');
+    expect(screen.queryByRole('img', { name: '広島化成 製品設計課' })).toBeNull();
+    const signIn = await screen.findByRole('button', { name: 'ログイン' });
+    expect(logo.compareDocumentPosition(signIn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('shows the department logo in the authenticated header instead of the company logo', async () => {
+    const session = {
+      actor: {
+        memberId: 'MEM-ADMIN',
+        name: '管理者',
+        email: 'admin@example.invalid',
+        role: 'ADMIN',
+        active: true,
+        verified: true,
+        selfServiceEnabled: true
+      },
+      authMode: 'local',
+      csrfToken: 'csrf',
+      expiresAt: new Date(Date.now() + 60_000).toISOString()
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url.startsWith('/api/session') ? configResponse(session) : configResponse({})
+      )
+    );
+    render(
+      <I18nProvider>
+        <App />
+      </I18nProvider>
+    );
+    const logo = (await screen.findByRole('img', { name: '広島化成 製品設計課' })) as HTMLImageElement;
+    expect(logo.getAttribute('src')).toBe('/branding/designTeam.png');
+    expect(logo.className).toBe('design-team-logo');
+    expect(screen.queryByRole('img', { name: '広島化成' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'English' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'サインアウト' })).toBeTruthy();
   });
 });
 

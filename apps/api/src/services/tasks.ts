@@ -15,6 +15,7 @@ import {
   getProject,
   getSubproject,
   getTask,
+  getTaskContext,
   insertDeadlineHistory,
   insertTask,
   listChildSummaries,
@@ -630,11 +631,12 @@ export async function overrideComplete(  ctx: ServiceCtx,
 export async function taskDetail(ctx: ServiceCtx, taskId: string): Promise<TaskDetail> {
   const task = await getTask(ctx.db, taskId);
   if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
-  const [assignees, confirmations, deadlineHistory, children] = await Promise.all([
+  const [assignees, confirmations, deadlineHistory, children, context] = await Promise.all([
     listTaskAssignees(ctx.db, taskId),
     listScheduleConfirmations(ctx.db, taskId),
     listDeadlineHistory(ctx.db, taskId),
-    listChildSummaries(ctx.db, taskId)
+    listChildSummaries(ctx.db, taskId),
+    getTaskContext(ctx.db, task.projectId, task.subprojectId)
   ]);
   const effective = [
     ...(task.ownerMemberId
@@ -672,6 +674,7 @@ export async function taskDetail(ctx: ServiceCtx, taskId: string): Promise<TaskD
     }));
   return {
     record: task,
+    context: context ?? { projectId: task.projectId, projectName: '', subprojects: [] },
     assignees: effective,
     additionalAssigneeIds: effective.filter((row) => !row.primary).map((row) => row.memberId),
     assigneeIds: effective.map((row) => row.memberId),

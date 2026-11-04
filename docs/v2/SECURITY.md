@@ -126,6 +126,22 @@ default list excludes `Done`, `Cancelled`, archived and deleted work; completed 
 only through the explicit `displayStatus=DONE` filter. The manager routes keep their existing
 behaviour and management controls.
 
+### 4.2 Read-only projections carry no private field
+
+The member explorer, the read-only project detail and the read-only task detail are built from
+explicit allowlists, not from a stored row:
+
+- `WorkProject` carries identity, name, `description`, responsibility name, owner *name*, status,
+  priority, deadline, derived progress and the `TaskScope` counts. `dashboard_summary`,
+  `next_action`, `notification_enabled`, milestones, phases and internal notes are absent.
+- `WorkSubproject` carries identity, name, `description`, parent identifier, status, deadline,
+  depth and the rollup.
+- `TaskDetail.context` carries the project name and the subproject chain (names only).
+
+There is no write path under `/api/work/*`: a `MEMBER` or `VIEWER` request to create, patch or
+delete project, subproject or task data answers `403` on the manager route, and the read-only route
+answers `404` for a method it does not serve. Hiding a button is never the control.
+
 Personal work (`/api/employee/my-work`) is a separate boundary: it is resolved from the verified
 session and shows the caller's own assignments. Because an assignment is itself the authorization,
 it does not apply the `INTERNAL` filter, and it still excludes archived projects, subtasks and

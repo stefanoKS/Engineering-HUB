@@ -48,9 +48,22 @@ describe('smart back navigation', () => {
     expect(window.location.hash).toBe('#/all-work');
   });
 
+  it('falls back to the member project explorer for a directly opened project', async () => {
+    const navigation = await import('../src/state/navigation');
+    window.history.replaceState({}, '', '#/project/P1');
+    navigation.recordRoute('project/P1');
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
+
+    navigation.backOrFallback(MEMBER, 'projects');
+
+    expect(back).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe('#/projects');
+    back.mockRestore();
+  });
+
   it('never sends a member back to a manager-only route', async () => {
     const navigation = await import('../src/state/navigation');
-    navigation.recordRoute('projects');
+    navigation.recordRoute('requests');
     window.history.pushState({}, '', '#/task/T1');
     navigation.recordRoute('task/T1');
     const back = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
@@ -59,7 +72,11 @@ describe('smart back navigation', () => {
 
     expect(back).not.toHaveBeenCalled();
     expect(window.location.hash).toBe('#/all-work');
-    expect(navigation.routeAllowed('projects', MEMBER)).toBe(false);
+    expect(navigation.routeAllowed('requests', MEMBER)).toBe(false);
+    expect(navigation.routeAllowed('members', MEMBER)).toBe(false);
+    // The read-only project explorer is a member route; the management list is not.
+    expect(navigation.routeAllowed('projects', MEMBER)).toBe(true);
+    expect(navigation.routeAllowed('projects/P1', MEMBER)).toBe(true);
     expect(navigation.routeAllowed('project/P1', MEMBER)).toBe(true);
     expect(navigation.routeAllowed('https://example.invalid', ADMIN)).toBe(false);
   });

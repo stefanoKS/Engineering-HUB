@@ -104,6 +104,7 @@ export function LoginScreen({
   return (
     <main className="login-screen">
       <div className="login-card">
+        <img src="/branding/companyLogo.png" alt="広島化成" className="company-login-logo" />
         <h1>{t('app.name')}</h1>
         <p className="muted">{t(config?.authMode === 'local' ? 'local.intro' : 'login.domain')}</p>
         {notice ? <div className="banner warning">{notice}</div> : null}

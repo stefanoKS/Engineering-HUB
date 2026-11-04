@@ -10,19 +10,23 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { TaskListQuery } from '@eh/contracts';
 import { actorOf, ok, type AppDependencies } from '../http';
 import { sendError } from '../errors';
-import { listActiveWork, listWorkProjects, readOnlyProjectDetail, readOnlyTaskDetail } from '../services/work';
-import type { ServiceCtx } from '../services/common';
+import { listActiveWork, listWorkProjects, readOnlyProjectDetail, readOnlyTaskDetail, type WorkCtx } from '../services/work';
+import { readCtx } from '../services/views';
 
-function ctx(request: FastifyRequest): ServiceCtx {
+function ctx(request: FastifyRequest): WorkCtx {
+  const read = readCtx(request);
   return {
-    db: request.state.db,
+    db: read.db,
     identity: actorOf(request),
-    correlationId: request.state.correlationId
+    correlationId: request.state.correlationId,
+    cache: read.cache,
+    today: read.today
   };
 }
 
 const ProjectQuery = z.object({
   query: z.string().trim().max(200).optional(),
+  responsibilityId: z.string().trim().max(64).optional(),
   page: z.coerce.number().int().min(1).max(10000).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25)
 });
@@ -56,7 +60,6 @@ export function registerWorkRoutes(app: FastifyInstance, _deps: AppDependencies)
       return sendError(reply, request.state, error);
     }
   });
-
   app.get('/api/work/projects/:id', async (request, reply) => {
     try {
       const { id } = IdParams.parse(request.params ?? {});

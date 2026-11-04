@@ -296,6 +296,15 @@ export function ProjectForm({
             <TextInput value={form.projectName} onChange={(value) => set('projectName', value)} required />
           </label>
           <label className="field">
+            <span className="field-label">{t('projects.description')}</span>
+            <textarea
+              value={form.description}
+              onChange={(event) => set('description', event.target.value)}
+              rows={4}
+              maxLength={5000}
+            />
+          </label>
+          <label className="field">
             <span className="field-label">{t('projects.responsibility')}</span>
             <SelectInput
               value={form.responsibilityId}

@@ -1,5 +1,121 @@
 # V2 Acceptance Record
 
+## Back button position and alignment — 2026-11-04
+
+Layout-only follow-up to the member explorer release above; no API route, contract, migration,
+authorization or data change. The shared `BackButton` (one component, `apps/web/src/state/navigation.tsx`)
+is the first child of the detail content column and now uses one explicit `.back-button` rule.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Back button appears at far-left | PASS | `.back-button` sets `align-self: flex-start`; the column-flex parent previously stretched the button to the full width and the browser centred its label. Measured in Chromium: button box x equals the `<h2>` box x within 2 px at 1440, 1920 and 390 px |
+| Button aligns with page content | PASS | `padding-left: 0` so the arrow glyph starts exactly at the title's left margin; no `justify-content`, `margin-left: auto` or `float` anywhere in the rule |
+| Project Detail navigation works | PASS | `member-project-detail-{member,viewer}.png`; unit test asserts the control is the first child of `.screen` |
+| Task Detail navigation works | PASS | `member-task-detail-{member,viewer}.png`; unit test asserts the same structure |
+| Direct URL fallback works | PASS | `navigation.test.ts` "falls back to the member project explorer for a directly opened project" and the existing task-URL case |
+| Browser Back/Forward still works | PASS | Browser journey clicks Back on the project detail and lands on the explorer it came from, with the search term `Edited` still in the box |
+| No layout overlap or unwanted spacing | PASS | 0-120 px gap asserted between the control and the title; `documentElement.scrollWidth` never exceeds the viewport at 390/1366/1440/1920 |
+| Existing navigation state preserved | PASS | Route memory, filters, expanded hierarchy and scroll offsets unchanged (only CSS and the class rule were touched); `npm run test:v2` **299 passed, 1 skipped (300)**; `npm run test:browser` PASS |
+
+Gates: `npm run typecheck`, `npm run lint`, `npm run test:v2`, `npm run validate`, `npm run build`,
+`npm run smoke:prod` and `npm run test:browser` all PASS. Production remains **NOT APPROVED FOR
+PRODUCTION**; live host behaviour is NOT_RUN.
+
+## MEMBER project explorer, descriptions and read-only details — 2026-11-04
+
+Baseline `15325d90c03b8915ad1d2d85b671efb0add00a7f` with the uncommitted branding work preserved.
+This release adds the member project explorer, project/subproject/task descriptions in the
+read-only path and one additive migration. No deployment, migration of an operational database,
+trigger, mail/Calendar activation or publication ran; every database used below was disposable and
+created by the test/smoke harness.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| 0 preflight | PASS | HEAD above; `apps/web/src/{App.tsx,state/navigation.tsx,screens/*}`, `apps/api/src/{routes,services}`, `packages/{contracts,db}` and the migration directory read before editing; baseline `npm run test:v2` = 20 files, **280 passed, 1 skipped** |
+| 1 member navigation | PASS | `routeAllowed()` and the post-sign-in redirect accept `projects` for MEMBER and VIEWER; `App.tsx` renders `WorkProjectsScreen` for both reader roles and keeps `ProjectsScreen` for ADMIN/MANAGER; `apps/web/test/member-explorer.test.tsx` proves the Projects nav entry and a direct `#/projects` for both roles, and that `/api/manager/projects` is never called |
+| 2 project explorer UI | PASS | `WorkProjectsScreen.tsx` calls `GET /api/work/projects` with server-side search (project name only, never the private next action), responsibility filter and paging (24/page); cards show name, responsibility, owner, status, priority, deadline, progress, open/completed counts, description preview and one "View details" link; loading, empty, error and retry states; no create/edit/archive/delete control |
+| 3 read-only project detail | PASS | Existing `ProjectDetailScreen` + `ProjectHierarchy` reused; project information section renders name, description, responsibility, owner, status, priority and deadline; hierarchy keeps stable-ID expansion; management buttons absent for MEMBER and VIEWER (unit + browser assertions) |
+| 4 project description API | PASS | `WorkProject.description` added to the allowlisted projection and filled from `PROJECTS.description`; the recorded key set (`activeTaskCount`, `committedDeadline`, `completedTaskCount`, `description`, `health`, `priority`, `projectId`, `projectName`, `progressPercent`, `projectOwnerName`, `responsibilityName`, `status`) is asserted in `roles-and-work.test.ts`; `dashboardSummary`, `nextAction`, notification settings, milestones and phases stay absent; RESTRICTED and guessed identifiers answer `404` and their description text never appears in the body |
+| 5 subproject description | PASS | `0009_subproject_description.sql` (`ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''`); `SubprojectRow`/`toSubproject`/`SUBPROJECT_SELECT`/insert/update updated; `Subproject`, `CreateSubprojectBody` (max 2000), `PatchSubprojectBody` and `WorkSubproject` extended; manager `SubprojectForm` has a multiline Description field; manager project form gained the previously unwired Description field |
+| 6 subproject information UI | PASS | Row keeps name, status, deadline and active/done counts; a preview sits under the name with an in-place `詳細を見る / View details` toggle; `white-space: pre-wrap` and `overflow-wrap: anywhere` keep line breaks without horizontal overflow; nested subprojects inherit it |
+| 7 task description | PASS | Dedicated `作業内容・説明 / Task description` section renders the full description with preserved line breaks; project name link, subproject path, assignees, deadline, derived status, priority and skill grade are shown; empty text renders `説明なし / No description`; manager-only history and schedule sections are not rendered for a reader |
+| 8 navigation | PASS | Breadcrumbs on project and task detail link only to readable records; My Work links the project and offers "Open"; explorer search term and page survive leaving and returning (`useRouteMemoryState`); smart Back and scroll memory unchanged |
+| 9 My Work integration | PASS | My Work stays the personal list; a reader gets task name, project link, subproject name, deadline, status and an Open link, and no complete/report action; MEMBER keeps task creation and completion requests, VIEWER keeps none |
+| 10 read-only authorization | PASS | `roles-and-work.test.ts` "refuses project, subproject and task mutations from MEMBER and VIEWER": create subproject, patch subproject/project/task and delete subproject answer `403`, `PATCH /api/work/projects/:id` answers `404`, and the stored subproject description stays unchanged; guessed RESTRICTED identifiers answer `404` |
+| 11 performance | PASS | One bounded page per explorer request; counts come from the memoized `TaskScope` pass, never one query per card; task detail loads only when opened; member keys (`work/projects`, `work/project/<id>`) stay separate from `manager/*`; no new global state library. Measured at 1 000 projects / 10 000 tasks (15 samples): explorer p50 26.8 ms / p95 51.6 ms / 10 db calls / 7.9 KB, project detail p50 26.7 ms / p95 40.1 ms, task detail p50 2.8 ms / p95 3.2 ms ([PERFORMANCE.md](PERFORMANCE.md), `bench/results-2026-11-04T04-49-44-012Z.json`) |
+| 12 regression tests | PASS | API (+7 tests: descriptions, name-only search, member-created description, permission refusals), contracts (+2), db integration (+2, incl. applying 0009 to a table that already holds rows), web (+7) and updated navigation/hierarchy/workflow expectations; V2 suite **298 passed, 1 skipped (299)**; V1 suite 776 passed |
+| 13 validation | PASS | `npm run typecheck`, `npm run lint`, `npm run test:v2`, `npm run validate` (V1 `validate:v1`, V2 142 files, deploy templates), `npm run build`, `npm run smoke:prod` (schema 9, `/readyz` schema 9), `npm run test:browser` (real Chromium, member/viewer/manager journeys) and `npm run benchmark -- --dataset large --iterations 15` |
+| 14 delivery | PASS | Evidence screenshots in `work/screenshots/`: `member-project-explorer-{member,viewer}{,-1920,-mobile}.png`, `member-project-detail-{member,viewer}{,-mobile}.png`, `member-task-detail-{member,viewer}.png`; Windows LAN steps in the section below |
+
+Data preservation and rollback:
+
+- The migration is additive and one-shot: `ALTER TABLE subprojects ADD COLUMN IF NOT EXISTS
+  description TEXT NOT NULL DEFAULT ''`. No prior migration file was edited and no column is
+  rewritten. `packages/db/test/integration.test.ts` drops the column and the ledger row from a
+  database that already holds a subproject, re-applies the migration and asserts the identifier,
+  project link, revision, next action and the new empty description.
+- Rollback is a restore, not a reverse migration: verify the backup, stop the API and worker,
+  restore into a fresh database, point `DATABASE_URL` at it and restart ([MIGRATION.md](MIGRATION.md)).
+
+Remaining limitations:
+
+- Colour reuse means the project accent is an identity aid, not a unique identifier; the project
+  name is always visible.
+- The explorer shows the project owner *name* only; member identifiers, e-mail addresses, roles and
+  the private `MEMBERS` table are never exposed to a reader.
+- A very long description is clamped on a card and fully readable on the detail page; there is no
+  rich-text rendering by design (plain React text only).
+- Live Workspace/LAN host behaviour, Google sign-in and physical recovery remain **NOT_RUN**: no
+  live host, real credentials or company data were used. Production stays **NOT APPROVED FOR
+  PRODUCTION**.
+
+### Windows LAN rebuild and migration steps for this release
+
+```powershell
+# 0. From the repository root, with the release code checked out
+npm ci
+npm run typecheck
+npm run lint:v2
+npm run test:v2
+npm run validate:v2
+npm run build
+
+# 1. Verified encrypted backup FIRST (a failure stops the upgrade)
+./deploy/windows/Backup-Now.cmd
+
+# 2. Apply the reviewed additive migration (schema 8 -> 9); type "APPLY MIGRATIONS"
+./deploy/windows/Migrate-Lan.cmd
+
+# 3. Confirm the ledger, readiness and preservation
+psql "$env:DATABASE_URL" -c "SELECT version, name FROM schema_migrations ORDER BY version;"
+Invoke-RestMethod http://localhost:8050/readyz      # 200, schemaVersion 9
+node --env-file=data/lan/worker.env apps/worker/dist/cli.js verify-restore "C:/approved-recovery/backup.dump.enc"
+
+# 4. Start (or restart) the LAN host only after 0-3 pass
+./deploy/windows/Start-Lan.cmd
+```
+
+No step above was executed against an operational database during this review.
+
+## Branding assets: company logo on sign-in, department logo in the header — 2026-11-04
+
+Source/build-only visual change. No migration, schema, API route, authorization, notification or
+publication change; no deployment, and no operational database was accessed. The supplied PNG files
+are used as delivered: they are not redrawn, recoloured, cropped or resized on disk.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| 0 assets | PASS | `apps/web/public/branding/companyLogo.png` (1672×941, RGBA) and `designTeam.png` (2172×724, RGB) are readable PNGs, not ignored by Git, and appear in `apps/web/dist/branding/` after `npm run build`. Supplied capitalisation is `companyLogo.png`, not `companylogo.png`; the code uses the real name |
+| 1 sign-in | PASS | `/branding/companyLogo.png` renders above the local employee-ID/password form; Google sign-in and the development fixture paths are unchanged; the department logo never appears here |
+| 2 authenticated header | PASS | `/branding/designTeam.png` replaces the `brand-symbol` span for ADMIN, MANAGER, MEMBER and VIEWER; language switch, account name, role pill, password change and sign out stay visible |
+| 3 responsive | PASS | measured at 1920×1280, 1366×768 (ja and en) and 390×844: rendered aspect ratios equal the intrinsic ratios (1.777 and 3.000), brand and header actions never overlap, `documentElement.scrollWidth` never exceeds the viewport, header height 94 px desktop / 174 px narrow |
+| 4 favicon | NOT_RUN | optional; both originals keep wide, mixed-scale lockups that are unreadable at 16 px, and no separate favicon asset was added |
+| 5 compatibility | PASS | no change to PostgreSQL, API, authentication, roles, projects, tasks, assignment, completion, navigation or backup behaviour; Japanese and English both render |
+| 6 verification | PASS | `npm run typecheck`, `npm run lint:v2`, `npm run validate:v2`, `npm run test:v2` (**280 pass, 1 skipped**) and `npm run build`; layout captured from a local Vite preview with a stubbed API (UI evidence, not a live run) |
+| Live Workspace / LAN browser | NOT_RUN | no live host, deployment or real credentials were used for this review |
+
+Production remains **NOT APPROVED FOR PRODUCTION**.
+
 ## ADMIN logical removal and smart Back — 2026-11-04
 
 Baseline `80ed41bdf8b7847a464c4f8dbd836f77115788c3` with a clean working tree. Source/build

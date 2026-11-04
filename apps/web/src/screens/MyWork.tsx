@@ -280,7 +280,7 @@ function WorkCard({
         <a href={`#/task/${item.taskId}`}>{item.taskName}</a>
       </h3>
       <p className="muted small">
-        {item.projectName}
+        <a href={`#/project/${item.projectId}`}>{item.projectName}</a>
         {item.subprojectName ? ` / ${item.subprojectName}` : ''} · {t('myWork.deadline')}: {item.dueDate ?? t('common.unset')} ·{' '}
         {label('priority', item.priority)}
       </p>
@@ -321,7 +321,11 @@ function WorkCard({
             </button>
           ) : null}
         </div>
-      ) : null}
+      ) : (
+        <div className="inline-actions">
+          <a className="button secondary" href={`#/task/${item.taskId}`}>{t('action.open')}</a>
+        </div>
+      )}
       <ErrorBox error={save.error} onRetry={onChanged} />
       {completing ? (
         <ConfirmDialog

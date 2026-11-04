@@ -12,6 +12,7 @@ export function SubprojectForm({ projectId, item, initialParentSubprojectId, sib
   const { t, label } = useI18n();
   const save = useSave(); const idempotencyKey = useIdempotencyKey();
   const [name, setName] = useState(item?.subprojectName ?? '');
+  const [description, setDescription] = useState(item?.description ?? '');
   const [parent, setParent] = useState(item?.parentSubprojectId ?? initialParentSubprojectId ?? '');
   const [owner, setOwner] = useState(item?.ownerId ?? '');
   const [status, setStatus] = useState(item?.status ?? 'Planned');
@@ -30,7 +31,7 @@ export function SubprojectForm({ projectId, item, initialParentSubprojectId, sib
   return <Modal title={t(item ? 'subprojects.edit' : 'subprojects.new')} onClose={onClose} footer={<>
     <button className="button secondary" type="button" onClick={onClose}>{t('action.cancel')}</button>
     <button className="button" type="button" disabled={!name.trim() || save.state === 'saving' || (changedDeadline && !confirmed)} onClick={() => void save.run(async () => {
-      const payload = { subprojectName: name.trim(), parentSubprojectId: parent || null, ownerId: owner || null, status,
+      const payload = { subprojectName: name.trim(), description, parentSubprojectId: parent || null, ownerId: owner || null, status,
         deadline: deadline || null, plannedStart: start || null, plannedEnd: end || null, estimatedHours: hours === '' ? null : Number(hours), nextAction: next };
       return item ? api.patch('/api/manager/subprojects/' + item.subprojectId, { ...payload, revision: item.revision, confirmDeadlineChange: confirmed })
         : api.post('/api/manager/subprojects', { ...payload, projectId, idempotencyKey });
@@ -38,6 +39,7 @@ export function SubprojectForm({ projectId, item, initialParentSubprojectId, sib
   </>}>
     <div className="stack">
       <label className="field"><span className="field-label">{t('subprojects.name')}</span><TextInput value={name} onChange={setName} required /></label>
+      <label className="field"><span className="field-label">{t('subprojects.description')}</span><textarea value={description} onChange={event => setDescription(event.target.value)} rows={4} maxLength={2000} /></label>
       <label className="field"><span className="field-label">{t('subprojects.parent')}</span><SelectInput value={parent} onChange={setParent} allowEmpty={t('common.none')} options={parents.map(s => ({ value: s.subprojectId, label: s.subprojectName }))} /></label>
       <label className="field"><span className="field-label">{t('projects.owner')}</span><SelectInput value={owner} onChange={setOwner} allowEmpty={t('common.unset')} options={members.map(m => ({ value: m.memberId, label: m.name }))} /></label>
       <label className="field"><span className="field-label">{t('projects.status')}</span><SelectInput value={status} onChange={value => setStatus(value as Subproject['status'])} options={['Planned','Active','On Hold','Completed','Cancelled','Archived'].map(value => ({ value, label: label('project.status', value) }))} /></label>

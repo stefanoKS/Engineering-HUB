@@ -180,6 +180,9 @@ async function measureDataset(
     { name: 'workload', method: 'GET', url: '/api/manager/reports/workload', auth: adminAuth },
     { name: 'status', method: 'GET', url: '/api/manager/status', auth: adminAuth },
     { name: 'employee snapshot', method: 'GET', url: '/api/employee/snapshot', auth: memberAuth },
+    { name: 'member project explorer', method: 'GET', url: '/api/work/projects?pageSize=24', auth: memberAuth },
+    { name: 'member project detail', method: 'GET', url: '/api/work/projects/P-000001', auth: memberAuth },
+    { name: 'member task detail', method: 'GET', url: '/api/work/tasks/T-0000001', auth: memberAuth },
     {
       name: 'task create (write)',
       method: 'POST',

@@ -457,7 +457,7 @@ describe('project detail roles', () => {
   it('gives ADMIN edit, create and delete actions', async () => {
     stubManagerApi();
     render(<I18nProvider><ProjectDetailScreen actor={ADMIN_ACTOR as never} projectId="PRJ-A" /></I18nProvider>);
-    expect(await screen.findByText('Alpha')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: /Alpha/ })).toBeTruthy();
     expect(await screen.findByText('Area A work')).toBeTruthy();
     expect(screen.getAllByRole('button', { name: /を削除/ }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: '新規タスク' }).length).toBeGreaterThan(0);

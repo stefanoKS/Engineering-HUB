@@ -382,25 +382,39 @@ export type LinkableMemberList = z.infer<typeof LinkableMemberList>;
 /**
  * Read-only project projection for MEMBER and VIEWER.
  *
- * It carries only what the permitted screens render: identity, name, responsibility, owner name,
- * status, priority, deadline, health and derived progress. Notification settings, the dashboard
- * summary, milestones, phases and internal notes are absent rather than filtered in the browser.
+ * It carries only what the permitted screens render: identity, name, description, responsibility,
+ * owner name, status, priority, deadline, health, derived progress and the TaskScope counts for
+ * open and completed work. Notification settings, the dashboard summary, milestones, phases,
+ * internal notes and the next action are absent rather than filtered in the browser.
  */
 export const WorkProject = z.object({
   projectId: z.string(),
   projectName: z.string(),
+  description: z.string(),
   responsibilityName: z.string(),
   projectOwnerName: z.string(),
   status: ProjectStatus,
   priority: Priority,
   committedDeadline: IsoDate.nullable(),
   progressPercent: z.number().min(0).max(100).nullable(),
-  health: z.string()
+  health: z.string(),
+  /** Open leaf work in active work; a container task is never counted. */
+  activeTaskCount: z.number().int().min(0),
+  /** Completed leaf work, reported separately and never mixed into the open figure. */
+  completedTaskCount: z.number().int().min(0)
 });
 export type WorkProject = z.infer<typeof WorkProject>;
 
+export const WorkResponsibilityOption = z.object({
+  responsibilityId: z.string(),
+  name: z.string()
+});
+export type WorkResponsibilityOption = z.infer<typeof WorkResponsibilityOption>;
+
 export const WorkProjectList = z.object({
   items: z.array(WorkProject),
+  /** The responsibilities that group at least one readable project, for the member filter. */
+  responsibilities: z.array(WorkResponsibilityOption),
   total: z.number().int().min(0),
   page: z.number().int().min(1),
   pageSize: z.number().int().min(1),
@@ -411,6 +425,7 @@ export type WorkProjectList = z.infer<typeof WorkProjectList>;
 export const WorkSubproject = z.object({
   subprojectId: z.string(),
   subprojectName: z.string(),
+  description: z.string(),
   parentSubprojectId: z.string().nullable(),
   status: ProjectStatus,
   deadline: IsoDate.nullable(),

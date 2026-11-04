@@ -41,6 +41,7 @@ Treat every remaining **PASS** below as "implemented and covered by the named lo
 | Feature | V1 implementation / entry points | V1 authorization | Invariants and tests | V2 location | Migration | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | Project list/create/edit | `Ui.createProject`, `Ui.updateProject`, `Projects.gs`, `ManagerWeb` `projects`/`project` | ADMIN, MANAGER | Partial patch, revision check, immutable IDs; `contracts.test`, `api.test` (create once, stale edit) | `apps/web/src/screens/Projects.tsx`, `apps/api/src/services/projects.ts`, `projects` table | PRESERVED IDs | PASS |
+| Project/subproject descriptions | `PROJECTS.Description`; no subproject field in V1 | ADMIN, MANAGER write; every role reads | Project description allowlisted in the read-only projection; `subprojects.description` additive (schema 9, default `''`); a partial patch keeps untouched text; `contracts.test`, `integration.test`, `roles-and-work.test` | `apps/web/src/screens/Projects.tsx`, `SubprojectForm.tsx`, `WorkProjects.tsx`, `services/work.ts` | Additive column | PASS |
 | Project archive | `Projects.archive`, `projectArchive` | ADMIN, MANAGER + confirmation | Status change only, history kept; `domain.test` lifecycle, `api.test` archive-not-called (UI), DB trigger `projects_archived_marker` | `archiveProjectCommand` | PRESERVED | PASS |
 | Project delete (mistaken empty record) | `Deletion.gs`, `projectDelete` | ADMIN only, typed `DELETE <id>`, reason, backup | Empty preflight, tombstone, `RECORD_DELETE_PREPARED`/`RECORD_DELETED`; `deletion.ts`, `domain.test` | `apps/api/src/services/deletion.ts`, `record_deletions` | PRESERVED | PASS |
 | Project completion rule | — | ADMIN, MANAGER | All tasks Done before `Completed`; `domain.test` | `assertProjectCompletable` | — | PASS |
@@ -88,6 +89,7 @@ Treat every remaining **PASS** below as "implemented and covered by the named lo
 | Member task creation | not available in V1 | `POST /api/employee/my-work`, 自分の担当タスク | PASS (owner from the session, `Not Started`/0 %, no approval needed to create) |
 | Member completion request | completion report in the dashboard | 完了報告 in My Work, same request queue | PASS (pending never completes; a member-created task needs an ADMIN decision) |
 | Privacy boundary | allowlisted snapshot | One allowlist in `publication.ts`; `contracts.test` | PASS |
+| Member project browsing | the sidebar showed permitted work only; no project explorer for employees | `Projects` tab → `WorkProjectsScreen`, `GET /api/work/projects`, `GET /api/work/projects/:id`, `GET /api/work/tasks/:id` | PASS (read-only, INTERNAL only, descriptions allowlisted, `roles-and-work.test`, `member-explorer.test.tsx`, browser journeys) |
 
 ## 3. Integrations and operations
 

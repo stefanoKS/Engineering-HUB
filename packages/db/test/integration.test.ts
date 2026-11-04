@@ -29,6 +29,7 @@ import {
   renewLease,
   reapExpiredLeases,
   schemaVersion,
+  runMigrations,
   updateProject,
   updateTask,
   writeSnapshotSlot
@@ -81,6 +82,60 @@ describe('schema and migrations', () => {
     );
     expect(rows.length).toBeGreaterThanOrEqual(5);
     expect(new Set(rows.map((row) => row.version)).size).toBe(rows.length);
+  });
+  it('applies 0009 to a database that already holds subproject rows', async () => {
+    expectDatabase({ skip: () => undefined });
+    const { project } = await seed();
+    const before = await insertSubproject(
+      db,
+      { projectId: project.projectId, subprojectName: 'Pre-migration area', nextAction: 'Keep me' },
+      'SUB-PRE'
+    );
+    // Return the database to the V8 shape, keeping the existing row, then re-apply the migration.
+    await db.query('ALTER TABLE subprojects DROP COLUMN description');
+    await db.query('DELETE FROM schema_migrations WHERE version = 9');
+    const result = await runMigrations(pool);
+    expect(result.applied.map((entry) => entry.version)).toEqual([9]);
+    expect(await schemaVersion(pool)).toBe(9);
+    const after = await db.one<{
+      subproject_id: string;
+      description: string;
+      next_action: string;
+      revision: number;
+      project_id: string;
+    }>('SELECT subproject_id, description, next_action, revision, project_id FROM subprojects WHERE subproject_id = $1', [
+      'SUB-PRE'
+    ]);
+    expect(after).toMatchObject({
+      subproject_id: 'SUB-PRE',
+      description: '',
+      next_action: 'Keep me',
+      revision: before.revision,
+      project_id: project.projectId
+    });
+  });
+});
+
+describe('subproject description', () => {
+  it('stores a description, keeps a previous row on the empty default and preserves identity', async () => {
+    expectDatabase({ skip: () => undefined });
+    const { project, subproject } = await seed();
+    // A row created without a description keeps the additive column's empty default.
+    expect(subproject.description).toBe('');
+    expect(subproject.subprojectId).toBe('SUB-1');
+    expect(subproject.parentSubprojectId).toBeNull();
+
+    const described = await insertSubproject(
+      db,
+      { projectId: project.projectId, subprojectName: 'Described', description: 'First\nSecond' },
+      'SUB-2'
+    );
+    expect(described.description).toBe('First\nSecond');
+    const stored = await db.one<{ description: string }>(
+      'SELECT description FROM subprojects WHERE subproject_id = $1',
+      ['SUB-2']
+    );
+    expect(stored?.description).toBe('First\nSecond');
   });
 });
 

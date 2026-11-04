@@ -4,7 +4,7 @@ import type { Actor, Reference, Task, TaskDetail } from '@eh/contracts';
 import { api } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
-import { Badge, EmptyState, ErrorBox, Section, statusTone } from '../components/ui';
+import { Badge, Breadcrumbs, DescriptionText, EmptyState, ErrorBox, Section, statusTone } from '../components/ui';
 import { ConfirmDialog } from '../components/forms';
 import { TaskForm } from './TaskForm';
 import { displayTone } from './Tasks';
@@ -40,44 +40,55 @@ export function TaskDetailScreen({
   if (!detail.data) return <p className="muted">{t('state.loading')}</p>;
 
   const { record } = detail.data;
+  const { context } = detail.data;
+  const subprojectPath = context.subprojects.map((entry) => entry.subprojectName).join(' / ');
   return (
     <div className="screen">
       <BackButton actor={actor} fallback="all-work" disabled={editing || action !== null} />
+      <Breadcrumbs
+        items={[
+          { label: t('nav.projects'), href: '#/projects' },
+          { label: context.projectName || context.projectId, href: `#/project/${context.projectId}` },
+          ...(subprojectPath
+            ? [{ label: subprojectPath, href: `#/project/${context.projectId}` }]
+            : []),
+          { label: record.taskName }
+        ]}
+      />
       <div className="screen-header">
         <div>
           <h2>{record.taskName}</h2>
           <p className="muted small">
-            <a href={`#/project/${record.projectId}`}>{record.projectId}</a> · {record.taskId}
+            <a href={`#/project/${record.projectId}`}>{context.projectName || record.projectId}</a>
+            {subprojectPath ? ` · ${subprojectPath}` : ''} · {record.taskId}
           </p>
         </div>
-        <div className="filters">
-          {canManage ? (
-            <>
-              <button type="button" className="button secondary" onClick={() => setEditing(true)}>
-                {t('action.edit')}
+        {canManage ? (
+          <div className="filters">
+            <button type="button" className="button secondary" onClick={() => setEditing(true)}>
+              {t('action.edit')}
+            </button>
+            {!detail.data.children.length && record.displayStatus !== 'DONE' && record.displayStatus !== 'CANCELLED' ? (
+              <button type="button" className="button" onClick={() => setAction('complete')}>
+                {t('tasks.completeDirect')}
               </button>
-              {!detail.data.children.length && record.displayStatus !== 'DONE' && record.displayStatus !== 'CANCELLED' ? (
-                <button type="button" className="button" onClick={() => setAction('complete')}>
-                  {t('tasks.completeDirect')}
-                </button>
-              ) : null}
-              <button type="button" className="button secondary" onClick={() => setAction('approve')}>
-                {t('tasks.approve')}
+            ) : null}
+            <button type="button" className="button secondary" onClick={() => setAction('approve')}>
+              {t('tasks.approve')}
+            </button>
+            <button type="button" className="button secondary" onClick={() => setAction('confirm')}>
+              {t('tasks.confirmSchedule')}
+            </button>
+            {actor.role === 'ADMIN' ? (
+              <button type="button" className="button secondary" onClick={() => setAction('override')}>
+                {t('tasks.override')}
               </button>
-              <button type="button" className="button secondary" onClick={() => setAction('confirm')}>
-                {t('tasks.confirmSchedule')}
-              </button>
-              {actor.role === 'ADMIN' ? (
-                <button type="button" className="button secondary" onClick={() => setAction('override')}>
-                  {t('tasks.override')}
-                </button>
-              ) : null}
-            </>
-          ) : null}
-        </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
-      <Section title={t('common.items')}>
+      <Section title={t('tasks.info')}>
         <div className="detail-grid" style={{ ['--project-accent' as string]: projectColor(record.projectId) }}>
           <div>
             <dt>{t('column.status')}</dt>
@@ -97,6 +108,10 @@ export function TaskDetailScreen({
           <div>
             <dt>{t('column.deadline')}</dt>
             <dd>{record.dueDate ?? t('common.unset')}</dd>
+          </div>
+          <div>
+            <dt>{t('tasks.priority')}</dt>
+            <dd>{label('priority', record.priority)}</dd>
           </div>
           <div>
             <dt>{t('skills.grade')}</dt>
@@ -125,6 +140,10 @@ export function TaskDetailScreen({
         </div>
       </Section>
 
+      <Section title={t('tasks.descriptionTitle')}>
+        <DescriptionText text={record.description} />
+      </Section>
+
       {detail.data.children.length ? (
         <div className="banner info">{t('tasks.containerNote')}</div>
       ) : null}
@@ -142,7 +161,7 @@ export function TaskDetailScreen({
             ))}
           </ul>
         )}
-        {detail.data.assigneeHistory.length ? (
+        {canManage && detail.data.assigneeHistory.length ? (
           <>
             <h3>{t('members.previous')}</h3>
             <ul className="list muted">
@@ -174,50 +193,54 @@ export function TaskDetailScreen({
         </Section>
       ) : null}
 
-      <Section title={t('tasks.history')}>
-        {detail.data.deadlineHistory.length === 0 ? (
-          <EmptyState />
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>{t('common.items')}</th>
-                <th>{t('column.deadline')}</th>
-                <th>{t('common.unset')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {detail.data.deadlineHistory.map((entry) => (
-                <tr key={entry.historyId}>
-                  <td>{entry.changedAt.slice(0, 16).replace('T', ' ')}</td>
-                  <td>
-                    {entry.previousDueDate ?? t('common.unset')} → {entry.newDueDate ?? t('common.unset')}
-                  </td>
-                  <td className="muted small">
-                    {entry.changedBy} · {entry.source} · {entry.reason}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Section>
+      {canManage ? (
+        <>
+          <Section title={t('tasks.history')}>
+            {detail.data.deadlineHistory.length === 0 ? (
+              <EmptyState />
+            ) : (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>{t('common.items')}</th>
+                    <th>{t('column.deadline')}</th>
+                    <th>{t('common.unset')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detail.data.deadlineHistory.map((entry) => (
+                    <tr key={entry.historyId}>
+                      <td>{entry.changedAt.slice(0, 16).replace('T', ' ')}</td>
+                      <td>
+                        {entry.previousDueDate ?? t('common.unset')} → {entry.newDueDate ?? t('common.unset')}
+                      </td>
+                      <td className="muted small">
+                        {entry.changedBy} · {entry.source} · {entry.reason}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Section>
 
-      <Section title={t('tasks.confirmSchedule')}>
-        {detail.data.confirmations.length === 0 ? (
-          <EmptyState />
-        ) : (
-          <ul className="list">
-            {detail.data.confirmations.map((confirmation) => (
-              <li key={confirmation.scheduleConfirmationId}>
-                v{confirmation.version} · {confirmation.confirmedAt.slice(0, 16).replace('T', ' ')} ·{' '}
-                {confirmation.confirmedBy}
-                {confirmation.active ? <Badge tone="ok">{t('state.saved')}</Badge> : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+          <Section title={t('tasks.confirmSchedule')}>
+            {detail.data.confirmations.length === 0 ? (
+              <EmptyState />
+            ) : (
+              <ul className="list">
+                {detail.data.confirmations.map((confirmation) => (
+                  <li key={confirmation.scheduleConfirmationId}>
+                    v{confirmation.version} · {confirmation.confirmedAt.slice(0, 16).replace('T', ' ')} ·{' '}
+                    {confirmation.confirmedBy}
+                    {confirmation.active ? <Badge tone="ok">{t('state.saved')}</Badge> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+        </>
+      ) : null}
 
       {editing ? (
         <TaskForm

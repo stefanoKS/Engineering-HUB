@@ -8,7 +8,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { Database, insertProject, saveSettings } from '@eh/db';
+import { Database, insertProject, insertSubproject, saveSettings } from '@eh/db';
 import { businessDate } from '@eh/domain';
 import { buildApp } from '../src/app';
 import { loadConfig } from '../src/config';
@@ -391,7 +391,7 @@ describe('project visibility policy', () => {
     expect(detail.statusCode, detail.body).toBe(200);
     const record = detail.json().data.record as Record<string, unknown>;
     expect(Object.keys(record).sort()).toEqual(
-      ['committedDeadline', 'health', 'priority', 'projectId', 'projectName', 'progressPercent', 'projectOwnerName', 'responsibilityName', 'status'].sort()
+      ['activeTaskCount', 'committedDeadline', 'completedTaskCount', 'description', 'health', 'priority', 'projectId', 'projectName', 'progressPercent', 'projectOwnerName', 'responsibilityName', 'status'].sort()
     );
     expect(detail.body).not.toContain('dashboardSummary');
     expect(detail.body).not.toContain('notificationEnabled');
@@ -400,6 +400,266 @@ describe('project visibility policy', () => {
       const refused = await app.inject({ url: `/api/work/projects/${projectId}`, headers: { cookie: member.cookie! } });
       expect(refused.statusCode, projectId).toBe(404);
     }
+  });
+});
+
+describe('member project explorer', () => {
+  it('serves the project and subproject descriptions a member may read, never a restricted one', async () => {
+    await db.query("UPDATE projects SET description = $1 WHERE project_id = 'PRJ-A'", ['Alpha overview\nSecond line']);
+    await db.query(
+      "INSERT INTO projects(project_id,project_name,status,dashboard_visibility,description) VALUES('PRJ-R','Restricted','Active','RESTRICTED','Top secret plan')"
+    );
+    await insertSubproject(db, { projectId: 'PRJ-A', subprojectName: 'Area A', description: 'Area A detail\nline two' }, 'SUB-A');
+    await insertSubproject(
+      db,
+      { projectId: 'PRJ-A', subprojectName: 'Area A1', parentSubprojectId: 'SUB-A', description: 'Nested detail' },
+      'SUB-A1'
+    );
+    await insertSubproject(db, { projectId: 'PRJ-R', subprojectName: 'Hidden area', description: 'Restricted detail' }, 'SUB-R');
+    await db.query(
+      "INSERT INTO tasks(task_id,project_id,subproject_id,task_name,status,due_date) VALUES('T-A','PRJ-A','SUB-A1','Nested work','In Progress','2026-12-01')"
+    );
+
+    const member = await login('0010');
+    const detail = await app.inject({ url: '/api/work/projects/PRJ-A', headers: { cookie: member.cookie! } });
+    expect(detail.statusCode, detail.body).toBe(200);
+    const data = detail.json().data as {
+      record: { description: string; activeTaskCount: number; completedTaskCount: number };
+      subprojects: { subprojectId: string; description: string }[];
+    };
+    expect(data.record.description).toBe('Alpha overview\nSecond line');
+    expect(data.record.activeTaskCount).toBe(1);
+    expect(data.record.completedTaskCount).toBe(0);
+    expect(data.subprojects.map((entry) => entry.subprojectId)).toEqual(['SUB-A', 'SUB-A1']);
+    expect(data.subprojects.find((entry) => entry.subprojectId === 'SUB-A1')?.description).toBe('Nested detail');
+    expect(detail.body).not.toContain('Restricted detail');
+    expect(detail.body).not.toContain('Top secret plan');
+
+    // A RESTRICTED description is never reachable, not even through a guessed identifier.
+    const refused = await app.inject({ url: '/api/work/projects/PRJ-R', headers: { cookie: member.cookie! } });
+    expect(refused.statusCode, refused.body).toBe(404);
+    expect(refused.body).not.toContain('Top secret plan');
+  });
+
+  it('lets a manager write a subproject description and keeps an existing row on the empty default', async () => {
+    await insertSubproject(db, { projectId: 'PRJ-A', subprojectName: 'Legacy area' }, 'SUB-LEGACY');
+    const legacy = await db.one<{ description: string }>(
+      "SELECT description FROM subprojects WHERE subproject_id = 'SUB-LEGACY'"
+    );
+    expect(legacy?.description).toBe('');
+
+    const manager = await login('0002');
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/manager/subprojects',
+      headers: manager,
+      payload: {
+        idempotencyKey: 'sub-description-create-1',
+        projectId: 'PRJ-A',
+        subprojectName: 'Spec area',
+        description: 'First line\nSecond line',
+        nextAction: 'Review drawing'
+      }
+    });
+    expect(created.statusCode, created.body).toBe(200);
+    const subproject = (
+      created.json() as { data: { subproject: { subprojectId: string; description: string; revision: number } } }
+    ).data.subproject;
+    expect(subproject.description).toBe('First line\nSecond line');
+
+    const patched = await app.inject({
+      method: 'PATCH',
+      url: `/api/manager/subprojects/${subproject.subprojectId}`,
+      headers: manager,
+      payload: { revision: subproject.revision, description: 'Updated detail' }
+    });
+    expect(patched.statusCode, patched.body).toBe(200);
+    expect((patched.json() as { data: { subproject: { description: string } } }).data.subproject.description).toBe(
+      'Updated detail'
+    );
+    // A partial patch never rewrites the columns the manager did not address.
+    const stored = await db.one<{ next_action: string; status: string; owner_id: string | null }>(
+      'SELECT next_action, status, owner_id FROM subprojects WHERE subproject_id = $1',
+      [subproject.subprojectId]
+    );
+    expect(stored).toMatchObject({ next_action: 'Review drawing', status: 'Planned', owner_id: null });
+
+    const member = await login('0010');
+    const read = await app.inject({ url: '/api/work/projects/PRJ-A', headers: { cookie: member.cookie! } });
+    expect(read.statusCode, read.body).toBe(200);
+    expect(read.body).toContain('Updated detail');
+  });
+
+  it('offers responsibility filtering and TaskScope counts on the read-only project list', async () => {
+    await db.query("INSERT INTO responsibilities(responsibility_id,name) VALUES('RES-1','Design')");
+    await db.query("UPDATE projects SET responsibility_id = 'RES-1' WHERE project_id = 'PRJ-A'");
+    await db.query(
+      "INSERT INTO projects(project_id,project_name,status,dashboard_visibility) VALUES('PRJ-B','Beta','Active','INTERNAL')"
+    );
+    await db.query(
+      "INSERT INTO tasks(task_id,project_id,task_name,status,due_date) VALUES('T-OPEN','PRJ-A','Open work','In Progress','2026-12-01'),('T-DONE','PRJ-A','Done work','Done','2026-12-01'),('T-B','PRJ-B','Beta work','In Progress','2026-12-01')"
+    );
+    const member = await login('0010');
+    const all = await app.inject({ url: '/api/work/projects?pageSize=10', headers: { cookie: member.cookie! } });
+    expect(all.statusCode, all.body).toBe(200);
+    const allData = all.json().data as {
+      items: { projectId: string; activeTaskCount: number; completedTaskCount: number }[];
+      responsibilities: { responsibilityId: string; name: string }[];
+    };
+    expect(allData.responsibilities).toEqual([{ responsibilityId: 'RES-1', name: 'Design' }]);
+    const alpha = allData.items.find((project) => project.projectId === 'PRJ-A');
+    expect(alpha?.activeTaskCount).toBe(1);
+    expect(alpha?.completedTaskCount).toBe(1);
+
+    const filtered = await app.inject({
+      url: '/api/work/projects?responsibilityId=RES-1',
+      headers: { cookie: member.cookie! }
+    });
+    expect(filtered.statusCode, filtered.body).toBe(200);
+    expect((filtered.json().data as { items: { projectId: string }[] }).items.map((project) => project.projectId)).toEqual([
+      'PRJ-A'
+    ]);
+  });
+
+  it('searches the project name only and never a private column', async () => {
+    await db.query("UPDATE projects SET next_action = 'Secret next action' WHERE project_id = 'PRJ-A'");
+    const member = await login('0010');
+    const byPrivate = await app.inject({
+      url: '/api/work/projects?query=Secret',
+      headers: { cookie: member.cookie! }
+    });
+    expect(byPrivate.statusCode, byPrivate.body).toBe(200);
+    expect((byPrivate.json().data as { items: { projectId: string }[] }).items).toEqual([]);
+    const byName = await app.inject({
+      url: '/api/work/projects?query=alpha',
+      headers: { cookie: member.cookie! }
+    });
+    expect(
+      (byName.json().data as { items: { projectId: string }[] }).items.map((project) => project.projectId)
+    ).toEqual(['PRJ-A']);
+  });
+
+  it('describes a read-only task with its project and subproject path', async () => {
+    await insertSubproject(db, { projectId: 'PRJ-A', subprojectName: 'Area A' }, 'SUB-A');
+    await insertSubproject(db, { projectId: 'PRJ-A', subprojectName: 'Area A1', parentSubprojectId: 'SUB-A' }, 'SUB-A1');
+    await db.query(
+      "INSERT INTO tasks(task_id,project_id,subproject_id,task_name,description,status,due_date) VALUES('T-DESC','PRJ-A','SUB-A1','Described task',$1,'In Progress','2026-12-01')",
+      ['First line\nSecond line']
+    );
+    const member = await login('0010');
+    const detail = await app.inject({ url: '/api/work/tasks/T-DESC', headers: { cookie: member.cookie! } });
+    expect(detail.statusCode, detail.body).toBe(200);
+    const data = detail.json().data as {
+      record: { description: string };
+      context: { projectName: string; subprojects: { subprojectName: string }[] };
+    };
+    expect(data.record.description).toBe('First line\nSecond line');
+    expect(data.context.projectName).toBe('Alpha');
+    expect(data.context.subprojects.map((entry) => entry.subprojectName)).toEqual(['Area A', 'Area A1']);
+  });
+
+  it('keeps a description a member wrote when the task is read back', async () => {
+    const member = await login('0010');
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/employee/my-work',
+      headers: member,
+      payload: {
+        idempotencyKey: 'member-described-task-1',
+        projectId: 'PRJ-A',
+        taskName: 'Member described work',
+        description: 'Line one\nLine two',
+        deadline: '2026-12-15'
+      }
+    });
+    expect(created.statusCode, created.body).toBe(200);
+    const taskId = (created.json() as { data: { taskId: string } }).data.taskId;
+    const detail = await app.inject({ url: `/api/work/tasks/${taskId}`, headers: { cookie: member.cookie! } });
+    expect(detail.statusCode, detail.body).toBe(200);
+    const data = detail.json().data as { record: { description: string; taskName: string } };
+    expect(data.record.taskName).toBe('Member described work');
+    expect(data.record.description).toBe('Line one\nLine two');
+  });
+
+  it('refuses project, subproject and task mutations from MEMBER and VIEWER', async () => {
+    await insertSubproject(db, { projectId: 'PRJ-A', subprojectName: 'Guard area' }, 'SUB-G');
+    await db.query(
+      "INSERT INTO tasks(task_id,project_id,task_name,status,due_date) VALUES('T-G','PRJ-A','Guarded','In Progress','2026-12-01')"
+    );
+    for (const employeeId of ['0010', '0020']) {
+      const headers = await login(employeeId);
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/api/manager/subprojects',
+            headers,
+            payload: { idempotencyKey: `denied-${employeeId}-sub`, projectId: 'PRJ-A', subprojectName: 'Denied' }
+          })
+        ).statusCode,
+        `${employeeId} create`
+      ).toBe(403);
+      expect(
+        (
+          await app.inject({
+            method: 'PATCH',
+            url: '/api/manager/subprojects/SUB-G',
+            headers,
+            payload: { revision: 1, description: 'changed' }
+          })
+        ).statusCode,
+        `${employeeId} patch subproject`
+      ).toBe(403);
+      expect(
+        (
+          await app.inject({
+            method: 'PATCH',
+            url: '/api/manager/projects/PRJ-A',
+            headers,
+            payload: { revision: 1, description: 'changed' }
+          })
+        ).statusCode,
+        `${employeeId} patch project`
+      ).toBe(403);
+      expect(
+        (
+          await app.inject({
+            method: 'PATCH',
+            url: '/api/manager/tasks/T-G',
+            headers,
+            payload: { revision: 1, taskName: 'changed' }
+          })
+        ).statusCode,
+        `${employeeId} patch task`
+      ).toBe(403);
+      expect(
+        (
+          await app.inject({
+            method: 'DELETE',
+            url: '/api/manager/subprojects/SUB-G',
+            headers,
+            payload: { revision: 1, confirmed: true, reason: 'x', confirmation: 'DELETE SUB-G' }
+          })
+        ).statusCode,
+        `${employeeId} delete subproject`
+      ).toBe(403);
+      // The read-only projection is not a write path.
+      expect(
+        (
+          await app.inject({
+            method: 'PATCH',
+            url: '/api/work/projects/PRJ-A',
+            headers,
+            payload: { revision: 1, description: 'changed' }
+          })
+        ).statusCode,
+        `${employeeId} work patch`
+      ).toBe(404);
+    }
+    const unchanged = await db.one<{ description: string }>(
+      "SELECT description FROM subprojects WHERE subproject_id = 'SUB-G'"
+    );
+    expect(unchanged?.description).toBe('');
   });
 });
 
@@ -673,11 +933,11 @@ describe('schema readiness', () => {
     const ledger = await db.one<{ version: number; name: string; checksum: string; duration_ms: number }>(
       'SELECT version, name, checksum, duration_ms FROM schema_migrations ORDER BY version DESC LIMIT 1'
     );
-    expect(ledger?.version).toBe(8);
+    expect(ledger?.version).toBe(9);
     await db.query('DELETE FROM schema_migrations WHERE version = $1', [ledger!.version]);
     const response = await app.inject({ url: '/readyz' });
     expect(response.statusCode).toBe(503);
-    expect(response.json()).toMatchObject({ status: 'migration-required', requiredSchemaVersion: 8 });
+    expect(response.json()).toMatchObject({ status: 'migration-required', requiredSchemaVersion: 9 });
     expect(response.json().error.code).toBe('DATABASE_MIGRATION_REQUIRED');
     await db.query(
       'INSERT INTO schema_migrations(version, name, checksum, duration_ms) VALUES($1,$2,$3,$4)',

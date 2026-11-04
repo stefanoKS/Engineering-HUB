@@ -77,7 +77,7 @@ The example explicitly sets ALLOW_INSECURE_LAN_HTTP=true to support the requeste
 
 ## 4. Apply schema and create your administrator
 
-Migration 0007_local_accounts.sql permits members without email, adds local credential records and session credential versions. Migration 0008_member_created_work.sql (2026-11-03) adds the member task-creation channel and the recorded request author; it is additive and rewrites no existing column. Both preserve existing IDs/records and do not rewrite prior migration files. For an existing database, first create and verify a backup, then review/apply the new migration.
+Migration 0007_local_accounts.sql permits members without email, adds local credential records and session credential versions. Migration 0008_member_created_work.sql (2026-11-03) adds the member task-creation channel and the recorded request author. Migration 0009_subproject_description.sql (2026-11-04) adds `subprojects.description` as `TEXT NOT NULL DEFAULT ''`, so an existing subproject reads back with an empty description. Each is additive and rewrites no existing column. All of them preserve existing IDs/records and do not rewrite prior migration files. For an existing database, first create and verify a backup, then review/apply the new migration. The current build requires schema 9.
 
 Run deploy/windows/Migrate-Lan.cmd and type APPLY MIGRATIONS when ready. This is an explicit one-shot action; startup never migrates.
 

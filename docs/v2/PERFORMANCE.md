@@ -1,5 +1,24 @@
 # Performance
 
+## Member explorer measurement — 2026-11-04
+
+The member read-only endpoints were added to the harness (`tools/benchmark`) and measured on the
+`large` dataset (1 000 projects, 10 000 tasks, 120 members, 15 warm samples, in-process injection):
+
+| Endpoint | cold | p50 | p95 | db calls | bytes |
+| --- | --- | --- | --- | --- | --- |
+| `GET /api/work/projects?pageSize=24` | 156.47 ms | 26.78 ms | 51.60 ms | 10 | 7 906 |
+| `GET /api/work/projects/P-000001` | 39.83 ms | 26.73 ms | 40.05 ms | 10 | 5 907 |
+| `GET /api/work/tasks/T-0000001` | 16.87 ms | 2.79 ms | 3.17 ms | 5 | 1 390 |
+
+All three stay inside the documented ≤ 300 ms read target and the "bounded, ≤ 10 database calls"
+rule; the explorer pays one memoized `TaskScope` pass for the counts instead of one query per card.
+Raw results: `bench/results-2026-11-04T04-49-44-012Z.json` (final tree); an earlier run of the same
+day is kept as `bench/results-2026-11-04T04-44-25-404Z.json`. The single cold outlier is the first
+request on a fresh pool, which the harness reports separately. These are local, server-side numbers -
+not evidence about a deployment - and `docs/PRODUCTION_READINESS.md` stays **NOT APPROVED FOR
+PRODUCTION**.
+
 ## Large local benchmark — 2026-11-01
 
 At 10,000 tasks and concurrency 5, task creation p95 was 55.43 ms, task lists 28.74 ms and workload 205.84 ms. These are in-process measurements without network/TLS. See [method, raw results and limits](RELEASE_HARDENING.md).

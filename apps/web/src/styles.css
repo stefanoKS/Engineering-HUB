@@ -76,6 +76,7 @@ p {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
   gap: 1rem;
   padding: 0.85rem 1.5rem;
   background: var(--ui-surface);
@@ -343,6 +344,43 @@ p {
 
 .link-button.danger {
   color: var(--red);
+}
+
+/*
+ * The shared Back control on a detail screen.
+ *
+ * It sits inside the column-flex `.screen` container, so without this rule it stretched to the full
+ * content width and its label was centred by the button default - the reason it appeared mid-page.
+ * It is now one compact, self-aligned control whose arrow starts exactly at the page-title left
+ * margin: no `justify-content`, `margin-left: auto` or `float` is involved, and nothing here can
+ * inherit a right alignment.
+ */
+.back-button {
+  align-self: flex-start;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  width: auto;
+  max-width: 100%;
+  margin: 0;
+  padding: 0.3rem 0.6rem 0.3rem 0;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.back-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ui-accent) 10%, transparent);
+}
+
+.back-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .lang-switch .lang {
@@ -692,10 +730,13 @@ dialog.modal::backdrop {
 
 /* V2 workstation refresh: bright identity accents, calm reading surfaces, clear actions. */
 body { background: radial-gradient(ellipse at 90% 0, #e5e9ff 0, transparent 42%), var(--ui-bg); }
-.app-header { padding: 1.2rem 2rem; gap: 1.5rem; }
-.brand { display: flex; align-items: center; gap: .85rem; }
-.brand-symbol { display: grid; place-content: center; grid-template-columns: auto auto; width: 46px; height: 46px; flex-shrink: 0; background: #312e81; color: #fff; font-size: 18px; font-weight: 800; border-radius: 14px; letter-spacing: -1px; box-shadow: 0 5px 12px #312e8126; }
-.brand-symbol span { color: #5eead4; }
+.app-header { padding: .9rem 2rem; gap: 1.5rem; }
+.brand { display: flex; align-items: center; gap: .85rem; min-width: 0; }
+.brand-text { min-width: 0; }
+/* Supplied brand assets: the company lockup on the sign-in card and the department lockup in the
+   authenticated header. Both keep their intrinsic aspect ratio; neither is cropped or recoloured. */
+.company-login-logo { display: block; width: 100%; max-width: 320px; height: auto; object-fit: contain; margin: 0 auto; }
+.design-team-logo { display: block; width: auto; height: 64px; max-width: min(360px, 40vw); object-fit: contain; flex-shrink: 0; }
 .app-header h1 { font-size: 1.2rem; letter-spacing: .015em; }
 .app-header .muted { font-size: .78rem; }
 .app-nav { padding: .65rem 2rem; gap: .35rem; box-shadow: 0 4px 14px #17233b05; }
@@ -760,6 +801,8 @@ input[type=checkbox] { min-height: auto; width: 17px; height: 17px; accent-color
 .project-picker .pagination { flex-wrap: wrap; font-size: .75rem; gap: .3rem; }
 .project-picker .pagination .button { min-height: 32px; padding: .2rem .45rem; }
 @media (max-width: 850px) {
+  .design-team-logo { height: 46px; max-width: min(240px, 65vw); }
+  .company-login-logo { max-width: 260px; }
   .app-header { align-items: flex-start; flex-wrap: wrap; padding: 1rem; }
   .header-actions { justify-content: flex-start; gap: .7rem; }
   .app-nav { padding: .5rem .8rem; flex-wrap: nowrap; overflow-x: auto; }
@@ -902,4 +945,70 @@ input[type=checkbox] { min-height: auto; width: 17px; height: 17px; accent-color
   .hierarchy-row { padding-left: calc(0.4rem + (var(--level, 1) - 1) * 0.9rem); }
   .hierarchy-assignees { max-width: 10rem; }
   .hierarchy-actions { margin-left: 0; width: 100%; }
+}
+/* ------------------------------------------------------------------ read-only explorer */
+
+/*
+ * Member-facing read-only surfaces: the project explorer cards, breadcrumbs and multi-line
+ * descriptions. A description keeps its line breaks, wraps inside its column and never
+ * introduces a horizontal scrollbar; a preview is clamped so a card stays compact.
+ */
+.breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: #5b6472;
+  min-width: 0;
+}
+.breadcrumb-item { display: inline-flex; align-items: center; gap: 0.25rem; min-width: 0; overflow-wrap: anywhere; }
+.breadcrumb-item a { color: var(--ui-accent); text-decoration: underline; }
+.breadcrumb-item [aria-current='page'] { color: #2b3445; font-weight: 650; }
+.breadcrumb-sep { color: #a3abbb; }
+
+.description-text {
+  margin: 0.35rem 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+.description-text.empty-description,
+.description-preview.empty-description { color: #7d8798; font-style: italic; }
+.description-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 0.35rem 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+  gap: 1rem;
+}
+.project-card { display: flex; flex-direction: column; gap: 0.45rem; border-left: 3px solid var(--project-accent, #3b6ea5); }
+.project-card-head { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+.project-card-head h3 { margin: 0; font-size: 1.02rem; overflow-wrap: anywhere; }
+.project-card-head a { color: inherit; text-decoration: none; }
+.project-card-head a:hover { text-decoration: underline; }
+.project-card-meta { margin: 0; overflow-wrap: anywhere; }
+.project-card-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0; }
+.project-card .inline-actions { margin-top: auto; }
+
+.hierarchy-description {
+  margin: 0.1rem 0 0.45rem;
+  padding-left: calc(3rem + (var(--level, 1) - 1) * 1.35rem);
+  max-width: 70ch;
+}
+.hierarchy-description .description-preview { -webkit-line-clamp: 2; }
+.hierarchy-description .link-button { padding: 0.15rem 0; font-size: 0.82rem; }
+
+@media (max-width: 900px) {
+  .project-grid { grid-template-columns: 1fr; }
+  .hierarchy-description { padding-left: calc(2.4rem + (var(--level, 1) - 1) * 0.9rem); }
 }

@@ -123,6 +123,10 @@ permission checks against PostgreSQL and never calls Apps Script or Sheets.
   browser history only when the previous entry is a known, role-authorized application route;
   otherwise it replaces the URL with Projects or All Work. Route filters, expanded hierarchy
   nodes, pagination and scroll offsets are kept in page memory only, never browser storage.
+  One shared `BackButton` renders as the first child of the detail content column; `.back-button`
+  keeps it compact and self-aligned (`align-self: flex-start`, no left padding), so its arrow starts
+  exactly at the page-title left margin at every viewport width instead of stretching to the column
+  width and centring its label.
 * The API memoizes table reads for the lifetime of one request (`ReadCtx`), so assembling a
   screen does not re-read a table. There is no cross-user server cache of the private data.
 
@@ -180,6 +184,18 @@ separately.
 * No second bootstrap route, no browser write path outside the documented commands.
 * No claim that a single office server is highly available.
 
+## Branding assets
+
+The supplied logo files live in `apps/web/public/branding/` and are referenced by absolute URL
+(`/branding/companyLogo.png`, `/branding/designTeam.png`); Vite copies `public/` unchanged into
+`dist/branding/`. The sign-in card shows only the company lockup (`company-login-logo`); the
+authenticated shell shows only the department lockup (`design-team-logo`) in place of the former
+`brand-symbol` box, for every role, next to the application name. Both images keep their intrinsic
+aspect ratio (`width`/`height` auto on one axis with `object-fit: contain`), so they are never
+cropped or stretched; the files themselves are not modified. The header logo shrinks below 850 px,
+and the header wraps instead of hiding the language switch, identity, role or sign-out controls.
+Assets and styles carry no data, authorization or publication meaning.
+
 ## Expandable task hierarchy
 
 The task screen pages root tasks and loads bounded child pages through the same authorized manager
@@ -187,3 +203,44 @@ endpoint. A recursive SQL ancestor projection is bounded by the domain MAX_TASK_
 search/filter ancestry before paging. Parent_Task_ID is unchanged; collapse changes only page-memory
 expansion state. Child queries share the normal task-cache invalidation prefix and reopening uses
 cached rows. Nested expansion survives collapsing and reopening its parent within the screen.
+
+## Member project explorer (read-only browsing)
+
+`MEMBER` and `VIEWER` reach projects through one read-only screen (`WorkProjectsScreen`) backed by
+`GET /api/work/projects`. It is a separate component from the management `ProjectsScreen`, so the
+member tree never imports the manager list, the archive/edit/delete controls or the create form.
+The explorer, the project detail and the task detail all read `/api/work/*`; `routeAllowed()` and the
+post-sign-in redirect accept `projects` for both reader roles, and a direct `#/projects` address
+renders the explorer instead of bouncing to My Work.
+
+* One bounded page per request. Search (`query`) and responsibility (`responsibilityId`) are
+  resolved by the server before paging and before the top-N cut; the page reports its total.
+  The responsibility list in the response is limited to areas that group at least one readable
+  project, so the filter cannot disclose an area with no visible work.
+* Cards reuse the stable `Project_ID` accent and show only allowlisted fields: name, description,
+  responsibility name, owner name, status, priority, deadline, derived progress and the two
+  `TaskScope` counts (`openWork`, `completedWork`). A container task is never counted, and completed
+  work is never mixed into the open figure.
+* Description rendering uses React text with `white-space: pre-wrap`; a card clamps the preview and
+  the detail page shows the full text. An empty description renders `説明なし / No description`
+  instead of a blank panel. Subproject descriptions use the same preview plus an in-place
+  `詳細を見る / View details` toggle, so a short description never needs its own page.
+* Project detail and task detail keep the existing `ProjectHierarchy` and `ProjectDetailScreen`
+  components; a reader gets no edit, create, delete, reassign or deadline control, and the task
+  detail renders no manager-only history or schedule section at all. A breadcrumb
+  (`プロジェクト / project / subproject path / task`) links only to records the reader could already
+  open.
+* Cache keys stay separated: the member list uses the `work/projects` prefix and the detail
+  `work/project/<id>`, while manager reads keep `manager/*`. Nothing private is written to the
+  browser: search, filter, page and expansion state live in page memory only.
+
+`subprojects.description` is a schema-9 additive column (`TEXT NOT NULL DEFAULT ''`). The manager
+form edits it; the read-only projection copies it into `WorkSubproject.description`; a partial
+`PATCH` that omits it keeps the stored text.
+
+## Task detail context
+
+`GET /api/manager/tasks/:id` and `GET /api/work/tasks/:id` share one `TaskDetail` contract that adds
+`context` (project name and the subproject chain, root first). The chain is one bounded recursive
+query (`depth < 8`) over `subprojects`, carrying names only - no owner, deadline or private column -
+so both the manager and the read-only task screen can show the same breadcrumb.

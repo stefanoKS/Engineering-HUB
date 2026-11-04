@@ -1,5 +1,18 @@
 # V2 HTTP API
 
+## Member project explorer (2026-11-04)
+
+`MEMBER` and `VIEWER` now have a Projects navigation entry that opens a read-only explorer backed
+by `GET /api/work/projects` (never `/api/manager/projects`). The explorer searches by project name,
+filters by responsibility on the server, pages the result and shows only allowlisted fields:
+project name, description, responsibility name, owner name, status, priority, committed deadline,
+derived progress and the `TaskScope` counts of open and completed work. `GET /api/work/projects/:id`
+adds the project description and each subproject's description to the same narrow projection, and
+`GET /api/work/tasks/:id` adds a display-only `context` (project name and the subproject chain).
+Schema 9 adds `subprojects.description` (additive, default `''`). There is no write path on any
+`/api/work/*` route: a MEMBER or VIEWER still cannot create, patch, delete, reassign, approve or
+change a deadline.
+
 ## Local LAN update — 2026-11-02
 
 [LOCAL_LAN.md](LOCAL_LAN.md) specifies the employee-ID/password mode, schema 7, optional email, first-login change, administrator reset, employee-owned progress editing, Windows launcher, durable local backup and optional Shared Drive upload. It supersedes Google-only or Linux-only assumptions below for this mode. [Verification record](LOCAL_LAN_ACCEPTANCE.md).
@@ -115,8 +128,8 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | PATCH | `/api/manager/projects/:id` | `revision` + changed fields, `confirmDeadlineChange`, `acknowledgeNonWorking` |
 | POST | `/api/manager/projects/:id/archive` | `revision`, `confirmed: true`, `reason?` |
 | DELETE | `/api/manager/projects/:id` | `revision`, `confirmed`, `reason`, `confirmation: "DELETE <id>"` |
-| POST | `/api/manager/subprojects` | `idempotencyKey`, `projectId`, `parentSubprojectId?`, `subprojectName` |
-| PATCH | `/api/manager/subprojects/:id` | `revision` + fields |
+| POST | `/api/manager/subprojects` | `idempotencyKey`, `projectId`, `parentSubprojectId?`, `subprojectName`, `description?` (max 2000) |
+| PATCH | `/api/manager/subprojects/:id` | `revision` + partial fields; an omitted `description` keeps the stored text |
 | POST | `/api/manager/subprojects/:id/archive` \| `/reactivate` | `revision`, `confirmed`, `reason?` |
 | DELETE | `/api/manager/subprojects/:id` | As projects |
 | POST | `/api/admin/subprojects/:id/remove` | ADMIN logical removal: `revision`, `confirmed: true`; sets `deleted_at`, increments the revision and writes `RECORD_REMOVED` without deleting history |
@@ -188,9 +201,9 @@ or a stored status; the only completion path is the reviewed request below.
 | Method | Path | Notes |
 | --- | --- | --- |
 | GET | `/api/work/tasks` | Server-paged active work. `projectId`, `subprojectId`, `responsibilityId`, `unassigned`, `status`, `displayStatus` (`IN_PROGRESS`/`OVERDUE`/`DONE`/`CANCELLED`), `ownerMemberId`, `query`, `containerOnly`, `overdueOnly`, `includeInactive`, `tree`, `treeParentId`, paging and sorting |
-| GET | `/api/work/tasks/:id` | Task detail for MEMBER/VIEWER: an allowlisted record plus assignees and children |
-| GET | `/api/work/projects` | `query`, `page`, `pageSize`; the assignment picker for the read-only screens |
-| GET | `/api/work/projects/:id` | Read-only project detail: allowlisted record, rollup, subprojects (with the stored `parentSubprojectId`) and the tasks of the visible branches |
+| GET | `/api/work/tasks/:id` | Task detail for MEMBER/VIEWER: an allowlisted record plus the display-only `context` (project name and subproject chain, root first), assignees and children |
+| GET | `/api/work/projects` | Member project explorer. `query` (project name only), `responsibilityId`, `page`, `pageSize`; each item carries `description` and the `TaskScope` counts `activeTaskCount`/`completedTaskCount`, and the page carries the `responsibilities` that group at least one readable project |
+| GET | `/api/work/projects/:id` | Read-only project detail: allowlisted record (with `description` and the two counts), rollup, subprojects (with `description` and the stored `parentSubprojectId`) and the tasks of the visible branches |
 
 Visibility is resolved on the server before a page is cut:
 

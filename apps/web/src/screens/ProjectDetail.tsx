@@ -18,7 +18,7 @@ import type { Actor, DeletionPreflight, Project, Reference, ProgressRollup, Subp
 import { api, ApiFailure } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
-import { Badge, EmptyState, ErrorBox, Modal, ProgressBar, Section, statusTone } from '../components/ui';
+import { Badge, Breadcrumbs, DescriptionText, EmptyState, ErrorBox, Modal, ProgressBar, Section, statusTone } from '../components/ui';
 import { displayTone } from './Tasks';
 import { projectColor } from '@eh/domain';
 import { BackButton, useRouteMemoryState } from '../state/navigation';
@@ -50,6 +50,7 @@ type ReadOnlyDetail = {
   record: {
     projectId: string;
     projectName: string;
+    description: string;
     responsibilityName: string;
     projectOwnerName: string;
     status: Project['status'];
@@ -62,6 +63,7 @@ type ReadOnlyDetail = {
   subprojects: {
     subprojectId: string;
     subprojectName: string;
+    description?: string;
     parentSubprojectId?: string | null;
     status: Subproject['status'];
     deadline: string | null;
@@ -92,6 +94,7 @@ function toViewModel(detail: ManagerDetail | ReadOnlyDetail): ViewModel {
 export type HierarchySubproject = {
   subprojectId: string;
   subprojectName: string;
+  description?: string;
   parentSubprojectId: string | null;
   status: string;
   deadline: string | null;
@@ -464,6 +467,8 @@ function SubprojectItem({
   const { t, label } = useI18n();
   const key = `sub:${node.subprojectId}`;
   const open = !collapsed.has(key);
+  const description = (node.description ?? '').trim();
+  const [expanded, setExpanded] = useState(false);
   return (
     <li className="hierarchy-node" id={`hierarchy-${node.subprojectId}`}>
       <div className="hierarchy-row hierarchy-row-subproject" style={{ ['--level' as string]: level }}>
@@ -507,6 +512,19 @@ function SubprojectItem({
           </span>
         ) : null}
       </div>
+      {description ? (
+        <div className="hierarchy-description" style={{ ['--level' as string]: level }}>
+          <p className={expanded ? 'description-text' : 'description-preview'}>{description}</p>
+          <button
+            type="button"
+            className="link-button"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((current) => !current)}
+          >
+            {t(expanded ? 'subprojects.hideDetails' : 'subprojects.details')}
+          </button>
+        </div>
+      ) : null}
       {open ? (
         node.tasks.length === 0 && node.children.length === 0 ? (
           <p className="hierarchy-empty muted small">{t('hierarchy.emptySubproject')}</p>
@@ -850,6 +868,7 @@ export function ProjectDetailScreen({
       subprojects: source.subprojects.map((subproject) => ({
         subprojectId: subproject.subprojectId,
         subprojectName: subproject.subprojectName,
+        description: subproject.description ?? '',
         parentSubprojectId: subproject.parentSubprojectId ?? null,
         status: subproject.status,
         deadline: subproject.deadline,
@@ -875,7 +894,7 @@ export function ProjectDetailScreen({
     <div className="screen" style={{ ['--project-accent' as string]: projectColor(record.projectId) }}>
       <BackButton
         actor={actor}
-        fallback={actor.role === 'ADMIN' || actor.role === 'MANAGER' ? 'projects' : 'all-work'}
+        fallback="projects"
         disabled={
           editProject ||
           editingSubproject !== null ||
@@ -883,6 +902,12 @@ export function ProjectDetailScreen({
           newTaskSubproject !== undefined ||
           deleteTarget !== null
         }
+      />
+      <Breadcrumbs
+        items={[
+          { label: t('nav.projects'), href: '#/projects' },
+          { label: record.projectName }
+        ]}
       />
       <div className="screen-header">
         <div>
@@ -915,6 +940,35 @@ export function ProjectDetailScreen({
           {notice}
         </div>
       ) : null}
+
+      <Section title={t('project.info')}>
+        <div className="detail-grid">
+          <div>
+            <dt>{t('projects.status')}</dt>
+            <dd>
+              <Badge tone={statusTone(record.status)}>{label('project.status', record.status)}</Badge>
+            </dd>
+          </div>
+          <div>
+            <dt>{t('projects.priority')}</dt>
+            <dd>{label('priority', record.priority)}</dd>
+          </div>
+          <div>
+            <dt>{t('projects.responsibility')}</dt>
+            <dd>{record.responsibilityName || t('overview.unassigned')}</dd>
+          </div>
+          <div>
+            <dt>{t('projects.owner')}</dt>
+            <dd>{record.projectOwnerName || t('common.unset')}</dd>
+          </div>
+          <div>
+            <dt>{t('projects.deadline')}</dt>
+            <dd>{record.committedDeadline ?? t('common.unset')}</dd>
+          </div>
+        </div>
+        <h3>{t('projects.description')}</h3>
+        <DescriptionText text={record.description ?? ''} />
+      </Section>
 
       <Section title={t('projects.progress')}>
         <ProgressBar value={view.progress.percent} />

@@ -14,6 +14,7 @@ import { LocalAccountsScreen, PasswordScreen } from './screens/LocalAccounts';
 import { LoginScreen } from './screens/Login';
 const OverviewScreen = lazy(() => import('./screens/Overview').then(module => ({ default: module.OverviewScreen })));
 const ProjectsScreen = lazy(() => import('./screens/Projects').then(module => ({ default: module.ProjectsScreen })));
+const WorkProjectsScreen = lazy(() => import('./screens/WorkProjects').then(module => ({ default: module.WorkProjectsScreen })));
 const ProjectDetailScreen = lazy(() => import('./screens/ProjectDetail').then(module => ({ default: module.ProjectDetailScreen })));
 const TasksScreen = lazy(() => import('./screens/Tasks').then(module => ({ default: module.TasksScreen })));
 const TaskDetailScreen = lazy(() => import('./screens/TaskDetail').then(module => ({ default: module.TaskDetailScreen })));
@@ -76,7 +77,7 @@ export function App(): JSX.Element {
   useEffect(() => {
     const role = session?.actor.role;
     if (!role || role === 'ADMIN' || role === 'MANAGER') return;
-    const allowed = new Set(['my-work', 'all-work', 'overview', 'task', 'project']);
+    const allowed = new Set(['my-work', 'all-work', 'overview', 'task', 'projects', 'project']);
     if (!allowed.has(route.segments[0] ?? 'overview')) navigate('my-work');
   }, [session, route.path]);
 
@@ -143,7 +144,7 @@ export function App(): JSX.Element {
       ].filter((entry) =>
         isManager
           ? true
-          : entry.path === 'my-work' || entry.path === 'all-work' || entry.path === 'overview'
+          : entry.path === 'my-work' || entry.path === 'all-work' || entry.path === 'projects' || entry.path === 'overview'
       ),
     [t, isManager]
   );
@@ -171,8 +172,8 @@ export function App(): JSX.Element {
       <a className="skip-link" href="#main-content" onClick={event => { event.preventDefault(); document.getElementById('main-content')?.focus(); }}>{t('nav.skip')}</a>
       <header className="app-header">
         <div className="brand">
-          <span className="brand-symbol" aria-hidden="true">E<span>H</span></span>
-          <div><h1>{t('app.name')}</h1>
+          <img src="/branding/designTeam.png" alt="広島化成 製品設計課" className="design-team-logo" />
+          <div className="brand-text"><h1>{t('app.name')}</h1>
           <p className="muted">{t('app.subtitle')}</p></div>
         </div>
         <div className="header-actions">
@@ -229,6 +230,9 @@ function renderScreen(route: Route, actor: Actor, isManager: boolean): JSX.Eleme
     if (!second) return <TasksScreen actor={actor} readOnly={!isManager} />;
     return <TaskDetailScreen actor={actor} taskId={second} readOnly={!isManager} />;
   }
+  // MEMBER and VIEWER browse permitted projects through the read-only explorer, never through the
+  // management list (which reads `/api/manager/projects`).
+  if (first === 'projects' && !isManager) return <WorkProjectsScreen />;
   // Read-only project detail stays reachable for MEMBER and VIEWER (the task detail links here).
   if (first === 'project' && second && !isManager) {
     return <ProjectDetailScreen actor={actor} projectId={second} readOnly />;
