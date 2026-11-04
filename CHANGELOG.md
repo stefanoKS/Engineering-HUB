@@ -1,5 +1,26 @@
 # Changelog
 
+## V2 responsibility area removal and retired-area visibility — 2026-11-04
+
+Schema 11 adds an additive migration (`0011_responsibility_deletions.sql`) that extends the
+`record_deletions` entity allowlist so a removed responsibility area keeps the same tombstone
+contract as a project, subproject or task. No column or row is rewritten.
+
+- The 分野 screen lists active areas only; the new `廃止済みを表示` / **Show retired** checkbox
+  (route memory, default off) reveals retired ones. Retiring or reactivating an area remains a
+  status change and rewrites no project, task, owner or deadline.
+- ADMIN now has 分野を削除, backed by `GET /api/admin/responsibilities/:id/delete-preflight` and
+  `DELETE /api/admin/responsibilities/:id`. MANAGER, MEMBER and VIEWER are refused on the server.
+- Any project row that still names the area - active, archived or logically deleted - blocks the
+  deletion with `PROJECTS_REFERENCED` and the affected count; the dialog then offers 廃止する
+  instead of a misleading Delete button. Stored publication references and pending worker jobs
+  block the same way.
+- Member links are the only administrative relationship: they never block, they are written into
+  the tombstone snapshot and then removed with the row. Append-only audit rows stay, the deletion
+  re-runs the preflight under a row lock, and a repeated request never produces a second tombstone.
+- `/readyz` now requires schema 11; apply the migration from a verified backup before deploying
+  this build.
+
 ## V2 unified task removal and explicit mistaken-record purge — 2026-11-04
 
 - All Work and Project Detail now use the same ADMIN logical-removal dialog and

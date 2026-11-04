@@ -191,6 +191,7 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | GET | `/api/manager/reports/workload/tasks` | Paginated drilldown behind a card, a timeline bucket or a member row |
 | GET | `/api/manager/plan/preview` | `deadline`, `durationValue`, `durationUnit`, `durationBasis` |
 | GET | `/api/manager/deletion/preflight` | `entityType`, `entityId` (ADMIN only) |
+| GET | `/api/admin/responsibilities/:id/delete-preflight` | ADMIN only; eligibility, project/reference counts, blockers, `erasePlan`, `confirmationText` and the current revision |
 | GET | `/api/manager/removal/preflight` | `entityType=TASKS|SUBPROJECTS`, `entityId` (ADMIN only); returns active child/dependency/workflow blockers, the current revision and whether retained task history requires an administrative reason |
 
 ### Commands
@@ -222,6 +223,7 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | PATCH | `/api/manager/responsibilities/:id` | `revision` + fields |
 | PATCH | `/api/manager/responsibilities/:id/order` | `revision`, `sortOrder` |
 | POST | `/api/manager/responsibilities/:id/retire` \| `/reactivate` | `revision`, `confirmed`, `reason?` |
+| DELETE | `/api/admin/responsibilities/:id` | ADMIN only, unused areas only: `revision`, `confirmed: true`, `confirmation: "DELETE <id>"`, optional `reason`; writes the tombstone and `RECORD_DELETE_PREPARED`/`RECORD_DELETED` |
 | POST | `/api/manager/skills` | `skillName`, `category`, `description`, `requiredLevel` |
 | POST | `/api/manager/skills/assess` | `memberId`, `skillId`, `currentLevel`, `evidence`, `trainingAction` |
 | POST | `/api/manager/requests/sync` | `includeDecided`; performs at most one import per call |
@@ -264,6 +266,31 @@ value without corroboration is reported separately as `UNVERIFIED_LEGACY_EFFORT`
 rather than silently erased. Routine `TASK_UPDATED` history does not itself block a purge, while
 unknown or operational audit actions do. Audit checks query the complete history, not a capped
 recent page.
+
+### Responsibility areas (分野)
+
+`GET /api/manager/responsibilities` returns every stored area, active and retired, because the
+manager table filters them in the browser: the default view lists active areas only and the
+`廃止済みを表示` / **Show retired** checkbox reveals the rest. That preference lives in route
+memory, never in the workbook. Retiring or reactivating an area is a status change only - no
+project, task, owner, deadline or colour is rewritten - and the refreshed list simply moves the row
+between the two views.
+
+`DELETE /api/admin/responsibilities/:id` is the reviewed permanent deletion for an **unused** area,
+and `GET /api/admin/responsibilities/:id/delete-preflight` is its read-only companion. The
+preflight answers `projectCount` (active, archived and logically deleted projects all count),
+`archivedProjectCount`, `deletedProjectCount`, `activeMemberCount`, `historicalMemberCount`,
+`auditReferenceCount`, `publishedReferenceCount`, `activeJobCount`, `erasePlan`,
+`confirmationText` and the current revision. Any project reference blocks the deletion with
+`PROJECTS_REFERENCED` (HTTP 409, `details.projectCount`), as do a stored publication reference and a
+pending worker job. Nothing is reassigned or cascaded; the manager moves the projects first or
+retires the area instead. Only `responsibility_members` links are administrative: they do not
+block, they are captured in the tombstone snapshot and then removed with the row, while the
+append-only `audit_log` rows stay. The deletion re-runs the preflight under a row lock inside the
+deleting transaction, refuses a stale revision with `EDIT_CONFLICT`, and answers the stored
+`tombstoneId` only after `RECORD_DELETE_PREPARED`, the row removal and `RECORD_DELETED` all
+succeed. A deleted identifier is never reused, so a repeated deletion answers
+`INVALID_TRANSITION` without a second tombstone.
 
 ## 5. Employee / member endpoints
 

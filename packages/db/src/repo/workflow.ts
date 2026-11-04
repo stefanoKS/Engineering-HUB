@@ -269,10 +269,19 @@ export async function listAudit(
 
 /* ------------------------------ deletion --------------------------------- */
 
+export type DeletableEntity = 'PROJECTS' | 'SUBPROJECTS' | 'TASKS' | 'RESPONSIBILITIES';
+
+const DELETION_TABLE: Record<DeletableEntity, { table: string; column: string }> = {
+  PROJECTS: { table: 'projects', column: 'project_id' },
+  SUBPROJECTS: { table: 'subprojects', column: 'subproject_id' },
+  TASKS: { table: 'tasks', column: 'task_id' },
+  RESPONSIBILITIES: { table: 'responsibilities', column: 'responsibility_id' }
+};
+
 export async function insertTombstone(
   db: Db,
   input: {
-    entityType: 'PROJECTS' | 'SUBPROJECTS' | 'TASKS';
+    entityType: DeletableEntity;
     entityId: string;
     deletedBy: string;
     reason: string;
@@ -290,15 +299,24 @@ export async function insertTombstone(
 }
 
 /** The only destructive statement in the application, called after every preflight gate. */
-export async function deleteRecord(
-  db: Db,
-  entityType: 'PROJECTS' | 'SUBPROJECTS' | 'TASKS',
-  entityId: string
-): Promise<boolean> {
-  const table = entityType === 'PROJECTS' ? 'projects' : entityType === 'SUBPROJECTS' ? 'subprojects' : 'tasks';
-  const column = entityType === 'PROJECTS' ? 'project_id' : entityType === 'SUBPROJECTS' ? 'subproject_id' : 'task_id';
+export async function deleteRecord(db: Db, entityType: DeletableEntity, entityId: string): Promise<boolean> {
+  const { table, column } = DELETION_TABLE[entityType];
   const result = await db.query(`DELETE FROM ${table} WHERE ${column} = $1`, [entityId]);
   return (result.rowCount ?? 0) > 0;
+}
+
+/**
+ * Membership rows of a permanently deleted responsibility.
+ *
+ * The relationship is soft for every ordinary change; only the reviewed ADMIN deletion path may
+ * remove these rows, and the tombstone snapshot of them is written first. Projects are never
+ * touched here - a project that still names the responsibility blocks the deletion.
+ */
+export async function deleteResponsibilityMemberRows(db: Db, responsibilityId: string): Promise<number> {
+  const result = await db.query('DELETE FROM responsibility_members WHERE responsibility_id = $1', [
+    responsibilityId
+  ]);
+  return result.rowCount ?? 0;
 }
 
 export async function listTombstones(db: Db, entityType?: string) {

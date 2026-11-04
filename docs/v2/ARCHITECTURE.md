@@ -208,6 +208,24 @@ or unknown audit actions, children, incoming foreign keys and workflow evidence 
 transaction explicitly removes only the enumerated task-assignee and outgoing-dependency rows,
 writes the durable tombstone and audit records, and then removes the task. No migration is needed.
 
+### Responsibility area lifecycle
+
+A responsibility area has three states the manager controls: edit, retire (a status change that
+keeps every project, task and history row) and, for an unused area, permanent deletion. The
+manager table lists active areas only and the `廃止済みを表示` preference - held in route memory, not
+in the database - reveals retired ones; retiring an area therefore only moves the row between the
+two views and the Overview cards and project filters keep resolving the stored identifier.
+
+`DELETE /api/admin/responsibilities/:id` is the only removal path for an area, and it reuses the
+tombstone contract of `record_deletions` (schema 11 extends its entity allowlist). Any project row
+that still names the area - active, archived or logically deleted - refuses the deletion with
+`PROJECTS_REFERENCED`, as do a stored publication reference and a pending worker job; the manager
+moves the projects first or retires the area instead, and nothing is reassigned or cascaded. The
+only administrative relationship is `responsibility_members`: its rows are snapshotted into the
+tombstone and then removed, while append-only `audit_log` rows stay. The deletion re-runs the
+preflight under a row lock inside the deleting transaction and answers the tombstone ID only after
+`RECORD_DELETE_PREPARED`, the row removal and `RECORD_DELETED` all succeed.
+
 ## 8. Published employee projection
 
 * One allowlist in `packages/domain/src/publication.ts` produces the only fields that leave the

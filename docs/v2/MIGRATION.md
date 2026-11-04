@@ -6,6 +6,31 @@ workbook, and it never sends a notification.
 
 ## 1. Commands
 
+### Schema 10 → 11 on an existing installation (Windows LAN)
+
+A deployment built from this repository requires **schema 11** (the last migration is
+`0011_responsibility_deletions.sql`: it drops and re-adds the `record_deletions.entity_type`
+CHECK so the reviewed ADMIN deletion path can tombstone a removed responsibility area as well as a
+project, subproject or task). The constraint replacement rewrites no row and adds no column; every
+stored responsibility, project, audit record and tombstone reads back exactly as before.
+`/readyz` answers `503 DATABASE_MIGRATION_REQUIRED` until the ledger reaches 11, and the API still
+never migrates at startup.
+
+```powershell
+# 1. Verified encrypted backup first (a failed backup stops the upgrade)
+./deploy/windows/Backup-Now.cmd
+
+# 2. Apply the reviewed additive migration; the prompt requires "APPLY MIGRATIONS"
+./deploy/windows/Migrate-Lan.cmd
+
+# 3. Confirm the ledger, readiness and data preservation
+psql "$env:DATABASE_URL" -c "SELECT version, name FROM schema_migrations ORDER BY version;"
+Invoke-RestMethod http://localhost:8050/readyz
+
+# 4. Only after 1-3 pass, publish the new application build and start it
+./deploy/windows/Start-Lan.cmd
+```
+
 ### Schema 9 → 10 on an existing installation (Windows LAN)
 
 A deployment built from this repository requires **schema 10** (the last migration is the

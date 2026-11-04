@@ -81,6 +81,58 @@ export function deletionPreflight(evidence: DeletionEvidence): DeletionPreflight
   };
 }
 
+/**
+ * A responsibility area is only physically removable while no project row names it.
+ *
+ * Archived and soft-deleted projects still reference the stable identifier, so they block the
+ * same way an active project does: the manager moves the projects to another area first, and
+ * nothing is reassigned or cascaded automatically. Membership links are administrative only and
+ * do not block - the deletion tombstone keeps their snapshot.
+ */
+export type ResponsibilityDeletionEvidence = {
+  entityId: string;
+  projectCount: number;
+  archivedProjectCount: number;
+  deletedProjectCount: number;
+  publishedReferenceCount?: number;
+  activeJobCount?: number;
+  retiredIdentifier?: boolean;
+};
+
+export function responsibilityDeletionPreflight(
+  evidence: ResponsibilityDeletionEvidence
+): DeletionPreflightResult {
+  const blockers: DeletionBlocker[] = [];
+  const blocked = (code: string, detail: string): void => {
+    blockers.push({ code, detail });
+  };
+  if (evidence.retiredIdentifier) {
+    blocked('ALREADY_DELETED', 'This identifier was already deleted and is never reused');
+  }
+  if (evidence.projectCount > 0) {
+    const breakdown = [
+      `${evidence.projectCount} project row(s) still name this responsibility`,
+      evidence.archivedProjectCount ? `${evidence.archivedProjectCount} archived` : '',
+      evidence.deletedProjectCount ? `${evidence.deletedProjectCount} logically deleted` : ''
+    ].filter(Boolean);
+    blocked(
+      'PROJECTS_REFERENCED',
+      breakdown.length > 1 ? `${breakdown[0]} (${breakdown.slice(1).join(', ')})` : breakdown[0] ?? ''
+    );
+  }
+  if ((evidence.publishedReferenceCount ?? 0) > 0) {
+    blocked('PUBLISHED', 'A stored publication snapshot still references this responsibility');
+  }
+  if ((evidence.activeJobCount ?? 0) > 0) {
+    blocked('ACTIVE_WORKFLOW', 'A pending background job still references this responsibility');
+  }
+  return {
+    deletable: blockers.length === 0,
+    blockers,
+    confirmationText: `DELETE ${evidence.entityId}`
+  };
+}
+
 export function assertDeletionAllowed(result: DeletionPreflightResult, supplied: string): void {
   if (!result.deletable) {
     throw new DomainError('INVALID_TRANSITION', 'This record cannot be removed permanently', {

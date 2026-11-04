@@ -313,6 +313,22 @@ export const ConfirmReasonBody = z
   })
   .strict();
 
+/**
+ * ADMIN-only permanent removal of an unused responsibility.
+ *
+ * `confirmation` is the typed phrase the preflight returned (`DELETE <id>`); the browser derives
+ * it from the record it selected, never from free text. `reason` is optional because the dialog is
+ * one Yes/No confirmation; an omitted reason is recorded as the documented default.
+ */
+export const DeleteResponsibilityBody = z
+  .object({
+    revision: Revision,
+    confirmed: Confirm,
+    reason: Text(1000).optional(),
+    confirmation: z.string().min(1).max(200)
+  })
+  .strict();
+
 export const SaveMemberBody = z
   .object({
     memberId: Id.optional(),

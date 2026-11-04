@@ -19,6 +19,7 @@ import {
   CreateTaskBody,
   DecisionBody,
   DeleteBody,
+  DeleteResponsibilityBody,
   MoveResponsibilityBody,
   OverrideCompleteBody,
   PatchProjectBody,
@@ -105,10 +106,12 @@ import { workloadDrilldown, workloadReport } from '../services/workload';
 import { publicationStatus, publishNow } from '../services/publication';
 import {
   deleteEntity,
+  deleteResponsibility,
   preflight,
   reconcileDeletions,
   removalPreflight,
-  removeEntity
+  removeEntity,
+  responsibilityPreflight
 } from '../services/deletion';
 import type { ServiceCtx } from '../services/common';
 
@@ -606,6 +609,25 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
       }
     });
   }
+
+  app.get('/api/admin/responsibilities/:id/delete-preflight', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      return ok(reply, request, await responsibilityPreflight(serviceCtx(request), id));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  app.delete('/api/admin/responsibilities/:id', async (request, reply) => {
+    try {
+      const body = DeleteResponsibilityBody.parse(request.body ?? {});
+      const { id } = request.params as { id: string };
+      return ok(reply, request, await deleteResponsibility(serviceCtx(request), id, body));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
 
   read('/api/manager/skills', async (request) => {
     const [items, assessments] = await Promise.all([

@@ -325,6 +325,8 @@ describe('分野 terminology and overview counts', () => {
       </I18nProvider>
     );
 
+    // A retired area is hidden from the default view; the manager reveals it explicitly.
+    fireEvent.click(await screen.findByLabelText('廃止済みを表示'));
     expect(await screen.findByText('廃止')).toBeTruthy();
     expect(screen.queryByText('Retired')).toBeNull();
   });

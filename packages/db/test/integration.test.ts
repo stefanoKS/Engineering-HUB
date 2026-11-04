@@ -28,6 +28,7 @@ import {
   releaseDeliveryAttempt,
   renewLease,
   reapExpiredLeases,
+  REQUIRED_SCHEMA_VERSION,
   schemaVersion,
   runMigrations,
   updateProject,
@@ -96,7 +97,7 @@ describe('schema and migrations', () => {
     await db.query('DELETE FROM schema_migrations WHERE version = 9');
     const result = await runMigrations(pool);
     expect(result.applied.map((entry) => entry.version)).toEqual([9]);
-    expect(await schemaVersion(pool)).toBe(10);
+    expect(await schemaVersion(pool)).toBe(REQUIRED_SCHEMA_VERSION);
     const after = await db.one<{
       subproject_id: string;
       description: string;

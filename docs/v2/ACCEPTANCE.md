@@ -1,5 +1,42 @@
 # V2 Acceptance Record
 
+## Responsibility area removal: hide retired areas and ADMIN deletion — 2026-11-04
+
+Implemented on reviewed HEAD `fab33c355b84879aba9c03cdac061d25627c8950` with a clean worktree. No
+production database, deployment, publication, mail or external service was accessed. Every database
+test used the repository's disposable PostgreSQL (`freshDatabase()` truncation, embedded smoke
+cluster) and the schema-11 migration was applied only there.
+
+The 分野 screen now hides retired areas by default (`廃止済みを表示` / **Show retired**, remembered in
+route memory), keeps retire/reactivate as status changes that rewrite no project, and offers an
+ADMIN-only **分野を削除** action. The delete path is a new server-checked preflight plus
+`DELETE /api/admin/responsibilities/:id`, gated by `record_deletions` (schema 11) and the same
+append-only audit contract as project/subproject/task deletion.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| Gate 0 inspection | PASS | inspected `Responsibilities.tsx`, `i18n.tsx`, `services/directory.ts`, `routes/manager.ts`, `repo/directory.ts`, every migration, the contracts, and every downstream reference to `responsibilities.responsibility_id` (`projects`, `responsibility_members`, `audit_log`, `record_deletions`, `published_snapshots`, `outbox_jobs`) |
+| Gate 1 hide retired | PASS | `visibleResponsibilities()` filters the default list; retired rows are never deleted or rewritten; the toggle is route memory (`responsibilities:showRetired`); `responsibility-filter.test.ts` (4) and `responsibilities-screen.test.tsx` "hides retired areas by default and reveals them with the toggle"; browser smoke retires an area and proves it disappears and returns through **Show retired**; `responsibility-deletion.test.ts` retires and reactivates an area while the referencing project keeps its responsibility |
+| Gate 1 empty state | PASS | `responsibilities-screen.test.tsx` "shows an actionable empty state when every area is retired"; a filtered-empty view uses a separate message |
+| Gate 2 ADMIN delete control | PASS | `responsibilities-screen.test.tsx` "offers the delete action to ADMIN only": ADMIN sees 分野を削除, MANAGER keeps 編集/廃止 and never receives the delete control; the endpoint refuses MANAGER, MEMBER and VIEWER with `AUTHORIZATION_DENIED` (`responsibility-deletion.test.ts`) |
+| Gate 3 preflight | PASS | `GET /api/admin/responsibilities/:id/delete-preflight` returns `projectCount`, `archivedProjectCount`, `deletedProjectCount`, `activeMemberCount`, `historicalMemberCount`, `auditReferenceCount`, `publishedReferenceCount`, `activeJobCount`, `erasePlan`, `confirmationText` and the revision; active, archived and logically deleted projects all block; membership links alone do not; an unknown/already deleted identifier reports `NOT_FOUND_OR_DELETED` |
+| Gate 4 deletion endpoint | PASS | `DELETE /api/admin/responsibilities/:id` validates the id, revision, confirmation and optional reason, re-runs the preflight under `FOR UPDATE` inside the transaction, writes `RECORD_DELETE_PREPARED`, the tombstone (with the member-link snapshot), removes only `responsibility_members` and the responsibility row, then writes `RECORD_DELETED`; no `ON DELETE CASCADE` exists and no project, task or member row is touched |
+| Gate 4 concurrency | PASS | `responsibility-deletion.test.ts` "refuses a stale revision, a wrong phrase and a project added after the preflight" and "reports a repeated deletion instead of double-deleting" (one tombstone, one `RECORD_DELETED`) |
+| Gate 5 confirmation UI | PASS | eligible dialog: 分野を削除 with 「…」を削除しますか？この操作は元に戻せません。 and キャンセル / 削除 (the client derives `DELETE <id>`); blocked dialog: 削除できません。 + 関連プロジェクト: {n}件 + キャンセル / 廃止する and no delete button; success closes the dialog, shows the notice and invalidates responsibilities, references, overview, projects, tasks and employee caches |
+| Gate 6 terminology | PASS | Japanese 分野 / 新規分野 / 分野を編集 / 分野を削除 / 廃止済みを表示; English Responsibility / New responsibility / Edit responsibility / Delete responsibility / Show retired; no table, identifier, API field or stored status renamed |
+| Gate 7 regression | PASS | `responsibility-deletion.test.ts` (**9**), `responsibility-filter.test.ts` (**4**), `responsibilities-screen.test.tsx` (**5**) plus the updated `readability.test.tsx` retired-label check |
+| `npm run typecheck` | PASS | api, web, worker, contracts, db, domain, i18n, benchmark, migration |
+| `npm run lint:v2` | PASS | ESLint clean |
+| `npm run test:v2` (`REQUIRE_DATABASE=1`) | PASS | **385 passed, 1 skipped** across **31** files against real PostgreSQL; no suite skipped |
+| `npm run validate:v2` | PASS | **162 files checked** |
+| `npm run build` | PASS | `@eh/api`, `@eh/web`, `@eh/worker`, `@eh/migration` |
+| `npm run smoke:prod` | PASS | built migration CLI applied schema **11**; built API health/readiness/session/read/mutation; built worker job; clean stop |
+| `npm run test:browser` | PASS | Chromium: existing journeys plus "Responsibility areas: retired hidden by default, ADMIN deletes an unused area" |
+| Migration / schema | PASS | new additive `0011_responsibility_deletions.sql` (extends the `record_deletions` entity allowlist, rewrites no row); `REQUIRED_SCHEMA_VERSION` and `DB_SCHEMA_VERSION` are 11; `/readyz` refuses a schema-10 database |
+| Live Workspace / Google / production | NOT_RUN | no credential, tenant, mailbox, Drive or production database was used; no deployment or migration of an operational database was performed |
+
+Production remains **NOT APPROVED FOR PRODUCTION**.
+
 ## Corrected logical removal of tasks with retained history — 2026-11-04
 
 Implemented on reviewed HEAD `595b13356401d3743e9fe5255a98459f4ba51961` while preserving the

@@ -9,6 +9,7 @@
  */
 import {
   deleteRecord,
+  deleteResponsibilityMemberRows,
   getProject,
   getSubproject,
   getTaskIncludingDeleted,
@@ -16,8 +17,8 @@ import {
   listTombstones,
   listAudit
 } from '@eh/db';
-import type { DeletionPreflight } from '@eh/contracts';
-import { DomainError, deletionPreflight, requireRole } from '@eh/domain';
+import type { DeletionPreflight, ResponsibilityDeletionPreflight } from '@eh/contracts';
+import { DomainError, deletionPreflight, requireRole, responsibilityDeletionPreflight } from '@eh/domain';
 import { audit, requireTypedConfirmation, type ServiceCtx } from './common';
 
 type EntityType = 'PROJECTS' | 'SUBPROJECTS' | 'TASKS';
@@ -747,4 +748,263 @@ export async function reconcileDeletions(
     appended += 1;
   }
   return { checked: tombstones.length, appended };
+}
+
+/* --------------------- responsibility area deletion ---------------------- */
+
+/** The documented reason stored when the one-click confirmation omits a free-text reason. */
+const RESPONSIBILITY_DELETE_REASON = 'Created by mistake';
+
+type ResponsibilityRow = {
+  responsibility_id: string;
+  name: string;
+  status: 'Active' | 'Retired';
+  revision: number;
+};
+
+type ResponsibilityMemberRow = {
+  assignment_id: string;
+  member_id: string;
+  assigned_at: string;
+  assigned_by: string;
+  removed_at: string | null;
+  removed_by: string;
+};
+
+async function evaluateResponsibilityPreflight(
+  db: DbLike,
+  entityId: string,
+  options: PreflightOptions = {}
+): Promise<ResponsibilityDeletionPreflight> {
+  if (options.lock) {
+    // Serialises a concurrent project assignment, membership change or revision bump behind this
+    // preflight, so the blockers and the revision are read from the current row.
+    await db.query('SELECT 1 FROM responsibilities WHERE responsibility_id = $1 FOR UPDATE', [entityId]);
+  }
+  const record = await db.one<ResponsibilityRow>(
+    'SELECT responsibility_id, name, status, revision FROM responsibilities WHERE responsibility_id = $1',
+    [entityId]
+  );
+  if (!record) {
+    return {
+      entityType: 'RESPONSIBILITIES',
+      entityId,
+      name: '',
+      status: null,
+      deletable: false,
+      blockers: [
+        { code: 'NOT_FOUND_OR_DELETED', detail: 'The responsibility does not exist or was already deleted' }
+      ],
+      projectCount: 0,
+      archivedProjectCount: 0,
+      deletedProjectCount: 0,
+      activeMemberCount: 0,
+      historicalMemberCount: 0,
+      auditReferenceCount: 0,
+      publishedReferenceCount: 0,
+      activeJobCount: 0,
+      erasePlan: [],
+      confirmationText: `DELETE ${entityId}`,
+      revision: null
+    };
+  }
+
+  // Every project row counts, whatever its status: an archived or logically deleted project still
+  // stores the stable responsibility identifier and would be left dangling by a physical deletion.
+  const projects = await db.one<{ total: string; archived: string; deleted: string }>(
+    `SELECT count(*)::text AS total,
+            count(*) FILTER (WHERE status = 'Archived')::text AS archived,
+            count(*) FILTER (WHERE deleted_at IS NOT NULL)::text AS deleted
+       FROM projects WHERE responsibility_id = $1`,
+    [entityId]
+  );
+  const members = await db.one<{ active: string; historical: string }>(
+    `SELECT count(*) FILTER (WHERE removed_at IS NULL)::text AS active,
+            count(*) FILTER (WHERE removed_at IS NOT NULL)::text AS historical
+       FROM responsibility_members WHERE responsibility_id = $1`,
+    [entityId]
+  );
+  const auditReferences = await countRows(
+    db,
+    "SELECT count(*)::text AS count FROM audit_log WHERE entity_type = 'RESPONSIBILITIES' AND entity_id = $1",
+    [entityId]
+  );
+  const publishedReferences = await countRows(
+    db,
+    `SELECT count(*)::text AS count
+       FROM published_snapshots snapshot
+      WHERE EXISTS (
+        SELECT 1 FROM jsonb_array_elements(snapshot.rows) row WHERE row->>'responsibilityId' = $1
+      )`,
+    [entityId]
+  );
+  const activeJobs = await countRows(
+    db,
+    `SELECT count(*)::text AS count
+       FROM outbox_jobs
+      WHERE status IN ('PENDING','LEASED')
+        AND (payload->>'responsibilityId' = $1 OR payload->>'entityId' = $1)`,
+    [entityId]
+  );
+  const retiredIdentifier =
+    (await countRows(
+      db,
+      "SELECT count(*)::text AS count FROM record_deletions WHERE entity_type = 'RESPONSIBILITIES' AND entity_id = $1",
+      [entityId]
+    )) > 0;
+
+  const projectCount = Number(projects?.total ?? 0);
+  const archivedProjectCount = Number(projects?.archived ?? 0);
+  const deletedProjectCount = Number(projects?.deleted ?? 0);
+  const activeMemberCount = Number(members?.active ?? 0);
+  const historicalMemberCount = Number(members?.historical ?? 0);
+  const result = responsibilityDeletionPreflight({
+    entityId,
+    projectCount,
+    archivedProjectCount,
+    deletedProjectCount,
+    publishedReferenceCount: publishedReferences,
+    activeJobCount: activeJobs,
+    retiredIdentifier
+  });
+
+  const memberLinks = activeMemberCount + historicalMemberCount;
+  return {
+    entityType: 'RESPONSIBILITIES',
+    entityId,
+    name: record.name,
+    status: record.status,
+    deletable: result.deletable,
+    blockers: result.blockers,
+    projectCount,
+    archivedProjectCount,
+    deletedProjectCount,
+    activeMemberCount,
+    historicalMemberCount,
+    auditReferenceCount: auditReferences,
+    publishedReferenceCount: publishedReferences,
+    activeJobCount: activeJobs,
+    erasePlan: [
+      { code: 'RESPONSIBILITY_ROW', count: 1, detail: `Responsibility row ${entityId}` },
+      ...(memberLinks
+        ? [
+            {
+              code: 'RESPONSIBILITY_MEMBERS',
+              count: memberLinks,
+              detail: `${memberLinks} member link(s) recorded in the deletion tombstone and then removed`
+            }
+          ]
+        : [])
+    ],
+    confirmationText: result.confirmationText,
+    revision: record.revision
+  };
+}
+
+/** ADMIN-only eligibility read for permanently removing an unused responsibility area. */
+export async function responsibilityPreflight(
+  ctx: ServiceCtx,
+  entityId: string
+): Promise<ResponsibilityDeletionPreflight> {
+  requireRole(ctx.identity, 'ADMIN');
+  return evaluateResponsibilityPreflight(ctx.db, entityId);
+}
+
+/**
+ * Permanently removes an unused responsibility area.
+ *
+ * Only the responsibility row and its administrative member links are removed; the tombstone
+ * keeps the full snapshot (including soft-removed links) and the append-only audit log keeps the
+ * actor and the reason. Projects are never reassigned or deleted - a project that still names the
+ * area refuses the operation and the manager retires it instead.
+ */
+export async function deleteResponsibility(
+  ctx: ServiceCtx,
+  entityId: string,
+  input: { revision: number; confirmed: true; reason?: string; confirmation: string }
+): Promise<{ entityType: 'RESPONSIBILITIES'; entityId: string; name: string; tombstoneId: string }> {
+  requireRole(ctx.identity, 'ADMIN');
+  if (!input.confirmed) throw new DomainError('CONFIRMATION_REQUIRED', 'Deletion requires explicit confirmation');
+  const reason = String(input.reason ?? '').trim() || RESPONSIBILITY_DELETE_REASON;
+
+  const checked = await evaluateResponsibilityPreflight(ctx.db, entityId);
+  if (!checked.deletable) {
+    throw new DomainError('INVALID_TRANSITION', 'This responsibility cannot be deleted', {
+      blockers: checked.blockers,
+      projectCount: checked.projectCount
+    });
+  }
+  if (checked.revision !== input.revision) {
+    throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
+  }
+  requireTypedConfirmation(input.confirmation, checked.confirmationText);
+
+  return ctx.db.transaction(async (tx) => {
+    const locked = await evaluateResponsibilityPreflight(tx, entityId, { lock: true });
+    if (!locked.deletable) {
+      throw new DomainError('INVALID_TRANSITION', 'This responsibility cannot be deleted', {
+        blockers: locked.blockers,
+        projectCount: locked.projectCount
+      });
+    }
+    if (locked.revision !== input.revision) {
+      throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
+    }
+
+    const links = await tx.many<ResponsibilityMemberRow>(
+      `SELECT assignment_id, member_id, assigned_at, assigned_by, removed_at, removed_by
+         FROM responsibility_members
+        WHERE responsibility_id = $1
+        ORDER BY assigned_at, assignment_id`,
+      [entityId]
+    );
+    const snapshot = {
+      responsibilityId: entityId,
+      name: locked.name,
+      status: locked.status,
+      revision: input.revision,
+      memberLinks: links.map((row) => ({
+        assignmentId: row.assignment_id,
+        memberId: row.member_id,
+        assignedAt: row.assigned_at,
+        assignedBy: row.assigned_by,
+        removedAt: row.removed_at,
+        removedBy: row.removed_by
+      }))
+    };
+
+    await audit(tx, ctx, {
+      entityType: 'RESPONSIBILITIES',
+      entityId,
+      action: 'RECORD_DELETE_PREPARED',
+      previousValue: snapshot,
+      newValue: { reason }
+    });
+
+    const tombstoneId = await insertTombstone(tx, {
+      entityType: 'RESPONSIBILITIES',
+      entityId,
+      deletedBy: ctx.identity.email,
+      reason,
+      lastRevision: input.revision,
+      snapshot
+    });
+
+    // Administrative-only relationships: the preflight refused every project reference, so no
+    // operational record can be reached here, and the tombstone already holds their snapshot.
+    await deleteResponsibilityMemberRows(tx, entityId);
+
+    const removed = await deleteRecord(tx, 'RESPONSIBILITIES', entityId);
+    if (!removed) throw new DomainError('NOT_FOUND', `Responsibility not found: ${entityId}`);
+
+    await audit(tx, ctx, {
+      entityType: 'RESPONSIBILITIES',
+      entityId,
+      action: 'RECORD_DELETED',
+      previousValue: snapshot,
+      newValue: { tombstoneId, reason }
+    });
+
+    return { entityType: 'RESPONSIBILITIES' as const, entityId, name: locked.name, tombstoneId };
+  });
 }

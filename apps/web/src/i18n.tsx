@@ -416,6 +416,57 @@ export const V2_LABELS = {
   'responsibilities.retire': { ja: '廃止', en: 'Retire' },
   'responsibilities.reactivate': { ja: '再有効化', en: 'Reactivate' },
   'responsibilities.order': { ja: '表示順', en: 'Order' },
+ 'responsibilities.showRetired': { ja: '廃止済みを表示', en: 'Show retired' },
+ 'responsibilities.emptyActive': {
+   ja: '有効な分野がありません。「廃止済みを表示」で廃止した分野を確認できます。',
+   en: 'No active responsibilities. Turn on "Show retired" to see retired areas.'
+ },
+ 'responsibilities.emptyFiltered': {
+   ja: '条件に一致する分野がありません。',
+   en: 'No responsibilities match the current filter.'
+ },
+ 'responsibilities.delete': { ja: '分野を削除', en: 'Delete responsibility' },
+ 'responsibilities.deleteWarning': {
+   ja: '「{name}」を削除しますか？この操作は元に戻せません。',
+   en: 'Delete "{name}"? This cannot be undone.'
+ },
+ 'responsibilities.deleteChecking': {
+   ja: '削除できるか確認しています…',
+   en: 'Checking whether this responsibility can be deleted…'
+ },
+ 'responsibilities.deleteBlocked': { ja: '削除できません。', en: 'This responsibility cannot be deleted.' },
+ 'responsibilities.deleteProjectCount': { ja: '関連プロジェクト: {n}件', en: 'Related projects: {n}' },
+ 'responsibilities.deleteBlockedHint': {
+   ja: 'この分野には関連プロジェクトがあります。先にプロジェクトの分野を変更してください。',
+   en: 'This responsibility is still referenced by projects. Move the projects to another responsibility first.'
+ },
+ 'responsibilities.deleteRetireInstead': { ja: '廃止する', en: 'Retire instead' },
+ 'responsibilities.deleteMembersNote': {
+   ja: '担当メンバーの関連付けと削除理由は、削除記録と監査証跡として保持されます。',
+   en: 'Member links and the deletion reason are retained in the deletion record and the audit trail.'
+ },
+ 'responsibilities.deleted': { ja: '「{name}」を削除しました。', en: 'Deleted "{name}".' },
+ 'responsibilities.blocker.PROJECTS_REFERENCED': {
+   ja: '関連プロジェクトが残っています',
+   en: 'Projects still reference this responsibility'
+ },
+ 'responsibilities.blocker.PUBLISHED': {
+   ja: '共有ダッシュボードの公開データが参照しています',
+   en: 'A published snapshot references this responsibility'
+ },
+ 'responsibilities.blocker.ACTIVE_WORKFLOW': {
+   ja: '進行中のバックグラウンド処理があります',
+   en: 'A pending background job references this responsibility'
+ },
+ 'responsibilities.blocker.ALREADY_DELETED': {
+   ja: 'この識別子は既に削除済みです',
+   en: 'This identifier was already deleted and is never reused'
+ },
+ 'responsibilities.blocker.NOT_FOUND_OR_DELETED': {
+   ja: '既に削除されています',
+   en: 'Already deleted'
+ },
+ 'responsibilities.blocker.generic': { ja: '削除できません', en: 'Deletion is not allowed' },
   'members.new': { ja: '新規メンバー', en: 'New member' },
   'members.edit': { ja: 'メンバーを編集', en: 'Edit member' },
   'members.name': { ja: '氏名', en: 'Name' },

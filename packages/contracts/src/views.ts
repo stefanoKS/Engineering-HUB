@@ -364,6 +364,37 @@ export const DeletionPreflight = z.object({
 });
 export type DeletionPreflight = z.infer<typeof DeletionPreflight>;
 
+/**
+ * ADMIN-only eligibility answer for permanently removing an unused responsibility area.
+ *
+ * `projectCount` is every project row that still names the area, archived and logically deleted
+ * included. The member counts are administrative links only: they never block the deletion, they
+ * are captured in the tombstone snapshot and erased with the row.
+ */
+export const ResponsibilityDeletionPreflight = z.object({
+  entityType: z.literal('RESPONSIBILITIES'),
+  entityId: z.string(),
+  /** Blank and null when the area no longer exists (a repeated or unknown identifier). */
+  name: z.string(),
+  status: z.enum(['Active', 'Retired']).nullable(),
+  deletable: z.boolean(),
+  blockers: z.array(z.object({ code: z.string(), detail: z.string() })),
+  projectCount: z.number().int().min(0),
+  archivedProjectCount: z.number().int().min(0),
+  deletedProjectCount: z.number().int().min(0),
+  activeMemberCount: z.number().int().min(0),
+  historicalMemberCount: z.number().int().min(0),
+  auditReferenceCount: z.number().int().min(0),
+  publishedReferenceCount: z.number().int().min(0),
+  activeJobCount: z.number().int().min(0),
+  erasePlan: z
+    .array(z.object({ code: z.string(), count: z.number().int().min(0), detail: z.string() }))
+    .optional(),
+  confirmationText: z.string(),
+  revision: Revision.nullable()
+});
+export type ResponsibilityDeletionPreflight = z.infer<typeof ResponsibilityDeletionPreflight>;
+
 export const EmployeeTask = z.object({
   taskId: z.string(),
   taskName: z.string(),

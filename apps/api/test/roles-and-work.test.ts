@@ -8,7 +8,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { Database, insertProject, insertSubproject, saveSettings } from '@eh/db';
+import { Database, REQUIRED_SCHEMA_VERSION, insertProject, insertSubproject, saveSettings } from '@eh/db';
 import { businessDate } from '@eh/domain';
 import { buildApp } from '../src/app';
 import { loadConfig } from '../src/config';
@@ -933,11 +933,14 @@ describe('schema readiness', () => {
     const ledger = await db.one<{ version: number; name: string; checksum: string; duration_ms: number }>(
       'SELECT version, name, checksum, duration_ms FROM schema_migrations ORDER BY version DESC LIMIT 1'
     );
-    expect(ledger?.version).toBe(10);
+    expect(ledger?.version).toBe(REQUIRED_SCHEMA_VERSION);
     await db.query('DELETE FROM schema_migrations WHERE version = $1', [ledger!.version]);
     const response = await app.inject({ url: '/readyz' });
     expect(response.statusCode).toBe(503);
-    expect(response.json()).toMatchObject({ status: 'migration-required', requiredSchemaVersion: 10 });
+    expect(response.json()).toMatchObject({
+      status: 'migration-required',
+      requiredSchemaVersion: REQUIRED_SCHEMA_VERSION
+    });
     expect(response.json().error.code).toBe('DATABASE_MIGRATION_REQUIRED');
     await db.query(
       'INSERT INTO schema_migrations(version, name, checksum, duration_ms) VALUES($1,$2,$3,$4)',

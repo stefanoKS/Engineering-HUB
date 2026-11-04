@@ -353,6 +353,37 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await expect(page.getByRole('button', { name: 'Collapse Browser deletable subproject', exact: true })).toHaveCount(0);
     await page.setViewportSize({ width: 1440, height: 1000 });
     console.log('PASS  Project hierarchy: contextual creation, smart Back, blocked deletion, ADMIN-only logical removal');
+
+    // Responsibility areas: a retired area leaves the default view, and ADMIN deletes an unused one.
+    await page.locator('.app-nav').getByRole('link', { name: 'Responsibilities', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Responsibilities', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'New responsibility', exact: true }).click();
+    await dialog.locator('input[type="text"]').first().fill('Browser unused area');
+    await dialog.getByRole('button', { name: 'Create', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByText('Browser unused area', { exact: true })).toBeVisible();
+    const areaRow = page.locator('tbody tr').filter({ hasText: 'Browser unused area' });
+    await areaRow.getByRole('button', { name: 'Retire', exact: true }).click();
+    await expect(dialog.getByText('Browser unused area', { exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Confirm', exact: true }).click();
+    await expect(page.getByText('Browser unused area', { exact: true })).toHaveCount(0);
+    await page.getByLabel('Show retired', { exact: true }).check();
+    await expect(page.getByText('Browser unused area', { exact: true })).toBeVisible();
+    await expect(page.getByText('Retired', { exact: true })).toBeVisible();
+    await page
+      .locator('tbody tr')
+      .filter({ hasText: 'Browser unused area' })
+      .getByRole('button', { name: 'Delete responsibility', exact: true })
+      .click();
+    await expect(dialog.getByText('Delete "Browser unused area"? This cannot be undone.', { exact: true })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Delete', exact: true })).toBeEnabled();
+    await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByText('Deleted "Browser unused area".', { exact: true })).toBeVisible();
+    await expect(page.getByText('Browser unused area', { exact: true })).toHaveCount(0);
+    await page.getByLabel('Show retired', { exact: true }).uncheck();
+    console.log('PASS  Responsibility areas: retired hidden by default, ADMIN deletes an unused area');
+
     await page.locator('.app-nav').getByRole('link', { name: 'Overview', exact: true }).click();
     await expect(page.locator('.kpi').first()).toBeVisible();
     await mkdir('work/screenshots', { recursive: true });

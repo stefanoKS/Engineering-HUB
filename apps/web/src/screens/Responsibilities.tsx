@@ -1,12 +1,15 @@
-/** Responsibility areas: list, create/edit, ordering and retirement. */
+/** Responsibility areas: list, create/edit, ordering, retirement and ADMIN deletion. */
 import { useState } from 'react';
 import { ColorPicker } from '../components/ColorPicker';
 import type { Actor, Responsibility } from '@eh/contracts';
 import { api } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
+import { useRouteMemoryState } from '../state/navigation';
+import { visibleResponsibilities } from '../state/responsibility-filter';
 import { useI18n } from '../i18n';
 import { Badge, EmptyState, ErrorBox, SaveState, Section, statusTone } from '../components/ui';
 import { ConfirmDialog, SelectInput, TextInput, useIdempotencyKey, useSave } from '../components/forms';
+import { ResponsibilityDeleteDialog } from '../components/ResponsibilityDeleteDialog';
 
 type Member = { memberId: string; name: string; active: boolean };
 
@@ -14,12 +17,19 @@ export function ResponsibilitiesScreen({ actor }: { actor: Actor }): JSX.Element
   const { t, label } = useI18n();
   const [editing, setEditing] = useState<Responsibility | 'new' | null>(null);
   const [statusChange, setStatusChange] = useState<{ item: Responsibility; status: 'Active' | 'Retired' } | null>(null);
+  const [deleting, setDeleting] = useState<Responsibility | null>(null);
+  const [notice, setNotice] = useState('');
+  // Retired areas stay stored; the default view simply hides them until the manager asks.
+  const [showRetired, setShowRetired] = useRouteMemoryState('responsibilities:showRetired', false);
   const list = useQuery<{ items: (Responsibility & { _revision: number })[] }>(keys.responsibilities, () =>
     api.get<{ items: (Responsibility & { _revision: number })[] }>('/api/manager/responsibilities')
   );
   const members = useQuery<{ members: Member[] }>(keys.references, () =>
     api.get<{ members: Member[] }>('/api/manager/references')
   );
+
+  const items = list.data?.items ?? [];
+  const visible = visibleResponsibilities(items, showRetired);
 
   async function move(item: Responsibility, delta: number): Promise<void> {
     await api.patch(`/api/manager/responsibilities/${item.responsibilityId}/order`, {
@@ -34,16 +44,37 @@ export function ResponsibilitiesScreen({ actor }: { actor: Actor }): JSX.Element
       <div className="screen-header">
         <h2>{t('nav.responsibilities')}</h2>
         <div className="filters">
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={showRetired}
+              onChange={(event) => setShowRetired(event.target.checked)}
+            />
+            {t('responsibilities.showRetired')}
+          </label>
           <button type="button" className="button" onClick={() => setEditing('new')}>
             {t('responsibilities.new')}
           </button>
         </div>
       </div>
+      {notice ? (
+        <div className="banner ok" role="status">
+          {notice}
+        </div>
+      ) : null}
       <ErrorBox error={list.error} onRetry={() => list.refresh()} />
       {!list.data ? (
         <p className="muted">{t('state.loading')}</p>
-      ) : list.data.items.length === 0 ? (
-        <EmptyState />
+      ) : visible.length === 0 ? (
+        <EmptyState
+          text={
+            items.length === 0
+              ? undefined
+              : showRetired
+                ? t('responsibilities.emptyFiltered')
+                : t('responsibilities.emptyActive')
+          }
+        />
       ) : (
         <table className="table">
           <thead>
@@ -57,7 +88,7 @@ export function ResponsibilitiesScreen({ actor }: { actor: Actor }): JSX.Element
             </tr>
           </thead>
           <tbody>
-            {list.data.items.map((item) => (
+            {visible.map((item) => (
               <tr key={item.responsibilityId}>
                 <td>
                   <span className="color-swatch" style={{ background: item.color || '#ccc' }} aria-hidden="true" />
@@ -89,6 +120,11 @@ export function ResponsibilitiesScreen({ actor }: { actor: Actor }): JSX.Element
                   >
                     {item.status === 'Active' ? t('responsibilities.retire') : t('responsibilities.reactivate')}
                   </button>
+                  {actor.role === 'ADMIN' ? (
+                    <button type="button" className="link-button danger" onClick={() => setDeleting(item)}>
+                      {t('responsibilities.delete')}
+                    </button>
+                  ) : null}
                 </td>
               </tr>
             ))}
@@ -119,6 +155,34 @@ export function ResponsibilitiesScreen({ actor }: { actor: Actor }): JSX.Element
               reason
             });
             setStatusChange(null);
+            // The retired row leaves the default view on the refreshed list; the stored record and
+            // every project relationship stay untouched.
+            setNotice('');
+            queryCache.invalidate([keys.responsibilities, keys.overview, keys.employee]);
+          }}
+        />
+      ) : null}
+
+      {deleting ? (
+        <ResponsibilityDeleteDialog
+          item={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={(name) => {
+            setDeleting(null);
+            setNotice(t('responsibilities.deleted', { name }));
+            // The area is gone from references, project filters and the overview rollup.
+            queryCache.invalidate([
+              keys.responsibilities,
+              keys.references,
+              keys.overview,
+              keys.projects,
+              keys.tasks,
+              keys.employee
+            ]);
+          }}
+          onRetired={() => {
+            setDeleting(null);
+            setNotice('');
             queryCache.invalidate([keys.responsibilities, keys.overview, keys.employee]);
           }}
         />
