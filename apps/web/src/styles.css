@@ -1102,3 +1102,91 @@ input[type=checkbox] { min-height: auto; width: 17px; height: 17px; accent-color
 .timeline-bar { min-width: 0; }
 .timeline.compact .timeline-label, .timeline.compact .timeline-value { font-size: .64rem; }
 .timeline.compact .timeline-bar-button { max-width: 34px; }
+
+/* ------------------------------------------------------------------ readability */
+/*
+ * Deadlines, names and the workload axis.
+ *
+ * A deadline is a labelled region with its own tone: overdue is red, due today is amber and an
+ * ordinary future deadline keeps readable body text. Names are the primary identity of a row and
+ * are larger than the metadata around them; nothing here changes a stored value.
+ */
+.deadline { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: 0.3rem; white-space: nowrap; }
+.deadline-label { font-size: 0.82rem; font-weight: 600; color: var(--ui-muted); letter-spacing: 0.02em; }
+.deadline-value { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ui-text); }
+.deadline-size-normal .deadline-value { font-size: 1.06rem; }
+.deadline-size-large .deadline-value { font-size: 1.125rem; }
+.deadline-overdue .deadline-value { color: var(--red); font-weight: 700; }
+.deadline-today .deadline-value { color: var(--amber); font-weight: 700; }
+.deadline-done .deadline-value { color: var(--green); font-weight: 600; }
+.deadline-cancelled .deadline-value,
+.deadline-none .deadline-value { color: var(--ui-muted); font-weight: 500; }
+
+.my-work-row h3 { font-size: 1.15rem; line-height: 1.35; }
+.my-work-row-title { min-width: 0; }
+.my-work-row-meta { margin-top: 0.1rem; }
+.my-work-row-due { white-space: nowrap; }
+.my-work-row-status { display: flex; flex-direction: column; gap: 0.2rem; align-items: flex-start; min-width: 7rem; }
+.row-status-line { display: inline-flex; flex-wrap: wrap; gap: 0.25rem; align-items: center; }
+.my-work-row { grid-template-columns: minmax(12rem, 1fr) auto auto auto; row-gap: 0.3rem; }
+
+.project-card-head h3 { font-size: 1.15rem; }
+.area-card h3 { font-size: 1.075rem; }
+.hierarchy-name { font-size: 1.02rem; }
+.project-card-head a,
+.hierarchy-name.task-link { font-weight: 650; }
+.screen-header h2 { font-size: clamp(1.25rem, 1.1rem + 0.4vw, 1.5rem); }
+.table td:first-child a { font-size: 1.06rem; }
+
+/* ------------------------------------------------------------------ member creation */
+.segmented { display: inline-flex; gap: 0.25rem; padding: 0.25rem; border: 1px solid var(--ui-border); border-radius: 11px; background: var(--ui-accent-soft); flex-wrap: wrap; }
+.segmented-button { border: 0; background: transparent; font: inherit; font-weight: 650; color: #46536d; padding: 0.45rem 0.95rem; border-radius: 8px; cursor: pointer; }
+.segmented-button.active { background: var(--ui-accent); color: #fff; box-shadow: 0 2px 8px #a8182f33; }
+.segmented-button:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; }
+.creation-panel { gap: 0.75rem; }
+.member-subproject-form { max-width: 46rem; }
+.stack-tight { display: flex; flex-direction: column; gap: 0.4rem; }
+
+/* ------------------------------------------------------------------ my requests */
+.requests-toggle { appearance: none; border: 0; background: transparent; color: inherit; font: inherit; font-weight: 650; padding: 0; cursor: pointer; text-align: left; }
+.requests-toggle:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; }
+.request-list { margin: 0.35rem 0 0; }
+.request-list li { padding: 0.35rem 0; border-bottom: 1px solid var(--ui-border); }
+.request-list li:last-child { border-bottom: 0; }
+.request-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem; }
+.request-id { font-variant-numeric: tabular-nums; font-size: 0.75rem; }
+.request-detail { margin: 0.2rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ------------------------------------------------------------------ workload axis and today marker */
+.timeline-axis { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; padding-bottom: 0.25rem; border-bottom: 1px solid var(--ui-border); }
+.timeline-axis-label { font-size: 0.76rem; font-weight: 650; color: var(--ui-muted); }
+.timeline-axis-range { font-size: 0.72rem; color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+.timeline-bar { position: relative; }
+.timeline-today-line { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px; background: var(--ui-accent); border-radius: 1px; pointer-events: none; z-index: 1; }
+.timeline-today-label { font-size: 0.68rem; font-weight: 700; color: var(--ui-accent); white-space: nowrap; }
+.timeline-bar.is-today .timeline-label { color: var(--ui-accent); font-weight: 650; }
+.timeline-today-outside { margin-top: 0.35rem; }
+.timeline-value { font-size: 0.72rem; font-weight: 600; }
+@media (max-width: 1100px) { .timeline-value { font-size: 0.66rem; } }
+@media (max-width: 720px) {
+  .timeline-value, .timeline-label, .timeline-today-label { font-size: 0.62rem; }
+  .my-work-row-due { justify-self: start; }
+}
+/* Narrow screens stack the compact work row instead of keeping four columns. */
+@media (max-width: 700px) {
+  .my-work-row { align-items: start; grid-template-columns: 1fr; }
+  .my-work-row-status { min-width: 0; }
+  .my-work-row-actions { justify-content: flex-start; }
+}
+/*
+ * A narrow screen keeps every bucket wide enough to read its count and date, and scrolls the
+ * timeline sideways instead of squeezing the labels into each other.
+ */
+@media (max-width: 720px) {
+  .timeline { gap: 0.25rem; align-items: flex-end; }
+  .timeline-bar { flex: 0 0 auto; min-width: 2.6rem; }
+  .timeline.compact .timeline-bar { min-width: 2rem; }
+  .timeline-today-label { margin-top: 0.05rem; }
+  /* The date wraps onto a second line instead of overlapping the neighbouring bucket. */
+  .timeline-label { white-space: normal; text-align: center; line-height: 1.15; }
+}

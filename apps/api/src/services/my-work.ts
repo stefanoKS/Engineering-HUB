@@ -8,9 +8,15 @@
  * granted all of that at once.
  */
 import type { z } from 'zod';
-import type { CreateMyTaskBody, MyWorkList, MyWorkProjectOptions } from '@eh/contracts';
-import { getProject, insertTask, getTask } from '@eh/db';
-import { DomainError, canCreateOwnTask, displayTaskStatus, requireRole } from '@eh/domain';
+import type { CreateMySubprojectBody, CreateMyTaskBody, MyWorkList, MyWorkProjectOptions, Subproject } from '@eh/contracts';
+import { getProject, insertSubproject, insertTask, getTask, listSubprojects } from '@eh/db';
+import {
+  DomainError,
+  canCreateOwnTask,
+  displayTaskStatus,
+  requireRole,
+  validateSubprojectParent
+} from '@eh/domain';
 import { audit, enqueueJob, hashRequest, runIdempotent, type ServiceCtx } from './common';
 import { assertTaskPlacement, planTaskDeadline } from './tasks';
 
@@ -164,13 +170,20 @@ export async function myWorkProjectOptions(ctx: ServiceCtx): Promise<MyWorkProje
         ORDER BY p.project_name
         LIMIT 500`
     ),
-    ctx.db.many<{ subproject_id: string; subproject_name: string; project_id: string }>(
-      `SELECT s.subproject_id, s.subproject_name, s.project_id
+    ctx.db.many<{
+      subproject_id: string;
+      subproject_name: string;
+      project_id: string;
+      parent_subproject_id: string | null;
+      depth: number;
+    }>(
+      `SELECT s.subproject_id, s.subproject_name, s.project_id, s.parent_subproject_id,
+              eh_subproject_depth(s.subproject_id) AS depth
          FROM subprojects s
          JOIN projects p ON p.project_id = s.project_id
         WHERE s.deleted_at IS NULL AND s.status <> 'Archived'
           AND p.status = 'Active' AND p.archived_at IS NULL
-        ORDER BY s.subproject_name
+        ORDER BY eh_subproject_depth(s.subproject_id), s.subproject_name
         LIMIT 2000`
     )
   ]);
@@ -182,7 +195,12 @@ export async function myWorkProjectOptions(ctx: ServiceCtx): Promise<MyWorkProje
       responsibilityName: project.responsibility_name ?? '',
       subprojects: subprojects
         .filter((entry) => entry.project_id === project.project_id)
-        .map((entry) => ({ subprojectId: entry.subproject_id, subprojectName: entry.subproject_name }))
+        .map((entry) => ({
+          subprojectId: entry.subproject_id,
+          subprojectName: entry.subproject_name,
+          parentSubprojectId: entry.parent_subproject_id,
+          depth: Number(entry.depth) || 1
+        }))
     }))
   };
 }
@@ -285,4 +303,88 @@ export async function createMyTask(
     }
   );
   return { taskId: result.data.taskId, replayed: result.replayed };
+}
+
+/**
+ * A MEMBER files a subproject immediately, with no approval step.
+ *
+ * The owner is the verified member, the status is `Active` and the hierarchy is validated against
+ * the whole project tree, so a member can never place work across a project boundary, under an
+ * archived ancestor or beyond the four-level nesting policy. A retry with the same key returns the
+ * subproject it created instead of a duplicate.
+ */
+export async function createMySubproject(
+  ctx: ServiceCtx,
+  body: z.infer<typeof CreateMySubprojectBody>
+): Promise<{ subproject: Subproject; replayed: boolean }> {
+  requireRole(ctx.identity, 'MEMBER');
+  if (!canCreateOwnTask(ctx.identity)) {
+    throw new DomainError('AUTHORIZATION_DENIED', 'Member self-service creation is limited to the MEMBER role');
+  }
+  const subprojectName = body.subprojectName.trim();
+  if (!subprojectName) throw new DomainError('VALIDATION_FAILED', 'A subproject name is required');
+
+  const project = await getProject(ctx.db, body.projectId);
+  if (!project) throw new DomainError('NOT_FOUND', `Project not found: ${body.projectId}`);
+  if (project.status !== 'Active' || project.archivedAt) {
+    throw new DomainError('INVALID_TRANSITION', 'A subproject can only be filed under an active project');
+  }
+
+  const siblings = await listSubprojects(ctx.db, body.projectId);
+  const parentSubprojectId = body.parentSubprojectId ?? null;
+  if (parentSubprojectId) {
+    const byId = new Map(siblings.map((entry) => [entry.subprojectId, entry]));
+    let node = byId.get(parentSubprojectId);
+    if (!node) throw new DomainError('HIERARCHY_INVALID', `Parent subproject not found: ${parentSubprojectId}`);
+    const seen = new Set<string>();
+    while (node) {
+      if (seen.has(node.subprojectId)) throw new DomainError('HIERARCHY_CYCLE', 'Subproject links form a cycle');
+      seen.add(node.subprojectId);
+      if (node.status !== 'Active') {
+        throw new DomainError('HIERARCHY_INVALID', 'A new subproject cannot sit under an inactive or archived parent');
+      }
+      node = node.parentSubprojectId ? byId.get(node.parentSubprojectId) : undefined;
+    }
+  }
+  validateSubprojectParent(
+    { id: null, projectId: body.projectId, parentId: parentSubprojectId },
+    siblings.map((entry) => ({
+      id: entry.subprojectId,
+      parentId: entry.parentSubprojectId,
+      projectId: entry.projectId
+    }))
+  );
+
+  const result = await runIdempotent(
+    ctx,
+    { scope: `employee.subproject.create:${ctx.identity.memberId}`, key: body.idempotencyKey, request: body },
+    async (tx) => {
+      const subproject = await insertSubproject(tx, {
+        projectId: body.projectId,
+        parentSubprojectId,
+        subprojectName,
+        description: body.description ?? '',
+        ownerId: ctx.identity.memberId,
+        status: 'Active',
+        deadline: body.deadline ?? null,
+        estimatedHours: null,
+        nextAction: ''
+      });
+      await audit(tx, ctx, {
+        entityType: 'SUBPROJECTS',
+        entityId: subproject.subprojectId,
+        action: 'SUBPROJECT_CREATED',
+        newValue: {
+          subprojectId: subproject.subprojectId,
+          projectId: subproject.projectId,
+          parentSubprojectId: subproject.parentSubprojectId,
+          ownerId: subproject.ownerId,
+          createdAt: subproject.createdAt,
+          creationChannel: 'MEMBER'
+        }
+      });
+      return subproject;
+    }
+  );
+  return { subproject: result.data, replayed: result.replayed };
 }

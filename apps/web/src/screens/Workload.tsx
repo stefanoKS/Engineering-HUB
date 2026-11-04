@@ -22,6 +22,7 @@ import { keys, useQuery } from '../state/cache';
 import { useRouteMemoryState } from '../state/navigation';
 import { useI18n } from '../i18n';
 import { Badge, ErrorBox, Pagination, Section, statusTone } from '../components/ui';
+import { DeadlineCell } from '../components/deadline';
 
 type BootstrapShape = {
   references: {
@@ -346,38 +347,58 @@ export function WorkloadScreen({ actor }: { actor: Actor }): JSX.Element {
             title={t('workload.timeline')}
             actions={<span className="muted small">{t(`workload.granularity.${data.granularity}`)}</span>}
           >
-            {data.buckets.every((bucket) => bucket.dueTasks === 0) ? (
-              <p className="empty">{t('workload.drill.empty')}</p>
-            ) : (
-              <div className={compactTimeline ? 'timeline compact' : 'timeline'} role="list">
-                {data.buckets.map((bucket) => {
-                  const max = Math.max(1, ...data.buckets.map((entry) => entry.dueTasks));
-                  const bucketText = bucketLabel(bucket.start, bucket.end, data.granularity, compactTimeline);
-                  const bucketTitle = bucketLabel(bucket.start, bucket.end, data.granularity, false);
-                  const height = bucket.dueTasks === 0 ? 0 : Math.max(8, Math.round((bucket.dueTasks / max) * 100));
-                  return (
-                    <div className="timeline-bar" role="listitem" key={bucket.key}>
-                      <div className="timeline-track-area">
-                        <button
-                          type="button"
-                          className={bucket.overdueTasks > 0 ? 'timeline-bar-button overdue' : 'timeline-bar-button'}
-                          aria-label={t('workload.timeline.open', { label: bucketTitle })}
-                          title={`${bucketTitle} · ${bucket.dueTasks}`}
-                          onClick={() => {
-                            setExpanded(null);
-                            setDrill({ kind: 'DUE', from: bucket.start, to: bucket.end, page: 1 });
-                          }}
-                        >
-                          <span className="timeline-fill" style={{ height: `${height}%` }} />
-                        </button>
-                        <span className="timeline-value">{bucket.dueTasks}</span>
-                      </div>
-                      <span className="timeline-label">{bucketText}</span>
+            {/* The axis is always visible, so a bare number is never an unexplained figure. */}
+            <div className="timeline-axis">
+              <span className="timeline-axis-label">{t('workload.axis.count')}</span>
+              <span className="timeline-axis-range">
+                {t('workload.axis.date')} · {timelineRangeLabel(data.start, data.end, compactTimeline)}
+              </span>
+            </div>
+            <div className={compactTimeline ? 'timeline compact' : 'timeline'} role="list">
+              {data.buckets.map((bucket) => {
+                const max = Math.max(1, ...data.buckets.map((entry) => entry.dueTasks));
+                const bucketText = bucketLabel(bucket.start, bucket.end, data.granularity, compactTimeline);
+                const bucketTitle = bucketLabel(bucket.start, bucket.end, data.granularity, false);
+                const height = bucket.dueTasks === 0 ? 0 : Math.max(8, Math.round((bucket.dueTasks / max) * 100));
+                const isToday = bucket.start <= data.today && data.today <= bucket.end;
+                const tooltip = t('workload.timeline.tooltip', {
+                  date: bucketTitle,
+                  count: bucket.dueTasks,
+                  overdue: bucket.overdueTasks
+                });
+                return (
+                  <div className={isToday ? 'timeline-bar is-today' : 'timeline-bar'} role="listitem" key={bucket.key}>
+                    <span className="timeline-value">
+                      {t(bucket.dueTasks === 1 ? 'workload.timeline.countOne' : 'workload.timeline.count', {
+                        n: bucket.dueTasks
+                      })}
+                    </span>
+                    <div className="timeline-track-area">
+                      {isToday ? <span className="timeline-today-line" aria-hidden="true" /> : null}
+                      <button
+                        type="button"
+                        className={bucket.overdueTasks > 0 ? 'timeline-bar-button overdue' : 'timeline-bar-button'}
+                        aria-label={`${t('workload.timeline.open', { label: bucketTitle })}: ${tooltip}`}
+                        title={tooltip}
+                        onClick={() => {
+                          setExpanded(null);
+                          setDrill({ kind: 'DUE', from: bucket.start, to: bucket.end, page: 1 });
+                        }}
+                      >
+                        <span className="timeline-fill" style={{ height: `${height}%` }} />
+                      </button>
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                    <span className="timeline-label">{bucketText}</span>
+                    {isToday ? (
+                      <span className="timeline-today-label">{t('workload.timeline.today')}</span>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+            {data.today < data.start || data.today > data.end ? (
+              <p className="muted small timeline-today-outside">{t('workload.timeline.todayOutside')}</p>
+            ) : null}
           </Section>
 
           <Section
@@ -551,7 +572,7 @@ function DrilldownPanel({
                 <td>
                   <Badge tone={statusTone(task.status)}>{label('task.status', task.status)}</Badge>
                 </td>
-                <td>{task.dueDate ?? t('common.unset')}</td>
+                <td><DeadlineCell dueDate={task.dueDate} showLabel={false} /></td>
                 <td>{task.completedDate ?? t('common.unset')}</td>
               </tr>
             ))}
@@ -566,6 +587,19 @@ function DrilldownPanel({
 }
 
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+
+/**
+ * The visible date context for the timeline axis.
+ *
+ * A dense month keeps a bare day number under each bar, so the month and year are stated once
+ * here instead of being repeated 31 times.
+ */
+function timelineRangeLabel(start: string, end: string, compact: boolean): string {
+  const from = start.replace(/-/g, '/');
+  const to = end.replace(/-/g, '/');
+  if (compact) return from.slice(0, 7);
+  return `${from} – ${to}`;
+}
 
 function bucketLabel(start: string, end: string, granularity: WorkloadGranularity, compact = false): string {
   if (granularity === 'MONTH') return start.slice(0, 7).replace('-', '/');

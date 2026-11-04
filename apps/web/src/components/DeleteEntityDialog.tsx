@@ -153,6 +153,7 @@ export function DeleteEntityDialog({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
   const [permanent, setPermanent] = useState(false);
+  const [reason, setReason] = useState('Created by mistake');
 
   useEffect(() => {
     let current = true;
@@ -187,6 +188,7 @@ export function DeleteEntityDialog({
 
   const deletable = preflight?.deletable === true;
   const canSubmit = deletable && !!preflight && !busy;
+  const requiresReason = preflight?.requiresReason === true;
 
   const submit = async (): Promise<void> => {
     if (!canSubmit || !preflight) return;
@@ -196,7 +198,8 @@ export function DeleteEntityDialog({
       const path = entityType === 'TASKS' ? 'tasks' : 'subprojects';
       await api.post(`/api/admin/${path}/${entityId}/remove`, {
         revision: preflight.revision,
-        confirmed: true
+        confirmed: true,
+        reason: requiresReason ? reason.trim() : undefined
       });
       onDeleted();
     } catch (error) {
@@ -208,7 +211,7 @@ export function DeleteEntityDialog({
 
   return (
     <Modal
-      title={t('delete.confirmTitle')}
+      title={t(requiresReason ? 'delete.completedTitle' : 'delete.confirmTitle')}
       onClose={onClose}
       footer={
         <>
@@ -226,7 +229,7 @@ export function DeleteEntityDialog({
           <button
             type="button"
             className="button danger"
-            disabled={!canSubmit}
+            disabled={!canSubmit || (requiresReason && !reason.trim())}
             onClick={() => void submit()}
           >
             {busy ? t('state.saving') : t('delete.submit')}
@@ -244,7 +247,17 @@ export function DeleteEntityDialog({
         {preflight ? (
           deletable ? (
             <>
-              <p>{t(entityType === 'TASKS' ? 'delete.confirmTask' : 'delete.confirmSubproject')}</p>
+              {requiresReason ? (
+                <>
+                  <p>{t('delete.completedTask')}</p>
+                  <label className="field">
+                    <span className="field-label">{t('confirm.deleteReason')}</span>
+                    <textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={3} />
+                  </label>
+                </>
+              ) : (
+                <p>{t(entityType === 'TASKS' ? 'delete.confirmTask' : 'delete.confirmSubproject')}</p>
+              )}
               <div className="banner info">{t('delete.allowed')}</div>
             </>
           ) : (

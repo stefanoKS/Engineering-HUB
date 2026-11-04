@@ -48,7 +48,7 @@ export async function listProjects(
   filters: ProjectFilters,
   page: number,
   pageSize: number
-): Promise<{ items: Project[]; total: number }> {
+): Promise<{ items: Project[]; total: number; groupTotals: { responsibilityId: string | null; total: number }[] }> {
   const where: string[] = ['p.deleted_at IS NULL'];
   const params: unknown[] = [];
   if (filters.responsibilityId) {
@@ -77,14 +77,25 @@ export async function listProjects(
     where.push("p.status <> 'Archived' AND p.archived_at IS NULL");
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const total = await db.one<{ count: string }>(`SELECT count(*)::text AS count FROM projects p ${whereSql}`, params);
+  const [total, groupTotals] = await Promise.all([
+    db.one<{ count: string }>(`SELECT count(*)::text AS count FROM projects p ${whereSql}`, params),
+    db.many<{ responsibility_id: string | null; count: string }>(
+      `SELECT p.responsibility_id, count(*)::text AS count FROM projects p ${whereSql}
+       GROUP BY p.responsibility_id`,
+      params
+    )
+  ]);
   const order = PROJECT_SORTS[filters.sort ?? 'deadline'];
   const direction = filters.direction === 'desc' ? 'DESC' : 'ASC';
   const rows = await db.many<ProjectRow>(
     `${PROJECT_SELECT} ${whereSql} ORDER BY ${order} ${direction} NULLS LAST, p.project_id ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
     [...params, pageSize, (page - 1) * pageSize]
   );
-  return { items: rows.map(toProject), total: Number(total?.count ?? 0) };
+  return {
+    items: rows.map(toProject),
+    total: Number(total?.count ?? 0),
+    groupTotals: groupTotals.map((group) => ({ responsibilityId: group.responsibility_id, total: Number(group.count) }))
+  };
 }
 
 export async function listAllProjects(db: Db, limit = 500): Promise<Project[]> {

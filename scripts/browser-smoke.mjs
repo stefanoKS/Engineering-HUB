@@ -105,7 +105,12 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await expectBackButtonLeftAligned('Browser edited project');
     await page.setViewportSize({ width: 1366, height: 768 });
     await expect(page.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'New subproject', exact: true })).toHaveCount(0);
+    // A MEMBER files a subproject here straight away; a VIEWER never receives the control.
+    if (roleName === 'member') {
+      await expect(page.getByRole('button', { name: 'New subproject', exact: true })).toBeVisible();
+    } else {
+      await expect(page.getByRole('button', { name: 'New subproject', exact: true })).toHaveCount(0);
+    }
     // Smart Back returns to the explorer the reader actually came from, with its search term intact.
     await page.getByRole('button', { name: '← Back', exact: true }).click();
     await expect(page.getByRole('searchbox', { name: 'Search by project name', exact: true })).toHaveValue('Edited');
@@ -140,7 +145,11 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await page.locator('a[href^="#/project/"]').first().click();
     await expect(page.getByRole('heading', { name: 'Browser edited project', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'New subproject', exact: true })).toHaveCount(0);
+    if (roleName === 'member') {
+      await expect(page.getByRole('button', { name: 'New subproject', exact: true })).toBeVisible();
+    } else {
+      await expect(page.getByRole('button', { name: 'New subproject', exact: true })).toHaveCount(0);
+    }
     // The project hierarchy is readable, but a MEMBER or VIEWER never receives a delete control.
     await expect(page.getByRole('button', { name: 'Collapse Browser verified subproject', exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Browser verified task', exact: true })).toBeVisible();
@@ -150,10 +159,37 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     // The personal list stays available to every role.
     await page.locator('.app-nav').getByRole('link', { name: 'My assigned work', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'My assigned work', exact: true })).toBeVisible();
-    if (roleName !== 'member') {
+    if (roleName === 'member') {
+      // A MEMBER files a task or a subproject straight away; both panels stay collapsed.
+      await expect(page.getByRole('button', { name: 'New task', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'New subproject', exact: true })).toBeVisible();
+      await expect(page.locator('.member-subproject-form')).toHaveCount(0);
+      // One form at a time: opening the subproject form captures the member creation UI.
+      await page.getByRole('button', { name: 'New subproject', exact: true }).click();
+      await expect(page.locator('.member-subproject-form')).toHaveCount(1);
+      await expect(page.getByLabel('Subproject name', { exact: true })).toBeVisible();
+      await capture('work/screenshots/my-work-create-subproject-member.png');
+      await page.getByRole('button', { name: 'New task', exact: true }).click();
+      await expect(page.locator('.member-subproject-form')).toHaveCount(0);
+      await expect(page.getByLabel('Task name', { exact: true })).toBeVisible();
+      await capture('work/screenshots/my-work-create-task-member.png');
+      await page.getByRole('button', { name: 'New task', exact: true }).click();
+      await expect(page.getByLabel('Task name', { exact: true })).toHaveCount(0);
+    } else {
       // A VIEWER may never file work or request completion.
-      await expect(page.getByRole('button', { name: 'Create task', exact: true })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'New task', exact: true })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'New subproject', exact: true })).toHaveCount(0);
     }
+    // The request history is collapsed until it is opened, and states its counts.
+    const requestsToggle = page.getByRole('button', { name: 'Expand or collapse my requests', exact: true });
+    await expect(requestsToggle).toHaveAttribute('aria-expanded', 'false');
+    await mkdir('work/screenshots', { recursive: true });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await capture(`work/screenshots/my-work-${roleName}.png`);
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false);
+    await capture(`work/screenshots/my-work-${roleName}-mobile.png`);
+    await page.setViewportSize({ width: 1366, height: 768 });
     // No manager-only navigation is offered.
     await expect(page.locator('.app-nav').getByRole('link', { name: 'Automation', exact: true })).toHaveCount(0);
     await expect(page.locator('.app-nav').getByRole('link', { name: 'Accounts', exact: true })).toHaveCount(0);
@@ -180,6 +216,22 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await expect(page.getByRole('button', { name: 'Mark done', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: /^Delete / })).toHaveCount(0);
     console.log('PASS  manager journey: hierarchy in context, edit and complete allowed, removal absent');
+
+    // Workload: the axis states the unit and the date, and today carries its own marker.
+    await page.locator('.app-nav').getByRole('link', { name: 'Workload', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Workload report', exact: true })).toBeVisible();
+    await expect(page.getByText('Tasks due (count)', { exact: true })).toBeVisible();
+    await expect(page.getByText(/^Date · /)).toBeVisible();
+    await expect(page.locator('.timeline-bar.is-today')).toHaveCount(1);
+    await expect(page.locator('.timeline-bar.is-today')).toContainText('Today');
+    await expect(page.locator('.timeline-value').first()).toHaveText(/\d+ tasks?/);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await capture('work/screenshots/workload-timeline.png');
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false);
+    await capture('work/screenshots/workload-timeline-mobile.png');
+    await page.setViewportSize({ width: 1366, height: 768 });
+    console.log('PASS  workload journey: axis labels, per-bucket counts, today marker');
   }
 
   try {

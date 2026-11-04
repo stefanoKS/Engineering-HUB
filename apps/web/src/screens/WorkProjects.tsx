@@ -11,6 +11,7 @@ import { api, queryString } from '../api/client';
 import { useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
 import { Badge, EmptyState, ErrorBox, Pagination, ProgressBar, statusTone } from '../components/ui';
+import { DeadlineCell } from '../components/deadline';
 import { projectColor } from '@eh/domain';
 import { useRouteMemoryState } from '../state/navigation';
 
@@ -98,9 +99,7 @@ export function WorkProjectsScreen(): JSX.Element {
                 <p className="project-card-badges">
                   <Badge tone={statusTone(project.status)}>{label('project.status', project.status)}</Badge>
                   <Badge tone="neutral">{label('priority', project.priority)}</Badge>
-                  <span className="muted small">
-                    {t('column.deadline')}: {project.committedDeadline ?? t('common.unset')}
-                  </span>
+                  <DeadlineCell dueDate={project.committedDeadline} />
                 </p>
                 <ProgressBar value={project.progressPercent} />
                 <p className="muted small">

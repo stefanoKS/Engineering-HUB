@@ -8,12 +8,20 @@ import { useI18n } from '../i18n';
 import { Badge, EmptyState, ErrorBox, Pagination, ProgressBar, Section, statusTone } from '../components/ui';
 import { ConfirmDialog, SelectInput, TextInput, useIdempotencyKey, useSave, type SaveStateValue } from '../components/forms';
 import { SaveState } from '../components/ui';
+import { DeadlineCell } from '../components/deadline';
 import { navigate } from '../App';
 import { projectColor } from '@eh/domain';
 import { useRouteMemoryState } from '../state/navigation';
 
 type ProjectRow = ProjectSummary & { _revision: number };
-type Page = { items: ProjectRow[]; total: number; page: number; pageSize: number; totalPages: number };
+type Page = {
+  items: ProjectRow[];
+  total: number;
+  groupTotals?: { responsibilityId: string | null; total: number }[];
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
 type References = { responsibilities: Reference[]; members: { memberId: string; name: string; active: boolean }[] };
 
 const STATUSES: Project['status'][] = ['Planned', 'Active', 'On Hold', 'Completed', 'Cancelled', 'Archived'];
@@ -23,6 +31,7 @@ type ProjectSort = 'deadline' | 'name' | 'responsibility' | 'owner' | 'status' |
 export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
   const { t, label } = useI18n();
   const [responsibilityId, setResponsibilityId] = useRouteMemoryState('projects:responsibility', '');
+  const [unassigned, setUnassigned] = useRouteMemoryState('projects:unassigned', false);
   const [status, setStatus] = useRouteMemoryState('projects:status', '');
   const [query, setQuery] = useRouteMemoryState('projects:query', '');
   const [page, setPage] = useRouteMemoryState('projects:page', 1);
@@ -34,12 +43,12 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
   const [deleteTarget, setDeleteTarget] = useState<{ summary: ProjectRow; confirmation: string; blockers: string[] } | null>(null);
 
   const references = useQuery<References>(keys.references, () => api.get<References>('/api/manager/references'));
-  const listKey = `${keys.projects}${queryString({ responsibilityId, status, query, sort, direction, page })}`;
+  const listKey = `${keys.projects}${queryString({ responsibilityId, unassigned, status, query, sort, direction, page })}`;
   const list = useQuery<Page>(listKey, () =>
-    api.get<Page>(`/api/manager/projects${queryString({ responsibilityId, status, query, sort, direction, page, pageSize: 25 })}`)
+    api.get<Page>(`/api/manager/projects${queryString({ responsibilityId, unassigned, status, query, sort, direction, page, pageSize: 25 })}`)
   );
   const canManage = actor.role === 'ADMIN' || actor.role === 'MANAGER';
-  const grouped = !responsibilityId && list.data
+  const grouped = !responsibilityId && !unassigned && list.data
     ? Array.from(list.data.items.reduce((groups, project) => {
         const key = project.responsibilityId ?? '__unassigned__';
         const existing = groups.get(key) ?? { name: project.responsibilityName || t('overview.unassigned'), items: [] as ProjectRow[] };
@@ -48,6 +57,8 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
         return groups;
       }, new Map<string, { name: string; items: ProjectRow[] }>()))
     : [];
+  const groupTotal = (groupId: string, displayed: number): number =>
+    list.data?.groupTotals?.find((total) => (total.responsibilityId ?? '__unassigned__') === groupId)?.total ?? displayed;
   const setSortOrder = (next: ProjectSort): void => {
     setDirection(next === sort ? (direction === 'asc' ? 'desc' : 'asc') : 'asc');
     setSort(next);
@@ -90,13 +101,17 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
         <h2>{t('nav.projects')}</h2>
         <div className="filters">
           <SelectInput
-            value={responsibilityId}
+            value={unassigned ? '__unassigned__' : responsibilityId}
             onChange={(value) => {
-              setResponsibilityId(value);
+              setUnassigned(value === '__unassigned__');
+              setResponsibilityId(value === '__unassigned__' ? '' : value);
               setPage(1);
             }}
             allowEmpty={t('filter.all')}
-            options={(references.data?.responsibilities ?? []).map((entry) => ({ value: entry.id, label: entry.name }))}
+            options={[
+              ...(references.data?.responsibilities ?? []).map((entry) => ({ value: entry.id, label: entry.name })),
+              { value: '__unassigned__', label: t('overview.unassigned') }
+            ]}
           />
           <SelectInput
             value={status}
@@ -148,8 +163,13 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
               <tr className="project-group-heading">
                 <th colSpan={6}>
                   <button type="button" className="link-button" aria-expanded={!collapsedGroups.has(groupId)} onClick={() => toggleGroup(groupId)}>
-                    {collapsedGroups.has(groupId) ? '▸' : '▾'} {group.name} ({group.items.length})
+                    {collapsedGroups.has(groupId) ? '▸' : '▾'} {group.name} ({
+                      groupTotal(groupId, group.items.length)
+                    })
                   </button>
+                  {groupTotal(groupId, group.items.length) > group.items.length
+                    ? <span className="muted small">{t('projects.groupContinues')}</span>
+                    : null}
                 </th>
               </tr>
               {!collapsedGroups.has(groupId) ? group.items.map((project) => (
@@ -164,8 +184,7 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
                   <Badge tone={statusTone(project.status)}>{label('project.status', project.status)}</Badge>
                 </td>
                 <td>
-                  {project.committedDeadline ?? t('common.unset')}
-                  {project.deadlineState === 'OVERDUE' ? <Badge tone="danger">{t('overview.overdue')}</Badge> : null}
+                  <DeadlineCell dueDate={project.committedDeadline} deadlineState={project.deadlineState} showLabel={false} />
                 </td>
                 <td>
                   <ProgressBar value={project.progressPercent} />
@@ -207,8 +226,7 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
                   <Badge tone={statusTone(project.status)}>{label('project.status', project.status)}</Badge>
                 </td>
                 <td>
-                  {project.committedDeadline ?? t('common.unset')}
-                  {project.deadlineState === 'OVERDUE' ? <Badge tone="danger">{t('overview.overdue')}</Badge> : null}
+                  <DeadlineCell dueDate={project.committedDeadline} deadlineState={project.deadlineState} showLabel={false} />
                 </td>
                 <td>
                   <ProgressBar value={project.progressPercent} />

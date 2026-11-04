@@ -191,7 +191,7 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | GET | `/api/manager/reports/workload/tasks` | Paginated drilldown behind a card, a timeline bucket or a member row |
 | GET | `/api/manager/plan/preview` | `deadline`, `durationValue`, `durationUnit`, `durationBasis` |
 | GET | `/api/manager/deletion/preflight` | `entityType`, `entityId` (ADMIN only) |
-| GET | `/api/manager/removal/preflight` | `entityType=TASKS|SUBPROJECTS`, `entityId` (ADMIN only); returns active child/dependency/workflow blockers and the current revision |
+| GET | `/api/manager/removal/preflight` | `entityType=TASKS|SUBPROJECTS`, `entityId` (ADMIN only); returns active child/dependency/workflow blockers, the current revision and whether retained task history requires an administrative reason |
 
 ### Commands
 
@@ -214,7 +214,7 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | POST | `/api/manager/tasks/:id/complete` | MANAGER/ADMIN: `revision`, `confirmed: true`, `note?`. Direct completion; the container, cancelled and already-done refusals still apply, and a pending completion report is withdrawn |
 | POST | `/api/manager/tasks/:id/override-complete` | ADMIN: `revision`, `reason`, `confirmation: "COMPLETE <id>"` |
 | DELETE | `/api/manager/tasks/:id` | Compatibility physical-purge route; ADMIN, as projects |
-| POST | `/api/admin/tasks/:id/remove` | ADMIN logical removal: `revision`, `confirmed: true`; preserves requests, deadline/audit/assignee history and queues A/B publication reconciliation |
+| POST | `/api/admin/tasks/:id/remove` | ADMIN logical removal: `revision`, `confirmed: true`, `reason?`; removes the task from normal views while preserving requests, completion/approval/schedule/audit/effort history and queues A/B publication reconciliation. `reason` is required when retained completion or approval evidence exists. |
 | POST | `/api/admin/tasks/:id/purge` | ADMIN advanced permanent erasure: `revision`, `confirmed`, required `reason`, `confirmation: "DELETE <id>"` |
 | POST | `/api/manager/members` | ADMIN for `role`/`active` |
 | PATCH | `/api/manager/members/:id` | `revision` + fields (role/active ADMIN only) |
@@ -275,8 +275,9 @@ request author and the deadline/status effect are decided on the server.
 | --- | --- | --- |
 | GET | `/api/employee/snapshot` | Published contract 1.6, `INTERNAL` projects only, `submissionEnabled` |
 | GET | `/api/employee/my-work` | `page`; My Assigned Work for **any** signed-in role, resolved from the verified session. Never another member's work |
-| GET | `/api/employee/my-work/projects` | MEMBER only. Active projects and non-archived subprojects a member may file work under (id, name, responsibility name only) |
+| GET | `/api/employee/my-work/projects` | MEMBER only. Active projects and non-archived subprojects a member may file work under: id, name and responsibility name per project, and `subprojectId`, `subprojectName`, `parentSubprojectId`, `depth` per subproject (hierarchy metadata only) |
 | POST | `/api/employee/my-work` | MEMBER only. `idempotencyKey`, `projectId`, `subprojectId?`, `taskName`, `description?`, `deadline`, `priority?`. The owner is the verified member, the status is `Not Started` and progress is 0. An owner, assignee, status or progress sent by the browser is rejected by the strict contract. A MANAGER or ADMIN uses the manager task form instead |
+| POST | `/api/employee/subprojects` | MEMBER only. `idempotencyKey`, `projectId`, `parentSubprojectId?`, `subprojectName`, `description?`, `deadline?`. Creation is **not** an approval step: the owner is the verified member, the status is `Active`, `estimatedHours` is empty and the audit row is `SUBPROJECT_CREATED`. The whole subtree is validated (active project, active parent, same project, four-level limit, no cycle) and a retry with the same key returns the first subproject. `POST /api/manager/subprojects` stays MANAGER/ADMIN only |
 | POST | `/api/employee/requests` | MEMBER only. `clientRequestId`, `taskId`, `requestType`, `requestedDueDate?`, `reason?`, `explanation?`, `completionNote?`; idempotent; only for work the member is assigned to |
 | GET | `/api/employee/requests/mine` | The caller's own requests with `submissionEnabled`; state and decision note only |
 | GET | `/api/employee/requests/:id` | Receipt state only; another member's receipt is `404` |

@@ -23,6 +23,25 @@ Migration `0008_member_created_work` adds `tasks.created_by_member_id`, `tasks.c
 keep their meaning. `assertCompletionDecisionRole` in `packages/domain` makes an ADMIN decision
 mandatory for a member-created task's completion.
 
+## Member subproject creation and UI readability — 2026-11-04
+
+`POST /api/employee/subprojects` (`createMySubproject` in `apps/api/src/services/my-work.ts`) lets a
+MEMBER file a subproject immediately, with no creation approval. The owner is the verified session,
+the status is `Active`, `estimatedHours` stays empty and the audit row is `SUBPROJECT_CREATED`; the
+browser cannot send an owner, role, status, progress or approval because `CreateMySubprojectBody` is
+strict. `validateSubprojectParent` plus an ancestor walk reuse the existing four-level policy, so a
+cross-project, archived or too-deep placement is refused before the single insert. The idempotency
+scope is `employee.subproject.create:<memberId>` and `POST /api/manager/subprojects` stays
+manager-only. Completion still requires the reviewed decision; creation is not a workflow.
+
+`GET /api/employee/my-work/projects` now carries `parentSubprojectId` and `depth` per subproject so
+the member form can show a hierarchical parent path without a second read. The My Assigned Work
+screen keeps both creation forms in one collapsible panel (one open at a time), shows the deadline
+in its own labelled region with overdue/today tone, and collapses the request history behind a
+count summary. Overview responsibility cards show project, open, overdue and completed counts
+instead of a percentage, and the Japanese label is 分野. No migration, column or Script Property was
+added for any of this; schema 10 and published contract 1.6 are unchanged.
+
 ## Local LAN update — 2026-11-02
 
 [LOCAL_LAN.md](LOCAL_LAN.md) specifies the employee-ID/password mode, schema 7, optional email, first-login change, administrator reset, employee-owned progress editing, Windows launcher, durable local backup and optional Shared Drive upload. It supersedes Google-only or Linux-only assumptions below for this mode. [Verification record](LOCAL_LAN_ACCEPTANCE.md).

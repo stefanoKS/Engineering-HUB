@@ -358,6 +358,7 @@ export const DeletionPreflight = z.object({
   })).optional(),
   dependencyCount: z.number().int().min(0),
   descendantCount: z.number().int().min(0),
+  requiresReason: z.boolean().optional(),
   confirmationText: z.string(),
   revision: Revision.nullable()
 });
@@ -441,7 +442,15 @@ export const MyWorkProjectOption = z.object({
   projectId: z.string(),
   projectName: z.string(),
   responsibilityName: z.string(),
-  subprojects: z.array(z.object({ subprojectId: z.string(), subprojectName: z.string() }))
+  subprojects: z.array(
+    z.object({
+      subprojectId: z.string(),
+      subprojectName: z.string(),
+      /** Hierarchy metadata only: enough to show a parent path and to disable a too-deep parent. */
+      parentSubprojectId: z.string().nullable(),
+      depth: z.number().int().min(1)
+    })
+  )
 });
 export type MyWorkProjectOption = z.infer<typeof MyWorkProjectOption>;
 

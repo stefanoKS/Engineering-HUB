@@ -12,10 +12,14 @@ import { api, ApiFailure } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
 import { Badge, ErrorBox } from '../components/ui';
+import { DeadlineCell } from '../components/deadline';
+import { MemberSubprojectForm, subprojectPath } from '../components/member-subproject-form';
 import { ConfirmDialog, createIdempotencyKey, SelectInput, TextInput, useIdempotencyKey, useSave } from '../components/forms';
 import { useRouteMemoryState } from '../state/navigation';
 
 const PAGE_SIZE = 25;
+
+type CreationTab = 'none' | 'task' | 'subproject';
 
 function displayTone(status: MyWorkList['items'][number]['displayStatus']): 'ok' | 'warn' | 'danger' | 'neutral' | 'info' {
   switch (status) {
@@ -38,6 +42,13 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
   const canCreate = actor.role === 'MEMBER';
   const canReport = actor.role === 'MEMBER';
 
+  const [createTab, setCreateTab] = useState<CreationTab>('none');
+  const [createdSubproject, setCreatedSubproject] = useState<{
+    projectId: string;
+    subprojectId: string;
+    name: string;
+  } | null>(null);
+
   const list = useQuery<MyWorkList>(`${keys.myWork}:${page}`, () =>
     api.get<MyWorkList>(`/api/employee/my-work?page=${page}&section=active`)
   );
@@ -57,6 +68,12 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
 
   const refreshAll = (): void => {
     queryCache.invalidate([keys.myWork, keys.myRequests]);
+  };
+
+  // A new subproject changes the hierarchy every screen shows, so the member-visible project
+  // payloads are invalidated as well as the options this form selects from.
+  const refreshAfterCreation = (): void => {
+    queryCache.invalidate([keys.myWork, keys.myProjects, keys.myRequests, 'work/projects', 'work/project/']);
   };
 
   const total = list.data?.activeTotal ?? 0;
@@ -83,13 +100,63 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
       ) : null}
 
       {canCreate ? (
-        <CreateTaskCard
-          projects={projects.data?.items ?? []}
-          loading={projects.loading}
-          onCreated={() => {
-            refreshAll();
-          }}
-        />
+        <section className="card stack creation-panel">
+          <div className="segmented" role="group" aria-label={t('myWork.createGroup')}>
+            <button
+              type="button"
+              className={createTab === 'task' ? 'segmented-button active' : 'segmented-button'}
+              aria-pressed={createTab === 'task'}
+              onClick={() => setCreateTab((current) => (current === 'task' ? 'none' : 'task'))}
+            >
+              {t('myWork.newTask')}
+            </button>
+            <button
+              type="button"
+              className={createTab === 'subproject' ? 'segmented-button active' : 'segmented-button'}
+              aria-pressed={createTab === 'subproject'}
+              onClick={() => setCreateTab((current) => (current === 'subproject' ? 'none' : 'subproject'))}
+            >
+              {t('myWork.newSubproject')}
+            </button>
+          </div>
+          {createTab === 'task' ? (
+            <CreateTaskCard
+              projects={projects.data?.items ?? []}
+              loading={projects.loading}
+              initialProjectId={createdSubproject?.projectId ?? ''}
+              initialSubprojectId={createdSubproject?.subprojectId ?? ''}
+              onCreated={() => {
+                refreshAfterCreation();
+              }}
+            />
+          ) : null}
+          {createTab === 'subproject' ? (
+            <MemberSubprojectForm
+              projects={projects.data?.items ?? []}
+              loading={projects.loading}
+              onCreated={(created) => {
+                setCreatedSubproject(created);
+                refreshAfterCreation();
+              }}
+            />
+          ) : null}
+          {createdSubproject ? (
+            <div className="banner ok stack-tight">
+              <span>{t('myWork.subprojectCreated')}</span>
+              <div className="inline-actions">
+                <button
+                  type="button"
+                  className="button secondary"
+                  onClick={() => {
+                    setCreateTab('task');
+                  }}
+                >
+                  {t('myWork.createTaskUnder')}
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </section>
       ) : null}
 
       <ErrorBox
@@ -107,6 +174,10 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
       </div>
 
       {items.length === 0 ? <p className="muted">{t('myWork.requestsEmpty')}</p> : null}
+
+      {items.some((item) => item.creationChannel === 'MEMBER') ? (
+        <p className="muted small">{t('myWork.adminApprovalNote')}</p>
+      ) : null}
 
       <div className="my-work-list" aria-label={t('local.myWork')}>
       {items.map((item) => (
@@ -140,7 +211,7 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
           aria-expanded={completedExpanded}
           onClick={() => setCompletedExpanded((value) => !value)}
         >
-          {completedExpanded ? '▾' : '▸'} 完了したタスク / Completed tasks ({completedTotal})
+          {completedExpanded ? '▾' : '▸'} {t('projects.completedTasks')} ({completedTotal})
         </button>
         {completedExpanded ? (
           <>
@@ -178,18 +249,22 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
 function CreateTaskCard({
   projects,
   loading,
+  initialProjectId = '',
+  initialSubprojectId = '',
   onCreated
 }: {
   projects: MyWorkProjectOptions['items'];
   loading: boolean;
+  initialProjectId?: string;
+  initialSubprojectId?: string;
   onCreated: () => void;
 }): JSX.Element {
   const { t, label } = useI18n();
   const initialKey = useIdempotencyKey();
   const [idempotencyKey, setIdempotencyKey] = useState(initialKey);
   const save = useSave();
-  const [projectId, setProjectId] = useState('');
-  const [subprojectId, setSubprojectId] = useState('');
+  const [projectId, setProjectId] = useState(initialProjectId);
+  const [subprojectId, setSubprojectId] = useState(initialSubprojectId);
   const [taskName, setTaskName] = useState('');
   const [description, setDescription] = useState('');
   const [deadline, setDeadline] = useState('');
@@ -257,7 +332,10 @@ function CreateTaskCard({
             value={subprojectId}
             onChange={setSubprojectId}
             allowEmpty={t('myWork.subprojectNone')}
-            options={subprojects.map((entry) => ({ value: entry.subprojectId, label: entry.subprojectName }))}
+            options={subprojects.map((entry) => ({
+              value: entry.subprojectId,
+              label: subprojectPath(subprojects, entry.subprojectId)
+            }))}
           />
         </label>
       </div>
@@ -328,22 +406,20 @@ function WorkRow({
       <h3>
         <a href={`#/task/${item.taskId}`}>{item.taskName}</a>
       </h3>
-      <p className="muted small">
+      <p className="my-work-row-meta muted small">
         <a href={`#/project/${item.projectId}`}>{item.projectName}</a>
-        {item.subprojectName ? ` / ${item.subprojectName}` : ''} · {t('myWork.deadline')}: {item.dueDate ?? t('common.unset')} ·{' '}
-        {label('priority', item.priority)}
+        {item.subprojectName ? ` / ${item.subprojectName}` : ''} · {label('priority', item.priority)}
       </p>
       </div>
       <div className="my-work-row-status">
-      <p className="small">
-        <span className="muted">{t('myWork.status')}: </span>
+      <span className="row-status-line">
         <Badge tone={displayTone(item.displayStatus)}>{t(`taskStatus.${item.displayStatus}`)}</Badge>
         {item.pendingRequest ? <Badge tone="warn">{t('myWork.pendingBadge')}</Badge> : null}
-        {item.creationChannel === 'MEMBER' ? (
-          <span className="muted small"> · {t('myWork.adminApprovalNote')}</span>
-        ) : null}
-      </p>
+      </span>
       {canReport ? <Badge tone={review.tone}>{t(review.label)}</Badge> : null}
+      </div>
+      <div className="my-work-row-due">
+        <DeadlineCell dueDate={item.dueDate} displayStatus={item.displayStatus} />
       </div>
 
       <div className="my-work-row-actions">
@@ -359,12 +435,14 @@ function WorkRow({
           </button>
       ) : null}
       {canManage ? (
+        <>
           <a className="button secondary" href={`#/task/${item.taskId}`}>{t('action.open')}</a>
           {!locked ? (
             <button type="button" className="button" onClick={() => setCompleting(true)}>
               {t('tasks.completeDirect')}
             </button>
           ) : null}
+        </>
       ) : (
           <a className="button secondary" href={`#/task/${item.taskId}`}>{t('action.open')}</a>
       )}
@@ -508,25 +586,66 @@ function CompletionRequestForm({
 
 function MyRequestsCard({ requests }: { requests: MemberRequest[] }): JSX.Element {
   const { t, label } = useI18n();
+  const [expanded, setExpanded] = useRouteMemoryState('my-work:requests-expanded', false);
+  const [openRow, setOpenRow] = useState<string | null>(null);
+  const pending = requests.filter((request) => ['PENDING', 'PROCESSING'].includes(request.status)).length;
+
   return (
-    <section className="card stack">
-      <h3>{t('myWork.requestsHeading')}</h3>
-      {requests.length === 0 ? <p className="muted">{t('myWork.requestsEmpty')}</p> : null}
-      {requests.length > 0 ? (
-        <ul className="list">
-          {requests.map((request) => (
-            <li key={request.requestId}>
-              <strong>{request.taskName || request.taskId}</strong>
-              <span className="muted small">
-                {' '}
-                · {t(`myWork.requestType.${request.requestType}`)} · {label('request.status', request.status)} ·{' '}
-                {request.submittedAt.slice(0, 10)} ({request.requestId})
-              </span>
-              {request.decisionNote ? <div className="muted small">{t('myWork.decisionNote')}: {request.decisionNote}</div> : null}
-              {request.staleReason ? <div className="muted small">{t('myWork.review.stale')}: {request.staleReason}</div> : null}
-            </li>
-          ))}
-        </ul>
+    <section className="card stack requests-panel">
+      <button
+        type="button"
+        className="requests-toggle"
+        aria-expanded={expanded}
+        aria-label={t('myWork.requestsToggle')}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span aria-hidden="true">{expanded ? '▾' : '▸'}</span> {t('myWork.requestsHeading')} (
+        {t('myWork.requestsSummary', { total: requests.length })})
+        <span className="muted small"> · {t('myWork.requestsPendingSummary', { n: pending })}</span>
+      </button>
+      {expanded ? (
+        requests.length === 0 ? (
+          <p className="muted">{t('myWork.requestsEmpty')}</p>
+        ) : (
+          <ul className="list request-list">
+            {requests.map((request) => {
+              const open = openRow === request.requestId;
+              const hasDetails = !!(request.decisionNote || request.staleReason);
+              return (
+                <li key={request.requestId}>
+                  <div className="request-row">
+                    <strong>{request.taskName || request.taskId}</strong>
+                    <span className="muted small">
+                      {t(`myWork.requestType.${request.requestType}`)} · {label('request.status', request.status)} ·{' '}
+                      {request.submittedAt.slice(0, 10)}
+                    </span>
+                    <span className="muted request-id">{request.requestId}</span>
+                    {hasDetails ? (
+                      <button
+                        type="button"
+                        className="link-button"
+                        aria-expanded={open}
+                        onClick={() => setOpenRow(open ? null : request.requestId)}
+                      >
+                        {t(open ? 'myWork.requestHideDetails' : 'myWork.requestDetails')}
+                      </button>
+                    ) : null}
+                  </div>
+                  {open && request.decisionNote ? (
+                    <div className="request-detail muted small">
+                      {t('myWork.decisionNote')}: {request.decisionNote}
+                    </div>
+                  ) : null}
+                  {open && request.staleReason ? (
+                    <div className="request-detail muted small">
+                      {t('myWork.review.stale')}: {request.staleReason}
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )
       ) : null}
     </section>
   );

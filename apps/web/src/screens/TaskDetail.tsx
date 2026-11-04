@@ -10,6 +10,8 @@ import { TaskForm } from './TaskForm';
 import { displayTone } from './Tasks';
 import { formatSkillGrade, projectColor } from '@eh/domain';
 import { BackButton } from '../state/navigation';
+import { DeleteEntityDialog } from '../components/DeleteEntityDialog';
+import { DeadlineCell } from '../components/deadline';
 
 type References = {
   members: { memberId: string; name: string; active: boolean; employeeId?: string }[];
@@ -29,6 +31,7 @@ export function TaskDetailScreen({
   const { t, label } = useI18n();
   const [editing, setEditing] = useState(false);
   const [action, setAction] = useState<'approve' | 'confirm' | 'override' | 'complete' | null>(null);
+  const [removing, setRemoving] = useState(false);
   const endpoint = readOnly ? `/api/work/tasks/${taskId}` : `/api/manager/tasks/${taskId}`;
   const detail = useQuery<TaskDetail>(keys.task(taskId), () => api.get<TaskDetail>(endpoint));
   const references = useQuery<References>(keys.references, () =>
@@ -68,6 +71,11 @@ export function TaskDetailScreen({
             <button type="button" className="button secondary" onClick={() => setEditing(true)}>
               {t('action.edit')}
             </button>
+            {actor.role === 'ADMIN' ? (
+              <button type="button" className="button danger" onClick={() => setRemoving(true)}>
+                {t('delete.submit')}
+              </button>
+            ) : null}
             {!detail.data.children.length && record.displayStatus !== 'DONE' && record.displayStatus !== 'CANCELLED' ? (
               <button type="button" className="button" onClick={() => setAction('complete')}>
                 {t('tasks.completeDirect')}
@@ -96,7 +104,9 @@ export function TaskDetailScreen({
           </div>
           <div>
             <dt>{t('column.deadline')}</dt>
-            <dd>{record.dueDate ?? t('common.unset')}</dd>
+            <dd>
+              <DeadlineCell dueDate={record.dueDate} displayStatus={record.displayStatus} size="large" />
+            </dd>
           </div>
           <div>
             <dt>{t('tasks.priority')}</dt>
@@ -131,9 +141,9 @@ export function TaskDetailScreen({
 
       {canManage ? (
         <details className="advanced-actions">
-          <summary>詳細操作 / Advanced</summary>
+          <summary>{t('tasks.advanced')}</summary>
           <p className="muted small">
-            割当承認と日程確定は監査・通知のワークフローを保持します。 / Assignment approval and schedule confirmation retain their audit and notification workflows.
+            {t('tasks.advancedHint')}
           </p>
           <div className="inline-actions">
             <button type="button" className="button secondary" onClick={() => setAction('approve')}>
@@ -305,6 +315,25 @@ export function TaskDetailScreen({
             }
             setAction(null);
             queryCache.invalidate([keys.task(record.taskId), keys.tasks, keys.taskIndex, keys.overview, keys.project(record.projectId), keys.myWork]);
+          }}
+        />
+      ) : null}
+
+      {removing ? (
+        <DeleteEntityDialog
+          entityType="TASKS"
+          entityId={record.taskId}
+          entityName={record.taskName}
+          onClose={() => setRemoving(false)}
+          onDeleted={() => {
+            queryCache.invalidate([
+              keys.tasks,
+              keys.taskIndex,
+              keys.overview,
+              keys.project(record.projectId),
+              keys.myWork
+            ]);
+            window.location.hash = '#/all-work';
           }}
         />
       ) : null}

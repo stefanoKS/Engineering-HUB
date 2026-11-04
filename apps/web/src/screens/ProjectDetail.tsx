@@ -23,6 +23,8 @@ import { displayTone } from './Tasks';
 import { projectColor } from '@eh/domain';
 import { BackButton, useRouteMemoryState } from '../state/navigation';
 import { DeleteEntityDialog } from '../components/DeleteEntityDialog';
+import { MemberSubprojectForm } from '../components/member-subproject-form';
+import { DeadlineCell } from '../components/deadline';
 
 /* ------------------------------------------------------------------ data shapes */
 
@@ -487,7 +489,7 @@ function SubprojectItem({
         </span>
         <span className="hierarchy-name">{node.subprojectName}</span>
         <Badge tone={statusTone(node.status)}>{label('project.status', node.status)}</Badge>
-        {node.deadline ? <span className="muted small">{t('column.deadline')}: {node.deadline}</span> : null}
+        {node.deadline ? <DeadlineCell dueDate={node.deadline} showLabel={false} /> : null}
         <span className="hierarchy-counts">{t('hierarchy.counts', { active: node.counts.active, done: node.counts.done })}</span>
         {canManage ? (
           <span className="hierarchy-actions">
@@ -607,7 +609,7 @@ function TaskItem({
         {task.container ? <Badge>{t('hierarchy.container')}</Badge> : null}
         {task.reviewState === 'PENDING' ? <Badge tone="warn">{t('tasks.review')}</Badge> : null}
         <span className="hierarchy-assignees muted small">{assignees || t('common.unset')}</span>
-        <span className="muted small">{task.dueDate ?? t('common.unset')}</span>
+        <DeadlineCell dueDate={task.dueDate} displayStatus={task.displayStatus} showLabel={false} />
         <Badge tone={displayTone(task.displayStatus)}>{t(`taskStatus.${task.displayStatus}`)}</Badge>
         {canDelete ? (
           <button
@@ -658,6 +660,9 @@ export function ProjectDetailScreen({
   const detail = useQuery<ManagerDetail | ReadOnlyDetail>(cacheKey, () => api.get<ManagerDetail | ReadOnlyDetail>(endpoint));
   const canManage = !readOnly && (actor.role === 'ADMIN' || actor.role === 'MANAGER');
   const canDelete = !readOnly && actor.role === 'ADMIN';
+  // A MEMBER files a subproject here straight away; every manager-only operation stays hidden.
+  const canCreateAsMember = readOnly && actor.role === 'MEMBER';
+  const [memberSubproject, setMemberSubproject] = useState(false);
   const [editProject, setEditProject] = useState(false);
   const [editingSubproject, setEditingSubproject] = useState<Subproject | null>(null);
   const [newSubprojectParent, setNewSubprojectParent] = useState<string | null | undefined>(undefined);
@@ -762,8 +767,7 @@ export function ProjectDetailScreen({
           newSubprojectParent !== undefined ||
           newTaskSubproject !== undefined ||
           deleteTarget !== null
-        }
-      />
+        }      />
       <Breadcrumbs
         items={[
           { label: t('nav.projects'), href: '#/projects' },
@@ -787,6 +791,16 @@ export function ProjectDetailScreen({
               {t('projects.edit')}
             </button>
           )}
+          {canCreateAsMember ? (
+            <button
+              type="button"
+              className="button secondary"
+              aria-expanded={memberSubproject}
+              onClick={() => setMemberSubproject((value) => !value)}
+            >
+              {t('myWork.newSubproject')}
+            </button>
+          ) : null}
           <Badge tone={statusTone(record.status)}>{label('project.status', record.status)}</Badge>
           {canManage ? (
             <Badge tone={(record as Project).dashboardVisibility === 'INTERNAL' ? 'ok' : 'neutral'}>
@@ -824,7 +838,9 @@ export function ProjectDetailScreen({
           </div>
           <div>
             <dt>{t('projects.deadline')}</dt>
-            <dd>{record.committedDeadline ?? t('common.unset')}</dd>
+            <dd>
+              <DeadlineCell dueDate={record.committedDeadline} showLabel={false} size="large" />
+            </dd>
           </div>
         </div>
         <h3>{t('projects.description')}</h3>
@@ -838,10 +854,34 @@ export function ProjectDetailScreen({
         </p>
       </Section>
 
+      {canCreateAsMember && memberSubproject ? (
+        <Section title={t('myWork.newSubproject')}>
+          <MemberSubprojectForm
+            fixedProjectId={projectId}
+            projects={[
+              {
+                projectId,
+                projectName: record.projectName,
+                responsibilityName: record.responsibilityName ?? '',
+                subprojects: view.subprojects.map((subproject) => ({
+                  subprojectId: subproject.subprojectId,
+                  subprojectName: subproject.subprojectName,
+                  parentSubprojectId: subproject.parentSubprojectId ?? null,
+                  depth: subproject.depth
+                }))
+              }
+            ]}
+            onCreated={() => {
+              setNotice(t('myWork.subprojectCreated'));
+              refresh();
+            }}
+          />
+        </Section>
+      ) : null}
+
       <ProjectHierarchy
         hierarchy={hierarchy}
-        canManage={canManage}
-        canDelete={canDelete}
+        canManage={canManage}        canDelete={canDelete}
         includeInactive={includeInactive}
         collapsed={collapsed}
         onToggle={toggleCollapsed}
@@ -877,7 +917,7 @@ export function ProjectDetailScreen({
               {view.phases.map((phase) => (
                 <li key={phase.project_phase_id}>
                   {phase.phase_name} · {phase.planned_start ?? t('common.unset')} → {phase.planned_end ?? t('common.unset')} ·{' '}
-                  <Badge tone={phase.status === 'PLANNED' ? 'ok' : 'warn'}>{phase.status}</Badge>
+                  <Badge tone={phase.status === 'PLANNED' ? 'ok' : 'warn'}>{label('phase.status', phase.status)}</Badge>
                 </li>
               ))}
             </ul>

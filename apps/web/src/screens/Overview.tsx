@@ -12,6 +12,7 @@ import { api, ApiFailure, queryString } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
 import { Badge, EmptyState, ErrorBox, ProgressBar, ProjectAccent, Section, statusTone } from '../components/ui';
+import { DeadlineCell } from '../components/deadline';
 import { navigate } from '../App';
 import { projectColor } from '@eh/domain';
 import { useRouteMemoryState } from '../state/navigation';
@@ -137,7 +138,7 @@ function ManagerOverview(): JSX.Element {
                         </a>
                       </td>
                       <td>{taskAssignees(task, t('common.unset'))}</td>
-                      <td>{task.dueDate}</td>
+                      <td><DeadlineCell dueDate={task.dueDate} displayStatus={task.displayStatus} showLabel={false} /></td>
                       <td>{daysBetween(task.dueDate, data.upcomingWindow.from)}</td>
                       <td>
                         <Badge tone="danger">{t(`taskStatus.${task.displayStatus}`)}</Badge>
@@ -191,7 +192,7 @@ function ManagerOverview(): JSX.Element {
                       </a>
                     </td>
                     <td>{taskAssignees(task, t('common.unset'))}</td>
-                    <td>{task.dueDate}</td>
+                    <td><DeadlineCell dueDate={task.dueDate} displayStatus={task.displayStatus} showLabel={false} /></td>
                     <td>
                       <Badge tone={task.displayStatus === 'OVERDUE' ? 'danger' : 'info'}>
                         {t(`taskStatus.${task.displayStatus}`)}
@@ -212,7 +213,10 @@ function ManagerOverview(): JSX.Element {
                   <div key={card.responsibilityId} className="area-card" style={{ borderColor: card.color || undefined }}>
                     <h3>{card.name}</h3>
                     <p className="muted small">
-                      {card.ownerName || t('common.unset')} · {card.projectCount} {t('nav.projects')}
+                      {card.ownerName || t('common.unset')} · {card.status === 'Active' ? null : (
+                        <span>{label('responsibility.status', card.status)} · </span>
+                      )}
+                      {card.projectCount} {t('nav.projects')}
                     </p>
                     <dl className="mini-stats">
                       <div>
@@ -221,10 +225,13 @@ function ManagerOverview(): JSX.Element {
                       </div>
                       <div>
                         <dt>{t('overview.overdue')}</dt>
-                        <dd>{card.overdueWork}</dd>
+                        <dd className={card.overdueWork > 0 ? 'danger-cell' : undefined}>{card.overdueWork}</dd>
+                      </div>
+                      <div>
+                        <dt>{t('overview.completedWork')}</dt>
+                        <dd>{card.completedWork}</dd>
                       </div>
                     </dl>
-                    <ProgressBar value={card.progressPercent} />
                   </div>
                 ))}
               </div>
@@ -457,9 +464,7 @@ export function EmployeeHome({ actor }: { actor: Actor }): JSX.Element {
                   </p>
                   <div className="task-card-meta">
                     <Badge tone={statusTone(task.status)}>{label('task.status', task.status)}</Badge>
-                    <span className="muted small">
-                      {t('column.deadline')}: {task.dueDate ?? t('common.unset')}
-                    </span>
+                    <DeadlineCell dueDate={task.dueDate} displayStatus={task.displayStatus} />
                     {task.pendingRequest ? <Badge tone="warn">{t('request.status.PENDING')}</Badge> : null}
                   </div>
                   <ProgressBar value={task.progressPercent} />

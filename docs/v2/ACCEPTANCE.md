@@ -1,5 +1,24 @@
 # V2 Acceptance Record
 
+## Corrected logical removal of tasks with retained history — 2026-11-04
+
+Implemented on reviewed HEAD `595b13356401d3743e9fe5255a98459f4ba51961` while preserving the
+pre-existing dirty worktree. No production database, deployment, migration, publication, mail or
+external service was accessed. PostgreSQL validation used the repository's freshly migrated,
+disposable test/smoke databases.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| Root cause | PASS | `evaluateRemoval()` treated `Done`, nonzero `actual_hours` and `assignment_approved_at` as logical-removal blockers, even though logical removal retains the row and its evidence. |
+| Normal ADMIN removal | PASS | `POST /api/admin/tasks/:id/remove` now permits retained completion, assignment-approval, schedule-confirmation, audit and effort evidence. Active children, inbound dependencies, pending requests and pending/leased notification work still block the transactionally re-evaluated removal. |
+| Audit and data preservation | PASS | Successful removal writes `tasks.deleted_at`, increments `revision`, retains all historical rows, records `RECORD_REMOVED` with reason, actor, previous status and previous revision, and enqueues the deduplicated publication outbox job. |
+| UI | PASS | The shared dialog offers an ordinary task removal confirmation without a typed ID. A task with retained completion/approval evidence shows the completed-task warning and requires an administrative reason; the Task Detail screen exposes the same ADMIN-only dialog. Permanent erasure remains a separate advanced action. |
+| Regression coverage | PASS | `apps/api/test/deletion.test.ts` (23 tests) now covers a Done task with assignment approval, schedule confirmation, recorded effort, and `ASSIGNMENT_APPROVED`, `SCHEDULE_CONFIRMED`, `TASK_COMPLETED_DIRECT` and `COMPLETION_OVERRIDDEN` audit records; logical removal succeeds while evidence remains and physical purge remains separately protected. |
+| Required checks | PASS | `npm run typecheck`; `npm run lint:v2`; `npm run test:v2` (**349 passed, 1 skipped**, 26 files); `npm run validate:v2` (**152 files checked**); `npm run build`; `npm run smoke:prod`; `npm run test:browser`. Smoke and browser checks used isolated PostgreSQL and completed successfully. |
+| Production / deployment | NOT_RUN | No production data was touched, no migration was run against an operational database, and no deployment was performed. |
+
+Production remains **NOT APPROVED FOR PRODUCTION**.
+
 ## Unified task removal and mistaken-record purge — 2026-11-04
 
 Latest local working tree; pre-existing uncommitted Overview, workload, navigation, database and
@@ -548,3 +567,53 @@ previously mistaken for a working artifact; that specific gap is now closed and 
 - PASS: ESLint for the three changed source/test files; npm run typecheck; npm run validate.
 - NOT_RUN: updated browser flow on the live LAN host; no rebuild, restart or live database mutation performed.
 - Earlier evidence remains historical. Production readiness remains NOT APPROVED FOR PRODUCTION.
+## Task, project and personal-work usability — 2026-11-04
+
+Schema **8**, published employee contract 1.6 and all historical migrations remain unchanged.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| All Work actions | PASS (local) | Everyday rows retain Edit and eligible Mark Done; assignment approval, schedule confirmation and ADMIN correction remain in Task Detail’s Advanced section. The approval command continues to write its audit record and assignment notification job; schedule confirmation remains its own audited command. |
+| All Work sorting | PASS (local) | `TaskListQuery` allows due date, name, project, owner, derived status, priority and update time; repository applies allowlisted SQL order before pagination, with Tokyo overdue derivation, nulls last and task-ID tie-breaker. Tree children receive the same sort query. |
+| Project sorting and grouping | PASS (local) | `ProjectListQuery` permits deadline, name, responsibility, owner, status, priority and update time; repository sorts before pagination with nulls last and project-ID tie-breaker. The API returns matching responsibility totals; the UI groups the bounded page, preserves collapse state, displays complete group totals and marks groups that continue on another page. A selected responsibility or Unassigned filter is flat. |
+| My Assigned Work sections | PASS (local) | Session-scoped endpoint accepts `section=active|completed`; separate bounded queries and counts prevent completed work from hiding active work. Active rows sort nearest deadline first; Done rows sort newest completion first, with null timestamps deterministic. Cancelled work remains excluded. |
+| Compact personal rows | PASS (local) | Personal tasks use responsive grid rows with project/subproject subtitle, compact status and actions; completed rows stay collapsed until requested. No manager browser persistence was added. |
+| `npm ci` | PASS | Lockfile dependencies restored after a transient native PostgreSQL DLL lock. |
+| `npm run typecheck` | PASS | All V2 workspaces compile cleanly after the release changes. |
+| `npm run lint:v2` | PASS | ESLint completed cleanly for `apps`, `packages` and `tools`. |
+| `npm run test:v2` | PASS | Full Vitest suite exited 0 after dependency restoration. |
+| `npm run validate:v2` | PASS | V2 source validation passed; 152 files checked. |
+| `npm run build` | PASS | API, web, worker and migration CLI artifacts built successfully. |
+| `npm run smoke:prod` | PASS | Disposable PostgreSQL schema 10 migration, built API readiness/read/mutation and worker outbox flow all passed. |
+| `npm run test:browser` | PASS | Built-artifact Chromium journeys passed for manager, member and viewer, including responsive layout. |
+| Live deployment / LAN test | NOT_RUN | No deployment, database migration, live LAN database or external service was touched. |
+
+No live Google resource, deployment host or production database was used. `docs/PRODUCTION_READINESS.md` remains **NOT APPROVED FOR PRODUCTION**.
+
+## Member creation, readability and workload timeline - 2026-11-04
+
+Schema 10, published employee contract 1.6, every historical migration and the V1 Apps Script project
+remain unchanged. No Script Property, column or index was added.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| Member task creation | PASS (local) | The existing `POST /api/employee/my-work` path is unchanged: owner is the verified member, status `Not Started`, no approval record. Covered by `roles-and-work.test` and `workflows.test`. |
+| Member subproject creation | PASS (local) | `POST /api/employee/subprojects` (`CreateMySubprojectBody`, `createMySubproject`): MEMBER only, active project, active non-archived parent chain, same project, four-level limit and cycle refusal, owner = verified member, status `Active`, `SUBPROJECT_CREATED` audit, member-scoped idempotency key returning the first record on retry. `member-creation.test` (9 tests) proves immediate creation, nested creation, immediate task placement under the new subproject, no approval row, privileged-field refusal, archived project/parent refusal, depth refusal, MANAGER/ADMIN/VIEWER refusal and the unchanged project-creation/completion refusals. |
+| Hierarchy metadata for the member form | PASS (local) | `GET /api/employee/my-work/projects` adds only `parentSubprojectId` and `depth`; `member-creation.test` asserts the new subproject appears with its parent and level. |
+| Member creation UI | PASS (local) | My Assigned Work keeps `新規タスク` and `新規サブプロジェクト` in one panel, one open at a time, with a hierarchical parent path, an optional deadline, a duplicate-safe submit and a "create a task under it" follow-up. A MEMBER also gets a contextual create control on the project screen they may read; `readability.test` and the Chromium member/viewer journeys cover it. |
+| Deadline prominence | PASS (local) | One `DeadlineCell` region labelled 納期/Deadline, red + `期限超過` badge when overdue, amber + `今日` when due today, dark text otherwise, `未設定` when absent; applied to My Assigned Work, All Work, task detail, project detail, the read-only explorer, the project list and the overview tables. `readability.test` covers the tone matrix and the region. |
+| Collapsible request history | PASS (local) | `自分の申請` is collapsed by default, shows the total and the pending count, expands through the remembered route state, and opens decision/stale notes per row instead of printing paragraphs. Pending completion indicators stay on the task rows and the manager Requests queue is untouched. `readability.test`, `workflows.test`. |
+| 分野 terminology and overview counts | PASS (local) | Japanese labels read 分野 for navigation, overview, project filter, workload filter and responsibility management; English keeps Responsibility. The overview responsibility card shows project, open, overdue and completed counts and no percentage bar. `readability.test` asserts the counts and the absence of a progress element. |
+| Name typography | PASS (local) | `.my-work-row h3` 1.15rem, project card 1.1rem, area card 1.075rem, hierarchy name 1.02rem, screen/task heading `clamp(1.25rem, 1.1rem + 0.4vw, 1.5rem)`; secondary labels stay 12–14px. Columns stack at 700px and no rule clips a long Japanese name. |
+| Localized statuses | PASS (local) | `shared/i18n.js` gains `task.status.*`, `project.status.*`, `responsibility.status.*`, `phase.status.*`, `request.status.PROCESSING` and `request.type.*`; the V2 dictionary was regenerated and the V1/dashboard copies synced. Stored enum values are untouched. `readability.test` asserts 廃止 and the absence of `Retired`. |
+| Workload today marker | PASS (local) | The marker uses `data.today` (Asia/Tokyo business date from the server) and highlights the bucket whose range contains it; a period without today states `今日は選択期間外です。` instead of drawing a marker. `readability.test` covers the day case and the outside case. |
+| Workload axis and labels | PASS (local) | Visible axis labels `期限タスク数（件）` / `日付`, a unit on every count including zero (`1 task` / `3 tasks` / `3件`), a date under every bucket (`11/04 (水)`, `11/02–11/08`, `2026/11`), month context for a dense month, and a tooltip with the date plus due and overdue counts. An all-zero period keeps its buckets and dates. `readability.test`. |
+| `npm run typecheck` | PASS | All V2 workspaces compile cleanly. |
+| `npm run lint` | PASS | V1 and V2 ESLint both exit 0. |
+| `npm run test:v2` | PASS | `REQUIRE_DATABASE=1`, 28 files, 367 passed / 1 skipped. Baseline before the change was 349 passed / 1 skipped. |
+| `npm run validate` | PASS | V1 source validation (989 translation keys, both synced copies), V2 validation (156 files) and the deployment templates. |
+| `npm run build` | PASS | API, web, worker and migration CLI artifacts built. |
+| `npm run smoke:prod` | PASS | Disposable PostgreSQL, built migration CLI to schema 10, built API read/mutation, worker outbox flow. |
+| `npm run test:browser` | PASS | Built-artifact Chromium journeys: manager, member and viewer, Japanese login and language switch, responsive widths, the member-only create control expectation, the workload axis/`Today` marker assertions, and screenshots under `work/screenshots` (`my-work-*`, `workload-timeline*`). |
+| Live deployment / Workspace / LAN | NOT_RUN | No deployment, production database, Workspace tenant or live LAN host was touched. |
+| Production approval | **NOT APPROVED** | `docs/PRODUCTION_READINESS.md` is unchanged; no live evidence exists. |

@@ -96,7 +96,8 @@ export const DeleteBody = z
 export const RemoveBody = z
   .object({
     revision: Revision,
-    confirmed: Confirm
+    confirmed: Confirm,
+    reason: Text(1000).optional()
   })
   .strict();
 
@@ -114,6 +115,24 @@ export const CreateSubprojectBody = z
     deadline: NullableIsoDate.optional(),
     estimatedHours: z.number().min(0).max(1000000).nullable().optional(),
     nextAction: Text(500).optional()
+  })
+  .strict();
+
+/**
+ * Member self-service subproject creation.
+ *
+ * A MEMBER files a subproject immediately, without a manager approval. Everything a manager may
+ * decide stays server-side: the owner is the verified session, the status is `Active`, and the
+ * browser cannot supply an owner, a role, a status, progress or an approval.
+ */
+export const CreateMySubprojectBody = z
+  .object({
+    idempotencyKey: IdempotencyKey,
+    projectId: Id,
+    parentSubprojectId: Id.nullable().optional(),
+    subprojectName: Text(200).min(1),
+    description: Text(2000).optional(),
+    deadline: NullableIsoDate.optional()
   })
   .strict();
 

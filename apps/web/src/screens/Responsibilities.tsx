@@ -11,7 +11,7 @@ import { ConfirmDialog, SelectInput, TextInput, useIdempotencyKey, useSave } fro
 type Member = { memberId: string; name: string; active: boolean };
 
 export function ResponsibilitiesScreen({ actor }: { actor: Actor }): JSX.Element {
-  const { t } = useI18n();
+  const { t, label } = useI18n();
   const [editing, setEditing] = useState<Responsibility | 'new' | null>(null);
   const [statusChange, setStatusChange] = useState<{ item: Responsibility; status: 'Active' | 'Retired' } | null>(null);
   const list = useQuery<{ items: (Responsibility & { _revision: number })[] }>(keys.responsibilities, () =>
@@ -66,7 +66,7 @@ export function ResponsibilitiesScreen({ actor }: { actor: Actor }): JSX.Element
                 <td>{item.ownerName || t('common.unset')}</td>
                 <td>{item.members.filter((member) => !member.primary).map((member) => member.name).join(', ') || t('common.none')}</td>
                 <td>
-                  <Badge tone={statusTone(item.status)}>{item.status}</Badge>
+                  <Badge tone={statusTone(item.status)}>{label('responsibility.status', item.status)}</Badge>
                 </td>
                 <td>
                   <button type="button" className="link-button" onClick={() => void move(item, -1)}>

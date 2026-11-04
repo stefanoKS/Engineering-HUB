@@ -86,11 +86,12 @@ exists only for local and test runs.
 
 | Area | ADMIN | MANAGER | MEMBER | VIEWER |
 | --- | --- | --- | --- | --- |
-| Projects, subprojects, responsibilities, tasks: create/edit/archive/delete | yes | yes | no | no |
+| Projects, subprojects, responsibilities, tasks: create/edit/archive/delete | yes | yes | create own subproject only (`/api/employee/subprojects`); no edit, archive or delete | no |
 | Reports, workload, member profile, automation, publication, status | yes | read; changes need ADMIN for live activation | no | no |
 | Read permitted work (`/api/work/*`, All Work) | yes | yes | yes, read-only | yes, read-only |
 | My Assigned Work (own assignments only) | yes | yes | yes | yes, read-only |
 | Create a task for oneself under an active project | not through self-service | not through self-service | yes | no |
+| Create a subproject (and a nested subproject) under an active project | through the manager form | through the manager form | yes, immediately; owner is the verified member and the status is `Active` | no |
 | Edit any existing task, assignment or deadline | yes | yes | no, even for a self-created task | no |
 | Progress / actual-hours edit | through the manager form | through the manager form | no (removed path) | no |
 | Submit a completion report | no (completes directly) | no (completes directly) | own assigned work only | no |

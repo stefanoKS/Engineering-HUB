@@ -146,6 +146,7 @@ async function projectPage(request: FastifyRequest, query: ReturnType<typeof Pro
       };
     }),
     total: page.total,
+    groupTotals: page.groupTotals,
     page: query.page,
     pageSize: query.pageSize,
     totalPages: Math.ceil(page.total / query.pageSize)

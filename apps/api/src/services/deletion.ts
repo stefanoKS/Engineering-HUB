@@ -28,7 +28,7 @@ type RemovalEntityType = 'SUBPROJECTS' | 'TASKS';
 
 type RemovalBlocker = { code: string; detail: string };
 
-const REMOVAL_REASON = 'Administrative removal of a mistakenly created record';
+const REMOVAL_REASON = 'Created by mistake';
 
 const NON_OPERATIONAL_AUDIT_ACTIONS: Record<EntityType, readonly string[]> = {
   PROJECTS: ['PROJECT_CREATED'],
@@ -490,6 +490,20 @@ async function evaluateRemoval(
       WHERE task_id = $1 AND result IN ('PENDING','DELIVERY_UNCERTAIN')`,
     [entityId]
   );
+  const scheduleConfirmations = await countRows(
+    db,
+    'SELECT count(*)::text AS count FROM schedule_confirmations WHERE task_id = $1',
+    [entityId]
+  );
+  const historicalAudit = await countRows(
+    db,
+    `SELECT count(*)::text AS count
+       FROM audit_log
+      WHERE entity_type = 'TASKS'
+        AND entity_id = $1
+        AND action = ANY($2::text[])`,
+    [entityId, ['ASSIGNMENT_APPROVED', 'SCHEDULE_CONFIRMED', 'TASK_COMPLETED_DIRECT', 'COMPLETION_OVERRIDDEN']]
+  );
   const jobs = await db.many<{ job_id: string; kind: string }>(
     `SELECT job_id::text, kind
        FROM outbox_jobs
@@ -514,12 +528,6 @@ async function evaluateRemoval(
       `Resolve pending notification/calendar work first (${pendingLedger + jobs.length} item(s))`
     );
   }
-  if (record.status === 'Done' || Number(record.actual_hours ?? 0) > 0) {
-    blocked('RECORDED_EFFORT', 'Completed work or recorded effort requires the protected completion/history workflow');
-  }
-  if (record.assignment_approved_at) {
-    blocked('APPROVALS', 'The current assignment is approved; clear the active operational decision first');
-  }
   return {
     entityType,
     entityId,
@@ -527,6 +535,12 @@ async function evaluateRemoval(
     blockers,
     dependencyCount: dependants.length,
     descendantCount: children.length,
+    requiresReason:
+      record.status === 'Done' ||
+      Number(record.actual_hours ?? 0) > 0 ||
+      !!record.assignment_approved_at ||
+      scheduleConfirmations > 0 ||
+      historicalAudit > 0,
     confirmationText: '',
     revision: record.revision
   };
@@ -545,7 +559,7 @@ export async function removeEntity(
   ctx: ServiceCtx,
   entityType: RemovalEntityType,
   entityId: string,
-  input: { revision: number; confirmed: true }
+  input: { revision: number; confirmed: true; reason?: string }
 ): Promise<{ entityType: RemovalEntityType; entityId: string; revision: number; alreadyRemoved: boolean }> {
   requireRole(ctx.identity, 'ADMIN');
   if (!input.confirmed) throw new DomainError('CONFIRMATION_REQUIRED', 'Removal requires explicit confirmation');
@@ -571,11 +585,16 @@ export async function removeEntity(
     if (checked.revision !== input.revision) {
       throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
     }
+    const reason = input.reason?.trim() ?? '';
+    if (checked.requiresReason && !reason) {
+      throw new DomainError('VALIDATION_FAILED', 'An administrative reason is required when retained history exists');
+    }
     const table = entityType === 'TASKS' ? 'tasks' : 'subprojects';
     const column = entityType === 'TASKS' ? 'task_id' : 'subproject_id';
     const previous = entityType === 'TASKS'
       ? await getTaskIncludingDeleted(tx, entityId)
       : await getSubproject(tx, entityId);
+    if (!previous) throw new DomainError('NOT_FOUND', `Record not found: ${entityId}`);
     const updated = await tx.one<{ revision: number }>(
       `UPDATE ${table}
           SET deleted_at = now(), updated_at = now(), revision = revision + 1
@@ -590,8 +609,10 @@ export async function removeEntity(
       action: 'RECORD_REMOVED',
       previousValue: previous,
       newValue: {
-        reason: REMOVAL_REASON,
+        reason: reason || REMOVAL_REASON,
         removedBy: ctx.identity.memberId,
+        previousStatus: entityType === 'TASKS' ? previous.status : undefined,
+        previousRevision: input.revision,
         revision: updated.revision
       }
     });

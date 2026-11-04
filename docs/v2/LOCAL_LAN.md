@@ -197,3 +197,24 @@ Windows LAN host:
 
 Do not run the migration command for this UI/API-only update, and do not point the validation
 commands at the operational database.
+
+## Member creation, readability and workload timeline — 2026-11-04
+
+Member subproject creation, the deadline/name typography, the collapsible request history, the 分野
+label, the localized status dictionaries and the workload axis/today marker are web/API code and
+translation files only. There is no migration, column, index or Script Property, so no operational
+data repair and no database step is required. On an authorized Windows LAN host:
+
+1. Stop the running `Start-Lan.cmd` / `npm.cmd run start:lan` supervisor with Ctrl+C and confirm it
+   exited. Do not start a second copy.
+2. Update the working tree through the normal reviewed release process.
+3. Run `npm.cmd ci`, `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run test:v2`,
+   `npm.cmd run validate`, `npm.cmd run build` and `npm.cmd run smoke:prod`.
+4. Restart with `deploy\windows\Start-Lan.cmd` (or `npm.cmd run start:lan`), confirm `/readyz`, then
+   hard-reload the browser so the new bundle is used. Verify that a MEMBER sees `新規タスク` and
+   `新規サブプロジェクト` on 自分の担当タスク, that 納期 is prominent with a red 期限超過 badge only
+   when overdue, that 自分の申請 starts collapsed, and that 工数レポート shows the 今日 marker and a
+   date under every bar.
+
+Do not run the migration command for this UI/API-only update, and do not point the validation
+commands at the operational database.

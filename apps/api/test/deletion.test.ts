@@ -127,14 +127,22 @@ describe('deletion authorization', () => {
 });
 
 describe('administrative logical removal', () => {
-        it('removes an edited INTERNAL task while preserving routine historical evidence', async () => {
+        it('removes a completed task with approval, schedule, effort and audit history while preserving every record', async () => {
           await db.query(
-            `INSERT INTO tasks(task_id,project_id,task_name,status,due_date,revision)
-             VALUES('T-LOGICAL','PRJ-INT','Mistaken published task','In Progress','2026-12-10',4)`
+            `INSERT INTO tasks(task_id,project_id,task_name,status,due_date,actual_hours,assignment_approved_at,revision)
+             VALUES('T-LOGICAL','PRJ-INT','Mistaken published task','Done','2026-12-10',4,now(),4)`
+          );
+          await db.query(
+            `INSERT INTO schedule_confirmations(schedule_confirmation_id,task_id,confirmed_by)
+             VALUES('SC-LOGICAL','T-LOGICAL','MEM-ADMIN')`
           );
           await db.query(
             `INSERT INTO audit_log(entity_type,entity_id,action,actor_member_id)
-             VALUES('TASKS','T-LOGICAL','TASK_UPDATED','MEM-ADMIN')`
+             VALUES
+               ('TASKS','T-LOGICAL','ASSIGNMENT_APPROVED','MEM-ADMIN'),
+               ('TASKS','T-LOGICAL','SCHEDULE_CONFIRMED','MEM-ADMIN'),
+               ('TASKS','T-LOGICAL','TASK_COMPLETED_DIRECT','MEM-ADMIN'),
+               ('TASKS','T-LOGICAL','COMPLETION_OVERRIDDEN','MEM-ADMIN')`
           );
           await db.query(
             `INSERT INTO task_requests(request_id,request_type,task_id,project_id,requester_name,status)
@@ -154,17 +162,25 @@ describe('administrative logical removal', () => {
             headers: { cookie: admin.cookie! }
           });
           expect(checked.statusCode, checked.body).toBe(200);
-          expect(checked.json().data).toMatchObject({ deletable: true, blockers: [], revision: 4 });
+          expect(checked.json().data).toMatchObject({ deletable: true, blockers: [], requiresReason: true, revision: 4 });
+
+          const missingReason = await administrativeRemove(admin, '/api/admin/tasks/T-LOGICAL/remove', {
+            revision: 4,
+            confirmed: true
+          });
+          expect(missingReason.statusCode, missingReason.body).toBe(400);
+          expect(missingReason.json().error.code).toBe('VALIDATION_FAILED');
 
           const removed = await administrativeRemove(admin, '/api/admin/tasks/T-LOGICAL/remove', {
             revision: 4,
-            confirmed: true
+            confirmed: true,
+            reason: 'Created by mistake'
           });
           expect(removed.statusCode, removed.body).toBe(200);
           expect(removed.json().data).toMatchObject({ alreadyRemoved: false, revision: 5 });
           expect(await db.one("SELECT 1 FROM tasks WHERE task_id = 'T-LOGICAL' AND deleted_at IS NOT NULL AND revision = 5")).toBeTruthy();
           expect(await db.one("SELECT 1 FROM task_deadline_history WHERE history_id = 'HIST-1'")).toBeTruthy();
-          expect(await db.one("SELECT 1 FROM audit_log WHERE entity_id = 'T-LOGICAL' AND action = 'TASK_UPDATED'")).toBeTruthy();
+          expect(await db.one("SELECT 1 FROM audit_log WHERE entity_id = 'T-LOGICAL' AND action = 'TASK_COMPLETED_DIRECT'")).toBeTruthy();
           expect(await db.one("SELECT 1 FROM task_assignees WHERE assignment_id = 'ASG-HIST'")).toBeTruthy();
           expect(await db.one("SELECT 1 FROM task_requests WHERE request_id = 'REQ-HIST'")).toBeTruthy();
           expect(await db.one("SELECT 1 FROM audit_log WHERE entity_id = 'T-LOGICAL' AND action = 'RECORD_REMOVED'")).toBeTruthy();
@@ -214,7 +230,7 @@ describe('administrative logical removal', () => {
           expect(Number(evidence!.count)).toBe(1);
         });
 
-        it('blocks child work, active dependencies, pending requests/jobs, completed work and stale revisions', async () => {
+        it('blocks child work, active dependencies, pending requests/jobs and stale revisions', async () => {
           await db.query(
             `INSERT INTO tasks(task_id,project_id,task_name,status,actual_hours) VALUES
              ('T-BLOCKED','PRJ-PRIV','Blocked target','In Progress',NULL),
@@ -248,7 +264,7 @@ describe('administrative logical removal', () => {
             url: '/api/manager/removal/preflight?entityType=TASKS&entityId=T-DONE',
             headers: { cookie: admin.cookie! }
           });
-          expect(done.json().data.blockers.map((entry: { code: string }) => entry.code)).toContain('RECORDED_EFFORT');
+          expect(done.json().data).toMatchObject({ deletable: true, blockers: [], requiresReason: true });
 
           await db.query(
             "INSERT INTO tasks(task_id,project_id,task_name,status,revision) VALUES('T-STALE-REMOVE','PRJ-PRIV','Stale task','Not Started',3)"

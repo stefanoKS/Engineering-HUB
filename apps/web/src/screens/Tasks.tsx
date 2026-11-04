@@ -19,6 +19,7 @@ import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
 import { Badge, EmptyState, ErrorBox, Pagination } from '../components/ui';
 import { DeleteEntityDialog } from '../components/DeleteEntityDialog';
+import { DeadlineCell } from '../components/deadline';
 import { ConfirmDialog } from '../components/forms';
 import { TaskForm } from './TaskForm';
 import { MAX_TASK_DEPTH, projectColor } from '@eh/domain';
@@ -420,7 +421,7 @@ function TaskTreeRows(props: TreeProps & { items: TaskSummary[] }): JSX.Element 
                 <td>
                   <Badge tone={displayTone(task.displayStatus)}>{t(`taskStatus.${task.displayStatus}`)}</Badge>
                 </td>
-                <td>{task.dueDate ?? t('common.unset')}</td>
+                <td><DeadlineCell dueDate={task.dueDate} displayStatus={task.displayStatus} showLabel={false} /></td>
                 {canManage ? (
                   <td className="actions">
                     <button type="button" className="link-button" onClick={() => void openEdit(task)}>

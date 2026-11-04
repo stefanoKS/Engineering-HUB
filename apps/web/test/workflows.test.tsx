@@ -109,6 +109,8 @@ describe('member self-service work', () => {
     vi.stubGlobal('crypto', {}); // Plain HTTP LAN may not expose randomUUID.
     const calls = stubWork({ submissionEnabled: true });
     render(<I18nProvider><MyWorkScreen actor={MEMBER_ACTOR} /></I18nProvider>);
+    // Creation lives in a collapsible panel, so the form opens explicitly and only one at a time.
+    fireEvent.click(await screen.findByRole('button', { name: '新規タスク' }));
     expect(await screen.findByText('Alpha / Area')).toBeTruthy();
 
     fireEvent.change(screen.getAllByRole('combobox')[0]!, { target: { value: 'PRJ-A' } });

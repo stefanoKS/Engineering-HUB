@@ -5,6 +5,7 @@ import { api, queryString } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
 import { Badge, EmptyState, ErrorBox, Pagination, SaveState, Section, statusTone } from '../components/ui';
+import { DeadlineCell } from '../components/deadline';
 import { SelectInput, TextInput, useIdempotencyKey, useSave } from '../components/forms';
 
 type Page = { items: (Member & { _revision: number })[]; total: number; page: number; pageSize: number; totalPages: number };
@@ -249,7 +250,7 @@ export function MemberProfileScreen({ actor, memberId }: { actor: Actor; memberI
               <li key={task.taskId}>
                 <a href={`#/task/${task.taskId}`}>{task.taskName}</a>
                 <Badge tone={statusTone(task.status)}>{label('task.status', task.status)}</Badge>
-                <span className="muted small">{task.dueDate ?? t('common.unset')}</span>
+                <DeadlineCell dueDate={task.dueDate} displayStatus={task.displayStatus} showLabel={false} />
               </li>
             ))}
           </ul>
