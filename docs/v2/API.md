@@ -141,6 +141,17 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | POST | `/api/manager/reports/refresh` | MANAGER |
 | POST | `/api/manager/deletion/reconcile` | ADMIN, `confirmed`, `confirmation: "RECONCILE DELETIONS"` |
 
+`DELETE` on a task, subproject or project is the only destructive command. It is ADMIN-only, it
+re-runs the preflight under a row lock inside the same transaction, and it answers the stored
+`tombstoneId` from `record_deletions` after `RECORD_DELETE_PREPARED` and `RECORD_DELETED` exist.
+`GET /api/manager/deletion/preflight` is the read-only companion; it reports `deletable`, the
+blocker codes and the exact `confirmationText`. Nothing cascades: a record that still owns tasks,
+descendants, dependencies, recorded effort, approvals, requests, notifications, deadline history,
+schedule decisions, audit history or a publication is refused and must be archived instead.
+Audit checks query the complete history, not a capped recent page. For subprojects, only
+`SUBPROJECT_CREATED` and `SUBPROJECT_UPDATED` are non-operational deletion history; every other or
+unknown action blocks permanent deletion. Audit rows are append-only and survive removal.
+
 ## 5. Employee / member endpoints
 
 `MEMBER` and above may read. Creation and request submission are member self-service; a `VIEWER`
@@ -167,7 +178,7 @@ or a stored status; the only completion path is the reviewed request below.
 | GET | `/api/work/tasks` | Server-paged active work. `projectId`, `subprojectId`, `responsibilityId`, `unassigned`, `status`, `displayStatus` (`IN_PROGRESS`/`OVERDUE`/`DONE`/`CANCELLED`), `ownerMemberId`, `query`, `containerOnly`, `overdueOnly`, `includeInactive`, `tree`, `treeParentId`, paging and sorting |
 | GET | `/api/work/tasks/:id` | Task detail for MEMBER/VIEWER: an allowlisted record plus assignees and children |
 | GET | `/api/work/projects` | `query`, `page`, `pageSize`; the assignment picker for the read-only screens |
-| GET | `/api/work/projects/:id` | Read-only project detail: allowlisted record, rollup, subprojects and active tasks |
+| GET | `/api/work/projects/:id` | Read-only project detail: allowlisted record, rollup, subprojects (with the stored `parentSubprojectId`) and the tasks of the visible branches |
 
 Visibility is resolved on the server before a page is cut:
 
@@ -185,6 +196,10 @@ Visibility is resolved on the server before a page is cut:
 - The read-only project record carries identity, name, responsibility, owner name, status,
   priority, deadline, progress and health. Notification settings, the dashboard summary,
   milestones, phases and internal notes are absent.
+- The read-only project detail keeps the stored hierarchy (`subprojects[].parentSubprojectId`,
+  `tasks[].subprojectId`, `tasks[].parentTaskId`) so a reader rebuilds the same tree the manager
+  sees. Completed work inside a visible project stays readable so the completed count is real; the
+  tasks of an archived branch are withheld entirely instead of being re-attached as direct work.
 
 Managers use `/api/manager/tasks` and `/api/manager/projects` for the same data with management
 controls; the server refuses every manager write for MEMBER and VIEWER.

@@ -9,6 +9,52 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { APP_NAME, DEFAULT_LANGUAGE, LANGUAGES, STORAGE_KEY, isLanguage, label as dictLabel, t as dictT, type Language } from '@eh/i18n';
 
 export const V2_LABELS = {
+ 'hierarchy.title': { ja: 'プロジェクト構成', en: 'Project structure' },
+ 'hierarchy.directTasks': { ja: 'プロジェクト直下のタスク', en: 'Direct project tasks' },
+ 'hierarchy.counts': { ja: '進行中 {active} · 完了 {done}', en: '{active} active · {done} done' },
+ 'hierarchy.expand': { ja: '{name} を開く', en: 'Expand {name}' },
+ 'hierarchy.collapse': { ja: '{name} を閉じる', en: 'Collapse {name}' },
+ 'hierarchy.newSubproject': { ja: '子サブプロジェクト', en: 'Nested subproject' },
+ 'hierarchy.deleteTask': { ja: '{name} を完全削除', en: 'Delete {name} permanently' },
+ 'hierarchy.deleteSubproject': { ja: '{name} を完全削除', en: 'Delete {name} permanently' },
+ 'hierarchy.emptySubproject': { ja: 'このサブプロジェクトにはタスクがありません。', en: 'This subproject has no tasks.' },
+ 'hierarchy.empty': { ja: 'サブプロジェクトもタスクもまだありません。', en: 'No subprojects or tasks yet.' },
+ 'hierarchy.emptyDirect': { ja: 'プロジェクト直下のタスクはありません。', en: 'No direct project tasks.' },
+ 'hierarchy.showInactive': { ja: '取消・アーカイブを表示', en: 'Show cancelled and archived' },
+ 'hierarchy.container': { ja: '作業単位外', en: 'Container' },
+ 'hierarchy.hiddenTasks': { ja: '非表示のタスク: {n} 件', en: '{n} hidden tasks' },
+ 'delete.target': { ja: '対象', en: 'Target' },
+ 'delete.checking': { ja: '削除できるか確認しています…', en: 'Checking whether this can be removed…' },
+ 'delete.allowed': {
+   ja: 'この記録は削除できます。下の確認を入力してください。',
+   en: 'This record can be removed. Complete the confirmation below.'
+ },
+ 'delete.blocked': { ja: 'この記録は削除できません。', en: 'This record cannot be removed.' },
+ 'delete.blockedHint': {
+   ja: '子タスクや子サブプロジェクトは自動では削除されません。先に整理するか、アーカイブを使用してください。',
+   en: 'Child tasks and subprojects are never removed automatically. Handle them first, or archive instead.'
+ },
+ 'delete.revealChildren': { ja: '子を表示', en: 'Show children' },
+ 'delete.submit': { ja: '完全削除', en: 'Delete permanently' },
+ 'delete.staleRevision': {
+   ja: '他の更新により内容が変わりました。画面を再読み込みしてから、もう一度お試しください。',
+   en: 'The record changed after you loaded it. Reload the page and try again.'
+ },
+ 'delete.done': { ja: '完全削除しました。', en: 'The record was permanently removed.' },
+ 'delete.blocker.HAS_DESCENDANTS': { ja: '子サブプロジェクトまたは子タスクが残っています', en: 'Child subprojects or tasks remain' },
+ 'delete.blocker.HAS_TASKS': { ja: 'タスクが残っています', en: 'Tasks remain' },
+ 'delete.blocker.AUDIT_HISTORY': { ja: '監査履歴があるため削除できません（アーカイブを使用）', en: 'Audit history exists; archive instead' },
+ 'delete.blocker.PUBLISHED': { ja: '共有ダッシュボードに公開されています', en: 'Published to the shared dashboard' },
+ 'delete.blocker.RECORDED_EFFORT': { ja: '記録済みの実績があります', en: 'Recorded effort exists' },
+ 'delete.blocker.APPROVALS': { ja: '承認履歴があります', en: 'Assignment or schedule approvals exist' },
+ 'delete.blocker.REQUESTS': { ja: '申請履歴があります', en: 'Employee requests exist' },
+ 'delete.blocker.NOTIFICATIONS': { ja: '通知履歴があります', en: 'Notification history exists' },
+ 'delete.blocker.DEADLINE_HISTORY': { ja: '期限変更の履歴があります', en: 'Deadline history exists' },
+ 'delete.blocker.SCHEDULE_CONFIRMATIONS': { ja: '日程確定の記録があります', en: 'A schedule decision exists' },
+ 'delete.blocker.ARCHIVED_RECORD': { ja: 'アーカイブ済みの記録は保持されます', en: 'An archived record is retained' },
+ 'delete.blocker.DEPENDENCY_REFERENCED': { ja: '他の作業がこの記録に依存しています', en: 'Other work depends on this record' },
+ 'delete.blocker.NOT_FOUND_OR_DELETED': { ja: '既に削除されています', en: 'Already removed' },
+ 'delete.blocker.generic': { ja: '削除できません', en: 'Removal is not allowed' },
  'tasks.noChanges': { ja: '変更はありません。', en: 'No changes to save.' },
  'assignee.inactive': { ja: '無効', en: 'Inactive' },
  'action.open': { ja: '詳細を開く', en: 'Open' },

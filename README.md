@@ -8,13 +8,17 @@ on your company LAN, with PostgreSQL as the database. Employee-ID/password sign-
 account or email. Japanese is the default; every user can switch to English.
 
 Managers organise responsibilities, projects, subprojects (four levels) and tasks (three levels),
-review requests and monitor progress without counting parent tasks twice. Expand the arrow beside
-a parent task to show its children directly underneath; click again to collapse the branch. Members create their own
-work and submit completion reports; managers approve those reports or mark authorized work done
-directly. Task state is derived (進行中 / 期限超過 / 完了) from the deadline and completion, skill
-grades are letters A–D, and one searchable picker assigns several employees at once. Backups are
-encrypted locally first, with an optional Google Drive copy. Mail, Calendar and publication remain
-optional and off by default.
+review requests and monitor progress without counting parent tasks twice. A project page shows one
+expandable tree — each subproject header with its tasks directly beneath it, nested subprojects
+below, and project-direct tasks in their own section — so a task is found where it is stored, never
+by guessing from names. Expand the arrow beside a parent task to show its children directly
+underneath; click again to collapse the branch. Only an ADMIN can permanently remove a mistaken,
+empty task or subproject: the control always runs the deletion preflight first, which refuses any
+record that still owns work, history or a publication. Members create their own work and submit
+completion reports; managers approve those reports or mark authorized work done directly. Task state
+is derived (進行中 / 期限超過 / 完了) from the deadline and completion, skill grades are letters A–D, and
+one searchable picker assigns several employees at once. Backups are encrypted locally first, with an
+optional Google Drive copy. Mail, Calendar and publication remain optional and off by default.
 
 ## Install on Windows LAN
 

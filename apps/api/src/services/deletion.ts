@@ -24,14 +24,33 @@ type EntityType = 'PROJECTS' | 'SUBPROJECTS' | 'TASKS';
 
 type DbLike = Pick<ServiceCtx['db'], 'one' | 'many' | 'query'>;
 
+const NON_OPERATIONAL_AUDIT_ACTIONS: Record<EntityType, readonly string[]> = {
+  PROJECTS: ['PROJECT_CREATED'],
+  SUBPROJECTS: ['SUBPROJECT_CREATED', 'SUBPROJECT_UPDATED'],
+  TASKS: ['TASK_CREATED']
+};
+
 async function countRows(db: DbLike, sql: string, params: unknown[]): Promise<number> {
   const row = await db.one<{ count: string }>(sql, params);
   return Number(row?.count ?? 0);
 }
 
-async function hasHistory(db: DbLike, entityType: string, entityId: string, allowedActions: string[]): Promise<boolean> {
-  const entries = await listAudit(db, { entityType, entityId, limit: 100 });
-  return entries.some((entry) => !allowedActions.includes(entry.action));
+async function hasDisallowedAuditHistory(
+  db: DbLike,
+  entityType: EntityType,
+  entityId: string
+): Promise<boolean> {
+  const row = await db.one<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM audit_log
+        WHERE entity_type = $1
+          AND entity_id = $2
+          AND NOT (action = ANY($3::text[]))
+     ) AS exists`,
+    [entityType, entityId, NON_OPERATIONAL_AUDIT_ACTIONS[entityType]]
+  );
+  return row?.exists === true;
 }
 
 type PreflightOptions = { lock?: boolean };
@@ -78,7 +97,7 @@ async function evaluatePreflight(
     const tasks = await countRows(db, 'SELECT count(*)::text AS count FROM tasks WHERE project_id = $1 AND deleted_at IS NULL', [entityId]);
     const milestones = await countRows(db, 'SELECT count(*)::text AS count FROM milestones WHERE project_id = $1', [entityId]);
     const issues = await countRows(db, 'SELECT count(*)::text AS count FROM issues WHERE project_id = $1', [entityId]);
-    const history = await hasHistory(db, entityType, entityId, ['PROJECT_CREATED']);
+    const history = await hasDisallowedAuditHistory(db, entityType, entityId);
     const result = deletionPreflight({
       entityType,
       entityId,
@@ -126,7 +145,7 @@ async function evaluatePreflight(
       'SELECT count(*)::text AS count FROM milestones WHERE subproject_id = $1',
       [entityId]
     );
-    const history = await hasHistory(db, entityType, entityId, ['SUBPROJECT_CREATED']);
+    const history = await hasDisallowedAuditHistory(db, entityType, entityId);
     const result = deletionPreflight({
       entityType,
       entityId,
@@ -168,7 +187,7 @@ async function evaluatePreflight(
   const deadlineHistory = await countRows(db, 'SELECT count(*)::text AS count FROM task_deadline_history WHERE task_id = $1', [entityId]);
   const scheduleConfirmations = await countRows(db, 'SELECT count(*)::text AS count FROM schedule_confirmations WHERE task_id = $1', [entityId]);
   const project = await getProject(db, task.projectId);
-  const history = await hasHistory(db, entityType, entityId, ['TASK_CREATED']);
+  const history = await hasDisallowedAuditHistory(db, entityType, entityId);
   const result = deletionPreflight({
     entityType,
     entityId,
@@ -249,8 +268,7 @@ export async function deleteEntity(
       newValue: { reason: input.reason }
     });
 
-    const tombstoneId = `DEL-${entityId}`;
-    await insertTombstone(tx, {
+    const tombstoneId = await insertTombstone(tx, {
       entityType,
       entityId,
       deletedBy: ctx.identity.email,

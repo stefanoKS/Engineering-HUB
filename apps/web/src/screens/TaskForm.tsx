@@ -30,6 +30,7 @@ export function TaskForm({
   task,
   detail,
   initialProjectId,
+  initialSubprojectId,
   initialParentTaskId,
   references,
   onClose,
@@ -38,6 +39,8 @@ export function TaskForm({
   task?: Task;
   detail?: TaskDetail;
   initialProjectId?: string;
+  /** A contextual "new task" inside a subproject preselects it; the manager may still change it. */
+  initialSubprojectId?: string;
   initialParentTaskId?: string;
   references?: References;
   onClose: () => void;
@@ -50,7 +53,7 @@ export function TaskForm({
   const [parentOptions, setParentOptions] = useState<{ id: string; name: string; depth: number }[]>([]);
   const [form, setForm] = useState({
     projectId: task?.projectId ?? initialProjectId ?? '',
-    subprojectId: task?.subprojectId ?? '',
+    subprojectId: task?.subprojectId ?? initialSubprojectId ?? '',
     parentTaskId: task?.parentTaskId ?? initialParentTaskId ?? '',
     taskName: task?.taskName ?? '',
     description: task?.description ?? '',

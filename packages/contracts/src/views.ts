@@ -411,6 +411,7 @@ export type WorkProjectList = z.infer<typeof WorkProjectList>;
 export const WorkSubproject = z.object({
   subprojectId: z.string(),
   subprojectName: z.string(),
+  parentSubprojectId: z.string().nullable(),
   status: ProjectStatus,
   deadline: IsoDate.nullable(),
   depth: z.number().int().min(1),

@@ -265,10 +265,28 @@ export async function readOnlyProjectDetail(ctx: ServiceCtx, projectId: string):
     listTaskSummariesForProject(ctx.db, projectId),
     listSubprojects(ctx.db, projectId)
   ]);
-  const visibleSubprojects = allSubprojects.filter((subproject) => manager || subproject.status !== 'Archived');
-  const visibleTasks = tasks.filter(
-    (task) => manager || (task.status !== 'Done' && task.status !== 'Cancelled')
-  );
+  const allById = new Map(allSubprojects.map((subproject) => [subproject.subprojectId, subproject]));
+  const ancestorArchived = (subprojectId: string): boolean => {
+    let current = allById.get(subprojectId);
+    let guard = 0;
+    while (current) {
+      if (current.status === 'Archived') return true;
+      current = current.parentSubprojectId ? allById.get(current.parentSubprojectId) : undefined;
+      if (++guard > 20) return true;
+    }
+    return false;
+  };
+  // Descendant eligibility follows the whole ancestor chain, so an archived parent hides its
+  // children instead of leaving an orphaned branch.
+  const visibleSubprojects = allSubprojects.filter((subproject) => manager || !ancestorArchived(subproject.subprojectId));
+  const visibleSubprojectIds = new Set(visibleSubprojects.map((subproject) => subproject.subprojectId));
+  // Completed work inside a visible project stays part of that project's record, so a reader can
+  // see the real completed count. Cancelled work and the tasks of an archived branch are withheld
+  // from a non-manager: the hierarchy must not receive a task it is not allowed to show.
+  const visibleTasks = tasks.filter((task) => {
+    if (task.subprojectId && !visibleSubprojectIds.has(task.subprojectId)) return false;
+    return manager || task.status !== 'Cancelled';
+  });
 
   const rollupOf = (tasksForRollup: typeof tasks) => {
     const value = rollup(
@@ -316,6 +334,7 @@ export async function readOnlyProjectDetail(ctx: ServiceCtx, projectId: string):
     subprojects: visibleSubprojects.map((subproject) => ({
       subprojectId: subproject.subprojectId,
       subprojectName: subproject.subprojectName,
+      parentSubprojectId: subproject.parentSubprojectId,
       status: subproject.status,
       deadline: subproject.deadline,
       depth: subproject.depth,

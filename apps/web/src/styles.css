@@ -833,3 +833,73 @@ input[type=checkbox] { min-height: auto; width: 17px; height: 17px; accent-color
   .assignee-panel { padding: 0.35rem 0.5rem; }
   .assignee-list { max-height: 9rem; }
 }.chip-inactive { font-size: 0.7rem; padding: 0 0.25rem; border-radius: 4px; background: #f1f3f5; color: #6b7280; }
+
+/* Unified project hierarchy: subproject headers, their tasks, nested subprojects and direct tasks. */
+.hierarchy { list-style: none; margin: 0; padding: 0; }
+.hierarchy-children { list-style: none; margin: 0; padding: 0; }
+.hierarchy-node { margin: 0; }
+.hierarchy-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+  padding: 0.35rem 0.5rem;
+  padding-left: calc(0.5rem + (var(--level, 1) - 1) * 1.35rem);
+  border-radius: 6px;
+  border-left: 3px solid transparent;
+  min-width: 0;
+}
+.hierarchy-row:hover { background: var(--tint, #f4f6f9); }
+.hierarchy-row-subproject {
+  border-left-color: var(--project-accent, #3b6ea5);
+  font-weight: 600;
+  background: color-mix(in srgb, var(--project-accent, #3b6ea5) 6%, transparent);
+}
+.hierarchy-row-task { font-weight: 400; }
+.hierarchy-row-direct { border-left-color: var(--border, #d8dde4); }
+.hierarchy-name { min-width: 0; overflow-wrap: anywhere; }
+.hierarchy-assignees { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hierarchy-counts { font-size: 0.8rem; color: #5b6472; white-space: nowrap; }
+.hierarchy-actions { display: inline-flex; align-items: center; gap: 0.35rem; margin-left: auto; flex-wrap: wrap; }
+.hierarchy-empty { margin: 0.15rem 0 0.5rem; padding-left: 2.6rem; }
+.tree-toggle {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 4px;
+  color: inherit;
+}
+.tree-toggle:hover { background: var(--tint, #e8ecf2); }
+.tree-toggle:focus-visible { outline: 2px solid var(--project-accent, #3b6ea5); outline-offset: 1px; }
+.tree-spacer { display: inline-block; width: 1.4rem; }
+.tree-icon-slot { display: inline-flex; width: 1.15rem; justify-content: center; color: var(--project-accent, #3b6ea5); }
+.tree-icon { width: 1.05rem; height: 1.05rem; }
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 6px;
+  color: #6b7280;
+}
+.icon-button.danger { color: var(--danger, #b3261e); }
+.icon-button:hover { background: var(--tint, #eef1f5); border-color: var(--border, #d8dde4); }
+.icon-button:focus-visible { outline: 2px solid var(--project-accent, #3b6ea5); outline-offset: 1px; }
+.icon-button:disabled { opacity: 0.45; cursor: not-allowed; }
+.icon-svg { width: 1.05rem; height: 1.05rem; }
+.inline-checkbox { white-space: nowrap; font-weight: 400; }
+.task-link { color: inherit; text-decoration: underline; }
+.task-link:focus-visible { outline: 2px solid var(--project-accent, #3b6ea5); outline-offset: 2px; }
+@media (max-width: 900px) {
+  .hierarchy-row { padding-left: calc(0.4rem + (var(--level, 1) - 1) * 0.9rem); }
+  .hierarchy-assignees { max-width: 10rem; }
+  .hierarchy-actions { margin-left: 0; width: 100%; }
+}

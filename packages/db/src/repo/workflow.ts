@@ -279,12 +279,14 @@ export async function insertTombstone(
     lastRevision: number;
     snapshot: unknown;
   }
-): Promise<void> {
+): Promise<string> {
+  const tombstoneId = newId('DEL');
   await db.query(
     `INSERT INTO record_deletions (tombstone_id, entity_type, entity_id, deleted_by, reason, last_revision, snapshot)
      VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-    [newId('DEL'), input.entityType, input.entityId, input.deletedBy, input.reason, input.lastRevision, JSON.stringify(input.snapshot)]
+    [tombstoneId, input.entityType, input.entityId, input.deletedBy, input.reason, input.lastRevision, JSON.stringify(input.snapshot)]
   );
+  return tombstoneId;
 }
 
 /** The only destructive statement in the application, called after every preflight gate. */

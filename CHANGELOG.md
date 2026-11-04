@@ -1,5 +1,54 @@
 # Changelog
 
+## V2 project detail hierarchy and ADMIN-only permanent removal — 2026-11-04
+
+No schema change: migrations 0001–0008 and their checksums are untouched, and no database was
+migrated or deployed. Disposable databases only.
+
+### Unified project hierarchy
+- `apps/web/src/screens/ProjectDetail.tsx` replaces the separate subproject and task tables with one
+  expandable tree: subproject header → its tasks → nested subprojects, plus a separate **Direct
+  project tasks** section for tasks without a subproject.
+- Placement uses only the stored links (`subprojects.parent_subproject_id`, `tasks.subproject_id`,
+  `tasks.parent_task_id`); tasks are never grouped by name or render order and are never re-bucketed
+  into the direct section. A task appears exactly once.
+- Expansion state is keyed by stable IDs and owned by the screen, so a save, a delete or a data
+  refresh keeps every other branch as the reader left it.
+- Cancelled work and archived branches (including their descendants) are hidden by default; a
+  manager can reveal cancelled work with one checkbox. `hiddenTasks` reports what is withheld.
+- Counts are aggregated through nested subprojects: `active` (open work), `done` (`Done`), `total`.
+- `/api/work/projects/:id` now also returns `parentSubprojectId` and withholds the tasks of an
+  archived branch from a MEMBER/VIEWER reader; completed work inside a visible project stays
+  readable so the completed count is real.
+
+### Contextual creation and presentation
+- A subproject header offers New task (preselected `initialSubprojectId`), Nested subproject
+  (preselected `initialParentSubprojectId`), Edit, and — for ADMIN only — the trash control.
+- Task rows show indentation, the task link, assignees, deadline and the derived
+  進行中 / 期限超過 / 完了 badge; the per-row percentage bar is gone.
+
+### ADMIN-only permanent removal
+- The trash control opens the reviewed preflight (`GET /api/manager/deletion/preflight`), shows the
+  target, the blockers with translated messages and, when permitted, the exact confirmation phrase
+  plus a required reason before `DELETE /api/manager/tasks/:id` or
+  `DELETE /api/manager/subprojects/:id`.
+- MANAGER keeps edit and create and never receives a delete control; MEMBER and VIEWER see none.
+- A blocked removal explains why (tasks, descendants, recorded effort, approvals, requests,
+  notifications, deadline history, schedule decisions, audit history, publication, archive) and
+  offers to reveal the children; nothing cascades and no integrity or audit rule is bypassed.
+- The reported `tombstoneId` is now the stored `record_deletions` identifier, so the audit row, the
+  tombstone and the response agree.
+
+### Tests
+- `apps/web/test/project-hierarchy.test.tsx` (21 tests): hierarchy model, nesting, no duplicates,
+  counts, archived/cancelled filtering, expansion stability, role-based action visibility, the
+  delete dialog (allowed, blocked, stale revision) and the contextual create preselect.
+- `apps/api/test/deletion.test.ts` (12 tests, real PostgreSQL): role matrix, eligible task and
+  subproject removal with tombstone and audit evidence, every blocker, stale revision, wrong phrase,
+  blank reason, preserved unrelated work, and the hierarchy payload links.
+- `scripts/browser-smoke.mjs` asserts the hierarchy, contextual creation, the blocked dialog and the
+  ADMIN removal, and adds a MANAGER journey beside the MEMBER and VIEWER ones.
+
 ## V2 regression fixes (visibility, role-aware UI, list behaviour, partial edits) — 2026-11-04
 
 No schema change: migrations 0001–0008 and their checksums are untouched. Disposable databases only.

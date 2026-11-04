@@ -5,14 +5,14 @@ import { api } from '../api/client';
 import { useI18n } from '../i18n';
 import { TextInput, SelectInput, useIdempotencyKey, useSave } from '../components/forms';
 import { ErrorBox, Modal, SaveState } from '../components/ui';
-export function SubprojectForm({ projectId, item, siblings, members, onClose, onSaved }: {
-  projectId: string; item?: Subproject; siblings: Subproject[]; members: { memberId: string; name: string }[];
+export function SubprojectForm({ projectId, item, initialParentSubprojectId, siblings, members, onClose, onSaved }: {
+  projectId: string; item?: Subproject; initialParentSubprojectId?: string | null; siblings: Subproject[]; members: { memberId: string; name: string }[];
   onClose: () => void; onSaved: () => void;
 }): JSX.Element {
   const { t, label } = useI18n();
   const save = useSave(); const idempotencyKey = useIdempotencyKey();
   const [name, setName] = useState(item?.subprojectName ?? '');
-  const [parent, setParent] = useState(item?.parentSubprojectId ?? '');
+  const [parent, setParent] = useState(item?.parentSubprojectId ?? initialParentSubprojectId ?? '');
   const [owner, setOwner] = useState(item?.ownerId ?? '');
   const [status, setStatus] = useState(item?.status ?? 'Planned');
   const [deadline, setDeadline] = useState(item?.deadline ?? '');

@@ -1,5 +1,51 @@
 # V2 Acceptance Record
 
+## Project detail hierarchy and ADMIN-only permanent removal — 2026-11-04
+
+Baseline `main @ 46a24f4`. Source/build update only: migrations 0001–0008 and their checksums are
+unchanged, no new migration, no live database was touched and no deployment was performed. Every
+database test used a disposable database (`freshDatabase()` truncation, `smoke:prod` isolated /
+embedded PostgreSQL).
+
+The project page is now one expandable hierarchy built only from the stored links
+(`subprojects.parent_subproject_id`, `tasks.subproject_id`, `tasks.parent_task_id`). A subproject is
+a header with its tasks immediately beneath it, nested subprojects follow, and tasks without a
+subproject stay in a separate **Direct project tasks** section; nothing is grouped by name or by
+render order and a task is never re-bucketed. ADMIN removes an eligible empty task or subproject
+through the existing preflight, typed confirmation and reason; MANAGER keeps edit and create but
+never receives a delete control, and MEMBER/VIEWER see a read-only tree.
+
+The deletion preflight now treats `SUBPROJECT_CREATED` and `SUBPROJECT_UPDATED` as the complete
+allowlist of non-operational subproject audit actions. It asks PostgreSQL whether any other action
+exists across the full audit history; unknown actions remain blockers and no audit row is changed or
+removed.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| `npm run typecheck` | PASS | contracts, domain, db, i18n, api, web, worker, benchmark, migration |
+| `npm run lint` | PASS | V1 and V2 ESLint clean |
+| focused deletion/hierarchy tests | PASS | **38 pass** across `deletion.test.ts` and `project-hierarchy.test.tsx` |
+| `npm test` | PASS | V1 **776 pass, 0 fail**; V2 **267 pass, 1 skipped** across 19 files (real PostgreSQL) |
+| `npm run validate` | PASS | V1 source, V2 governance (137 files), deployment templates |
+| `npm run build` | PASS | `@eh/api`, `@eh/web`, `@eh/worker`, `@eh/migration` |
+| `npm run smoke:prod` | PASS | built CLI applied schema 8; health/readiness/session/read/mutation; worker job; clean stop |
+| `npm run test:browser` | PASS | Chromium: hierarchy, contextual creation, blocked deletion, ADMIN removal, plus manager/member/viewer journeys |
+| `npm run test:lan` | PASS | local auth journeys including the manager, member and viewer hierarchy checks |
+| GATE 1 unified hierarchy | PASS | `project-hierarchy.test.ts` "project hierarchy model": task under subproject, direct task, nested subproject, nested task, multi-level nesting, siblings, empty subproject, no duplicate rendering, counts through nested subprojects, cancelled/archived filtering, archived ancestor hides its descendants |
+| GATE 1 payload links | PASS | `deletion.test.ts` "project detail hierarchy payload": stored `parentSubprojectId`/`subprojectId` returned, MEMBER reader gets the links without restricted fields, archived branch withheld |
+| GATE 2 presentation | PASS | tree renders header counts, deadline, badges, indented task rows and a task link; no per-row percentage bar; role-based action visibility asserted |
+| GATE 3 contextual creation | PASS | browser smoke: "New task" inside a subproject opens the form with the subproject preselected and the task lands in that branch; project-level creation stays project-direct |
+| GATE 4 permissions | PASS | ADMIN sees delete, MANAGER sees edit/create only, MEMBER and VIEWER see no action; `deletion.test.ts` "deletion authorization" refuses preflight and removal for MANAGER/MEMBER/VIEWER with `AUTHORIZATION_DENIED` and the row survives |
+| GATE 4 deletion workflow | PASS | preflight dialog shows the target, the blockers and the exact confirmation; `deletion.test.ts` proves a newly created empty subproject and empty subprojects after one or three edits are removed with their complete audit history preserved, the correct snapshot in the tombstone, and `RECORD_DELETE_PREPARED` + `RECORD_DELETED` |
+| GATE 4 blockers | PASS | subproject with tasks or a milestone (`HAS_TASKS`), nested children (`HAS_DESCENDANTS`), and an unknown disallowed action older than 101 allowed updates (`AUDIT_HISTORY`) are refused; task effort, publication and archive blockers remain covered |
+| GATE 5 errors and refresh | PASS | stale revision and an edit after preflight return `EDIT_CONFLICT` with no removal, wrong phrase `CONFIRMATION_REQUIRED` and blank reason are refused, repeated removal reports `NOT_FOUND_OR_DELETED`, expansion state survives refresh, and successful deletion invalidates hierarchy/detail/list/index/reference caches |
+| Deletion tombstone identity | PASS | the reported `tombstoneId` is now the stored `record_deletions` primary key instead of a derived label |
+| Migrations / schema | PASS | no migration added or edited; `0001`–`0008` checksums unchanged; schema 8 remains required |
+| Live Google Workspace / Drive / mail | NOT_RUN | no credential, tenant or mailbox was used |
+| Physical second-PC LAN rehearsal | NOT_RUN | requires the operator host |
+
+Production remains **NOT APPROVED FOR PRODUCTION**.
+
 ## Regression fixes: visibility, role-aware UI, list behaviour, partial edits — 2026-11-04
 
 Baseline `main @ 3bc47fc`. Source/build update only: migrations 0001–0008 and their checksums are
