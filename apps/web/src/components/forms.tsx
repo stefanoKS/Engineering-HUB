@@ -129,7 +129,10 @@ export function TextInput({
   max,
   step,
   placeholder,
-  disabled
+  disabled,
+  id,
+  autoFocus,
+  ariaLabel
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -140,12 +143,19 @@ export function TextInput({
   step?: number;
   placeholder?: string;
   disabled?: boolean;
+  id?: string;
+  autoFocus?: boolean;
+  ariaLabel?: string;
 }): JSX.Element {
   return (
     <input
       type={type}
+      id={id}
       value={value}
       required={required}
+      aria-required={required || undefined}
+      aria-label={ariaLabel}
+      autoFocus={autoFocus}
       min={min}
       max={max}
       step={step}
@@ -176,6 +186,90 @@ export function SelectInput({
         </option>
       ))}
     </select>
+  );
+}
+
+/**
+ * A bounded search filter in front of a select.
+ *
+ * The option list is always the one already authorized for this form; only the visible subset
+ * changes. The current selection stays visible while the search results change, so a filter can
+ * never silently clear a stored value.
+ */
+export function SearchSelect({
+  value,
+  onChange,
+  options,
+  allowEmpty,
+  searchLabel,
+  selectLabel,
+  threshold = 8,
+  disabled
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+  allowEmpty?: string;
+  searchLabel: string;
+  /** The accessible name of the select itself: a <label> wrapping a search box labels that box. */
+  selectLabel: string;
+  threshold?: number;
+  disabled?: boolean;
+}): JSX.Element {
+  const { t } = useI18n();
+  const [filter, setFilter] = useState('');
+  const needle = filter.trim().toLowerCase();
+  const matches = needle ? options.filter((option) => option.label.toLowerCase().includes(needle)) : options;
+  const selected = options.find((option) => option.value === value);
+  const showSearch = options.length > threshold;
+  const keepSelected = !!value && !matches.some((option) => option.value === value);
+  return (
+    <div className="search-select stack">
+      {showSearch ? (
+        <input
+          type="search"
+          aria-label={searchLabel}
+          placeholder={searchLabel}
+          value={filter}
+          disabled={disabled}
+          onChange={(event) => setFilter(event.target.value)}
+        />
+      ) : null}
+      <select value={value} aria-label={selectLabel} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
+        {allowEmpty !== undefined ? <option value="">{allowEmpty}</option> : null}
+        {keepSelected ? <option value={value}>{selected ? selected.label : value}</option> : null}
+        {matches.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {showSearch && needle && matches.length === 0 ? (
+        <span className="muted small">{t('myWork.noMatches')}</span>
+      ) : null}
+    </div>
+  );
+}
+
+/** Marks a field that the server will reject when it is empty. */
+export function RequiredTag(): JSX.Element {
+  const { t } = useI18n();
+  return <span className="field-required">{t('common.required')}</span>;
+}
+
+/** Lists the concrete reasons the primary action is disabled, so a user is never left guessing. */
+export function BlockedReasons({ reasons }: { reasons: string[] }): JSX.Element {
+  const { t } = useI18n();
+  if (reasons.length === 0) return <span />;
+  return (
+    <div className="validation-summary" role="status">
+      <strong>{t('form.blockedReasons')}</strong>
+      <ul>
+        {reasons.map((reason) => (
+          <li key={reason}>{reason}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

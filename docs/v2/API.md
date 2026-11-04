@@ -1,5 +1,25 @@
 # V2 HTTP API
 
+## Usability release: guided forms, request context and My Work filters (2026-11-04)
+
+No route was added, removed or re-authorized. Three existing projections were extended narrowly so
+a screen does not need a per-row request:
+
+| Endpoint | Addition | Why |
+| --- | --- | --- |
+| `GET /api/employee/my-work` | `query`, `projectId`, `overdue`, `dueThisWeek`, `awaitingReview` query flags; `unfilteredActiveTotal` and `projects` in the body | Filters resolve in SQL before `LIMIT`/`OFFSET`, and "nothing assigned" stays distinguishable from "no match" |
+| `GET /api/manager/requests` (and the sync reply) | each item carries `taskName`, `projectName`, `subprojectName` | A reviewer judges a request without opening the task or issuing one request per row |
+| `GET /api/manager/status` | `requestSubmissionEnabled` | The status screen reports a closed intake instead of implying it works |
+| `GET /api/manager/tasks/:id`, `GET /api/work/tasks/:id` | `depth` | Child-task eligibility is explained from the stored hierarchy depth |
+| `GET /api/manager/tasks/parent-options` | each item carries `parentTaskId` | The client renders a full parent path instead of an ambiguous name |
+
+`GET /api/employee/my-work` still resolves the member from the verified session only; a
+`memberId`, `ownerId` or similar browser parameter is neither read nor honoured. Every flag is a
+bounded filter: `query` is ≤120 characters, `projectId` ≤64, and the three flags accept only the
+exact strings `true`/`false`. The requested `section` keeps its own `total`, while
+`unfilteredActiveTotal` is the active-work count without filters. `projects` lists at most 200
+projects that occur in the caller's own work and is the only valid set of `projectId` values.
+
 ## Manager Overview and All Work filters (2026-11-04)
 
 `GET /api/manager/overview` remains `ADMIN`/`MANAGER` only and accepts:

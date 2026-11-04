@@ -67,7 +67,14 @@ function myWorkItem(overrides: Partial<MyWorkList['items'][number]> = {}): MyWor
 }
 
 function myWorkList(items: MyWorkList['items']): MyWorkList {
-  return { items, total: items.length, activeTotal: items.length, completedTotal: 0 };
+  return {
+    items,
+    total: items.length,
+    activeTotal: items.length,
+    completedTotal: 0,
+    unfilteredActiveTotal: items.length,
+    projects: []
+  };
 }
 
 const PROJECT_OPTIONS: MyWorkProjectOptions = {
@@ -335,12 +342,14 @@ describe('分野 terminology and overview counts', () => {
 describe('workload timeline axis and today marker', () => {
   const today = businessDate();
   const weekStart = startOfWorkWeek(today);
+  // A three-day window that always contains today, so the marker assertion is date-independent.
+  const windowStart = addDays(today, -1);
 
   function report(overrides: Partial<WorkloadReport> = {}): WorkloadReport {
     return {
       mode: 'WEEK',
-      start: weekStart,
-      end: addDays(weekStart, 6),
+      start: windowStart,
+      end: addDays(windowStart, 2),
       today,
       granularity: 'DAY',
       summary: {
@@ -354,9 +363,9 @@ describe('workload timeline axis and today marker', () => {
         assignments: 3
       },
       buckets: [
-        { key: weekStart, start: weekStart, end: weekStart, dueTasks: 0, completedTasks: 0, overdueTasks: 0 },
-        { key: addDays(weekStart, 1), start: addDays(weekStart, 1), end: addDays(weekStart, 1), dueTasks: 3, completedTasks: 0, overdueTasks: 1 },
-        { key: addDays(weekStart, 2), start: addDays(weekStart, 2), end: addDays(weekStart, 2), dueTasks: 1, completedTasks: 0, overdueTasks: 0 }
+        { key: windowStart, start: windowStart, end: windowStart, dueTasks: 0, completedTasks: 0, overdueTasks: 0 },
+        { key: addDays(windowStart, 1), start: addDays(windowStart, 1), end: addDays(windowStart, 1), dueTasks: 3, completedTasks: 0, overdueTasks: 1 },
+        { key: addDays(windowStart, 2), start: addDays(windowStart, 2), end: addDays(windowStart, 2), dueTasks: 1, completedTasks: 0, overdueTasks: 0 }
       ],
       employees: [],
       assignmentBasis: 'CURRENT_ASSIGNMENTS',

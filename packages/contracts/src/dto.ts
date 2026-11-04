@@ -307,7 +307,9 @@ export const TaskDetail = z.object({
       source: z.string()
     })
   ),
-  children: z.array(TaskSummary)
+  children: z.array(TaskSummary),
+  /** Hierarchy depth of this task (1 = top level), used to explain child-task eligibility. */
+  depth: z.number().int().min(1)
 });
 export type TaskDetail = z.infer<typeof TaskDetail>;
 
@@ -367,6 +369,10 @@ export type Issue = z.infer<typeof Issue>;
 
 export const TaskRequest = z.object({
   requestId: Id,
+  /** Display-only task context, so a reviewer can judge the request without opening the task. */
+  taskName: z.string(),
+  projectName: z.string(),
+  subprojectName: z.string(),
   requestType: RequestType,
   taskId: Id,
   projectId: z.string().nullable(),

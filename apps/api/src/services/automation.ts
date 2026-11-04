@@ -193,7 +193,8 @@ export async function statusView(ctx: ServiceCtx, config: AppConfig): Promise<St
     rowCounts: counts,
     appVersion: config.version,
     migrationVersion: version,
-    contractVersion: '1.6'
+    contractVersion: '1.6',
+    requestSubmissionEnabled: settingFlag(settings, SETTING_KEYS.REQUEST_SUBMISSION_ENABLED, false)
   };
 }
 

@@ -558,7 +558,11 @@ describe('project detail roles', () => {
     const subprojectBranch = (await screen.findByRole('button', { name: 'Area A を閉じる' })).closest('li')!;
     fireEvent.click(within(subprojectBranch).getByRole('button', { name: '新規タスク' }));
     const dialog = await screen.findByRole('dialog');
+    // The contextual location is shown as a readable path; no reselect is required.
+    expect(within(dialog).getByText('Alpha / Area A')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: '作成先を変更' }));
     const subprojectSelect = within(dialog).getByLabelText('サブプロジェクト') as HTMLSelectElement;
     await waitFor(() => expect(subprojectSelect.value).toBe('SUB-A'));
+    expect(within(dialog).getByRole('button', { name: 'この作成先のまま' })).toBeTruthy();
   });
 });

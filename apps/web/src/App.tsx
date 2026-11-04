@@ -133,27 +133,30 @@ export function App(): JSX.Element {
   const signedIn = session ? session.actor : null;
   const isManager = !!signedIn && (signedIn.role === 'ADMIN' || signedIn.role === 'MANAGER');
 
-  const nav = useMemo(
-    () =>
-      [
-        { path: 'overview', label: t('nav.overview') },
-        { path: 'my-work', label: t('local.myWork') },
-        { path: 'all-work', label: t('nav.allWork') },
-        { path: 'projects', label: t('nav.projects') },
-        { path: 'responsibilities', label: t('nav.responsibilities') },
-        { path: 'members', label: t('nav.members') },
-        { path: 'skills', label: t('nav.skills') },
-        { path: 'requests', label: t('nav.requests') },
-        { path: 'workload', label: t('nav.workload') },
-        { path: 'automation', label: t('nav.automation') },
-        { path: 'status', label: t('nav.status') }
-      ].filter((entry) =>
-        isManager
-          ? true
-          : entry.path === 'my-work' || entry.path === 'all-work' || entry.path === 'projects' || entry.path === 'overview'
-      ),
-    [t, isManager]
-  );
+  const navGroups = useMemo(() => {
+    const all = [
+      { path: 'overview', label: t('nav.overview'), group: 'nav.group.myWork' },
+      { path: 'my-work', label: t('local.myWork'), group: 'nav.group.myWork' },
+      { path: 'all-work', label: t('nav.allWork'), group: 'nav.group.department' },
+      { path: 'projects', label: t('nav.projects'), group: 'nav.group.department' },
+      { path: 'responsibilities', label: t('nav.responsibilities'), group: 'nav.group.department' },
+      { path: 'requests', label: t('nav.requests'), group: 'nav.group.department' },
+      { path: 'members', label: t('nav.members'), group: 'nav.group.people' },
+      { path: 'skills', label: t('nav.skills'), group: 'nav.group.people' },
+      { path: 'workload', label: t('nav.workload'), group: 'nav.group.people' },
+      { path: 'automation', label: t('nav.automation'), group: 'nav.group.admin' },
+      { path: 'status', label: t('nav.status'), group: 'nav.group.admin' }
+    ].filter((entry) =>
+      isManager
+        ? true
+        : entry.path === 'my-work' || entry.path === 'all-work' || entry.path === 'projects' || entry.path === 'overview'
+    );
+    // Frequent destinations stay directly reachable; grouping only adds a heading, never a menu.
+    return ['nav.group.myWork', 'nav.group.department', 'nav.group.people', 'nav.group.admin'].map((group) => ({
+      label: t(group),
+      entries: all.filter((entry) => entry.group === group)
+    }));
+  }, [t, isManager]);
 
   if (session === undefined) {
     return (
@@ -196,17 +199,28 @@ export function App(): JSX.Element {
       </header>
 
       <nav className="app-nav" aria-label={t('app.name')}>
-        {session.authMode === 'local' && session.actor.role === 'ADMIN' && <a className="nav-link" href="#/accounts">{t('local.accounts')}</a>}
-        {nav.map((entry) => (
-          <a
-            key={entry.path}
-            href={`#/${entry.path}`}
-            aria-current={(route.segments[0] === entry.path || route.segments[0] + 's' === entry.path) ? 'page' : undefined}
-            className={(route.segments[0] === entry.path || route.segments[0] + 's' === entry.path) ? 'nav-link active' : 'nav-link'}
-          >
-            {entry.label}
-          </a>
-        ))}
+        {navGroups.map((group) =>
+          group.entries.length === 0 ? null : (
+            <div className="nav-group" key={group.label}>
+              <span className="nav-group-label">{group.label}</span>
+              {group.entries.map((entry) => (
+                <a
+                  key={entry.path}
+                  href={`#/${entry.path}`}
+                  aria-current={(route.segments[0] === entry.path || route.segments[0] + 's' === entry.path) ? 'page' : undefined}
+                  className={(route.segments[0] === entry.path || route.segments[0] + 's' === entry.path) ? 'nav-link active' : 'nav-link'}
+                >
+                  {entry.label}
+                </a>
+              ))}
+              {group.label === t('nav.group.admin') && session.authMode === 'local' && session.actor.role === 'ADMIN' ? (
+                <a className="nav-link" href="#/accounts">
+                  {t('local.accounts')}
+                </a>
+              ) : null}
+            </div>
+          )
+        )}
       </nav>
 
       {notice ? (

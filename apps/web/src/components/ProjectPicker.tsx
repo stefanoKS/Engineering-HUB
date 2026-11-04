@@ -4,7 +4,8 @@ import { api, queryString } from '../api/client';
 import { useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
 import { ErrorBox, Pagination } from './ui';
-type Option = { projectId: string; projectName: string };
+type Option = { projectId: string; projectName: string; responsibilityName?: string };
+
 type Page = { items: Option[]; total: number; totalPages: number };
 /**
  * `scope` selects the role-appropriate endpoint.
@@ -24,12 +25,23 @@ export function ProjectPicker({ value, onChange, disabled = false, scope = 'mana
   const list = useQuery<Page>(`${scope}/projects/picker${params}`, () => api.get<Page>(base + params), { enabled: !disabled });
   const selected = useQuery<{ record: Option }>(`${scope}/project/${value}`, () => api.get<{ record: Option }>(base + '/' + value), { enabled: !!value });
   const options = list.data?.items ?? [];
+  // Only a repeated project name needs the responsibility to be unambiguous.
+  const nameCounts = new Map<string, number>();
+  for (const option of options) nameCounts.set(option.projectName, (nameCounts.get(option.projectName) ?? 0) + 1);
+  const optionLabel = (option: Option): string =>
+    (nameCounts.get(option.projectName) ?? 0) > 1 && option.responsibilityName
+      ? `${option.projectName} — ${option.responsibilityName}`
+      : option.projectName;
   return <div className="project-picker stack">
     {!disabled && <input aria-label={t('picker.search')} placeholder={t('picker.search')} value={search} onChange={e => setSearch(e.target.value)} />}
     <select aria-label={t('nav.projects')} disabled={disabled} value={value} onChange={e => onChange(e.target.value)}>
       <option value="">{t('common.unset')}</option>
-      {value && !options.some(p => p.projectId === value) && <option value={value}>{selected.data?.record.projectName ?? value}</option>}
-      {options.map(p => <option key={p.projectId} value={p.projectId}>{p.projectName}</option>)}
+      {value && !options.some(p => p.projectId === value) && (
+        <option value={value}>
+          {selected.data?.record ? selected.data.record.projectName : value}
+        </option>
+      )}
+      {options.map(p => <option key={p.projectId} value={p.projectId}>{optionLabel(p)}</option>)}
     </select>
     <ErrorBox error={list.error || selected.error} onRetry={() => { list.refresh(); if (value) selected.refresh(); }} />
     {!disabled && list.data && list.data.totalPages > 1 && <Pagination page={page} totalPages={list.data.totalPages} total={list.data.total} onChange={setPage} />}

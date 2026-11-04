@@ -24,6 +24,7 @@ import { projectColor } from '@eh/domain';
 import { BackButton, useRouteMemoryState } from '../state/navigation';
 import { DeleteEntityDialog } from '../components/DeleteEntityDialog';
 import { MemberSubprojectForm } from '../components/member-subproject-form';
+import { subprojectPath } from '../components/hierarchy';
 import { DeadlineCell } from '../components/deadline';
 
 /* ------------------------------------------------------------------ data shapes */
@@ -941,6 +942,7 @@ export function ProjectDetailScreen({
       {editingSubproject && canManage ? (
         <SubprojectForm
           projectId={projectId}
+          projectName={record.projectName}
           item={editingSubproject}
           siblings={view.subprojects as unknown as Subproject[]}
           members={references.data?.members ?? []}
@@ -955,6 +957,7 @@ export function ProjectDetailScreen({
       {newSubprojectParent !== undefined && canManage ? (
         <SubprojectForm
           projectId={projectId}
+          projectName={record.projectName}
           initialParentSubprojectId={newSubprojectParent}
           siblings={view.subprojects as unknown as Subproject[]}
           members={references.data?.members ?? []}
@@ -970,6 +973,10 @@ export function ProjectDetailScreen({
         <TaskForm
           initialProjectId={projectId}
           initialSubprojectId={newTaskSubproject ?? undefined}
+          context={{
+            projectName: record.projectName,
+            subprojectPath: newTaskSubproject ? subprojectPath(view.subprojects, newTaskSubproject) : ''
+          }}
           references={references.data}
           onClose={() => setNewTaskSubproject(undefined)}
           onSaved={() => {

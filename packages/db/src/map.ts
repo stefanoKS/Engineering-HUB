@@ -296,11 +296,17 @@ export type RequestRow = {
   stale_reason: string;
   revision: number;
   requester_member_id?: string | null;
+  task_name?: string | null;
+  project_name?: string | null;
+  subproject_name?: string | null;
 };
 
 export function toRequest(row: RequestRow): TaskRequest {
   return {
     requestId: row.request_id,
+    taskName: row.task_name ?? '',
+    projectName: row.project_name ?? '',
+    subprojectName: row.subproject_name ?? '',
     requestType: row.request_type,
     taskId: row.task_id,
     projectId: row.project_id,

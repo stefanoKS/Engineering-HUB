@@ -11,7 +11,7 @@ import type { Actor, EmployeeSnapshot, Overview, Reference } from '@eh/contracts
 import { api, ApiFailure, queryString } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
-import { Badge, EmptyState, ErrorBox, ProgressBar, ProjectAccent, Section, statusTone } from '../components/ui';
+import { Badge, DataFreshness, EmptyState, ErrorBox, ProgressBar, ProjectAccent, Section, statusTone } from '../components/ui';
 import { DeadlineCell } from '../components/deadline';
 import { navigate } from '../App';
 import { projectColor } from '@eh/domain';
@@ -436,6 +436,13 @@ export function EmployeeHome({ actor }: { actor: Actor }): JSX.Element {
         </label>
       </div>
       <p className="muted small">{t('request.form.owner')}: {actor.name} · {t('login.domain')}</p>
+      <DataFreshness snapshot />
+      {snapshot.data ? (
+        <p className="muted small">
+          {t('workload.generatedAt')}: {snapshot.data.publishedAt.slice(0, 16).replace('T', ' ')}
+          {snapshot.data.stale ? ` · ${t('freshness.stale')}` : ''}
+        </p>
+      ) : null}
 
       {banner ? <div className={`banner ${banner.tone}`}>{banner.text}</div> : null}
       <ErrorBox error={snapshot.error} onRetry={() => snapshot.refresh()} />

@@ -353,6 +353,7 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
         id: summary.taskId,
         name: summary.taskName,
         depth: summary.depth,
+        parentTaskId: summary.parentTaskId,
         container: summary.container,
         status: summary.status
       }));

@@ -12,6 +12,7 @@ import type { CreateMySubprojectBody, CreateMyTaskBody, MyWorkList, MyWorkProjec
 import { getProject, insertSubproject, insertTask, getTask, listSubprojects } from '@eh/db';
 import {
   DomainError,
+  businessDate,
   canCreateOwnTask,
   displayTaskStatus,
   requireRole,
@@ -92,26 +93,92 @@ export function reviewStateOf(row: { pending_request: boolean; last_completion_s
  * The identity is always the verified session member, so a manager keeps a personal list beside
  * the departmental one, and a MEMBER, a MANAGER, an ADMIN and a VIEWER each see only their own
  * assignments. Nothing is filtered by a role or an identifier supplied by the browser.
+ *
+ * Every filter is resolved here, before LIMIT/OFFSET, so a matching total is never derived from
+ * the visible page.
  */
-export async function listMyWork(ctx: ServiceCtx, page: number, section: MyWorkSection = 'active'): Promise<MyWorkList> {
+export type MyWorkFilters = {
+  query?: string;
+  projectId?: string;
+  overdue?: boolean;
+  dueThisWeek?: boolean;
+  awaitingReview?: boolean;
+};
+
+export async function listMyWork(
+  ctx: ServiceCtx,
+  page: number,
+  section: MyWorkSection = 'active',
+  filters: MyWorkFilters = {}
+): Promise<MyWorkList> {
   requireRole(ctx.identity, 'VIEWER');
   const sectionWhere = section === 'completed' ? "t.status = 'Done'" : "t.status <> 'Done'";
   const order = section === 'completed'
     ? 't.completed_at DESC NULLS LAST, t.task_id ASC'
     : 't.due_date ASC NULLS LAST, t.task_id ASC';
-  const [rows, total, activeTotal, completedTotal] = await Promise.all([
+
+  const params: unknown[] = [ctx.identity.memberId];
+  const where: string[] = [];
+  const query = (filters.query ?? '').trim();
+  if (query) {
+    params.push(`%${query}%`);
+    where.push(`(t.task_name ILIKE $${params.length} OR p.project_name ILIKE $${params.length})`);
+  }
+  if (filters.projectId) {
+    params.push(filters.projectId);
+    where.push(`t.project_id = $${params.length}`);
+  }
+  if (filters.overdue) {
+    params.push(businessDate());
+    where.push(
+      `(t.due_date IS NOT NULL AND t.due_date < $${params.length}::date AND t.status <> 'Done' AND t.status <> 'Cancelled')`
+    );
+  }
+  if (filters.dueThisWeek) {
+    params.push(businessDate());
+    where.push(
+      `(t.due_date IS NOT NULL AND t.due_date >= $${params.length}::date AND t.due_date < ($${params.length}::date + 7) AND t.status <> 'Done' AND t.status <> 'Cancelled')`
+    );
+  }
+  if (filters.awaitingReview) {
+    where.push(
+      `EXISTS (SELECT 1 FROM task_requests rp
+                WHERE rp.task_id = t.task_id AND rp.requester_member_id = $1
+                  AND rp.status IN ('PENDING','PROCESSING'))`
+    );
+  }
+  const filterWhere = where.length ? ` AND ${where.join(' AND ')}` : '';
+  const pageParam = params.length + 1;
+  params.push((page - 1) * PAGE_SIZE);
+
+  const [rows, total, activeTotal, completedTotal, unfiltered, projects] = await Promise.all([
     ctx.db.many<MyWorkRow>(
       `${MY_WORK_SELECT}
-        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND ${sectionWhere}
+        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND ${sectionWhere}${filterWhere}
         ORDER BY ${order}
-        LIMIT ${PAGE_SIZE} OFFSET $2`,
-      [ctx.identity.memberId, (page - 1) * PAGE_SIZE]
+        LIMIT ${PAGE_SIZE} OFFSET $${pageParam}`,
+      params
     ),
     ctx.db.one<{ count: string }>(
       `SELECT count(*)::text AS count
-         FROM tasks t JOIN projects p ON p.project_id = t.project_id
-        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND ${sectionWhere}`,
-      [ctx.identity.memberId]
+         FROM tasks t
+         JOIN projects p ON p.project_id = t.project_id
+        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND ${sectionWhere}${filterWhere}`,
+      params.slice(0, -1)
+    ),
+    ctx.db.one<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM tasks t
+         JOIN projects p ON p.project_id = t.project_id
+        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND t.status <> 'Done'${filterWhere}`,
+      params.slice(0, -1)
+    ),
+    ctx.db.one<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM tasks t
+         JOIN projects p ON p.project_id = t.project_id
+        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND t.status = 'Done'${filterWhere}`,
+      params.slice(0, -1)
     ),
     ctx.db.one<{ count: string }>(
       `SELECT count(*)::text AS count
@@ -119,10 +186,12 @@ export async function listMyWork(ctx: ServiceCtx, page: number, section: MyWorkS
         WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND t.status <> 'Done'`,
       [ctx.identity.memberId]
     ),
-    ctx.db.one<{ count: string }>(
-      `SELECT count(*)::text AS count
+    ctx.db.many<{ project_id: string; project_name: string }>(
+      `SELECT DISTINCT p.project_id, p.project_name
          FROM tasks t JOIN projects p ON p.project_id = t.project_id
-        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND t.status = 'Done'`,
+        WHERE ${ACTIVE_WORK} AND ${OWN_WORK}
+        ORDER BY p.project_name ASC
+        LIMIT 200`,
       [ctx.identity.memberId]
     )
   ]);
@@ -130,6 +199,8 @@ export async function listMyWork(ctx: ServiceCtx, page: number, section: MyWorkS
     total: Number(total?.count ?? 0),
     activeTotal: Number(activeTotal?.count ?? 0),
     completedTotal: Number(completedTotal?.count ?? 0),
+    unfilteredActiveTotal: Number(unfiltered?.count ?? 0),
+    projects: projects.map((row) => ({ projectId: row.project_id, projectName: row.project_name })),
     items: rows.map((row) => ({
       container: row.container,
       taskId: row.task_id,

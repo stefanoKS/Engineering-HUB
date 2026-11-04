@@ -1,11 +1,22 @@
 /** Task detail: the authoritative record, its relationships and the reviewed actions. */
 import { useState } from 'react';
-import type { Actor, Reference, Task, TaskDetail } from '@eh/contracts';
+import { MAX_TASK_DEPTH } from '@eh/domain';
+import type { Actor, MemberRequests, Reference, Task, TaskDetail } from '@eh/contracts';
 import { api } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
-import { Badge, Breadcrumbs, DescriptionText, EmptyState, ErrorBox, Section, statusTone } from '../components/ui';
+import {
+  Badge,
+  Breadcrumbs,
+  DataFreshness,
+  DescriptionText,
+  EmptyState,
+  ErrorBox,
+  Section,
+  statusTone
+} from '../components/ui';
 import { ConfirmDialog } from '../components/forms';
+import { CompletionReportPanel } from '../components/completion-report';
 import { TaskForm } from './TaskForm';
 import { displayTone } from './Tasks';
 import { formatSkillGrade, projectColor } from '@eh/domain';
@@ -30,14 +41,25 @@ export function TaskDetailScreen({
 }): JSX.Element {
   const { t, label } = useI18n();
   const [editing, setEditing] = useState(false);
+  const [addingChild, setAddingChild] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const [action, setAction] = useState<'approve' | 'confirm' | 'override' | 'complete' | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [notice, setNotice] = useState('');
   const endpoint = readOnly ? `/api/work/tasks/${taskId}` : `/api/manager/tasks/${taskId}`;
+  const canManage = !readOnly && (actor.role === 'ADMIN' || actor.role === 'MANAGER');
+  const canReport = readOnly && actor.role === 'MEMBER';
   const detail = useQuery<TaskDetail>(keys.task(taskId), () => api.get<TaskDetail>(endpoint));
   const references = useQuery<References>(keys.references, () =>
     readOnly ? Promise.resolve({ members: [], skills: [], subprojects: [] }) : api.get<References>('/api/manager/references')
   );
-  const canManage = !readOnly && (actor.role === 'ADMIN' || actor.role === 'MANAGER');
+  // A member's own request receipts decide whether a completion report is already pending. The key
+  // is shared with My Work, so both entry points read one authorized payload.
+  const myRequests = useQuery<MemberRequests>(
+    keys.myRequests,
+    () => api.get<MemberRequests>('/api/employee/requests/mine'),
+    { enabled: canReport }
+  );
 
   if (detail.error) return <ErrorBox error={detail.error} onRetry={() => detail.refresh()} />;
   if (!detail.data) return <p className="muted">{t('state.loading')}</p>;
@@ -45,9 +67,26 @@ export function TaskDetailScreen({
   const { record } = detail.data;
   const { context } = detail.data;
   const subprojectPath = context.subprojects.map((entry) => entry.subprojectName).join(' / ');
+  const finished = record.displayStatus === 'DONE' || record.displayStatus === 'CANCELLED';
+  const childBlockedReason = finished
+    ? t('tasks.addChildBlockedFinished')
+    : detail.data.depth >= MAX_TASK_DEPTH
+      ? t('tasks.addChildBlockedDepth')
+      : '';
+  const pendingRequest = (myRequests.data?.items ?? []).some(
+    (request) => request.taskId === taskId && ['PENDING', 'PROCESSING'].includes(request.status)
+  );
+  const reportBlocked: string[] = [];
+  if (canReport) {
+    if (detail.data.children.length > 0) reportBlocked.push(t('report.blocked.container'));
+    if (record.displayStatus === 'DONE') reportBlocked.push(t('report.blocked.done'));
+    if (record.displayStatus === 'CANCELLED') reportBlocked.push(t('report.blocked.cancelled'));
+    if (pendingRequest) reportBlocked.push(t('report.blocked.pending'));
+    if (myRequests.data && !myRequests.data.submissionEnabled) reportBlocked.push(t('report.blocked.disabled'));
+  }
   return (
     <div className="screen">
-      <BackButton actor={actor} fallback="all-work" disabled={editing || action !== null} />
+      <BackButton actor={actor} fallback="all-work" disabled={editing || addingChild || action !== null} />
       <Breadcrumbs
         items={[
           { label: t('nav.projects'), href: '#/projects' },
@@ -71,6 +110,15 @@ export function TaskDetailScreen({
             <button type="button" className="button secondary" onClick={() => setEditing(true)}>
               {t('action.edit')}
             </button>
+            <button
+              type="button"
+              className="button secondary"
+              disabled={!!childBlockedReason}
+              title={childBlockedReason || undefined}
+              onClick={() => setAddingChild(true)}
+            >
+              {t('tasks.addChild')}
+            </button>
             {actor.role === 'ADMIN' ? (
               <button type="button" className="button danger" onClick={() => setRemoving(true)}>
                 {t('delete.submit')}
@@ -84,6 +132,13 @@ export function TaskDetailScreen({
           </div>
         ) : null}
       </div>
+      {canManage && childBlockedReason ? <p className="muted small">{childBlockedReason}</p> : null}
+      {notice ? (
+        <div className="banner ok" role="status">
+          {notice}
+        </div>
+      ) : null}
+      <DataFreshness snapshot={false} />
 
       <Section title={t('tasks.info')}>
         <div className="detail-grid" style={{ ['--project-accent' as string]: projectColor(record.projectId) }}>
@@ -116,8 +171,12 @@ export function TaskDetailScreen({
             <dt>{t('skills.grade')}</dt>
             <dd>{record.requiredSkillId ? formatSkillGrade(record.requiredSkillLevel, t('skills.notAssessed')) : t('common.unset')}</dd>
           </div>
-          {canManage ? (
-            <>
+        </div>
+        {canManage ? (
+          <details className="advanced-actions">
+            <summary>{t('tasks.technical')}</summary>
+            <p className="muted small">{t('tasks.technicalHint')}</p>
+            <div className="detail-grid">
               <div>
                 <dt>{t('column.status')} (DB)</dt>
                 <dd>
@@ -134,9 +193,9 @@ export function TaskDetailScreen({
                   )}
                 </dd>
               </div>
-            </>
-          ) : null}
-        </div>
+            </div>
+          </details>
+        ) : null}
       </Section>
 
       {canManage ? (
@@ -263,15 +322,83 @@ export function TaskDetailScreen({
         </>
       ) : null}
 
+      {canReport ? (
+        <Section
+          title={t('report.heading')}
+          actions={
+            <button
+              type="button"
+              className="button"
+              disabled={reportBlocked.length > 0 || reporting}
+              onClick={() => setReporting(true)}
+            >
+              {t('report.heading')}
+            </button>
+          }
+        >
+          {reportBlocked.length > 0 ? (
+            <div className="validation-summary" role="status">
+              <ul>
+                {reportBlocked.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="muted small">{t('myWork.completionHeading')}</p>
+          )}
+          {reporting ? (
+            <CompletionReportPanel
+              taskId={record.taskId}
+              blockedReasons={reportBlocked}
+              onDismiss={() => setReporting(false)}
+              onSubmitted={() => {
+                detail.refresh();
+                myRequests.refresh();
+              }}
+            />
+          ) : null}
+        </Section>
+      ) : null}
+
       {editing ? (
         <TaskForm
           task={record}
           detail={detail.data}
+          context={{
+            projectName: context.projectName,
+            subprojectPath
+          }}
           references={references.data}
           onClose={() => setEditing(false)}
           onSaved={(task: Task) => {
             setEditing(false);
             queryCache.invalidate([keys.task(task.taskId), keys.tasks]);
+          }}
+        />
+      ) : null}
+
+      {addingChild ? (
+        <TaskForm
+          initialProjectId={record.projectId}
+          initialSubprojectId={record.subprojectId ?? undefined}
+          initialParentTaskId={record.taskId}
+          context={{ projectName: context.projectName, subprojectPath, parentTaskName: record.taskName }}
+          references={references.data}
+          onClose={() => setAddingChild(false)}
+          onSaved={(created: Task) => {
+            setAddingChild(false);
+            setNotice(t('tasks.addChildCreated'));
+            queryCache.invalidate([
+              keys.task(record.taskId),
+              keys.task(created.taskId),
+              keys.tasks,
+              keys.taskIndex,
+              keys.overview,
+              keys.project(record.projectId),
+              keys.myWork
+            ]);
+            detail.refresh();
           }}
         />
       ) : null}

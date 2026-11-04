@@ -102,11 +102,12 @@ export function RequestsScreen({ actor }: { actor: Actor }): JSX.Element {
           <table className="table">
             <thead>
               <tr>
-                <th>{t('request.form.task')}</th>
-                <th>{t('request.confirm.id')}</th>
-                <th>{t('request.form.requester')}</th>
-                <th>{t('column.status')}</th>
+                <th>{t('requests.task')}</th>
+                <th>{t('requests.context')}</th>
+                <th>{t('requests.reporter')}</th>
+                <th>{t('requests.submitted')}</th>
                 <th>{t('request.confirm.note')}</th>
+                <th>{t('requests.state')}</th>
                 <th>{t('column.actions')}</th>
               </tr>
             </thead>
@@ -114,24 +115,33 @@ export function RequestsScreen({ actor }: { actor: Actor }): JSX.Element {
               {queue.data.items.map((request) => (
                 <tr key={request.requestId}>
                   <td>
-                    <a href={`#/task/${request.taskId}`}>{request.taskId}</a>
+                    <strong>{request.taskName || request.taskId}</strong>
                     <div className="muted small">{label('request.type', request.requestType) || request.requestType}</div>
+                    <div className="muted small">{request.requestId}</div>
                   </td>
                   <td>
-                    {request.requestId}
-                    <div className="muted small">{request.submittedAt.slice(0, 16).replace('T', ' ')}</div>
+                    {request.projectName || t('common.unset')}
+                    {request.subprojectName ? <div className="muted small">{request.subprojectName}</div> : null}
                   </td>
-                  <td>{request.requesterName || t('common.unknown')}</td>
+                  <td>
+                    {request.requesterName || t('common.unknown')}
+                    <div>
+                      <a href={`#/task/${request.taskId}`} target="_blank" rel="noopener noreferrer">
+                        {t('requests.openTask')}
+                      </a>
+                    </div>
+                  </td>
+                  <td className="muted small">{request.submittedAt.slice(0, 16).replace('T', ' ')}</td>
+                  <td className="muted small">
+                    {request.requestType === 'DEADLINE_CHANGE'
+                      ? `${request.originalDueDate ?? '-'} → ${request.requestedDueDate ?? '-'}`
+                      : request.completionNote}
+                  </td>
                   <td>
                     <Badge tone={statusTone(request.status)}>{label('request.status', request.status)}</Badge>
                     {request.status === 'STALE' ? (
                       <div className="muted small">{t('requests.stale')}</div>
                     ) : null}
-                  </td>
-                  <td className="muted small">
-                    {request.requestType === 'DEADLINE_CHANGE'
-                      ? `${request.originalDueDate ?? '-'} → ${request.requestedDueDate ?? '-'}`
-                      : request.completionNote}
                   </td>
                   <td className="actions">
                     {['PENDING', 'PROCESSING'].includes(request.status) ? (
@@ -194,7 +204,7 @@ function DecisionDialog({
   onClose: () => void;
   onDecided: () => void;
 }): JSX.Element {
-  const { t } = useI18n();
+  const { t, label } = useI18n();
   const [note, setNote] = useState('');
   return (
     <ConfirmDialog
@@ -202,14 +212,38 @@ function DecisionDialog({
         kind === 'APPROVE' ? t('requests.approve') : kind === 'REJECT' ? t('requests.reject') : t('requests.return')
       }
       message={
-        <div>
+        <div className="stack">
+          <dl className="request-summary">
+            <dt>{t('requests.task')}</dt>
+            <dd>{request.taskName || request.taskId}</dd>
+            <dt>{t('requests.context')}</dt>
+            <dd>
+              {request.projectName || t('common.unset')}
+              {request.subprojectName ? ` / ${request.subprojectName}` : ''}
+            </dd>
+            <dt>{t('request.form.task')}</dt>
+            <dd>{label('request.type', request.requestType) || request.requestType}</dd>
+            <dt>{t('requests.reporter')}</dt>
+            <dd>{request.requesterName || t('common.unknown')}</dd>
+            <dt>{t('requests.submitted')}</dt>
+            <dd>{request.submittedAt.slice(0, 16).replace('T', ' ')}</dd>
+            <dt>{t('requests.state')}</dt>
+            <dd>{label('request.status', request.status)}</dd>
+          </dl>
           <p>
-            {request.requestId} · {request.taskId}
-          </p>
-          <p className="muted small">
             {request.requestType === 'DEADLINE_CHANGE'
               ? `${request.originalDueDate ?? '-'} → ${request.requestedDueDate ?? '-'}`
               : request.completionNote}
+          </p>
+          <p className="muted small">
+            {kind === 'APPROVE'
+              ? t('requests.approveHelp')
+              : kind === 'REJECT'
+                ? t('requests.rejectHelp')
+                : t('requests.returnHelp')}
+          </p>
+          <p className="muted small">
+            {t('request.confirm.id')}: {request.requestId} · {request.taskId}
           </p>
           <label className="field">
             <span className="field-label">{t('requests.note')}</span>

@@ -51,6 +51,9 @@ describe('workflow recovery', () => {
       { id: 'SUB-A', name: 'Correct area', projectId: 'PRJ-A', parentId: null, status: 'Active' },
       { id: 'SUB-B', name: 'Wrong area', projectId: 'PRJ-B', parentId: null, status: 'Active' }
     ] }} onClose={() => undefined} onSaved={() => undefined} /></I18nProvider>);
+    // The contextual location is shown, and the location fields stay collapsed until requested.
+    const changeLocation = await screen.findByRole('button', { name: '作成先を変更' });
+    fireEvent.click(changeLocation);
     expect(await screen.findByText('Correct area')).toBeTruthy();
     expect(screen.queryByText('Wrong area')).toBeNull();
     await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url.includes('subprojectId='))).toBe(true));
@@ -275,7 +278,7 @@ describe('role-aware read-only screens', () => {  it('uses the read-only project
       <I18nProvider>
         <TaskForm
           task={legacyTask as never}
-          detail={{ record: legacyTask as never, context: { projectId: 'PRJ-A', projectName: 'Alpha', subprojects: [] }, assignees: [], additionalAssigneeIds: [], assigneeIds: ['MEM-A'], assigneeHistory: [], confirmations: [], deadlineHistory: [], children: [] }}
+          detail={{ record: legacyTask as never, context: { projectId: 'PRJ-A', projectName: 'Alpha', subprojects: [] }, assignees: [], additionalAssigneeIds: [], assigneeIds: ['MEM-A'], assigneeHistory: [], confirmations: [], deadlineHistory: [], children: [], depth: 1 }}
           references={{ members: [{ memberId: 'MEM-A', name: 'Active Person', active: true }], skills: [], subprojects: [] }}
           onClose={() => undefined}
           onSaved={() => undefined}

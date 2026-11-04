@@ -293,6 +293,14 @@ export function TasksScreen({
         <TaskForm
           task={editing.mode === 'edit' ? editing.detail.record : undefined}
           detail={editing.mode === 'edit' ? editing.detail : undefined}
+          context={
+            editing.mode === 'edit'
+              ? {
+                  projectName: editing.detail.context.projectName,
+                  subprojectPath: editing.detail.context.subprojects.map((entry) => entry.subprojectName).join(' / ')
+                }
+              : undefined
+          }
           references={references.data}
           onClose={() => setEditing(null)}
           onSaved={(task: Task) => {

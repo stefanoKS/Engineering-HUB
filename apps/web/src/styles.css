@@ -1190,3 +1190,76 @@ input[type=checkbox] { min-height: auto; width: 17px; height: 17px; accent-color
   /* The date wraps onto a second line instead of overlapping the neighbouring bucket. */
   .timeline-label { white-space: normal; text-align: center; line-height: 1.15; }
 }
+/* ---------------------------------------------------------------------------
+ * Usability release: grouped navigation, guided forms and readable errors.
+ * ------------------------------------------------------------------------- */
+
+.nav-group { display: flex; flex-wrap: wrap; align-items: center; gap: 0.15rem; }
+.nav-group + .nav-group { border-left: 1px solid var(--ui-border); margin-left: 0.35rem; padding-left: 0.45rem; }
+.nav-group-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ui-muted);
+  padding: 0 0.35rem;
+  white-space: nowrap;
+}
+@media (max-width: 900px) {
+  .nav-group + .nav-group { border-left: 0; margin-left: 0; padding-left: 0; }
+  .nav-group-label { width: 100%; padding: 0.25rem 0.35rem 0; }
+}
+
+/* The primary action stays reachable while the optional sections are open. */
+dialog.modal .modal-footer {
+  position: sticky;
+  bottom: 0;
+  background: var(--ui-surface);
+  border-top: 1px solid var(--ui-border);
+  flex-wrap: wrap;
+}
+
+.location-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; }
+.location-path { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
+.location-fields { border-left: 3px solid var(--ui-accent-soft); padding-left: 0.75rem; }
+
+.field-required {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--ui-accent);
+  border: 1px solid var(--ui-accent);
+  border-radius: 999px;
+  padding: 0 0.35rem;
+  margin-left: 0.25rem;
+}
+
+.validation-summary { border: 1px solid var(--ui-border); border-left: 4px solid var(--ui-accent); border-radius: 0.35rem; padding: 0.5rem 0.75rem; background: var(--ui-accent-soft); }
+.validation-summary ul { margin: 0.35rem 0 0; padding-left: 1.1rem; }
+.validation-summary li { font-size: 0.85rem; }
+
+.search-select { gap: 0.35rem; }
+
+.switch { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
+.switch input { width: 1.15rem; height: 1.15rem; }
+
+.error-help { display: block; margin-top: 0.25rem; font-size: 0.85rem; }
+.error-technical { display: block; margin-top: 0.2rem; }
+
+.freshness { margin: -0.25rem 0 0.5rem; }
+
+.request-summary { display: grid; grid-template-columns: max-content 1fr; gap: 0.15rem 0.75rem; margin: 0; }
+.request-summary dt { color: var(--ui-muted); font-size: 0.8rem; }
+.request-summary dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+
+.automation-table td input[type="text"],
+.automation-table td input[type="number"],
+.automation-table td input[type="time"],
+.automation-table td select { min-width: 9rem; max-width: 100%; }
+
+.my-work-filters { padding: 0.75rem 1rem; }
+
+@media (max-width: 720px) {
+  dialog.modal .modal-footer { position: static; }
+  .request-summary { grid-template-columns: 1fr; }
+  .automation-table td input, .automation-table td select { min-width: 0; width: 100%; }
+  .validation-summary ul { padding-left: 0.9rem; }
+}

@@ -930,3 +930,82 @@ describe('task tree paging', () => {
     expect(siblings.json().data.items).toHaveLength(2);
   });
 });
+
+describe('personal work filtering', () => {
+  async function seedOwnWork(): Promise<void> {
+    await insertProject(db, { projectName: 'Filter project', status: 'Active' }, 'PRJ-F');
+    await insertProject(db, { projectName: 'Other project', status: 'Active' }, 'PRJ-O');
+    await db.query(
+      `INSERT INTO tasks(task_id,project_id,task_name,owner_member_id,status,due_date) VALUES
+        ('TSK-F1','PRJ-F','稟議 A','MEM-MEMBER','In Progress',$1),
+        ('TSK-F2','PRJ-F','CAD 修正','MEM-MEMBER','In Progress',$2),
+        ('TSK-F3','PRJ-O','Other work','MEM-MEMBER','In Progress',$3),
+        ('TSK-X','PRJ-F','Not mine','MEM-MANAGER','In Progress',$3)`,
+      [`${businessDate()}`, '2020-01-01', '2099-01-01']
+    );
+  }
+
+  it('filters before pagination and reports the unfiltered total and the filterable projects', async () => {
+    await seedOwnWork();
+    const auth = await signIn(MEMBER);
+    const all = await app.inject({ url: '/api/employee/my-work?page=1&section=active', headers: headers(auth) });
+    expect(all.statusCode, all.body).toBe(200);
+    expect(all.json().data.items.map((item: { taskId: string }) => item.taskId).sort()).toEqual(['TSK-F1', 'TSK-F2', 'TSK-F3']);
+    expect(all.json().data).toMatchObject({ total: 3, activeTotal: 3, unfilteredActiveTotal: 3 });
+    expect(all.json().data.projects.map((entry: { projectId: string }) => entry.projectId).sort()).toEqual(['PRJ-F', 'PRJ-O']);
+
+    const named = await app.inject({ url: '/api/employee/my-work?page=1&section=active&query=' + encodeURIComponent('稟議'), headers: headers(auth) });
+    expect(named.json().data.items.map((item: { taskId: string }) => item.taskId)).toEqual(['TSK-F1']);
+    // The matching total is the filter result, while the unfiltered total stays available.
+    expect(named.json().data).toMatchObject({ total: 1, unfilteredActiveTotal: 3 });
+
+    const overdue = await app.inject({ url: '/api/employee/my-work?page=1&section=active&overdue=true', headers: headers(auth) });
+    expect(overdue.json().data.items.map((item: { taskId: string }) => item.taskId)).toEqual(['TSK-F2']);
+
+    const project = await app.inject({ url: '/api/employee/my-work?page=1&section=active&projectId=PRJ-O', headers: headers(auth) });
+    expect(project.json().data.items.map((item: { taskId: string }) => item.taskId)).toEqual(['TSK-F3']);
+
+    const review = await app.inject({ url: '/api/employee/my-work?page=1&section=active&awaitingReview=true', headers: headers(auth) });
+    expect(review.json().data.items).toEqual([]);
+    expect(review.json().data).toMatchObject({ total: 0, unfilteredActiveTotal: 3 });
+
+    // Identity is the verified session; a browser-supplied member is never honoured.
+    const forged = await app.inject({ url: '/api/employee/my-work?page=1&section=active&memberId=MEM-MANAGER', headers: headers(auth) });
+    expect(forged.json().data.items.map((item: { taskId: string }) => item.taskId)).not.toContain('TSK-X');
+  });
+
+  it('rejects an unbounded filter value and keeps the section counts independent', async () => {
+    await seedOwnWork();
+    const auth = await signIn(MEMBER);
+    expect((await app.inject({ url: '/api/employee/my-work?query=' + 'x'.repeat(200), headers: headers(auth) })).statusCode).toBe(400);
+  });
+});
+
+describe('reviewer request context', () => {
+  it('carries the task, project and subproject names into the queue', async () => {
+    await insertProject(db, { projectName: 'Alpha context' }, 'PRJ-CTX');
+    await insertSubproject(db, { projectId: 'PRJ-CTX', subprojectName: '試作' }, 'SUB-CTX');
+    await insertTask(db, { projectId: 'PRJ-CTX', subprojectId: 'SUB-CTX', taskName: '設計レビュー', dueDate: '2026-12-01' }, 'TSK-CTX');
+    await db.query(`INSERT INTO task_requests (request_id, request_type, task_id, project_id, status)
+      VALUES ('REQ-CTX','DEADLINE_CHANGE','TSK-CTX','PRJ-CTX','PENDING')`);
+    const response = await app.inject({ url: '/api/manager/requests?includeDecided=false&page=1', headers: headers(await signIn(MANAGER)) });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().data.items[0]).toMatchObject({
+      taskName: '設計レビュー',
+      projectName: 'Alpha context',
+      subprojectName: '試作'
+    });
+  });
+});
+
+describe('status request intake', () => {
+  it('reports a closed intake and reflects the stored setting', async () => {
+    const auth = await signIn(MANAGER);
+    const closed = await app.inject({ url: '/api/manager/status', headers: headers(auth) });
+    expect(closed.statusCode, closed.body).toBe(200);
+    expect(closed.json().data.requestSubmissionEnabled).toBe(false);
+    await saveSettings(db, { REQUEST_SUBMISSION_ENABLED: 'true' }, ADMIN);
+    const open = await app.inject({ url: '/api/manager/status', headers: headers(auth) });
+    expect(open.json().data.requestSubmissionEnabled).toBe(true);
+  });
+});

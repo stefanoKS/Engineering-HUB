@@ -631,12 +631,13 @@ export async function overrideComplete(  ctx: ServiceCtx,
 export async function taskDetail(ctx: ServiceCtx, taskId: string): Promise<TaskDetail> {
   const task = await getTask(ctx.db, taskId);
   if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
-  const [assignees, confirmations, deadlineHistory, children, context] = await Promise.all([
+  const [assignees, confirmations, deadlineHistory, children, context, depthRow] = await Promise.all([
     listTaskAssignees(ctx.db, taskId),
     listScheduleConfirmations(ctx.db, taskId),
     listDeadlineHistory(ctx.db, taskId),
     listChildSummaries(ctx.db, taskId),
-    getTaskContext(ctx.db, task.projectId, task.subprojectId)
+    getTaskContext(ctx.db, task.projectId, task.subprojectId),
+    ctx.db.one<{ depth: number }>('SELECT eh_task_depth($1) AS depth', [taskId])
   ]);
   const effective = [
     ...(task.ownerMemberId
@@ -681,7 +682,8 @@ export async function taskDetail(ctx: ServiceCtx, taskId: string): Promise<TaskD
     assigneeHistory: history,
     confirmations,
     deadlineHistory,
-    children
+    children,
+    depth: Number(depthRow?.depth ?? 1)
   };
 }
 

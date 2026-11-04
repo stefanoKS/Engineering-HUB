@@ -151,31 +151,69 @@ export function DescriptionText({ text }: { text: string }): JSX.Element {
   );
 }
 
+/**
+ * One readable error surface.
+ *
+ * The plain-language consequence comes first, the recovery help second, and the technical code
+ * last. A conflict, an unobservable write and a refusal are never presented as a plain retry.
+ */
 export function ErrorBox({ error, onRetry }: { error: unknown; onRetry?: () => void }): JSX.Element {
   const { t } = useI18n();
   if (!error) return <span />;
   const failure = error instanceof ApiFailure ? error : null;
+  const code = failure?.code ?? 'ERROR';
   const message = failure
     ? failure.code === 'NETWORK'
       ? t('state.failed')
       : failure.message
     : (error as Error).message;
-  const tone = failure?.isDenied ? 'banner danger' : failure?.retryable ? 'banner warning' : 'banner danger';
+  const conflict = failure?.isConflict === true || code === 'EDIT_CONFLICT';
+  const unknown = code === 'NETWORK' || code === 'INVALID_RESPONSE';
+  const denied = failure?.isDenied === true || code === 'AUTHORIZATION_DENIED';
+  const title = conflict
+    ? t('error.conflictTitle')
+    : unknown
+      ? t('error.unknownTitle')
+      : denied
+        ? t('error.deniedTitle')
+        : failure?.retryable
+          ? t('error.retryTitle')
+          : t('error.title');
+  const help = conflict
+    ? t('error.conflictHelp')
+    : unknown
+      ? t('error.unknownHelp')
+      : denied
+        ? t('state.denied')
+        : '';
+  const tone = denied || conflict ? 'banner danger' : unknown || failure?.retryable ? 'banner warning' : 'banner danger';
   return (
     <div className={tone} role="alert">
-      <strong>{failure?.code ?? 'ERROR'}</strong>
+      <strong>{title}</strong>
       <span>{message}</span>
-      {failure?.correlationId ? (
-        <span className="muted small">
-          {t('error.correlation')}: {failure.correlationId}
-        </span>
-      ) : null}
-      {onRetry ? (
+      {help ? <span className="error-help">{help}</span> : null}
+      <span className="muted small error-technical">
+        {t('error.codeLabel')}: {code}
+        {failure?.correlationId ? ` · ${t('error.correlation')}: ${failure.correlationId}` : ''}
+      </span>
+      {onRetry && !conflict ? (
         <button type="button" className="link-button" onClick={onRetry}>
-          {t('state.retry')}
+          {unknown ? t('error.reload') : t('state.retry')}
         </button>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * A snapshot is never presented as live data; a live screen says so explicitly.
+ */
+export function DataFreshness({ snapshot }: { snapshot: boolean }): JSX.Element {
+  const { t } = useI18n();
+  return (
+    <p className={`muted small freshness ${snapshot ? 'snapshot' : 'live'}`}>
+      {snapshot ? t('freshness.snapshot') : t('freshness.live')}
+    </p>
   );
 }
 
@@ -192,14 +230,27 @@ export function Modal({
 }): JSX.Element {
   const { t } = useI18n();
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useRef(`modal-title-${Math.random().toString(36).slice(2)}`);
+  // A modal owns the keyboard while it is open and returns focus to its invoker on close.
   useEffect(() => {
     const dialog = ref.current;
-    if (dialog && !dialog.open) dialog.showModal();
+    const invoker = (typeof document === 'undefined' ? null : document.activeElement) as HTMLElement | null;
+    if (dialog && !dialog.open) {
+      dialog.showModal();
+      const first = dialog.querySelector<HTMLElement>(
+        '[data-autofocus], input:not([type="hidden"]), select, textarea, button'
+      );
+      first?.focus();
+    }
+    return () => {
+      if (invoker && typeof invoker.focus === 'function') invoker.focus();
+    };
   }, []);
   return (
     <dialog
       ref={ref}
       className="modal"
+      aria-labelledby={titleId.current}
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -207,7 +258,7 @@ export function Modal({
       onClose={onClose}
     >
       <header className="modal-header">
-        <h2>{title}</h2>
+        <h2 id={titleId.current}>{title}</h2>
         <button type="button" className="link-button" onClick={onClose} aria-label={t('common.close')}>
           ×
         </button>

@@ -342,7 +342,9 @@ export const StatusView = HealthStatus.extend({
   appVersion: z.string(),
   schemaVersion: z.number().int(),
   migrationVersion: z.number().int(),
-  contractVersion: z.string()
+  contractVersion: z.string(),
+  /** Whether employee requests are accepted; a closed intake is reported, never hidden. */
+  requestSubmissionEnabled: z.boolean()
 });
 export type StatusView = z.infer<typeof StatusView>;
 
@@ -464,7 +466,11 @@ export const MyWorkList = z.object({
   /** Total for the requested section, never a browser-side split of a mixed page. */
   total: z.number().int().min(0),
   activeTotal: z.number().int().min(0),
-  completedTotal: z.number().int().min(0)
+  completedTotal: z.number().int().min(0),
+  /** Active work with no filter applied, so "nothing assigned" is distinguishable from "no match". */
+  unfilteredActiveTotal: z.number().int().min(0),
+  /** Projects present in this member's own work; the only valid project filter values. */
+  projects: z.array(z.object({ projectId: z.string(), projectName: z.string() }))
 });
 export type MyWorkList = z.infer<typeof MyWorkList>;
 

@@ -132,10 +132,11 @@ export async function readOnlyTaskDetail(ctx: ServiceCtx, taskId: string): Promi
       throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
     }
   }
-  const [children, assignees, context] = await Promise.all([
+  const [children, assignees, context, depthRow] = await Promise.all([
     listChildSummaries(ctx.db, taskId),
     listTaskAssignees(ctx.db, taskId),
-    getTaskContext(ctx.db, task.projectId, task.subprojectId)
+    getTaskContext(ctx.db, task.projectId, task.subprojectId),
+    ctx.db.one<{ depth: number }>('SELECT eh_task_depth($1) AS depth', [taskId])
   ]);
   const effective = [
     ...(task.ownerMemberId
@@ -209,7 +210,8 @@ export async function readOnlyTaskDetail(ctx: ServiceCtx, taskId: string): Promi
     assigneeHistory: [],
     confirmations: [],
     deadlineHistory: [],
-    children
+    children,
+    depth: Number(depthRow?.depth ?? 1)
   };
 }
 

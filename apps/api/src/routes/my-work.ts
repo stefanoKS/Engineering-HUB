@@ -30,16 +30,38 @@ function ctx(request: FastifyRequest): ServiceCtx {
   };
 }
 
+const Flag = z
+  .enum(['true', 'false'])
+  .optional()
+  .transform((value) => value === 'true');
+
 const PageQuery = z.object({
   page: z.coerce.number().int().min(1).max(100000).default(1),
-  section: z.enum(['active', 'completed']).default('active')
+  section: z.enum(['active', 'completed']).default('active'),
+  query: z.string().trim().max(120).optional(),
+  projectId: z.string().trim().max(64).optional(),
+  overdue: Flag,
+  dueThisWeek: Flag,
+  awaitingReview: Flag
 });
 
 export function registerMyWork(app: FastifyInstance, _deps: AppDependencies): void {
   app.get('/api/employee/my-work', async (request, reply) => {
     try {
-      const { page, section } = PageQuery.parse(request.query ?? {});
-      return ok(reply, request, await listMyWork(ctx(request), page, section as MyWorkSection));
+      const { page, section, query, projectId, overdue, dueThisWeek, awaitingReview } = PageQuery.parse(
+        request.query ?? {}
+      );
+      return ok(
+        reply,
+        request,
+        await listMyWork(ctx(request), page, section as MyWorkSection, {
+          query: query || undefined,
+          projectId: projectId || undefined,
+          overdue,
+          dueThisWeek,
+          awaitingReview
+        })
+      );
     } catch (error) {
       return sendError(reply, request.state, error);
     }

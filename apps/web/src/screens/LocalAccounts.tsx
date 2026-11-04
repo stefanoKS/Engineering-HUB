@@ -165,6 +165,7 @@ export function LocalAccountsScreen(): JSX.Element {
               <th>{t('members.name')}</th>
               <th>{t('members.role')}</th>
               <th>{t('members.active')}</th>
+              <th>{t('local.loginConfigured')}</th>
               <th>{t('local.mustChange')}</th>
               <th>{t('column.actions')}</th>
             </tr>
@@ -176,8 +177,12 @@ export function LocalAccountsScreen(): JSX.Element {
                 <td>{account.name}</td>
                 <td>{account.role}</td>
                 <td>{account.active ? 'ON' : 'OFF'}</td>
+                <td>{t('local.loginConfigured')}</td>
                 <td>{account.mustChangePassword ? 'ON' : '—'}</td>
                 <td>
+                  <a className="link-button" href={`#/member/${account.memberId}`}>
+                    {t('local.profileLink')}
+                  </a>
                   <button
                     type="button"
                     className="link-button"
@@ -293,6 +298,7 @@ export function LocalAccountsScreen(): JSX.Element {
                           >
                             {entry.name} · {entry.memberId} · {entry.role}
                           </button>
+                          <span className="muted small"> · {t('local.loginMissing')}</span>
                         </li>
                       ))}
                     </ul>

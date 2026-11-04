@@ -1,5 +1,76 @@
 # V2 Acceptance Record
 
+## Usability release: guided creation, contextual work, findability and readable administration — 2026-11-04
+
+Implemented on local `HEAD 4690f42` (uncommitted working tree) after reading `AGENTS.md` and the
+V2 documents. No V1 Apps Script file (`src/`, `dashboard-app/`, `shared/`, `scripts/`), no
+migration, schema, script property, authorization rule, deployment, publication, mail, Calendar
+job or live database was touched. Every database test used the disposable PostgreSQL fixture.
+
+**Behaviour changes**
+
+| Area | Role | Before | After |
+| --- | --- | --- | --- |
+| Task creation/editing | MANAGER, ADMIN | one long form, Save/Cancel at the bottom of the body | location path + name + deadline + assignees + compact description first; priority/skill/parent in one optional section; Save/Create/Cancel reachable in a sticky footer; disabled actions state their reasons |
+| Repeated task entry | MANAGER, ADMIN | reopen the form per task | **続けて作成** keeps project/subproject/assignees/priority, clears name/description/deadline, rotates the idempotency key and focuses the name field; a refresh failure never repeats the create |
+| Subproject creation/editing | MANAGER, ADMIN | planning fields mixed into the main form | name, location, owner, optional deadline and compact description first; planned dates, effort, status and next action in **計画の詳細**; deadline ≠ forecast ≠ effort is explicit |
+| Hierarchy selection | MANAGER, ADMIN | ambiguous repeated names | subproject and parent-task options show their full path; project options add the responsibility only when a name repeats; bounded search above 8 options; depth limits explained |
+| Child tasks | MANAGER, ADMIN | no contextual action | **子タスクを追加** on eligible task detail, preselected project/subproject/parent, depth and finished-state restrictions explained, children refreshed after success |
+| Request review | MANAGER, ADMIN | task ID/type/reporter table | task name, project/subproject, reporter, submitted time, proposed change and state; task opens in a separate tab; Reject and Return explain their effect; IDs stay secondary |
+| Completion report | MEMBER | only from My Assigned Work | the same shared panel on eligible task detail; container/Done/pending/closed reasons are specific; no new member power |
+| Personal work | MEMBER, MANAGER, ADMIN, VIEWER | long single list | task search, project, overdue, due-this-week and awaiting-review filters resolved in SQL; matching and unfiltered totals; Reset filters; "nothing assigned" separated from "no matches" |
+| Navigation | all | flat row | group headings (My work / Department work / People / Administration) with every link still direct |
+| Automation | MANAGER, ADMIN | raw text inputs, manager could type edits | typed controls from the documented key; ADMIN-only mutation; configured value, effective state and consequence shown apart; duplicate saves blocked; emergency stop kept |
+| Status | MANAGER, ADMIN | internals first | backup, request intake, email and publication health first; hashes, slots, contract version, outbox and row counts in one disclosure; disabled ≠ not configured ≠ failed |
+| Errors | all | code-first banner | plain-language title and recovery first; conflict has no blind retry; unknown outcome says it was not retried; code and correlation ID secondary |
+
+**API/contract additions (no new route, no authorization change)**
+
+`GET /api/employee/my-work` accepts `query`, `projectId`, `overdue`, `dueThisWeek`,
+`awaitingReview` and returns `unfilteredActiveTotal` and `projects`. `TaskRequest` items carry
+`taskName`, `projectName`, `subprojectName`. `StatusView` carries `requestSubmissionEnabled`.
+`TaskDetail` carries `depth`. `parent-options` items carry `parentTaskId`. Documented in
+[docs/v2/API.md](API.md).
+
+**Gate results (executed locally, 2026-11-04)**
+
+| Gate | Command | Result |
+| --- | --- | --- |
+| Type check | `npm run typecheck` | PASS |
+| Lint (V2) | `npm run lint:v2` | PASS |
+| Unit/integration tests | `npm run test:v2` | PASS — 32 files, 405 passed, 1 skipped (pre-existing backup-container skip) |
+| Source validation | `npm run validate:v2` | PASS — 165 files |
+| Build | `npm run build` | PASS |
+| Production artifact smoke | `npm run smoke:prod` | PASS — migrated, booted, authorized read/write, worker job, graceful shutdown |
+| Browser smoke | `npm run test:browser` | PASS — Chromium, Japanese login and language switch, project create/edit, contextual task and child-task creation, nested subproject, blocked and ADMIN-only removal, workload, manager/member/viewer journeys, responsive 1440/1366/390 widths, sign-out |
+
+New tests: `apps/web/test/usability.test.tsx` (16 cases: create-and-add-another key rotation,
+disabled reasons, contextual child task, depth refusal, member report and its refusals, VIEWER
+absence, server-side My Work filters and totals, request context and decision help, manager
+read-only vs ADMIN typed automation, health-first status, conflict/unknown/denied errors, grouped
+navigation) and four API cases in `apps/api/test/api.test.ts` (filter totals and identity,
+bounded filter validation, reviewer request context, status intake flag).
+
+One pre-existing test fixture was made date-independent: the workload timeline fixture used
+Monday–Wednesday buckets and therefore failed whenever the suite ran on Thursday–Sunday because
+today fell outside the window. The window is now three days ending after today; no assertion was
+removed or relaxed.
+
+**Browser evidence**
+
+Executed by `npm run test:browser`; screenshots under `work/screenshots/` (desktop and 390 px
+mobile for each role journey). Static inspection or unit tests alone are never reported as
+browser evidence.
+
+**Not run / limitations**
+
+- `npm run test:lan` was not run: it needs the LAN host and a live LAN database.
+- The new My Work filter controls, the member completion panel on task detail and the automation
+  read-only view were verified by component tests, not clicked in the browser smoke.
+- Manager data still lives only in page memory; filters and navigation state stay in route memory.
+- `docs/PRODUCTION_READINESS.md` remains **NOT APPROVED FOR PRODUCTION**; no live Workspace
+  verification was produced by this release.
+
 ## Responsibility area removal: hide retired areas and ADMIN deletion — 2026-11-04
 
 Implemented on reviewed HEAD `fab33c355b84879aba9c03cdac061d25627c8950` with a clean worktree. No

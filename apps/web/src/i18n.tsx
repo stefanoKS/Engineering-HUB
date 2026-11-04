@@ -651,7 +651,190 @@ export const V2_LABELS = {
   'confirm.type': { ja: '{text} と入力してください', en: 'Type {text}' },
   'confirm.blocked': { ja: '削除できません。アーカイブを使用してください。', en: 'This record cannot be removed; archive it instead.' },
   'error.correlation': { ja: '問い合わせID', en: 'Correlation ID' },
-  'error.details': { ja: '詳細', en: 'Details' }
+  'error.details': { ja: '詳細', en: 'Details' },
+
+  // Usability release: shared form guidance.
+  'common.required': { ja: '必須', en: 'Required' },
+  'common.optional': { ja: '任意', en: 'Optional' },
+  'common.notConfigured': { ja: '未設定', en: 'Not configured' },
+  'common.disabled': { ja: '無効', en: 'Disabled' },
+  'common.failed': { ja: '失敗', en: 'Failed' },
+  'common.ok': { ja: '正常', en: 'OK' },
+  'form.optionalSection': { ja: '任意の設定', en: 'Optional details' },
+  'form.optionalHint': {
+    ja: '日常の作成では通常使いません。必要なときだけ開いてください。',
+    en: 'Usually not needed for routine creation. Open this only when required.'
+  },
+  'form.blockedReasons': { ja: 'このままでは登録できません', en: 'This cannot be submitted yet' },
+  'form.noChanges': { ja: '変更された項目はありません。', en: 'No field has changed.' },
+  'form.readOnly': { ja: '参照のみ', en: 'Read-only' },
+
+  'taskForm.location': { ja: '作成先', en: 'Location' },
+  'taskForm.changeLocation': { ja: '作成先を変更', en: 'Change location' },
+  'taskForm.keepLocation': { ja: 'この作成先のまま', en: 'Keep this location' },
+  'taskForm.projectRequired': { ja: 'プロジェクトを選択してください。', en: 'Select a project.' },
+  'taskForm.nameRequired': { ja: 'タスク名を入力してください。', en: 'Enter a task name.' },
+  'taskForm.deadlineRequired': { ja: '期限を入力してください。', en: 'Enter a deadline.' },
+  'taskForm.assigneeHint': { ja: '担当者は任意です。後から追加できます。', en: 'Assignees are optional and can be added later.' },
+  'taskForm.createAnother': { ja: '続けて作成', en: 'Create and add another' },
+  'taskForm.createdAnother': {
+    ja: '作成しました。作成先・担当者・優先度を引き継いでいます。',
+    en: 'Created. The location, assignees and priority were kept for the next task.'
+  },
+  'taskForm.retainedAssignees': { ja: '担当: {names}', en: 'Assignees: {names}' },
+  'taskForm.retainedPriority': { ja: '優先度: {value}', en: 'Priority: {value}' },
+  'taskForm.retainedHint': { ja: '次のタスクに引き継いだ値', en: 'Kept for the next task' },
+  'taskForm.parentHint': {
+    ja: '親タスクはタスクの所属を示します。依存関係とは別の項目です。',
+    en: 'The parent task shows where the task belongs; it is not a dependency.'
+  },
+  'taskForm.depthLimit': {
+    ja: 'タスクは3階層までです。これ以上深いタスクは親に選べません。',
+    en: 'Tasks nest up to three levels; a deeper task cannot be a parent.'
+  },
+  'taskForm.noParentOptions': { ja: 'この作成先には親にできるタスクがありません。', en: 'No eligible parent task in this location.' },
+  'taskForm.contextPath': { ja: '作成先: {path}', en: 'Location: {path}' },
+
+  'subForm.planning': { ja: '計画の詳細', en: 'Planning details' },
+  'projects.deadlineHint': {
+    ja: '期限は約束した日付です。予定終了日は見込みで、工数は作業時間です。',
+    en: 'The deadline is the committed date; the forecast end is an estimate and effort is work hours.'
+  },  'subForm.planningHint': {
+    ja: '期限・予定終了日・工数は別々の項目です。予定終了日は見込みで、工数は作業時間です。',
+    en: 'The deadline, the forecast end and the effort are separate. The forecast is an estimate; effort is work hours.'
+  },
+  'subForm.estimateHint': { ja: '予定の長さから工数を自動計算しません。', en: 'Estimated hours are never derived from the schedule.' },
+  'subForm.parentHint': { ja: 'サブプロジェクトは4階層までです。深い位置のものは親に選べません。', en: 'Subprojects nest up to four levels; a deeper one cannot be a parent.' },
+  'subForm.contextPath': { ja: '作成先: {path}', en: 'Location: {path}' },
+  'subForm.nameRequired': { ja: 'サブプロジェクト名を入力してください。', en: 'Enter a subproject name.' },
+
+  'tasks.addChild': { ja: '子タスクを追加', en: 'Add child task' },
+  'tasks.addChildCreated': { ja: '子タスクを作成しました。', en: 'Child task created.' },
+  'tasks.addChildBlockedDepth': {
+    ja: 'タスクは3階層までです。このタスクには子タスクを追加できません。',
+    en: 'Tasks nest up to three levels, so this task cannot have a child.'
+  },
+  'tasks.addChildBlockedFinished': { ja: '完了または取消のタスクには子タスクを追加できません。', en: 'A completed or cancelled task cannot receive a child task.' },
+  'tasks.addChildBlockedContainer': {
+    ja: 'このタスクは作業単位ではありません。子タスクの完了は子タスク側で報告してください。',
+    en: 'This task is a container. Report completion on the child task instead.'
+  },
+  'tasks.technical': { ja: '内部情報', en: 'Technical details' },
+  'tasks.technicalHint': { ja: '保存値と版番号は通常の確認では使いません。', en: 'Stored values and revision numbers are not needed for everyday work.' },
+
+  'report.heading': { ja: '完了を報告', en: 'Report completion' },
+  'report.note': { ja: '完了報告の内容', en: 'Completion note' },
+  'report.submit': { ja: '報告を送信', en: 'Send report' },
+  'report.submitting': { ja: '送信中…', en: 'Sending…' },
+  'report.dismiss': { ja: '閉じる', en: 'Close' },
+  'report.blocked.container': {
+    ja: '子タスクを持つタスクは直接完了できません。子タスクを完了してください。',
+    en: 'A task with child tasks cannot be completed directly. Complete the child tasks instead.'
+  },
+  'report.blocked.done': { ja: 'このタスクは完了済みです。', en: 'This task is already complete.' },
+  'report.blocked.cancelled': { ja: '取消のタスクには報告できません。', en: 'A cancelled task cannot receive a report.' },
+  'report.blocked.pending': { ja: '承認待ちの申請があります。結果をお待ちください。', en: 'A request is awaiting review. Wait for the outcome.' },
+  'report.blocked.disabled': { ja: '現在、完了報告の受付は停止しています。', en: 'Completion reports are currently closed.' },
+  'report.blocked.role': { ja: '完了報告は担当メンバーが行います。', en: 'Completion is reported by the assigned member.' },
+  'report.state.pending': { ja: '承認待ち', en: 'Awaiting review' },
+  'report.state.approved': { ja: '承認済み', en: 'Approved' },
+  'report.state.rejected': { ja: '却下', en: 'Rejected' },
+  'report.state.returned': { ja: '差し戻し', en: 'Returned' },
+  'report.state.stale': { ja: '内容が変わったため再申請が必要です', en: 'The task changed; submit again' },
+
+  'requests.task': { ja: 'タスク', en: 'Task' },
+  'requests.context': { ja: 'プロジェクト / サブプロジェクト', en: 'Project / subproject' },
+  'requests.reporter': { ja: '報告者（申請者の入力）', en: 'Reported by (as submitted)' },
+  'requests.submitted': { ja: '申請日時', en: 'Submitted' },
+  'requests.state': { ja: '申請の状態', en: 'Request state' },
+  'requests.openTask': { ja: 'タスクを別タブで開く', en: 'Open the task in a new tab' },
+  'requests.rejectHelp': {
+    ja: '却下はこの申請を終了します。タスクの期限や状態は変わりません。',
+    en: 'Reject closes this request. The task deadline and status do not change.'
+  },
+  'requests.returnHelp': {
+    ja: '差し戻しは申請者に再提出を求めます。タスクは変更されません。',
+    en: 'Return asks the reporter to submit again. The task is not changed.'
+  },
+  'requests.approveHelp': { ja: '承認すると、この申請が示す変更を一度だけ適用します。', en: 'Approve applies the requested change once.' },
+
+  'myWork.filter.task': { ja: 'タスク名で検索', en: 'Search task name' },
+  'myWork.filter.project': { ja: 'プロジェクト', en: 'Project' },
+  'myWork.filter.overdue': { ja: '期限超過', en: 'Overdue' },
+  'myWork.filter.dueThisWeek': { ja: '今週期限', en: 'Due this week' },
+  'myWork.filter.awaitingReview': { ja: '承認待ち', en: 'Awaiting review' },
+  'myWork.filter.reset': { ja: '絞り込みを解除', en: 'Reset filters' },
+  'myWork.filter.active': { ja: '絞り込み中', en: 'Filtered' },
+  'myWork.noAssignments': { ja: '担当タスクはありません。', en: 'You have no assigned tasks.' },
+  'myWork.noMatches': { ja: '条件に一致するタスクはありません。', en: 'No tasks match these filters.' },
+  'myWork.matching': { ja: '一致 {n} 件', en: '{n} matching' },
+  'myWork.allActive': { ja: '未完了 {n} 件', en: '{n} active' },
+
+  'nav.group.myWork': { ja: '自分の作業', en: 'My work' },
+  'nav.group.department': { ja: '部門の作業', en: 'Department work' },
+  'nav.group.people': { ja: 'メンバーと分野', en: 'People' },
+  'nav.group.admin': { ja: '管理', en: 'Administration' },
+
+  'automation.configured': { ja: '設定値', en: 'Configured' },
+  'automation.effective': { ja: '実効状態', en: 'Effective' },
+  'automation.readOnlyHint': { ja: '管理者のみ変更できます。表示は現在の設定値です。', en: 'Only ADMIN can change these. The values shown are the current settings.' },
+  'automation.consequence': { ja: '影響', en: 'Consequence' },
+  'automation.valueNotSet': { ja: '未設定（安全側で動作）', en: 'Not set (fails safe)' },
+  'automation.consequence.EMAIL_MODE': {
+    ja: 'LIVE は実際にメールを送信します。PREVIEW は記録のみ、OFF は送信しません。',
+    en: 'LIVE sends real mail. PREVIEW only records, and OFF sends nothing.'
+  },
+  'automation.consequence.EMERGENCY_STOP': { ja: 'ON の間はすべての送信が停止します。', en: 'While ON, every outbound send is stopped.' },
+  'automation.consequence.SHARED_DASHBOARD_PUBLISH_ENABLED': {
+    ja: 'ON にすると次回の公開で共有ダッシュボードが更新されます。即時反映ではありません。',
+    en: 'Turning this ON updates the shared dashboard at the next publication, not immediately.'
+  },
+  'automation.consequence.MAX_EMAILS_PER_RUN': { ja: '1回の実行で送る上限です。超えた分は次回に回ります。', en: 'Cap per run; anything above it is deferred.' },
+  'automation.consequence.COUNT': { ja: '数値で指定します。', en: 'Enter a number.' },
+  'automation.consequence.TOGGLE': { ja: '有効／無効を切り替えます。', en: 'Switches the feature on or off.' },
+  'automation.consequence.DEFAULT': { ja: '既存の設定値をそのまま保存します。', en: 'Stores the same setting value.' },
+  'automation.emergencyAccess': { ja: '緊急停止', en: 'Emergency stop' },
+
+  'status.health': { ja: '運用状態', en: 'Operational health' },
+  'status.health.backup': { ja: 'バックアップ', en: 'Backup' },
+  'status.health.requests': { ja: '申請の受付', en: 'Request intake' },
+  'status.health.email': { ja: 'メール送信', en: 'Email delivery' },
+  'status.health.publication': { ja: '共有ダッシュボード公開', en: 'Shared dashboard publication' },
+  'status.diagnostics': { ja: '内部情報', en: 'Diagnostics' },
+  'status.diagnosticsHint': { ja: 'ハッシュ・スロット・契約版・件数は通常の確認では使いません。', en: 'Hashes, slots, contract versions and row counts are not needed for routine checks.' },
+  'status.memberRecord': { ja: 'メンバー情報へ', en: 'Member record' },
+  'status.accountAdmin': { ja: 'アカウント管理へ', en: 'Account administration' },
+
+  'local.memberRecord': { ja: 'メンバー登録', en: 'Member record' },
+  'local.loginConfigured': { ja: 'ログイン設定あり', en: 'Login configured' },
+  'local.loginMissing': { ja: 'ログイン未設定', en: 'No login configured' },
+  'local.profileLink': { ja: 'プロフィールを開く', en: 'Open profile' },
+
+  'error.title': { ja: '処理できませんでした', en: 'This could not be completed' },
+  'error.conflictTitle': { ja: '新しい版が保存されています', en: 'A newer version was saved' },
+  'error.conflictHelp': {
+    ja: 'この画面を開いた後に他の変更が保存されました。上書きせず、再読み込みして最新の内容を確認してください。',
+    en: 'Someone saved a change after you opened this screen. Nothing was overwritten; reload and review the latest values.'
+  },
+  'error.unknownTitle': { ja: '結果を確認できませんでした', en: 'The outcome could not be confirmed' },
+  'error.unknownHelp': {
+    ja: '通信の問題で結果が不明です。自動では再送しません。一覧を再読み込みして状態を確認してください。',
+    en: 'The result is unknown because the connection failed. It was not retried automatically. Reload the list to check the current state.'
+  },
+  'error.deniedTitle': { ja: '権限がありません', en: 'Not authorised' },
+  'error.retryTitle': { ja: '一時的な問題', en: 'Temporary problem' },
+  'error.reload': { ja: '再読み込み', en: 'Reload' },
+  'error.codeLabel': { ja: 'コード', en: 'Code' },
+
+  'freshness.snapshot': {
+    ja: 'この画面は公開スナップショットを表示しています。最終公開時点の内容で、リアルタイムではありません。',
+    en: 'This screen shows the published snapshot as of the last publication. It is not live data.'
+  },
+  'freshness.live': { ja: 'この画面は保存済みの最新データを表示しています。', en: 'This screen shows the latest saved data.' },
+  'freshness.stale': {
+    ja: '公開スナップショットが最新ではありません。再公開をお待ちください。',
+    en: 'The published snapshot is not current; wait for the next publication.'
+  }
 } as const;
 
 export type V2LabelKey = keyof typeof V2_LABELS;

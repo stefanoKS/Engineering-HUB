@@ -11,7 +11,8 @@ import { MAX_SUBPROJECT_DEPTH } from '@eh/domain';
 import { api } from '../api/client';
 import { useI18n } from '../i18n';
 import { ErrorBox } from '../components/ui';
-import { createIdempotencyKey, SelectInput, TextInput, useSave } from './forms';
+import { createIdempotencyKey, SearchSelect, SelectInput, TextInput, useSave } from './forms';
+import { subprojectPath } from './hierarchy';
 
 export type SubprojectOption = {
   subprojectId: string;
@@ -27,19 +28,8 @@ export type SubprojectProjectOption = {
   subprojects: SubprojectOption[];
 };
 
-/** The hierarchical path of a subproject, so a nested parent is never an ambiguous name. */
-export function subprojectPath(subprojects: SubprojectOption[], subprojectId: string): string {
-  const byId = new Map(subprojects.map((entry) => [entry.subprojectId, entry]));
-  const names: string[] = [];
-  const seen = new Set<string>();
-  let node = byId.get(subprojectId);
-  while (node && !seen.has(node.subprojectId)) {
-    seen.add(node.subprojectId);
-    names.unshift(node.subprojectName);
-    node = node.parentSubprojectId ? byId.get(node.parentSubprojectId) : undefined;
-  }
-  return names.join(' / ');
-}
+// Kept as a re-export so existing screens keep one shared path helper.
+export { subprojectPath };
 
 export function MemberSubprojectForm({
   projects,
@@ -128,15 +118,18 @@ export function MemberSubprojectForm({
         )}
         <label className="field">
           <span className="field-label">{t('myWork.parentSubproject')}</span>
-          <SelectInput
+          <SearchSelect
             value={parentId}
             onChange={setParentId}
             allowEmpty={t('myWork.parentSubprojectNone')}
+            searchLabel={t('action.search')}
+            selectLabel={t('myWork.parentSubproject')}
             options={parents.map((entry) => ({
               value: entry.subprojectId,
               label: subprojectPath(subprojects, entry.subprojectId)
             }))}
           />
+          <span className="field-hint">{t('subForm.parentHint')}</span>
         </label>
       </div>
 

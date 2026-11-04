@@ -17,7 +17,12 @@ const REQUEST_SELECT = `
          original_due_date, requested_due_date, reason, explanation, completion_note, status,
          reviewer, decided_at, decision_note, task_revision_at_submission, due_date_at_submission,
          reported_completion_at, accepted_completion_at, inbox_request_id, imported_at,
-         snapshot_version, stale_reason, revision, requester_member_id
+         snapshot_version, stale_reason, revision, requester_member_id,
+         COALESCE((SELECT t.task_name FROM tasks t WHERE t.task_id = task_requests.task_id), '') AS task_name,
+         COALESCE((SELECT p.project_name FROM projects p WHERE p.project_id = task_requests.project_id), '') AS project_name,
+         COALESCE((SELECT s.subproject_name
+                     FROM tasks t JOIN subprojects s ON s.subproject_id = t.subproject_id
+                    WHERE t.task_id = task_requests.task_id), '') AS subproject_name
     FROM task_requests`;
 
 export async function listRequests(db: Db, includeDecided: boolean, page = 1, pageSize = 25): Promise<TaskRequest[]> {
