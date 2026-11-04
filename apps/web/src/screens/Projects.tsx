@@ -10,6 +10,7 @@ import { ConfirmDialog, SelectInput, TextInput, useIdempotencyKey, useSave, type
 import { SaveState } from '../components/ui';
 import { navigate } from '../App';
 import { projectColor } from '@eh/domain';
+import { useRouteMemoryState } from '../state/navigation';
 
 type ProjectRow = ProjectSummary & { _revision: number };
 type Page = { items: ProjectRow[]; total: number; page: number; pageSize: number; totalPages: number };
@@ -20,10 +21,10 @@ const PRIORITIES: Project['priority'][] = ['Low', 'Medium', 'High', 'Critical'];
 
 export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
   const { t, label } = useI18n();
-  const [responsibilityId, setResponsibilityId] = useState('');
-  const [status, setStatus] = useState('');
-  const [query, setQuery] = useState('');
-  const [page, setPage] = useState(1);
+  const [responsibilityId, setResponsibilityId] = useRouteMemoryState('projects:responsibility', '');
+  const [status, setStatus] = useRouteMemoryState('projects:status', '');
+  const [query, setQuery] = useRouteMemoryState('projects:query', '');
+  const [page, setPage] = useRouteMemoryState('projects:page', 1);
   const [editing, setEditing, loadEditor, editorError, editorLoading] = useEditorState<{ mode: 'create' } | { mode: 'edit'; project: Project } | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<ProjectRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ summary: ProjectRow; confirmation: string; blockers: string[] } | null>(null);

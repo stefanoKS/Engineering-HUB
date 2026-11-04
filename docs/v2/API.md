@@ -105,6 +105,7 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | GET | `/api/manager/reports/workload` | Four weeks of utilisation |
 | GET | `/api/manager/plan/preview` | `deadline`, `durationValue`, `durationUnit`, `durationBasis` |
 | GET | `/api/manager/deletion/preflight` | `entityType`, `entityId` (ADMIN only) |
+| GET | `/api/manager/removal/preflight` | `entityType=TASKS|SUBPROJECTS`, `entityId` (ADMIN only); returns active child/dependency/workflow blockers and the current revision |
 
 ### Commands
 
@@ -118,6 +119,7 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | PATCH | `/api/manager/subprojects/:id` | `revision` + fields |
 | POST | `/api/manager/subprojects/:id/archive` \| `/reactivate` | `revision`, `confirmed`, `reason?` |
 | DELETE | `/api/manager/subprojects/:id` | As projects |
+| POST | `/api/admin/subprojects/:id/remove` | ADMIN logical removal: `revision`, `confirmed: true`; sets `deleted_at`, increments the revision and writes `RECORD_REMOVED` without deleting history |
 | POST | `/api/manager/tasks` | `idempotencyKey`, `projectId`, `taskName`, `deadline`, optional planning fields, `assigneeIds`, `dependencyIds` |
 | PATCH | `/api/manager/tasks/:id` | `revision` + fields, `confirmDeadlineChange`, `acknowledgeNonWorking` |
 | POST | `/api/manager/tasks/:id/approve` | `revision`, `confirmed` |
@@ -125,6 +127,7 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | POST | `/api/manager/tasks/:id/complete` | MANAGER/ADMIN: `revision`, `confirmed: true`, `note?`. Direct completion; the container, cancelled and already-done refusals still apply, and a pending completion report is withdrawn |
 | POST | `/api/manager/tasks/:id/override-complete` | ADMIN: `revision`, `reason`, `confirmation: "COMPLETE <id>"` |
 | DELETE | `/api/manager/tasks/:id` | ADMIN, as projects |
+| POST | `/api/admin/tasks/:id/remove` | ADMIN logical removal: `revision`, `confirmed: true`; preserves requests, deadline/audit/assignee history and queues A/B publication reconciliation |
 | POST | `/api/manager/members` | ADMIN for `role`/`active` |
 | PATCH | `/api/manager/members/:id` | `revision` + fields (role/active ADMIN only) |
 | POST | `/api/manager/responsibilities` | `name`, `ownerMemberId`, `additionalMemberIds`, `colorHex`, `sortOrder` |
@@ -144,6 +147,15 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 `DELETE` on a task, subproject or project is the only destructive command. It is ADMIN-only, it
 re-runs the preflight under a row lock inside the same transaction, and it answers the stored
 `tombstoneId` from `record_deletions` after `RECORD_DELETE_PREPARED` and `RECORD_DELETED` exist.
+
+The POST `/api/admin/.../remove` commands are deliberately separate from these physical DELETE
+commands. Ordinary administrative removal keeps the task/subproject row and all foreign-key
+evidence, stamps `deleted_at`, increments `revision`, and records the verified actor and the
+standard mistaken-record reason in `RECORD_REMOVED`. A repeat after success returns
+`alreadyRemoved: true` and does not append another audit event. Child tasks/subprojects, active
+dependants, pending/processing requests, pending or leased notification/calendar jobs, current
+assignment approval, completed work and recorded effort block task removal. Routine edits, audit
+rows, deadline history, historical assignees, decided requests and prior publication do not.
 `GET /api/manager/deletion/preflight` is the read-only companion; it reports `deletable`, the
 blocker codes and the exact `confirmationText`. Nothing cascades: a record that still owns tasks,
 descendants, dependencies, recorded effort, approvals, requests, notifications, deadline history,

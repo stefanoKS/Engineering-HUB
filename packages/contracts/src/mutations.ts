@@ -93,6 +93,13 @@ export const DeleteBody = z
   })
   .strict();
 
+export const RemoveBody = z
+  .object({
+    revision: Revision,
+    confirmed: Confirm
+  })
+  .strict();
+
 export const CreateSubprojectBody = z
   .object({
     idempotencyKey: IdempotencyKey,

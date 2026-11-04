@@ -13,6 +13,7 @@ import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
 import { Badge, ErrorBox } from '../components/ui';
 import { ConfirmDialog, createIdempotencyKey, SelectInput, TextInput, useIdempotencyKey, useSave } from '../components/forms';
+import { useRouteMemoryState } from '../state/navigation';
 
 const PAGE_SIZE = 25;
 
@@ -31,7 +32,7 @@ function displayTone(status: MyWorkList['items'][number]['displayStatus']): 'ok'
 
 export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
   const { t } = useI18n();
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useRouteMemoryState('my-work:page', 1);
   const canCreate = actor.role === 'MEMBER';
   const canReport = actor.role === 'MEMBER';
 

@@ -79,6 +79,10 @@ function remove(headers: Headers, path: string, body: Record<string, unknown>) {
   return app.inject({ method: 'DELETE', url: path, headers, payload: body });
 }
 
+function administrativeRemove(headers: Headers, path: string, body: Record<string, unknown>) {
+  return app.inject({ method: 'POST', url: path, headers, payload: body });
+}
+
 function patchSubproject(headers: Headers, entityId: string, body: Record<string, unknown>) {
   return app.inject({
     method: 'PATCH',
@@ -121,6 +125,171 @@ describe('deletion authorization', () => {
     }
   });
 });
+
+describe('administrative logical removal', () => {
+        it('removes an edited INTERNAL task while preserving routine historical evidence', async () => {
+          await db.query(
+            `INSERT INTO tasks(task_id,project_id,task_name,status,due_date,revision)
+             VALUES('T-LOGICAL','PRJ-INT','Mistaken published task','In Progress','2026-12-10',4)`
+          );
+          await db.query(
+            `INSERT INTO audit_log(entity_type,entity_id,action,actor_member_id)
+             VALUES('TASKS','T-LOGICAL','TASK_UPDATED','MEM-ADMIN')`
+          );
+          await db.query(
+            `INSERT INTO task_requests(request_id,request_type,task_id,project_id,requester_name,status)
+             VALUES('REQ-HIST','DEADLINE_CHANGE','T-LOGICAL','PRJ-INT','Former requester','APPROVED')`
+          );
+          await db.query(
+            `INSERT INTO task_deadline_history(history_id,task_id,request_id,previous_due_date,new_due_date,reason)
+             VALUES('HIST-1','T-LOGICAL','REQ-HIST','2026-12-01','2026-12-10','Approved historical change')`
+          );
+          await db.query(
+            `INSERT INTO task_assignees(assignment_id,task_id,member_id,assigned_by,removed_at,removed_by)
+             VALUES('ASG-HIST','T-LOGICAL','MEM-A','MEM-ADMIN',now(),'MEM-ADMIN')`
+          );
+          const admin = await login('0001');
+          const checked = await app.inject({
+            url: '/api/manager/removal/preflight?entityType=TASKS&entityId=T-LOGICAL',
+            headers: { cookie: admin.cookie! }
+          });
+          expect(checked.statusCode, checked.body).toBe(200);
+          expect(checked.json().data).toMatchObject({ deletable: true, blockers: [], revision: 4 });
+
+          const removed = await administrativeRemove(admin, '/api/admin/tasks/T-LOGICAL/remove', {
+            revision: 4,
+            confirmed: true
+          });
+          expect(removed.statusCode, removed.body).toBe(200);
+          expect(removed.json().data).toMatchObject({ alreadyRemoved: false, revision: 5 });
+          expect(await db.one("SELECT 1 FROM tasks WHERE task_id = 'T-LOGICAL' AND deleted_at IS NOT NULL AND revision = 5")).toBeTruthy();
+          expect(await db.one("SELECT 1 FROM task_deadline_history WHERE history_id = 'HIST-1'")).toBeTruthy();
+          expect(await db.one("SELECT 1 FROM audit_log WHERE entity_id = 'T-LOGICAL' AND action = 'TASK_UPDATED'")).toBeTruthy();
+          expect(await db.one("SELECT 1 FROM task_assignees WHERE assignment_id = 'ASG-HIST'")).toBeTruthy();
+          expect(await db.one("SELECT 1 FROM task_requests WHERE request_id = 'REQ-HIST'")).toBeTruthy();
+          expect(await db.one("SELECT 1 FROM audit_log WHERE entity_id = 'T-LOGICAL' AND action = 'RECORD_REMOVED'")).toBeTruthy();
+          expect(await db.one("SELECT 1 FROM outbox_jobs WHERE kind = 'publication.run' AND payload->>'taskId' = 'T-LOGICAL'")).toBeTruthy();
+
+          const active = await app.inject({
+            url: '/api/manager/tasks?query=Mistaken%20published&page=1&pageSize=25',
+            headers: { cookie: admin.cookie! }
+          });
+          expect(active.statusCode, active.body).toBe(200);
+          expect(active.json().data.items).toEqual([]);
+        });
+
+        it('is ADMIN-only and treats a repeated successful removal as idempotent', async () => {
+          await db.query(
+            "INSERT INTO tasks(task_id,project_id,task_name,status) VALUES('T-IDEMPOTENT','PRJ-PRIV','Duplicate','Not Started')"
+          );
+          for (const employeeId of ['0002', '0010', '0020']) {
+            const headers = await login(employeeId);
+            const refused = await administrativeRemove(headers, '/api/admin/tasks/T-IDEMPOTENT/remove', {
+              revision: 1,
+              confirmed: true
+            });
+            expect(refused.statusCode, `${employeeId}: ${refused.body}`).toBe(403);
+          }
+          const anonymous = await administrativeRemove({}, '/api/admin/tasks/T-IDEMPOTENT/remove', {
+            revision: 1,
+            confirmed: true
+          });
+          expect(anonymous.statusCode).toBe(401);
+
+          const admin = await login('0001');
+          const first = await administrativeRemove(admin, '/api/admin/tasks/T-IDEMPOTENT/remove', {
+            revision: 1,
+            confirmed: true
+          });
+          expect(first.statusCode, first.body).toBe(200);
+          const second = await administrativeRemove(admin, '/api/admin/tasks/T-IDEMPOTENT/remove', {
+            revision: 1,
+            confirmed: true
+          });
+          expect(second.statusCode, second.body).toBe(200);
+          expect(second.json().data).toMatchObject({ alreadyRemoved: true, revision: 2 });
+          const evidence = await db.one<{ count: string }>(
+            "SELECT count(*)::text AS count FROM audit_log WHERE entity_id = 'T-IDEMPOTENT' AND action = 'RECORD_REMOVED'"
+          );
+          expect(Number(evidence!.count)).toBe(1);
+        });
+
+        it('blocks child work, active dependencies, pending requests/jobs, completed work and stale revisions', async () => {
+          await db.query(
+            `INSERT INTO tasks(task_id,project_id,task_name,status,actual_hours) VALUES
+             ('T-BLOCKED','PRJ-PRIV','Blocked target','In Progress',NULL),
+             ('T-CHILD','PRJ-PRIV','Child task','Not Started',NULL),
+             ('T-DEPENDANT','PRJ-PRIV','Dependant task','Not Started',NULL),
+             ('T-DONE','PRJ-PRIV','Completed task','Done',2)`
+          );
+          await db.query("UPDATE tasks SET parent_task_id = 'T-BLOCKED' WHERE task_id = 'T-CHILD'");
+          await db.query("INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES('T-DEPENDANT','T-BLOCKED')");
+          await db.query(
+            `INSERT INTO task_requests(request_id,request_type,task_id,project_id,requester_name,status)
+             VALUES('REQ-PENDING','COMPLETION_REPORT','T-BLOCKED','PRJ-PRIV','Worker','PENDING')`
+          );
+          await db.query(
+            `INSERT INTO outbox_jobs(kind,payload,dedupe_key)
+             VALUES('notification.task','{"taskId":"T-BLOCKED"}','pending-blocker')`
+          );
+          const admin = await login('0001');
+          const checked = await app.inject({
+            url: '/api/manager/removal/preflight?entityType=TASKS&entityId=T-BLOCKED',
+            headers: { cookie: admin.cookie! }
+          });
+          const blockers = checked.json().data.blockers as { code: string; detail: string }[];
+          expect(blockers.map((entry) => entry.code)).toEqual(
+            expect.arrayContaining(['HAS_DESCENDANTS', 'DEPENDENCY_REFERENCED', 'REQUESTS', 'NOTIFICATIONS'])
+          );
+          expect(blockers.find((entry) => entry.code === 'HAS_DESCENDANTS')?.detail).toContain('Child task');
+          expect(blockers.find((entry) => entry.code === 'DEPENDENCY_REFERENCED')?.detail).toContain('Dependant task');
+
+          const done = await app.inject({
+            url: '/api/manager/removal/preflight?entityType=TASKS&entityId=T-DONE',
+            headers: { cookie: admin.cookie! }
+          });
+          expect(done.json().data.blockers.map((entry: { code: string }) => entry.code)).toContain('RECORDED_EFFORT');
+
+          await db.query(
+            "INSERT INTO tasks(task_id,project_id,task_name,status,revision) VALUES('T-STALE-REMOVE','PRJ-PRIV','Stale task','Not Started',3)"
+          );
+          const stale = await administrativeRemove(admin, '/api/admin/tasks/T-STALE-REMOVE/remove', {
+            revision: 2,
+            confirmed: true
+          });
+          expect(stale.statusCode, stale.body).toBe(409);
+          expect(stale.json().error.code).toBe('EDIT_CONFLICT');
+          expect(await db.one("SELECT 1 FROM tasks WHERE task_id = 'T-STALE-REMOVE' AND deleted_at IS NULL")).toBeTruthy();
+        });
+
+        it('removes an edited empty subproject but protects active children', async () => {
+          await db.query(
+            `INSERT INTO subprojects(subproject_id,project_id,subproject_name,status,revision) VALUES
+             ('SUB-SOFT','PRJ-PRIV','Edited empty area','Planned',5),
+             ('SUB-PARENT','PRJ-PRIV','Parent area','Planned',1),
+             ('SUB-CHILD','PRJ-PRIV','Child area','Planned',1)`
+          );
+          await db.query("UPDATE subprojects SET parent_subproject_id = 'SUB-PARENT' WHERE subproject_id = 'SUB-CHILD'");
+          await db.query(
+            "INSERT INTO audit_log(entity_type,entity_id,action,actor_member_id) VALUES('SUBPROJECTS','SUB-SOFT','SUBPROJECT_UPDATED','MEM-ADMIN')"
+          );
+          const admin = await login('0001');
+          const removed = await administrativeRemove(admin, '/api/admin/subprojects/SUB-SOFT/remove', {
+            revision: 5,
+            confirmed: true
+          });
+          expect(removed.statusCode, removed.body).toBe(200);
+          expect(await db.one("SELECT 1 FROM subprojects WHERE subproject_id = 'SUB-SOFT' AND deleted_at IS NOT NULL")).toBeTruthy();
+          expect(await db.one("SELECT 1 FROM audit_log WHERE entity_id = 'SUB-SOFT' AND action = 'SUBPROJECT_UPDATED'")).toBeTruthy();
+
+          const blocked = await app.inject({
+            url: '/api/manager/removal/preflight?entityType=SUBPROJECTS&entityId=SUB-PARENT',
+            headers: { cookie: admin.cookie! }
+          });
+          expect(blocked.json().data.blockers[0].code).toBe('HAS_DESCENDANTS');
+          expect(blocked.json().data.blockers[0].detail).toContain('Child area');
+        });
+      });
 
 describe('eligible removals', () => {
   it('removes an empty subproject and records the intent, tombstone and completion', async () => {

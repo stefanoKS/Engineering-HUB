@@ -277,16 +277,16 @@ describe('project hierarchy tree', () => {
     const manager = renderTree(false);
     expect(screen.getAllByRole('button', { name: '新規タスク' }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: '編集' }).length).toBeGreaterThan(0);
-    expect(screen.queryAllByRole('button', { name: /を完全削除/ })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: /を削除/ })).toHaveLength(0);
     manager.unmount();
     renderTree(true);
-    expect(screen.getAllByRole('button', { name: /を完全削除/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /を削除/ }).length).toBeGreaterThan(0);
   });
 
   it('renders no create or delete controls for a reader without manager rights', () => {
     renderTree(false, false);
     expect(screen.queryAllByRole('button', { name: '新規タスク' })).toHaveLength(0);
-    expect(screen.queryAllByRole('button', { name: /を完全削除/ })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: /を削除/ })).toHaveLength(0);
     expect(screen.queryByLabelText('取消・アーカイブを表示')).toBeNull();
   });
 
@@ -304,10 +304,10 @@ describe('project hierarchy tree', () => {
 });
 
 describe('delete dialog', () => {
-  it('asks for the exact confirmation and submits the loaded revision', async () => {
+  it('uses a simple confirmation and submits the loaded revision to logical removal', async () => {
     const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
-      if (init?.method === 'DELETE') return response({ deleted: true });
-      if (url.includes('deletion/preflight')) {
+      if (init?.method === 'POST') return response({ removed: true });
+      if (url.includes('removal/preflight')) {
         return response({
           entityType: 'TASKS',
           entityId: 'T-A1',
@@ -329,20 +329,16 @@ describe('delete dialog', () => {
       </I18nProvider>
     );
     expect(await screen.findByText('Area A work')).toBeTruthy();
-    const submit = screen.getByRole('button', { name: '完全削除' }) as HTMLButtonElement;
-    expect(submit.disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText('DELETE T-A1 と入力してください'), { target: { value: 'DELETE T-A1' } });
-    fireEvent.change(screen.getByLabelText('理由（必須）'), { target: { value: 'Created by mistake' } });
+    expect(await screen.findByText('このタスクを一覧から削除しますか？')).toBeTruthy();
+    const submit = screen.getByRole('button', { name: '削除する' }) as HTMLButtonElement;
     await waitFor(() => expect(submit.disabled).toBe(false));
     fireEvent.click(submit);
     await waitFor(() => expect(onDeleted).toHaveBeenCalled());
-    const call = fetcher.mock.calls.find(([, init]) => init?.method === 'DELETE')!;
-    expect(call[0]).toBe('/api/manager/tasks/T-A1');
+    const call = fetcher.mock.calls.find(([, init]) => init?.method === 'POST')!;
+    expect(call[0]).toBe('/api/admin/tasks/T-A1/remove');
     expect(JSON.parse(String(call[1]!.body))).toEqual({
       revision: 7,
-      confirmed: true,
-      reason: 'Created by mistake',
-      confirmation: 'DELETE T-A1'
+      confirmed: true
     });
   });
 
@@ -374,14 +370,14 @@ describe('delete dialog', () => {
     );
     expect(await screen.findByText('タスクが残っています')).toBeTruthy();
     expect(screen.getByText(/2 task\(s\) are attached/)).toBeTruthy();
-    expect((screen.getByRole('button', { name: '完全削除' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: '削除する' }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: '子を表示' }));
     expect(reveal).toHaveBeenCalled();
   });
 
   it('reports a stale revision as a reload request instead of retrying blindly', async () => {
     const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
-      if (init?.method === 'DELETE') {
+      if (init?.method === 'POST') {
         return new Response(
           JSON.stringify({
             ok: false,
@@ -407,13 +403,11 @@ describe('delete dialog', () => {
         <DeleteEntityDialog entityType="TASKS" entityId="T-A1" entityName="Area A work" onClose={() => undefined} onDeleted={() => undefined} />
       </I18nProvider>
     );
-    fireEvent.change(await screen.findByLabelText('DELETE T-A1 と入力してください'), { target: { value: 'DELETE T-A1' } });
-    fireEvent.change(screen.getByLabelText('理由（必須）'), { target: { value: 'Duplicate' } });
-    const submit = screen.getByRole('button', { name: '完全削除' }) as HTMLButtonElement;
+    const submit = await screen.findByRole('button', { name: '削除する' }) as HTMLButtonElement;
     await waitFor(() => expect(submit.disabled).toBe(false));
     await act(async () => { fireEvent.click(submit); });
     expect(await screen.findByText(/他の更新により内容が変わりました/)).toBeTruthy();
-    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1);
+    expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
   });
 });
 
@@ -456,7 +450,7 @@ describe('project detail roles', () => {
 
   function stubManagerApi() {
     vi.stubGlobal('fetch', vi.fn(async (url: string) =>
-      url.includes('deletion/preflight') ? response({}) : url.includes('/references') ? response({ responsibilities: [], subprojects: [], skills: [], members: [] }) : response(detailPayload)
+      url.includes('removal/preflight') ? response({}) : url.includes('/references') ? response({ responsibilities: [], subprojects: [], skills: [], members: [] }) : response(detailPayload)
     ));
   }
 
@@ -465,7 +459,7 @@ describe('project detail roles', () => {
     render(<I18nProvider><ProjectDetailScreen actor={ADMIN_ACTOR as never} projectId="PRJ-A" /></I18nProvider>);
     expect(await screen.findByText('Alpha')).toBeTruthy();
     expect(await screen.findByText('Area A work')).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: /を完全削除/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /を削除/ }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: '新規タスク' }).length).toBeGreaterThan(0);
   });
 
@@ -474,7 +468,7 @@ describe('project detail roles', () => {
     render(<I18nProvider><ProjectDetailScreen actor={MANAGER_ACTOR as never} projectId="PRJ-A" /></I18nProvider>);
     expect(await screen.findByText('Area A work')).toBeTruthy();
     expect(screen.getAllByRole('button', { name: '編集' }).length).toBeGreaterThan(0);
-    expect(screen.queryAllByRole('button', { name: /を完全削除/ })).toHaveLength(0);
+    expect(screen.queryAllByRole('button', { name: /を削除/ })).toHaveLength(0);
   });
 
   it('renders MEMBER and VIEWER a read-only hierarchy without actions', async () => {
@@ -482,7 +476,7 @@ describe('project detail roles', () => {
       stubManagerApi();
       const view = render(<I18nProvider><ProjectDetailScreen actor={actor as never} projectId="PRJ-A" readOnly /></I18nProvider>);
       expect(await screen.findByText('Area A work')).toBeTruthy();
-      expect(screen.queryAllByRole('button', { name: /を完全削除/ })).toHaveLength(0);
+      expect(screen.queryAllByRole('button', { name: /を削除/ })).toHaveLength(0);
       expect(screen.queryAllByRole('button', { name: '新規タスク' })).toHaveLength(0);
       expect(screen.queryAllByRole('button', { name: '編集' })).toHaveLength(0);
       view.unmount();
@@ -493,7 +487,7 @@ describe('project detail roles', () => {
   it('opens the task form with the subproject preselected', async () => {
     const page = { items: [{ projectId: 'PRJ-A', projectName: 'Alpha' }], total: 1, totalPages: 1 };
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-      if (url.includes('deletion/preflight')) return response({});
+      if (url.includes('removal/preflight')) return response({});
       if (url.includes('/references')) {
         return response({
           responsibilities: [],

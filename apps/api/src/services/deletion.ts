@@ -24,6 +24,12 @@ type EntityType = 'PROJECTS' | 'SUBPROJECTS' | 'TASKS';
 
 type DbLike = Pick<ServiceCtx['db'], 'one' | 'many' | 'query'>;
 
+type RemovalEntityType = 'SUBPROJECTS' | 'TASKS';
+
+type RemovalBlocker = { code: string; detail: string };
+
+const REMOVAL_REASON = 'Administrative removal of a mistakenly created record';
+
 const NON_OPERATIONAL_AUDIT_ACTIONS: Record<EntityType, readonly string[]> = {
   PROJECTS: ['PROJECT_CREATED'],
   SUBPROJECTS: ['SUBPROJECT_CREATED', 'SUBPROJECT_UPDATED'],
@@ -217,6 +223,257 @@ async function evaluatePreflight(
 export async function preflight(ctx: ServiceCtx, entityType: EntityType, entityId: string): Promise<DeletionPreflight> {
   requireRole(ctx.identity, 'ADMIN');
   return evaluatePreflight(ctx.db, ctx, entityType, entityId);
+}
+
+async function evaluateRemoval(
+  db: DbLike,
+  entityType: RemovalEntityType,
+  entityId: string,
+  options: PreflightOptions = {}
+): Promise<DeletionPreflight> {
+  if (options.lock) await lockTarget(db, entityType, entityId);
+  const blockers: RemovalBlocker[] = [];
+  const blocked = (code: string, detail: string): void => {
+    blockers.push({ code, detail });
+  };
+
+  if (entityType === 'SUBPROJECTS') {
+    const record = await db.one<{
+      subproject_name: string;
+      status: string;
+      deleted_at: string | null;
+      revision: number;
+    }>(
+      `SELECT subproject_name, status, deleted_at, revision
+         FROM subprojects WHERE subproject_id = $1`,
+      [entityId]
+    );
+    if (!record || record.deleted_at) {
+      return {
+        entityType,
+        entityId,
+        deletable: false,
+        blockers: [{ code: 'NOT_FOUND_OR_DELETED', detail: 'The subproject was already removed or does not exist' }],
+        dependencyCount: 0,
+        descendantCount: 0,
+        confirmationText: '',
+        revision: record?.revision ?? null
+      };
+    }
+    const descendants = await db.many<{ subproject_name: string }>(
+      `SELECT subproject_name
+         FROM subprojects
+        WHERE parent_subproject_id = $1 AND deleted_at IS NULL
+        ORDER BY subproject_name`,
+      [entityId]
+    );
+    const tasks = await db.many<{ task_name: string }>(
+      `SELECT task_name
+         FROM tasks
+        WHERE subproject_id = $1 AND deleted_at IS NULL
+        ORDER BY task_name`,
+      [entityId]
+    );
+    const milestones = await db.many<{ milestone_name: string }>(
+      `SELECT milestone_name
+         FROM milestones
+        WHERE subproject_id = $1 AND status <> 'Closed'
+        ORDER BY milestone_name`,
+      [entityId]
+    );
+    if (descendants.length) {
+      blocked('HAS_DESCENDANTS', `Move or remove child subprojects first: ${descendants.map((row) => row.subproject_name).join(', ')}`);
+    }
+    if (tasks.length) {
+      blocked('HAS_TASKS', `Move or remove tasks first: ${tasks.map((row) => row.task_name).join(', ')}`);
+    }
+    if (milestones.length) {
+      blocked('ACTIVE_WORKFLOW', `Resolve active milestones first: ${milestones.map((row) => row.milestone_name).join(', ')}`);
+    }
+    return {
+      entityType,
+      entityId,
+      deletable: blockers.length === 0,
+      blockers,
+      dependencyCount: milestones.length,
+      descendantCount: descendants.length,
+      confirmationText: '',
+      revision: record.revision
+    };
+  }
+
+  const record = await db.one<{
+    task_name: string;
+    status: string;
+    actual_hours: string | number | null;
+    assignment_approved_at: string | null;
+    deleted_at: string | null;
+    revision: number;
+  }>(
+    `SELECT task_name, status, actual_hours, assignment_approved_at, deleted_at, revision
+       FROM tasks WHERE task_id = $1`,
+    [entityId]
+  );
+  if (!record || record.deleted_at) {
+    return {
+      entityType,
+      entityId,
+      deletable: false,
+      blockers: [{ code: 'NOT_FOUND_OR_DELETED', detail: 'The task was already removed or does not exist' }],
+      dependencyCount: 0,
+      descendantCount: 0,
+      confirmationText: '',
+      revision: record?.revision ?? null
+    };
+  }
+  const children = await db.many<{ task_name: string }>(
+    `SELECT task_name
+       FROM tasks
+      WHERE parent_task_id = $1 AND deleted_at IS NULL
+      ORDER BY task_name`,
+    [entityId]
+  );
+  const dependants = await db.many<{ task_name: string }>(
+    `SELECT t.task_name
+       FROM task_dependencies d
+       JOIN tasks t ON t.task_id = d.task_id
+      WHERE d.depends_on_task_id = $1 AND t.deleted_at IS NULL
+      ORDER BY t.task_name`,
+    [entityId]
+  );
+  const requests = await db.many<{ request_id: string; request_type: string }>(
+    `SELECT request_id, request_type
+       FROM task_requests
+      WHERE task_id = $1 AND status IN ('PENDING','PROCESSING')
+      ORDER BY submitted_at`,
+    [entityId]
+  );
+  const pendingLedger = await countRows(
+    db,
+    `SELECT count(*)::text AS count
+       FROM notification_ledger
+      WHERE task_id = $1 AND result IN ('PENDING','DELIVERY_UNCERTAIN')`,
+    [entityId]
+  );
+  const jobs = await db.many<{ job_id: string; kind: string }>(
+    `SELECT job_id::text, kind
+       FROM outbox_jobs
+      WHERE status IN ('PENDING','LEASED')
+        AND (payload->>'taskId' = $1 OR payload->>'entityId' = $1)
+      ORDER BY job_id
+      ${options.lock ? 'FOR UPDATE' : ''}`,
+    [entityId]
+  );
+  if (children.length) {
+    blocked('HAS_DESCENDANTS', `Remove or move child tasks first: ${children.map((row) => row.task_name).join(', ')}`);
+  }
+  if (dependants.length) {
+    blocked('DEPENDENCY_REFERENCED', `Resolve dependencies from: ${dependants.map((row) => row.task_name).join(', ')}`);
+  }
+  if (requests.length) {
+    blocked('REQUESTS', `Resolve pending requests first: ${requests.map((row) => `${row.request_type} ${row.request_id}`).join(', ')}`);
+  }
+  if (pendingLedger || jobs.length) {
+    blocked(
+      'NOTIFICATIONS',
+      `Resolve pending notification/calendar work first (${pendingLedger + jobs.length} item(s))`
+    );
+  }
+  if (record.status === 'Done' || Number(record.actual_hours ?? 0) > 0) {
+    blocked('RECORDED_EFFORT', 'Completed work or recorded effort requires the protected completion/history workflow');
+  }
+  if (record.assignment_approved_at) {
+    blocked('APPROVALS', 'The current assignment is approved; clear the active operational decision first');
+  }
+  return {
+    entityType,
+    entityId,
+    deletable: blockers.length === 0,
+    blockers,
+    dependencyCount: dependants.length,
+    descendantCount: children.length,
+    confirmationText: '',
+    revision: record.revision
+  };
+}
+
+export async function removalPreflight(
+  ctx: ServiceCtx,
+  entityType: RemovalEntityType,
+  entityId: string
+): Promise<DeletionPreflight> {
+  requireRole(ctx.identity, 'ADMIN');
+  return evaluateRemoval(ctx.db, entityType, entityId);
+}
+
+export async function removeEntity(
+  ctx: ServiceCtx,
+  entityType: RemovalEntityType,
+  entityId: string,
+  input: { revision: number; confirmed: true }
+): Promise<{ entityType: RemovalEntityType; entityId: string; revision: number; alreadyRemoved: boolean }> {
+  requireRole(ctx.identity, 'ADMIN');
+  if (!input.confirmed) throw new DomainError('CONFIRMATION_REQUIRED', 'Removal requires explicit confirmation');
+
+  return ctx.db.transaction(async (tx) => {
+    const existing = await tx.one<{ revision: number; deleted_at: string | null }>(
+      `SELECT revision, deleted_at
+         FROM ${entityType === 'TASKS' ? 'tasks' : 'subprojects'}
+        WHERE ${entityType === 'TASKS' ? 'task_id' : 'subproject_id'} = $1
+        FOR UPDATE`,
+      [entityId]
+    );
+    if (!existing) throw new DomainError('NOT_FOUND', `Record not found: ${entityId}`);
+    if (existing.deleted_at) {
+      return { entityType, entityId, revision: existing.revision, alreadyRemoved: true };
+    }
+    const checked = await evaluateRemoval(tx, entityType, entityId, { lock: true });
+    if (!checked.deletable) {
+      throw new DomainError('INVALID_TRANSITION', 'This record cannot be removed', {
+        blockers: checked.blockers
+      });
+    }
+    if (checked.revision !== input.revision) {
+      throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
+    }
+    const table = entityType === 'TASKS' ? 'tasks' : 'subprojects';
+    const column = entityType === 'TASKS' ? 'task_id' : 'subproject_id';
+    const previous = entityType === 'TASKS'
+      ? await getTaskIncludingDeleted(tx, entityId)
+      : await getSubproject(tx, entityId);
+    const updated = await tx.one<{ revision: number }>(
+      `UPDATE ${table}
+          SET deleted_at = now(), updated_at = now(), revision = revision + 1
+        WHERE ${column} = $1 AND revision = $2 AND deleted_at IS NULL
+        RETURNING revision`,
+      [entityId, input.revision]
+    );
+    if (!updated) throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
+    await audit(tx, ctx, {
+      entityType,
+      entityId,
+      action: 'RECORD_REMOVED',
+      previousValue: previous,
+      newValue: {
+        reason: REMOVAL_REASON,
+        removedBy: ctx.identity.memberId,
+        revision: updated.revision
+      }
+    });
+    if (entityType === 'TASKS') {
+      await tx.query(
+        `INSERT INTO outbox_jobs(kind, payload, dedupe_key, correlation_id)
+         VALUES ('publication.run', $1::jsonb, $2, $3)
+         ON CONFLICT (dedupe_key) DO NOTHING`,
+        [
+          JSON.stringify({ reason: 'TASK_REMOVED', taskId: entityId }),
+          `publication:task-removed:${entityId}:${updated.revision}`,
+          ctx.correlationId
+        ]
+      );
+    }
+    return { entityType, entityId, revision: updated.revision, alreadyRemoved: false };
+  });
 }
 
 export async function deleteEntity(

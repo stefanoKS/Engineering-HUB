@@ -171,3 +171,31 @@ Refresh browser tabs to load the updated My Work contract. Confirm two successiv
 creates, restricted-project completion review, ADMIN-only approval for member-created work, and
 local/Drive status. Retain protected `BAK-*.upload.json` checkpoints beside the encrypted artifacts.
 A checkpoint is private upload state, never a document to attach to support tickets.
+
+## Logical removal and smart Back rollout (2026-11-04)
+
+This update changes source and web assets only. Schema 8 and migrations 0001–0008 are unchanged:
+do **not** run `Migrate-Lan.cmd` for this update. On the Windows LAN host:
+
+```powershell
+Set-Location C:\path\to\Engineering-HUB
+npm ci
+npm run typecheck
+npm run lint
+npm test
+npm run validate
+npm run build
+```
+
+In the existing `Start-Lan.cmd` supervisor window press `Ctrl+C` and wait for both the API and
+worker to stop. Then start the rebuilt pair:
+
+```powershell
+.\deploy\windows\Start-Lan.cmd
+```
+
+Verify `http://127.0.0.1:8050/healthz` and `/readyz`, then reload employee browsers so they receive
+the rebuilt web bundle. Confirm an ADMIN can remove one disposable empty task/subproject, a MANAGER
+has no delete icon, the audit view contains `RECORD_REMOVED`, and Back returns Project detail →
+Task detail → Project detail without collapsing the branch. Do not initialize, migrate, deploy to
+production, or alter the operational database outside the reviewed application command.

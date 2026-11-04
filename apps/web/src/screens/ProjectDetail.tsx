@@ -6,8 +6,8 @@
  * `subprojects.parent_subproject_id`, `tasks.subproject_id` and `tasks.parent_task_id` - never from
  * names, visual order or a grouping heuristic.
  *
- * MANAGER and ADMIN edit and create in context. Only ADMIN gets a permanent-delete control, and it
- * always goes through the reviewed preflight; MANAGER, MEMBER and VIEWER never see it. A MEMBER or
+ * MANAGER and ADMIN edit and create in context. Only ADMIN gets an administrative-removal control,
+ * and it always goes through the reviewed preflight; MANAGER, MEMBER and VIEWER never see it. A MEMBER or
  * VIEWER reads the narrow `/api/work/projects/:id` projection with no actions at all.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -21,6 +21,7 @@ import { useI18n } from '../i18n';
 import { Badge, EmptyState, ErrorBox, Modal, ProgressBar, Section, statusTone } from '../components/ui';
 import { displayTone } from './Tasks';
 import { projectColor } from '@eh/domain';
+import { BackButton, useRouteMemoryState } from '../state/navigation';
 
 /* ------------------------------------------------------------------ data shapes */
 
@@ -632,6 +633,7 @@ const BLOCKER_LABELS: Record<string, string> = {
   NOTIFICATIONS: 'delete.blocker.NOTIFICATIONS',
   DEADLINE_HISTORY: 'delete.blocker.DEADLINE_HISTORY',
   SCHEDULE_CONFIRMATIONS: 'delete.blocker.SCHEDULE_CONFIRMATIONS',
+  ACTIVE_WORKFLOW: 'delete.blocker.ACTIVE_WORKFLOW',
   ARCHIVED_RECORD: 'delete.blocker.ARCHIVED_RECORD',
   DEPENDENCY_REFERENCED: 'delete.blocker.DEPENDENCY_REFERENCED',
   NOT_FOUND_OR_DELETED: 'delete.blocker.NOT_FOUND_OR_DELETED'
@@ -655,8 +657,6 @@ export function DeleteEntityDialog({
   const { t } = useI18n();
   const [preflight, setPreflight] = useState<DeletionPreflight | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
-  const [confirmation, setConfirmation] = useState('');
-  const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
 
@@ -666,7 +666,7 @@ export function DeleteEntityDialog({
     setLoadError(null);
     api
       .get<DeletionPreflight>(
-        `/api/manager/deletion/preflight?entityType=${entityType}&entityId=${encodeURIComponent(entityId)}`
+        `/api/manager/removal/preflight?entityType=${entityType}&entityId=${encodeURIComponent(entityId)}`
       )
       .then((value) => {
         if (current) setPreflight(value);
@@ -680,33 +680,18 @@ export function DeleteEntityDialog({
   }, [entityType, entityId]);
 
   const deletable = preflight?.deletable === true;
-  const canSubmit =
-    deletable &&
-    !!preflight &&
-    confirmation.trim() === preflight.confirmationText &&
-    reason.trim().length > 0 &&
-    !busy;
+  const canSubmit = deletable && !!preflight && !busy;
 
   const submit = async (): Promise<void> => {
     if (!canSubmit || !preflight) return;
     setBusy(true);
     setFailure(null);
     try {
-      if (entityType === 'TASKS') {
-        await api.del(`/api/manager/tasks/${entityId}`, {
-          revision: preflight.revision,
-          confirmed: true,
-          reason: reason.trim(),
-          confirmation: confirmation.trim()
-        });
-      } else {
-        await api.del(`/api/manager/subprojects/${entityId}`, {
-          revision: preflight.revision,
-          confirmed: true,
-          reason: reason.trim(),
-          confirmation: confirmation.trim()
-        });
-      }
+      const path = entityType === 'TASKS' ? 'tasks' : 'subprojects';
+      await api.post(`/api/admin/${path}/${entityId}/remove`, {
+        revision: preflight.revision,
+        confirmed: true
+      });
       onDeleted();
     } catch (error) {
       setFailure(error);
@@ -717,7 +702,7 @@ export function DeleteEntityDialog({
 
   return (
     <Modal
-      title={t('confirm.deleteTitle')}
+      title={t('delete.confirmTitle')}
       onClose={onClose}
       footer={
         <>
@@ -743,13 +728,16 @@ export function DeleteEntityDialog({
       <div className="stack">
         <p className="small">
           <span className="muted">{t('delete.target')}: </span>
-          <strong>{entityName}</strong> <span className="muted small">({entityId})</span>
+          <strong>{entityName}</strong>
         </p>
         {!preflight && !loadError ? <p role="status">{t('delete.checking')}</p> : null}
         <ErrorBox error={loadError} />
         {preflight ? (
           deletable ? (
-            <div className="banner info">{t('delete.allowed')}</div>
+            <>
+              <p>{t(entityType === 'TASKS' ? 'delete.confirmTask' : 'delete.confirmSubproject')}</p>
+              <div className="banner info">{t('delete.allowed')}</div>
+            </>
           ) : (
             <div className="banner warning">
               <strong>{t('delete.blocked')}</strong>
@@ -764,23 +752,6 @@ export function DeleteEntityDialog({
               <p className="muted small">{t('delete.blockedHint')}</p>
             </div>
           )
-        ) : null}
-        {deletable && preflight ? (
-          <>
-            <label className="field">
-              <span className="field-label">{t('confirm.type', { text: preflight.confirmationText })}</span>
-              <input
-                value={confirmation}
-                onChange={(event) => setConfirmation(event.target.value)}
-                autoFocus
-                autoComplete="off"
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">{t('confirm.deleteReason')}</span>
-              <textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={3} />
-            </label>
-          </>
         ) : null}
         <ErrorBox error={failure} />
         {failure instanceof ApiFailure && failure.isConflict ? (
@@ -814,8 +785,11 @@ export function ProjectDetailScreen({
   const [editingSubproject, setEditingSubproject] = useState<Subproject | null>(null);
   const [newSubprojectParent, setNewSubprojectParent] = useState<string | null | undefined>(undefined);
   const [newTaskSubproject, setNewTaskSubproject] = useState<string | null | undefined>(undefined);
-  const [includeInactive, setIncludeInactive] = useState(false);
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [includeInactive, setIncludeInactive] = useRouteMemoryState(`project:${projectId}:inactive`, false);
+  const [collapsed, setCollapsed] = useRouteMemoryState<Set<string>>(
+    `project:${projectId}:collapsed`,
+    () => new Set()
+  );
   const toggleCollapsed = useCallback((key: string) => {
     setCollapsed((current) => {
       const next = new Set(current);
@@ -899,6 +873,17 @@ export function ProjectDetailScreen({
 
   return (
     <div className="screen" style={{ ['--project-accent' as string]: projectColor(record.projectId) }}>
+      <BackButton
+        actor={actor}
+        fallback={actor.role === 'ADMIN' || actor.role === 'MANAGER' ? 'projects' : 'all-work'}
+        disabled={
+          editProject ||
+          editingSubproject !== null ||
+          newSubprojectParent !== undefined ||
+          newTaskSubproject !== undefined ||
+          deleteTarget !== null
+        }
+      />
       <div className="screen-header">
         <div>
           <h2>

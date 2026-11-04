@@ -119,6 +119,10 @@ permission checks against PostgreSQL and never calls Apps Script or Sheets.
   before a save cannot paint or be joined by the newer refresh.
 * Mutations return the authoritative record; the screen invalidates the narrowest datasets
   (task list + task + project + aggregates) instead of reloading the whole snapshot.
+* Hash navigation records only routes created during the current page lifetime. Detail Back uses
+  browser history only when the previous entry is a known, role-authorized application route;
+  otherwise it replaces the URL with Projects or All Work. Route filters, expanded hierarchy
+  nodes, pagination and scroll offsets are kept in page memory only, never browser storage.
 * The API memoizes table reads for the lifetime of one request (`ReadCtx`), so assembling a
   screen does not re-read a table. There is no cross-user server cache of the private data.
 
@@ -138,6 +142,19 @@ command ──► outbox_jobs (PENDING, dedupe_key) ──► worker claim (LEAS
 * An ambiguous provider outcome becomes `DELIVERY_UNCERTAIN` and is **never** retried
   automatically.
 * The save path only enqueues; it never waits for Gmail, Calendar, Drive or Sheets.
+
+## 7.1 Administrative removal versus physical purge
+
+Ordinary ADMIN removal is a revision-checked transaction that locks the task/subproject, rechecks
+active blockers, sets `deleted_at`, increments `revision` and appends `RECORD_REMOVED`. The row,
+stable ID, assignees, requests, deadline history and audit evidence remain in PostgreSQL. Active
+queries and workers already require `deleted_at IS NULL`, so removed work cannot be edited,
+assigned, requested, reminded or republished. Task removal queues a deduplicated
+`publication.run`; the worker rebuilds and commits the next allowlisted A/B snapshot.
+
+Physical purge remains the separate strict DELETE path with backup/tombstone preparation, typed
+`DELETE <id>` confirmation and the historical-evidence blockers. Logical removal does not weaken
+that contract and introduces no migration.
 
 ## 8. Published employee projection
 

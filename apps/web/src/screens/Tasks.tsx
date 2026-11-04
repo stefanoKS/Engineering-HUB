@@ -21,6 +21,7 @@ import { Badge, EmptyState, ErrorBox, Pagination } from '../components/ui';
 import { ConfirmDialog } from '../components/forms';
 import { TaskForm } from './TaskForm';
 import { MAX_TASK_DEPTH, projectColor } from '@eh/domain';
+import { useRouteMemoryState } from '../state/navigation';
 
 type Page = { items: TaskSummary[]; matchedTotal?: number; total: number; page: number; pageSize: number; totalPages: number };
 type References = {
@@ -46,12 +47,13 @@ export function displayTone(status: TaskSummary['displayStatus']): 'ok' | 'warn'
 
 export function TasksScreen({ actor, readOnly = false }: { actor: Actor; readOnly?: boolean }): JSX.Element {
   const { t } = useI18n();
-  const [projectId, setProjectId] = useState('');
-  const [displayStatus, setDisplayStatus] = useState('');
-  const [query, setQuery] = useState('');
-  const [includeInactive, setIncludeInactive] = useState(false);
-  const [page, setPage] = useState(1);
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const memoryKey = readOnly ? 'all-work:read' : 'all-work:manager';
+  const [projectId, setProjectId] = useRouteMemoryState(`${memoryKey}:project`, '');
+  const [displayStatus, setDisplayStatus] = useRouteMemoryState(`${memoryKey}:status`, '');
+  const [query, setQuery] = useRouteMemoryState(`${memoryKey}:query`, '');
+  const [includeInactive, setIncludeInactive] = useRouteMemoryState(`${memoryKey}:inactive`, false);
+  const [page, setPage] = useRouteMemoryState(`${memoryKey}:page`, 1);
+  const [expanded, setExpanded] = useRouteMemoryState<Set<string>>(`${memoryKey}:expanded`, () => new Set());
   const toggle = (id: string): void => setExpanded(current => {
     const next = new Set(current);
     if (next.has(id)) next.delete(id); else next.add(id);

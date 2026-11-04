@@ -9,6 +9,7 @@ import { ConfirmDialog } from '../components/forms';
 import { TaskForm } from './TaskForm';
 import { displayTone } from './Tasks';
 import { formatSkillGrade, projectColor } from '@eh/domain';
+import { BackButton } from '../state/navigation';
 
 type References = {
   members: { memberId: string; name: string; active: boolean; employeeId?: string }[];
@@ -41,6 +42,7 @@ export function TaskDetailScreen({
   const { record } = detail.data;
   return (
     <div className="screen">
+      <BackButton actor={actor} fallback="all-work" disabled={editing || action !== null} />
       <div className="screen-header">
         <div>
           <h2>{record.taskName}</h2>

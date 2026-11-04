@@ -1,5 +1,37 @@
 # V2 Acceptance Record
 
+## ADMIN logical removal and smart Back — 2026-11-04
+
+Baseline `80ed41bdf8b7847a464c4f8dbd836f77115788c3` with a clean working tree. Source/build
+update only: migrations 0001–0008 and schema 8 are unchanged, no operational database was
+accessed, no deployment was performed, and every PostgreSQL verification used the disposable
+`freshDatabase()` or production-smoke database.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| Gate 0 baseline | PASS | pre-change `npm test`; V1 and V2 suites green |
+| Logical task removal | PASS | `deletion.test.ts`: INTERNAL task with edit audit, approved request, deadline history and historical assignee is marked `deleted_at`, revision 4→5, and disappears from active search |
+| Evidence preservation | PASS | task row, audit, deadline, request and assignee rows remain; one `RECORD_REMOVED` records verified actor/reason; no foreign-key deletion |
+| Role boundary | PASS | ADMIN succeeds; MANAGER, MEMBER, VIEWER receive `AUTHORIZATION_DENIED`; unauthenticated caller receives 401; hierarchy controls are ADMIN-only |
+| Active blockers | PASS | named child task, active dependant, pending request, pending/leased outbox, approved assignment, Done/recorded effort; empty edited subproject succeeds while active child subproject/task/milestone refuses |
+| Concurrency/idempotency | PASS | stale revision is `EDIT_CONFLICT`; row is locked and blockers rechecked in the transaction; repeat after success returns `alreadyRemoved` with one audit event |
+| Background/publication safety | PASS | normal reads, request writes, reminders and Calendar reads require `deleted_at IS NULL`; task removal atomically queues deduplicated `publication.run` for the next verified A/B snapshot |
+| Smart Back | PASS | unit cases cover Projects→Project, Project→Task, All Work→Task, My Work→Task, direct fallback, role-authorized fallback and external-route refusal |
+| State preservation | PASS | filters, pagination, expanded task/subproject sets and scroll offsets use in-memory route state only; Chromium verifies Project→Task→Back with the expanded branch retained |
+| Modal safety | PASS | Back is disabled while project/task editors, action dialogs or removal confirmation are open |
+| Focused regressions | PASS | `deletion.test.ts` **21 pass**; hierarchy/navigation web tests **28 pass** |
+| `npm run typecheck` | PASS | all workspaces |
+| `npm run lint` | PASS | V1 and V2 ESLint |
+| `npm test` | PASS | V1 **776 pass**; V2 **278 pass, 1 skipped** across 20 files |
+| `npm run validate` | PASS | V1 source, V2 governance (**139 files**), deployment templates |
+| `npm run build` | PASS | API, web, worker and migration production artifacts |
+| `npm run smoke:prod` | PASS | schema 8, health/readiness/session/read/mutation, worker claim/completion and clean stop |
+| `npm run test:browser` | PASS | Chromium hierarchy, smart Back, blocked removal, ADMIN logical removal, MANAGER/MEMBER/VIEWER journeys |
+| `npm run test:lan` | PASS | local employee credentials, account onboarding, hierarchy/removal/navigation and all role journeys |
+| Live production / Google Workspace | NOT_RUN | no production database, mailbox, Drive, Calendar or deployment was accessed |
+
+Production remains **NOT APPROVED FOR PRODUCTION**.
+
 ## Project detail hierarchy and ADMIN-only permanent removal — 2026-11-04
 
 Baseline `main @ 46a24f4`. Source/build update only: migrations 0001–0008 and their checksums are

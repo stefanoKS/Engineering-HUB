@@ -26,6 +26,7 @@ const WorkloadScreen = lazy(() => import('./screens/Workload').then(module => ({
 const AutomationScreen = lazy(() => import('./screens/Automation').then(module => ({ default: module.AutomationScreen })));
 const StatusScreen = lazy(() => import('./screens/Status').then(module => ({ default: module.StatusScreen })));
 import { LanguageSwitch } from './components/ui';
+import { recordRoute, rememberScroll, rememberedScroll } from './state/navigation';
 
 export type Session = { authMode?: 'local' | 'google'; mustChangePassword?: boolean; actor: Actor; csrfToken: string; expiresAt: string };
 
@@ -44,15 +45,31 @@ export function navigate(path: string): void {
 export function App(): JSX.Element {
   const { t, language, setLanguage } = useI18n();
   const [session, setSession] = useState<Session | null | undefined>(undefined);
-  const [route, setRoute] = useState<Route>(readRoute);
+  const [route, setRoute] = useState<Route>(() => {
+    const initial = readRoute();
+    recordRoute(initial.path);
+    return initial;
+  });
   const [notice, setNotice] = useState('');
   const [changingPassword,setChangingPassword] = useState(false);
 
   useEffect(() => {
-    const onHash = (): void => setRoute(readRoute());
+    const onHash = (): void => {
+      const next = readRoute();
+      recordRoute(next.path);
+      setRoute(next);
+    };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => window.scrollTo(0, rememberedScroll(route.path)));
+    return () => {
+      window.cancelAnimationFrame(frame);
+      rememberScroll(route.path, window.scrollY);
+    };
+  }, [route.path]);
 
   // A member or viewer never lands on a manager-only route, even if the address bar still holds
   // one from a previous administrator session on a shared workstation.

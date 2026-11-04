@@ -61,7 +61,7 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     // The project hierarchy is readable, but a MEMBER or VIEWER never receives a delete control.
     await expect(page.getByRole('button', { name: 'Collapse Browser verified subproject', exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Browser verified task', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: /^Delete .* permanently$/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^Delete / })).toHaveCount(0);
     await expect(page.getByRole('checkbox', { name: 'Show cancelled and archived', exact: true })).toHaveCount(0);
 
     // The personal list stays available to every role.
@@ -78,7 +78,7 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
   }
 
   /**
-   * Manager journey: a MANAGER manages the hierarchy in context but has no permanent-delete
+   * Manager journey: a MANAGER manages the hierarchy in context but has no removal
    * control anywhere, because only ADMIN may remove a record.
    */
   async function managerJourney() {
@@ -90,12 +90,12 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     const subprojectRow = page.locator('.hierarchy-row-subproject').filter({ hasText: 'Browser verified subproject' });
     await expect(subprojectRow.getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
     await expect(subprojectRow.getByRole('button', { name: 'New task', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: /^Delete .* permanently$/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^Delete / })).toHaveCount(0);
     // A manager can still reach the completion action from a leaf task.
     await page.getByRole('link', { name: 'Browser child task', exact: true }).first().click();
     await expect(page.getByRole('button', { name: 'Mark done', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: /^Delete .* permanently$/ })).toHaveCount(0);
-    console.log('PASS  manager journey: hierarchy in context, edit and complete allowed, permanent delete absent');
+    await expect(page.getByRole('button', { name: /^Delete / })).toHaveCount(0);
+    console.log('PASS  manager journey: hierarchy in context, edit and complete allowed, removal absent');
   }
 
   try {
@@ -150,7 +150,7 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     console.log('PASS  Task tree: child creation, nested placement, collapse and reopen');
 
     // Project detail: one expandable hierarchy with contextual creation and the ADMIN-only
-    // permanent-delete workflow.
+    // administrative-removal workflow.
     await page.locator('.app-nav').getByRole('link', { name: 'Projects', exact: true }).click();
     await page.getByRole('link', { name: 'Browser edited project', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Browser edited project', exact: true })).toBeVisible();
@@ -158,6 +158,11 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     // Direct project tasks live in their own section, never inside a subproject.
     const directSection = page.locator('li.hierarchy-direct');
     await expect(directSection.getByRole('link', { name: 'Browser verified task', exact: true })).toBeVisible();
+    await directSection.getByRole('link', { name: 'Browser verified task', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Browser verified task', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: '← Back', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Browser edited project', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Collapse Browser verified subproject', exact: true })).toBeVisible();
 
     // Contextual creation inside the subproject preselects it.
     const subprojectRow = page.locator('.hierarchy-row-subproject').filter({ hasText: 'Browser verified subproject' });
@@ -187,31 +192,28 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await expect(page.getByRole('button', { name: 'Collapse Browser nested subproject', exact: true })).toBeVisible();
 
     // A subproject that still owns a task is refused, with the reason and a route to its children.
-    await subprojectRow.getByRole('button', { name: 'Delete Browser verified subproject permanently', exact: true }).click();
+    await subprojectRow.getByRole('button', { name: 'Delete Browser verified subproject', exact: true }).click();
     await expect(dialog.getByText('Browser verified subproject', { exact: true })).toBeVisible();
     await expect(dialog.getByText(/Tasks remain/)).toBeVisible();
-    await expect(dialog.getByRole('button', { name: 'Delete permanently', exact: true })).toBeDisabled();
+    await expect(dialog.getByRole('button', { name: 'Delete', exact: true })).toBeDisabled();
     await dialog.getByRole('button', { name: 'Show children', exact: true }).click();
     await expect(dialog).toHaveCount(0);
 
-    // An empty subproject can be removed by ADMIN through the preflight, the typed phrase and a reason.
+    // An empty subproject can be removed by ADMIN through the simple logical-removal confirmation.
     await page.getByRole('button', { name: 'New subproject', exact: true }).click();
     await dialog.getByLabel('Subproject name', { exact: true }).fill('Browser deletable subproject');
     await dialog.getByRole('button', { name: 'Create', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Collapse Browser deletable subproject', exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Delete Browser deletable subproject permanently', exact: true }).click();
-    await expect(dialog.getByText('This record can be removed. Complete the confirmation below.', { exact: true })).toBeVisible();
-    const confirmationLabel = await dialog.locator('.field-label').filter({ hasText: 'Type DELETE' }).first().innerText();
-    const phrase = confirmationLabel.replace(/^Type\s+/, '').trim();
-    await dialog.locator('input').first().fill(phrase);
-    await dialog.locator('textarea').first().fill('Created twice during the smoke run');
-    await dialog.getByRole('button', { name: 'Delete permanently', exact: true }).click();
+    await page.getByRole('button', { name: 'Delete Browser deletable subproject', exact: true }).click();
+    await expect(dialog.getByText('Remove this subproject?', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('The operation history will be retained for audit.', { exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
     await expect(dialog).toHaveCount(0);
-    await expect(page.getByText('The record was permanently removed.', { exact: true })).toBeVisible();
+    await expect(page.getByText('Removed from active lists; audit history was retained.', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Collapse Browser deletable subproject', exact: true })).toHaveCount(0);
     await page.setViewportSize({ width: 1440, height: 1000 });
-    console.log('PASS  Project hierarchy: contextual creation, blocked deletion, ADMIN-only permanent removal');
+    console.log('PASS  Project hierarchy: contextual creation, smart Back, blocked deletion, ADMIN-only logical removal');
     await page.locator('.app-nav').getByRole('link', { name: 'Overview', exact: true }).click();
     await expect(page.locator('.kpi').first()).toBeVisible();
     await mkdir('work/screenshots', { recursive: true });

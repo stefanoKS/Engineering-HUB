@@ -28,6 +28,7 @@ import {
   RequestQueueQuery,
   PublishBody,
   ReconcileBody,
+  RemoveBody,
   SaveMemberBody,
   SaveResponsibilityBody,
   TaskListQuery
@@ -99,7 +100,13 @@ import {
   workloadReport
 } from '../services/automation';
 import { publicationStatus, publishNow } from '../services/publication';
-import { deleteEntity, preflight, reconcileDeletions } from '../services/deletion';
+import {
+  deleteEntity,
+  preflight,
+  reconcileDeletions,
+  removalPreflight,
+  removeEntity
+} from '../services/deletion';
 import type { ServiceCtx } from '../services/common';
 
 function serviceCtx(request: FastifyRequest): ServiceCtx {
@@ -279,6 +286,16 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
     }
   });
 
+  app.post('/api/admin/subprojects/:id/remove', async (request, reply) => {
+    try {
+      const body = RemoveBody.parse(request.body ?? {});
+      const { id } = request.params as { id: string };
+      return ok(reply, request, await removeEntity(serviceCtx(request), 'SUBPROJECTS', id, body));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
   app.get('/api/manager/tasks', async (request, reply) => {
     try {
       managerOf(request);
@@ -412,6 +429,16 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
       const body = DeleteBody.parse(request.body ?? {});
       const { id } = request.params as { id: string };
       return ok(reply, request, await deleteEntity(serviceCtx(request), 'TASKS', id, body));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  app.post('/api/admin/tasks/:id/remove', async (request, reply) => {
+    try {
+      const body = RemoveBody.parse(request.body ?? {});
+      const { id } = request.params as { id: string };
+      return ok(reply, request, await removeEntity(serviceCtx(request), 'TASKS', id, body));
     } catch (error) {
       return sendError(reply, request.state, error);
     }
@@ -694,6 +721,15 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
       throw new DomainError('VALIDATION_FAILED', 'entityType and entityId are required');
     }
     return preflight(serviceCtx(request), type, query.entityId);
+  });
+
+  read('/api/manager/removal/preflight', async (request) => {
+    const query = request.query as { entityType?: string; entityId?: string };
+    if (query.entityType !== 'TASKS' && query.entityType !== 'SUBPROJECTS') {
+      throw new DomainError('VALIDATION_FAILED', 'entityType must be TASKS or SUBPROJECTS');
+    }
+    if (!query.entityId) throw new DomainError('VALIDATION_FAILED', 'entityId is required');
+    return removalPreflight(serviceCtx(request), query.entityType, query.entityId);
   });
 
   app.post('/api/manager/deletion/reconcile', async (request, reply) => {
