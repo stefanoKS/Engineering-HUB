@@ -8,7 +8,7 @@
  * - A decision is applied at most once. A repeated decision is refused without a second task
  *   effect, history row or audit record.
  */
-import type { RequestDecision, RequestStatus, RequestType } from '@eh/contracts';
+import type { RequestDecision, RequestStatus, RequestType, SubmissionBlockReason as ContractSubmissionBlockReason } from '@eh/contracts';
 import { DomainError } from './errors';
 
 export const REQUEST_TRANSITIONS: Readonly<Record<RequestStatus, readonly RequestStatus[]>> = {
@@ -33,7 +33,6 @@ export function assertTransition(from: RequestStatus, to: RequestStatus): void {
     });
   }
 }
-
 export type RequestSnapshot = {
   status: RequestStatus;
   requestType: RequestType;
@@ -210,5 +209,93 @@ export function validateSubmission(input: SubmissionValidation): void {
   }
   if (input.requestType === 'COMPLETION_REPORT' && !String(input.completionNote ?? '').trim()) {
     throw new DomainError('VALIDATION_FAILED', 'A completion note is required');
+  }
+}
+
+/**
+ * Why a request cannot be filed right now.
+ *
+ * One list drives the reported capability and the submission refusal, so a disabled action always
+ * explains itself and the server never depends on the client having asked first. The values live in
+ * the contract; the order below is the order a refusal is reported in.
+ */
+export type SubmissionBlockReason = ContractSubmissionBlockReason;
+
+export const SUBMISSION_BLOCK_REASON_ORDER: readonly SubmissionBlockReason[] = [
+  'ROLE',
+  'NOT_VISIBLE',
+  'ARCHIVED',
+  'NOT_ASSIGNED',
+  'CONTAINER',
+  'COMPLETED',
+  'CANCELLED',
+  'PENDING',
+  'SUBMISSION_DISABLED'
+];
+
+export type SubmissionTaskState = {
+  status: string;
+  /** The task has children, so its completion is derived from leaf work. */
+  container: boolean;
+  /** The task, its subproject chain or its project is archived. */
+  archived: boolean;
+};
+
+export type SubmissionAssessment = {
+  requestType: RequestType;
+  /** `canReportCompletion()` for this verified identity. */
+  mayReportCompletion: boolean;
+  /** `canRequestDeadlineChange()` for this verified identity. */
+  mayRequestDeadlineChange: boolean;
+  /** The verified member is the owner or an active additional assignee. */
+  assigned: boolean;
+  /** The reader can reach the task under the documented visibility policy. */
+  visible: boolean;
+  submissionEnabled: boolean;
+  /** Another completion report for this task is still open. */
+  pending: boolean;
+  task: SubmissionTaskState;
+};
+
+/**
+ * The ordered, complete list of reasons a submission would be refused.
+ *
+ * The approved completion-report exception stops at `NOT_VISIBLE` and `ROLE`: reporting another
+ * person's accessible work is allowed, reading a restricted project to report it is not, and a
+ * deadline change still requires the assignment.
+ */
+export function submissionBlockReasons(input: SubmissionAssessment): SubmissionBlockReason[] {
+  const reasons: SubmissionBlockReason[] = [];
+  const reporting = input.requestType === 'COMPLETION_REPORT';
+  if (reporting ? !input.mayReportCompletion : !input.mayRequestDeadlineChange) reasons.push('ROLE');
+  if (!input.visible) reasons.push('NOT_VISIBLE');
+  if (input.task.archived) reasons.push('ARCHIVED');
+  if (!reporting && !input.assigned) reasons.push('NOT_ASSIGNED');
+  if (input.task.container) reasons.push('CONTAINER');
+  if (input.task.status === 'Done') reasons.push('COMPLETED');
+  if (input.task.status === 'Cancelled') reasons.push('CANCELLED');
+  if (input.pending) reasons.push('PENDING');
+  if (!input.submissionEnabled) reasons.push('SUBMISSION_DISABLED');
+  return reasons;
+}
+
+export type SubmissionSeverity = 'DENIED' | 'REFUSED' | 'CLOSED' | 'CONTAINER';
+
+/** The stable refusal a first blocking reason maps to; the code, never the wording, is authoritative. */
+export function submissionRefusal(reason: SubmissionBlockReason): {
+  code: 'AUTHORIZATION_DENIED' | 'INVALID_TRANSITION' | 'REQUEST_SUBMISSION_CLOSED' | 'CONTAINER_NOT_COMPLETABLE';
+  severity: SubmissionSeverity;
+} {
+  switch (reason) {
+    case 'ROLE':
+    case 'NOT_VISIBLE':
+    case 'NOT_ASSIGNED':
+      return { code: 'AUTHORIZATION_DENIED', severity: 'DENIED' };
+    case 'CONTAINER':
+      return { code: 'CONTAINER_NOT_COMPLETABLE', severity: 'CONTAINER' };
+    case 'SUBMISSION_DISABLED':
+      return { code: 'REQUEST_SUBMISSION_CLOSED', severity: 'CLOSED' };
+    default:
+      return { code: 'INVALID_TRANSITION', severity: 'REFUSED' };
   }
 }

@@ -154,7 +154,12 @@ export const keys = {
   employee: 'employee/snapshot',
   myWork: 'employee/my-work',
   myProjects: 'employee/my-work/projects',
-  myRequests: 'employee/requests/mine'
+  myRequests: 'employee/requests/mine',
+  reportEligibility: (taskId: string) => `employee/report-eligibility/${taskId}`,
+  /** Prefix of every server-searched option list; a task save invalidates all of them. */
+  parentOptions: 'parent-options:',
+  /** The read-only timeline: a task or project change dates it, so a save refreshes it. */
+  timeline: 'work/timeline'
 };
 
 export function useQuery<T>(

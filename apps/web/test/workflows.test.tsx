@@ -335,8 +335,10 @@ describe('manager actions on the personal list', () => {
     await waitFor(() => expect(calls.some((call) => call.url.endsWith('/api/manager/tasks/TSK-MINE/complete'))).toBe(true));
     const posted = JSON.parse(calls.find((call) => call.url.endsWith('/complete'))!.body!);
     expect(posted).toEqual({ revision: 4, confirmed: true });
-    // No completion-request form for a manager.
-    expect(screen.queryByRole('button', { name: '完了報告' })).toBeNull();
+    // A manager keeps direct completion and may also file a completion report: the approved policy
+    // allows any MEMBER, MANAGER or ADMIN to report work they can reach, and the two actions stay
+    // separate and separately labelled.
+    expect(screen.getByRole('button', { name: '完了報告' })).toBeTruthy();
   });
 
   it('gives a MEMBER the request action and no management action', async () => {

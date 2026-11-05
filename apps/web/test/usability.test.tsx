@@ -114,8 +114,19 @@ function detail(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function stubTaskDetail(payload: unknown): ReturnType<typeof vi.fn> {
+function stubTaskDetail(payload: unknown, blockedReasons?: string[]): ReturnType<typeof vi.fn> {
   const fetcher = vi.fn(async (url: string) => {
+    if (url.includes('/report-eligibility')) {
+      const reasons =
+        blockedReasons ?? ((payload as { children?: unknown[] } | null)?.children?.length ? ['CONTAINER'] : []);
+      return response({
+        taskId: 'TSK-1',
+        eligible: reasons.length === 0,
+        reasons,
+        submissionEnabled: true,
+        reporterName: 'User'
+      });
+    }
     if (url.includes('/api/work/tasks/') || url.includes('/api/manager/tasks/')) return response(payload);
     if (url.includes('/references')) return response({ members: [], skills: [], subprojects: [] });
     if (url.includes('/api/employee/requests/mine')) return response({ items: [], submissionEnabled: true });
@@ -553,14 +564,16 @@ describe('navigation groups', () => {
         }
         if (url.includes('/api/employee/my-work/projects')) return response({ items: [], taskCreationEnabled: false });
         if (url.includes('/api/employee/requests/mine')) return response({ items: [], submissionEnabled: false });
+        if (url.includes('/api/employee/my-work/project-filter')) {
+          return response({ items: [], total: 0, page: 1, pageSize: 25, totalPages: 1, selected: null });
+        }
         if (url.includes('/api/employee/my-work')) {
           return response({
             items: [],
             total: 0,
             activeTotal: 0,
             completedTotal: 0,
-            unfilteredActiveTotal: 0,
-            projects: []
+            unfilteredActiveTotal: 0
           });
         }
         return response({});
@@ -571,10 +584,12 @@ describe('navigation groups', () => {
         <App />
       </I18nProvider>
     );
-    expect(await screen.findByText('部門の作業')).toBeTruthy();
+    // The organizational group reads Section work / 課の業務; identifiers stay unchanged.
+    expect(await screen.findByText('課の業務')).toBeTruthy();
     expect(screen.getByText('メンバーと分野')).toBeTruthy();
     expect(screen.getByText('管理')).toBeTruthy();
     expect(screen.getByRole('link', { name: '自分の担当タスク' })).toBeTruthy();
     expect(screen.getByRole('link', { name: 'プロジェクト' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'タイムライン' })).toBeTruthy();
   });
 });

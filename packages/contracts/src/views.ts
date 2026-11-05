@@ -16,7 +16,7 @@ import {
   TaskSummary
 } from './dto';
 import { Id, IsoDate, IsoTimestamp, Revision, paged } from './common';
-import { Priority, ProjectStatus, RequestType, TaskStatus } from './enums';
+import { Priority, ProjectStatus, RequestType, SubmissionBlockReason, TaskStatus } from './enums';
 
 export const ScopeCounts = z.object({
   workItems: z.number().int().min(0),
@@ -468,11 +468,46 @@ export const MyWorkList = z.object({
   activeTotal: z.number().int().min(0),
   completedTotal: z.number().int().min(0),
   /** Active work with no filter applied, so "nothing assigned" is distinguishable from "no match". */
-  unfilteredActiveTotal: z.number().int().min(0),
-  /** Projects present in this member's own work; the only valid project filter values. */
-  projects: z.array(z.object({ projectId: z.string(), projectName: z.string() }))
+  unfilteredActiveTotal: z.number().int().min(0)
 });
 export type MyWorkList = z.infer<typeof MyWorkList>;
+
+/**
+ * One project the member's own work can be filtered by.
+ *
+ * The filter is a paged, searchable server read rather than a fixed slice, so every eligible
+ * project stays discoverable however many there are.
+ */
+export const MyWorkProjectFilterOption = z.object({
+  projectId: z.string(),
+  projectName: z.string(),
+  responsibilityName: z.string(),
+  taskCount: z.number().int().min(0)
+});
+export type MyWorkProjectFilterOption = z.infer<typeof MyWorkProjectFilterOption>;
+
+export const MyWorkProjectFilter = paged(MyWorkProjectFilterOption).extend({
+  /** The selected project, kept readable even when it is not on the current page. */
+  selected: MyWorkProjectFilterOption.nullable()
+});
+export type MyWorkProjectFilter = z.infer<typeof MyWorkProjectFilter>;
+
+/**
+ * The server-derived completion-report capability for one task.
+ *
+ * `reasons` is the complete, ordered list of refusals; `eligible` is exactly "no reasons". A
+ * browser never infers eligibility from a request history page, and a missing answer keeps the
+ * action unavailable.
+ */
+export const ReportEligibility = z.object({
+  taskId: z.string(),
+  eligible: z.boolean(),
+  reasons: z.array(SubmissionBlockReason),
+  submissionEnabled: z.boolean(),
+  /** The verified reporter the server records; it is never accepted from the browser. */
+  reporterName: z.string()
+});
+export type ReportEligibility = z.infer<typeof ReportEligibility>;
 
 /** The active projects (and their non-archived subprojects) a member may file work under. */
 export const MyWorkProjectOption = z.object({
@@ -647,3 +682,95 @@ export const WorkTaskPage = z.object({
   totalPages: z.number().int().min(0)
 });
 export type WorkTaskPage = z.infer<typeof WorkTaskPage>;
+
+/**
+ * Read-only timeline projection.
+ *
+ * Dates keep their stored meaning: `plannedStart`/`forecastEnd`/`plannedEnd` are a plan, a
+ * `deadline` is a commitment and `completedAt` is the recorded completion. A `childRange` is a
+ * display span derived on the server from dated descendants inside the authorized filter; it is
+ * never written back to a record and never counted as extra work.
+ */
+export const TimelineScale = z.enum(['WEEK', 'MONTH', 'QUARTER']);
+export type TimelineScale = z.infer<typeof TimelineScale>;
+
+export const TimelineChildRange = z.object({
+  start: IsoDate.nullable(),
+  end: IsoDate.nullable(),
+  /** How many descendants carry a usable date, against how many exist in this scope. */
+  datedItems: z.number().int().min(0),
+  totalItems: z.number().int().min(0)
+});
+export type TimelineChildRange = z.infer<typeof TimelineChildRange>;
+
+export const TimelineProjectRow = z.object({
+  projectId: z.string(),
+  projectName: z.string(),
+  responsibilityId: z.string().nullable(),
+  responsibilityName: z.string(),
+  status: ProjectStatus,
+  plannedStart: IsoDate.nullable(),
+  forecastEnd: IsoDate.nullable(),
+  committedDeadline: IsoDate.nullable(),
+  progressPercent: z.number().min(0).max(100).nullable(),
+  /** Open leaf work in active work; a container task is never counted. */
+  openWork: z.number().int().min(0),
+  /** Completed leaf work, reported separately and never mixed into the open figure. */
+  completedWork: z.number().int().min(0),
+  childRange: TimelineChildRange,
+  /** No usable date of its own (neither a plan nor a commitment). */
+  undated: z.boolean()
+});
+export type TimelineProjectRow = z.infer<typeof TimelineProjectRow>;
+
+export const TimelineSubprojectRow = z.object({
+  subprojectId: z.string(),
+  projectId: z.string(),
+  parentSubprojectId: z.string().nullable(),
+  subprojectName: z.string(),
+  status: ProjectStatus,
+  plannedStart: IsoDate.nullable(),
+  plannedEnd: IsoDate.nullable(),
+  deadline: IsoDate.nullable(),
+  depth: z.number().int().min(1),
+  childRange: TimelineChildRange,
+  undated: z.boolean()
+});
+export type TimelineSubprojectRow = z.infer<typeof TimelineSubprojectRow>;
+
+export const TimelineTaskRow = z.object({
+  taskId: z.string(),
+  projectId: z.string(),
+  subprojectId: z.string().nullable(),
+  parentTaskId: z.string().nullable(),
+  taskName: z.string(),
+  status: TaskStatus,
+  displayStatus: z.enum(['IN_PROGRESS', 'OVERDUE', 'DONE', 'CANCELLED']),
+  plannedStart: IsoDate.nullable(),
+  dueDate: IsoDate.nullable(),
+  completedAt: IsoTimestamp.nullable(),
+  container: z.boolean(),
+  depth: z.number().int().min(1),
+  progressPercent: z.number().min(0).max(100).nullable(),
+  childRange: TimelineChildRange,
+  undated: z.boolean(),
+  /** The stored plan starts after the stored deadline: shown as a warning, never corrected. */
+  inconsistent: z.boolean()
+});
+export type TimelineTaskRow = z.infer<typeof TimelineTaskRow>;
+
+export const TimelineProjectBranch = z.object({
+  project: TimelineProjectRow,
+  subprojects: z.array(TimelineSubprojectRow),
+  tasks: z.array(TimelineTaskRow),
+  /** Honest indication that the branch exceeded the documented bound. */
+  truncated: z.boolean(),
+  /** Every task in this authorized branch, including any the bound did not return. */
+  taskTotal: z.number().int().min(0)
+});
+export type TimelineProjectBranch = z.infer<typeof TimelineProjectBranch>;
+
+export const TimelineProjectPage = paged(TimelineProjectRow).extend({
+  responsibilities: z.array(WorkResponsibilityOption)
+});
+export type TimelineProjectPage = z.infer<typeof TimelineProjectPage>;

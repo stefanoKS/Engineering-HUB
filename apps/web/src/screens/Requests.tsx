@@ -125,6 +125,9 @@ export function RequestsScreen({ actor }: { actor: Actor }): JSX.Element {
                   </td>
                   <td>
                     {request.requesterName || t('common.unknown')}
+                    {request.requesterMemberId ? null : (
+                      <div className="muted small">{t('requests.selfReported')}</div>
+                    )}
                     <div>
                       <a href={`#/task/${request.taskId}`} target="_blank" rel="noopener noreferrer">
                         {t('requests.openTask')}
@@ -141,6 +144,9 @@ export function RequestsScreen({ actor }: { actor: Actor }): JSX.Element {
                     <Badge tone={statusTone(request.status)}>{label('request.status', request.status)}</Badge>
                     {request.status === 'STALE' ? (
                       <div className="muted small">{t('requests.stale')}</div>
+                    ) : null}
+                    {request.reviewer ? (
+                      <div className="muted small">{t('report.reviewedBy', { name: request.reviewer })}</div>
                     ) : null}
                   </td>
                   <td className="actions">
@@ -185,7 +191,7 @@ export function RequestsScreen({ actor }: { actor: Actor }): JSX.Element {
           onClose={() => setDecision(null)}
           onDecided={() => {
             setDecision(null);
-            queryCache.invalidate([keys.requests, keys.tasks, keys.task(decision.request.taskId), keys.overview, keys.taskIndex, keys.project(decision.request.projectId ?? '')]);
+            queryCache.invalidate([keys.requests, keys.tasks, keys.task(decision.request.taskId), keys.overview, keys.taskIndex, keys.project(decision.request.projectId ?? ''), keys.myWork, keys.timeline]);
           }}
         />
       ) : null}
@@ -224,7 +230,12 @@ function DecisionDialog({
             <dt>{t('request.form.task')}</dt>
             <dd>{label('request.type', request.requestType) || request.requestType}</dd>
             <dt>{t('requests.reporter')}</dt>
-            <dd>{request.requesterName || t('common.unknown')}</dd>
+            <dd>
+              {request.requesterName || t('common.unknown')}
+              {request.requesterMemberId ? null : (
+                <span className="muted small"> · {t('requests.selfReported')}</span>
+              )}
+            </dd>
             <dt>{t('requests.submitted')}</dt>
             <dd>{request.submittedAt.slice(0, 16).replace('T', ' ')}</dd>
             <dt>{t('requests.state')}</dt>

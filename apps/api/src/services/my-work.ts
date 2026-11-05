@@ -8,7 +8,7 @@
  * granted all of that at once.
  */
 import type { z } from 'zod';
-import type { CreateMySubprojectBody, CreateMyTaskBody, MyWorkList, MyWorkProjectOptions, Subproject } from '@eh/contracts';
+import type { CreateMySubprojectBody, CreateMyTaskBody, MyWorkList, MyWorkProjectFilter, MyWorkProjectOptions, Subproject } from '@eh/contracts';
 import { getProject, insertSubproject, insertTask, getTask, listSubprojects } from '@eh/db';
 import {
   DomainError,
@@ -52,10 +52,10 @@ const MY_WORK_SELECT = `
          t.creation_channel, t.completed_at, t.revision,
          EXISTS (SELECT 1 FROM tasks c WHERE c.parent_task_id = t.task_id AND c.deleted_at IS NULL) AS container,
          EXISTS (SELECT 1 FROM task_requests rp
-                  WHERE rp.task_id = t.task_id AND rp.requester_member_id = $1
+                  WHERE rp.task_id = t.task_id
                     AND rp.status IN ('PENDING','PROCESSING')) AS pending_request,
          (SELECT rr.status FROM task_requests rr
-           WHERE rr.task_id = t.task_id AND rr.requester_member_id = $1
+           WHERE rr.task_id = t.task_id
              AND rr.request_type = 'COMPLETION_REPORT'
            ORDER BY rr.submitted_at DESC LIMIT 1) AS last_completion_status,
          (SELECT rq.status FROM task_requests rq
@@ -77,7 +77,12 @@ const ACTIVE_WORK = `t.deleted_at IS NULL AND t.status <> 'Cancelled'
   AND (t.subproject_id IS NULL OR NOT EXISTS (
         SELECT 1 FROM subprojects sp WHERE sp.subproject_id = t.subproject_id AND sp.status = 'Archived'))`;
 
-/** A compact review state for the member: what happened to *their own* last completion report. */
+/**
+ * One review state per task, whichever authorized person filed the report.
+ *
+ * A pending completion report is therefore visible to every assignee even when somebody else
+ * submitted it, and a decision on the task is never reported twice.
+ */
 export function reviewStateOf(row: { pending_request: boolean; last_completion_status: string | null }) {
   if (row.pending_request) return 'PENDING' as const;
   const status = row.last_completion_status ?? '';
@@ -151,7 +156,7 @@ export async function listMyWork(
   const pageParam = params.length + 1;
   params.push((page - 1) * PAGE_SIZE);
 
-  const [rows, total, activeTotal, completedTotal, unfiltered, projects] = await Promise.all([
+  const [rows, total, activeTotal, completedTotal, unfiltered] = await Promise.all([
     ctx.db.many<MyWorkRow>(
       `${MY_WORK_SELECT}
         WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND ${sectionWhere}${filterWhere}
@@ -185,14 +190,6 @@ export async function listMyWork(
          FROM tasks t JOIN projects p ON p.project_id = t.project_id
         WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND t.status <> 'Done'`,
       [ctx.identity.memberId]
-    ),
-    ctx.db.many<{ project_id: string; project_name: string }>(
-      `SELECT DISTINCT p.project_id, p.project_name
-         FROM tasks t JOIN projects p ON p.project_id = t.project_id
-        WHERE ${ACTIVE_WORK} AND ${OWN_WORK}
-        ORDER BY p.project_name ASC
-        LIMIT 200`,
-      [ctx.identity.memberId]
     )
   ]);
   return {
@@ -200,7 +197,6 @@ export async function listMyWork(
     activeTotal: Number(activeTotal?.count ?? 0),
     completedTotal: Number(completedTotal?.count ?? 0),
     unfilteredActiveTotal: Number(unfiltered?.count ?? 0),
-    projects: projects.map((row) => ({ projectId: row.project_id, projectName: row.project_name })),
     items: rows.map((row) => ({
       container: row.container,
       taskId: row.task_id,
@@ -226,6 +222,71 @@ export async function listMyWork(
 }
 
 export const MY_WORK_PAGE_SIZE = PAGE_SIZE;
+
+/**
+ * The project filter for the member's own work.
+ *
+ * Paged and searchable on the server, so no silent row cap decides which projects a member can
+ * reach. Only projects that really appear in the member's own work are selectable, and the
+ * selected project stays readable when it is not on the current page.
+ */
+export async function listMyWorkProjectFilter(
+  ctx: ServiceCtx,
+  input: { query?: string; page: number; pageSize?: number; selectedId?: string }
+): Promise<MyWorkProjectFilter> {
+  requireRole(ctx.identity, 'VIEWER');
+  const pageSize = Math.min(Math.max(input.pageSize ?? 25, 1), 100);
+  const params: unknown[] = [ctx.identity.memberId];
+  const where: string[] = [];
+  const query = (input.query ?? '').trim().toLowerCase();
+  if (query) {
+    params.push(`%${query}%`);
+    where.push(`lower(p.project_name) LIKE $${params.length}`);
+  }
+  const filterWhere = where.length ? ` AND ${where.join(' AND ')}` : '';
+  const scope = `FROM tasks t JOIN projects p ON p.project_id = t.project_id
+     WHERE ${ACTIVE_WORK} AND ${OWN_WORK}${filterWhere}`;
+  const [totalRow, rows] = await Promise.all([
+    ctx.db.one<{ count: string }>(`SELECT count(DISTINCT p.project_id)::text AS count ${scope}`, [...params]),
+    ctx.db.many<{ project_id: string; project_name: string; responsibility_name: string | null; task_count: string }>(
+      `SELECT p.project_id, p.project_name, r.name AS responsibility_name, count(*)::text AS task_count
+         FROM tasks t
+         JOIN projects p ON p.project_id = t.project_id
+         LEFT JOIN responsibilities r ON r.responsibility_id = p.responsibility_id
+        WHERE ${ACTIVE_WORK} AND ${OWN_WORK}${filterWhere}
+        GROUP BY p.project_id, p.project_name, r.name
+        ORDER BY lower(p.project_name) ASC, p.project_id ASC
+        LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, pageSize, (input.page - 1) * pageSize]
+    )
+  ]);
+  const selected = input.selectedId
+    ? await ctx.db.one<{ project_id: string; project_name: string; responsibility_name: string | null; task_count: string }>(
+        `SELECT p.project_id, p.project_name, r.name AS responsibility_name, count(*)::text AS task_count
+           FROM tasks t
+           JOIN projects p ON p.project_id = t.project_id
+           LEFT JOIN responsibilities r ON r.responsibility_id = p.responsibility_id
+          WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND p.project_id = $2
+          GROUP BY p.project_id, p.project_name, r.name`,
+        [ctx.identity.memberId, input.selectedId]
+      )
+    : null;
+  const map = (row: { project_id: string; project_name: string; responsibility_name: string | null; task_count: string }) => ({
+    projectId: row.project_id,
+    projectName: row.project_name,
+    responsibilityName: row.responsibility_name ?? '',
+    taskCount: Number(row.task_count ?? 0)
+  });
+  const total = Number(totalRow?.count ?? 0);
+  return {
+    items: rows.map(map),
+    total,
+    page: input.page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    selected: selected ? map(selected) : null
+  };
+}
 
 /** Active projects and non-archived subprojects a member may file work under. */
 export async function myWorkProjectOptions(ctx: ServiceCtx): Promise<MyWorkProjectOptions> {

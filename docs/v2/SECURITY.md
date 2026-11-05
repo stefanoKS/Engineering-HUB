@@ -1,5 +1,38 @@
 # V2 Security Model
 
+## Completion reports by any authorized reporter, and the read-only timeline — 2026-11-05
+
+**Approved policy change (narrow, deliberate).** A verified, active `MEMBER`, `MANAGER` or `ADMIN`
+may file a `COMPLETION_REPORT` for a task they can already reach, whether or not they are assigned
+to it. `VIEWER` remains read-only. This replaces the earlier assigned-member-only rule for
+completion reports **only**:
+
+* Reaching a task means "assigned to it" or "the project is readable under the documented
+  visibility policy". Reporting never widens visibility, so a `RESTRICTED` project the reporter
+  cannot read answers `404 NOT_FOUND` exactly like an unknown identifier.
+* `DEADLINE_CHANGE` keeps its rule: the verified `MEMBER`, assigned to the task. A manager cannot
+  file it, and a member who is not assigned cannot either.
+* Reporting is not completing and not assigning. The request row keeps `requester_name` and
+  `requester_member_id` from the session; the task keeps its owner, status, progress and revision
+  until a manager approves, and the approval remains a separate `MANAGER`/`ADMIN` decision with
+  separation of duty (`assertCompletionDecisionRole`). A reporter cannot approve their own report.
+* Every refusal is a stable code from one shared function (`submissionBlockReasons`), and the
+  capability endpoint (`GET /api/employee/tasks/:id/report-eligibility`) re-reads the same
+  assessment the write re-checks inside its own request; a capability answer is never authority.
+* A browser-supplied `requesterName` is ignored (the session name is stored), and
+  `requesterMemberId`, `reporterRole` or `ownerMemberId` are rejected by the strict payload schema.
+* A receipt key owned by another person answers `NOT_FOUND` before any eligibility or idempotency
+  work, so the endpoint cannot be used to probe another person's submission.
+* Legacy requests imported from the transition inbox carry no verified member; the manager queue
+  labels them **self-reported (not a verified account)** instead of implying verification.
+
+**Read-only timeline.** `GET /api/work/timeline` is available to every signed-in role and has no
+write path. It reuses the existing visibility policy (`INTERNAL` only for `MEMBER`/`VIEWER`,
+archived work only for a manager who asks) and the one counting rule (`taskScope`); it publishes
+only allowlisted display fields (names, stored dates, status, progress and leaf counts). No e-mail
+address, member identifier, description, acceptance criterion, note or request text is projected.
+A `childRange` is derived on the server from dated descendants and is never written back.
+
 ## Member self-service and completion approval — 2026-11-03
 
 * A member may create a task **for themselves only**. The owner is the verified `memberId`, the

@@ -57,6 +57,8 @@ export function SubprojectForm({
   );
   const [next, setNext] = useState(item?.nextAction ?? '');
   const [confirmed, setConfirmed] = useState(false);
+  // The location is readable at a glance; its editors appear only when the manager asks for them.
+  const [locationOpen, setLocationOpen] = useState(false);
 
   const excluded = new Set(item ? [item.subprojectId] : []);
   for (let depth = 0; depth < siblings.length; depth++) {
@@ -161,22 +163,35 @@ export function SubprojectForm({
           <div className="location-summary">
             <span className="field-label">{t('taskForm.location')}</span>
             <p className="location-path">{locationPath || t('common.unset')}</p>
+            <button
+              type="button"
+              className="link-button"
+              aria-expanded={locationOpen}
+              onClick={() => setLocationOpen((value) => !value)}
+            >
+              {locationOpen ? t('taskForm.keepLocation') : t('taskForm.changeLocation')}
+            </button>
           </div>
-          <label className="field">
-            <span className="field-label">{t('subprojects.parent')}</span>
-            <SearchSelect
-              value={parent}
-              onChange={setParent}
-              allowEmpty={t('common.none')}
-              searchLabel={t('action.search')}
-              selectLabel={t('subprojects.parent')}
-              options={parents.map((entry) => ({
-                value: entry.subprojectId,
-                label: subprojectPath(siblings, entry.subprojectId)
-              }))}
-            />
-            <span className="field-hint">{t('subForm.parentHint')}</span>
-          </label>
+          {/* Opening or closing this section never changes the selected parent. */}
+          {locationOpen ? (
+            <label className="field">
+              <span className="field-label">{t('subprojects.parent')}</span>
+              <SearchSelect
+                value={parent}
+                onChange={setParent}
+                allowEmpty={t('common.none')}
+                searchLabel={t('action.search')}
+                selectLabel={t('subprojects.parent')}
+                options={parents.map((entry) => ({
+                  value: entry.subprojectId,
+                  label: subprojectPath(siblings, entry.subprojectId)
+                }))}
+              />
+              <span className="field-hint">{t('subForm.parentHint')}</span>
+            </label>
+          ) : (
+            <p className="muted small">{t('taskForm.keepLocationHint')}</p>
+          )}
         </section>
 
         <label className="field">

@@ -217,6 +217,39 @@ export function DataFreshness({ snapshot }: { snapshot: boolean }): JSX.Element 
   );
 }
 
+const EDITABLE_FIELDS = 'input:not([type="hidden"]), select, textarea';
+
+function isFocusable(element: HTMLElement | null): element is HTMLElement {
+  if (!element) return false;
+  if (element.hasAttribute('disabled')) return false;
+  if (element.getAttribute('aria-hidden') === 'true') return false;
+  return !element.closest('[hidden]');
+}
+
+/**
+ * One predictable focus order for every modal:
+ *
+ * 1. an explicit preferred target (`autoFocus` / `data-autofocus`) when it is enabled,
+ * 2. the first enabled editable field, in DOM order,
+ * 3. the first footer action,
+ * 4. the first remaining control.
+ *
+ * The header close button therefore never wins merely because it appears first in the DOM.
+ */
+function focusFirst(dialog: HTMLDialogElement): HTMLElement | null {
+  const preferred = dialog.querySelector<HTMLElement>('[data-autofocus]');
+  if (isFocusable(preferred)) return preferred;
+  for (const field of dialog.querySelectorAll<HTMLElement>(EDITABLE_FIELDS)) {
+    if (isFocusable(field)) return field;
+  }
+  const footerButton = dialog.querySelector<HTMLElement>('.modal-footer button');
+  if (isFocusable(footerButton)) return footerButton;
+  for (const control of dialog.querySelectorAll<HTMLElement>('button, [href]')) {
+    if (isFocusable(control)) return control;
+  }
+  return null;
+}
+
 export function Modal({
   title,
   onClose,
@@ -237,10 +270,7 @@ export function Modal({
     const invoker = (typeof document === 'undefined' ? null : document.activeElement) as HTMLElement | null;
     if (dialog && !dialog.open) {
       dialog.showModal();
-      const first = dialog.querySelector<HTMLElement>(
-        '[data-autofocus], input:not([type="hidden"]), select, textarea, button'
-      );
-      first?.focus();
+      focusFirst(dialog)?.focus();
     }
     return () => {
       if (invoker && typeof invoker.focus === 'function') invoker.focus();

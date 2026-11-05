@@ -72,8 +72,7 @@ function myWorkList(items: MyWorkList['items']): MyWorkList {
     total: items.length,
     activeTotal: items.length,
     completedTotal: 0,
-    unfilteredActiveTotal: items.length,
-    projects: []
+    unfilteredActiveTotal: items.length
   };
 }
 

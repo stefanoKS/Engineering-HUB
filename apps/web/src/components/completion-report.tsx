@@ -1,24 +1,54 @@
 /**
- * The single completion-report form, shared by My Assigned Work and task detail.
+ * The one completion-report form, shared by My Assigned Work and task detail.
  *
  * The member identity and the eligibility rules come from the server; this panel only collects
- * the note. An unobservable outcome is reported as unknown and is never retried automatically.
+ * the note. The reporter shown here is the name the server will record, never one from the
+ * browser. An unobservable outcome is reported as unknown and is never retried automatically.
  */
 import { useState } from 'react';
+import type { SubmissionBlockReason } from '@eh/contracts';
 import { ApiFailure, api } from '../api/client';
 import { useI18n } from '../i18n';
 import { keys, queryCache } from '../state/cache';
 import { createIdempotencyKey } from './forms';
 
+/** One label per server refusal, so the reason is always explained in the reader's language. */
+export function reportReasonLabel(reason: SubmissionBlockReason): string {
+  switch (reason) {
+    case 'ROLE':
+      return 'report.blocked.role';
+    case 'NOT_VISIBLE':
+      return 'report.blocked.notVisible';
+    case 'ARCHIVED':
+      return 'report.blocked.archived';
+    case 'NOT_ASSIGNED':
+      return 'report.blocked.notAssigned';
+    case 'CONTAINER':
+      return 'report.blocked.container';
+    case 'COMPLETED':
+      return 'report.blocked.done';
+    case 'CANCELLED':
+      return 'report.blocked.cancelled';
+    case 'PENDING':
+      return 'report.blocked.pending';
+    case 'SUBMISSION_DISABLED':
+    default:
+      return 'report.blocked.disabled';
+  }
+}
+
 export function CompletionReportPanel({
   taskId,
   blockedReasons,
+  reporterName,
   onSubmitted,
   onDismiss
 }: {
   taskId: string;
   /** Every reason the server would refuse this report, so a disabled action always explains itself. */
   blockedReasons: string[];
+  /** The verified reporter the server records. */
+  reporterName?: string;
   onSubmitted: () => void;
   onDismiss?: () => void;
 }): JSX.Element {
@@ -41,7 +71,15 @@ export function CompletionReportPanel({
       });
       setState('done');
       setMessage({ tone: 'ok', text: `${t('request.completion.heading')} ${t('request.confirm.id')}: ${result.requestId}` });
-      queryCache.invalidate([keys.myRequests, keys.myWork, keys.task(taskId), keys.tasks, keys.requests]);
+      queryCache.invalidate([
+        keys.myRequests,
+        keys.myWork,
+        keys.task(taskId),
+        keys.tasks,
+        keys.requests,
+        keys.timeline,
+        keys.reportEligibility(taskId)
+      ]);
       onSubmitted();
     } catch (failure) {
       if (failure instanceof ApiFailure && ['NETWORK', 'INVALID_RESPONSE'].includes(failure.code)) {
@@ -60,6 +98,12 @@ export function CompletionReportPanel({
   return (
     <div className="card stack completion-report">
       <h4>{t('report.heading')}</h4>
+      {reporterName ? (
+        <>
+          <p className="muted small">{t('report.reporter', { name: reporterName })}</p>
+          <p className="muted small">{t('report.reporterHint')}</p>
+        </>
+      ) : null}
       {blockedReasons.length > 0 ? (
         <div className="validation-summary" role="status">
           <ul>

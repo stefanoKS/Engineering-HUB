@@ -270,7 +270,7 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
           onClose={() => setEditing(null)}
           onSaved={(project) => {
             setEditing(null);
-            queryCache.invalidate([keys.projects, keys.overview, keys.status, keys.bootstrap]);
+            queryCache.invalidate([keys.projects, keys.overview, keys.status, keys.bootstrap, keys.timeline]);
             if (editing.mode === 'create') navigate(`project/${project.projectId}`);
           }}
         />
@@ -287,7 +287,7 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
               confirmed: true
             });
             setArchiveTarget(null);
-            queryCache.invalidate([keys.projects, keys.overview, keys.status]);
+            queryCache.invalidate([keys.projects, keys.overview, keys.status, keys.timeline]);
           }}
         />
       ) : null}
@@ -321,7 +321,7 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
               confirmation
             });
             setDeleteTarget(null);
-            queryCache.invalidate([keys.projects, keys.overview, keys.status, keys.bootstrap]);
+            queryCache.invalidate([keys.projects, keys.overview, keys.status, keys.bootstrap, keys.timeline]);
           }}
         />
       ) : null}

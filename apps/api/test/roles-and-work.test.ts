@@ -823,7 +823,7 @@ describe('partial edits preserve recorded data', () => {
     expect(untouched?.revision).toBe(revision);
   });
 
-  it('shows a pending completion indicator only to the member who submitted it', async () => {
+  it('shows a pending completion indicator to every assignee while the receipt stays private', async () => {
     await saveSettings(db, { REQUEST_SUBMISSION_ENABLED: 'true' }, 'MEM-ADMIN');
     const manager = await login('0002');
     const taskId = await createTaskAsManager(manager, { name: 'Shared report', assigneeIds: ['MEM-A', 'MEM-B'] });
@@ -843,13 +843,22 @@ describe('partial edits preserve recorded data', () => {
     expect(itemA?.pendingRequest).toBe(true);
     expect(itemA?.reviewState).toBe('PENDING');
 
+    // Another assignee sees the same task-level pending state, whoever filed the report.
     const memberB = await login('0011');
     const listB = await app.inject({ url: '/api/employee/my-work', headers: { cookie: memberB.cookie! } });
     const itemB = (listB.json() as { data: { items: { taskId: string; pendingRequest: boolean; reviewState: string }[] } }).data.items.find(
       (item) => item.taskId === taskId
     );
-    expect(itemB?.pendingRequest).toBe(false);
-    expect(itemB?.reviewState).toBe('NONE');
+    expect(itemB?.pendingRequest).toBe(true);
+    expect(itemB?.reviewState).toBe('PENDING');
+
+    // The receipt list still belongs to the actual reporter only.
+    const mineB = await app.inject({ url: '/api/employee/requests/mine', headers: { cookie: memberB.cookie! } });
+    expect((mineB.json() as { data: { items: unknown[] } }).data.items).toHaveLength(0);
+    const mineA = await app.inject({ url: '/api/employee/requests/mine', headers: { cookie: memberA.cookie! } });
+    expect((mineA.json() as { data: { items: { taskId: string }[] } }).data.items.map((entry) => entry.taskId)).toEqual([
+      taskId
+    ]);
   });
 });
 

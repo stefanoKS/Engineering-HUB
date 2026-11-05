@@ -17,6 +17,7 @@ import {
   createMySubproject,
   createMyTask,
   listMyWork,
+  listMyWorkProjectFilter,
   myWorkProjectOptions,
   type MyWorkSection
 } from '../services/my-work';
@@ -45,6 +46,13 @@ const PageQuery = z.object({
   awaitingReview: Flag
 });
 
+const ProjectFilterQuery = z.object({
+  query: z.string().trim().max(120).optional(),
+  page: z.coerce.number().int().min(1).max(100000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
+  selectedId: z.string().trim().max(64).optional()
+});
+
 export function registerMyWork(app: FastifyInstance, _deps: AppDependencies): void {
   app.get('/api/employee/my-work', async (request, reply) => {
     try {
@@ -70,6 +78,25 @@ export function registerMyWork(app: FastifyInstance, _deps: AppDependencies): vo
   app.get('/api/employee/my-work/projects', async (request, reply) => {
     try {
       return ok(reply, request, await myWorkProjectOptions(ctx(request)));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  // The project filter of the member's own work: paged and searchable, never a silent row cap.
+  app.get('/api/employee/my-work/project-filter', async (request, reply) => {
+    try {
+      const query = ProjectFilterQuery.parse(request.query ?? {});
+      return ok(
+        reply,
+        request,
+        await listMyWorkProjectFilter(ctx(request), {
+          query: query.query || undefined,
+          page: query.page,
+          pageSize: query.pageSize,
+          selectedId: query.selectedId || undefined
+        })
+      );
     } catch (error) {
       return sendError(reply, request.state, error);
     }

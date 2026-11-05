@@ -217,6 +217,30 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await expect(page.getByRole('button', { name: /^Delete / })).toHaveCount(0);
     console.log('PASS  manager journey: hierarchy in context, edit and complete allowed, removal absent');
 
+    // Read-only timeline: the project-detail entry point preselects the project, the hierarchy
+    // expands on demand, and the legend names every visual meaning.
+    await page.locator('.app-nav').getByRole('link', { name: 'Projects', exact: true }).click();
+    await page.getByRole('link', { name: 'Browser edited project', exact: true }).first().click();
+    await page.getByRole('link', { name: 'View in timeline', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Timeline', exact: true })).toBeVisible();
+    await expect(page.locator('.tl-kind-subproject').filter({ hasText: 'Browser verified subproject' })).toBeVisible();
+    await expect(page.locator('.tl-kind-task').filter({ hasText: 'Browser verified task' }).first()).toBeVisible();
+    await expect(page.getByText('Planned span', { exact: true })).toBeVisible();
+    await expect(page.getByText('Deadline', { exact: true }).first()).toBeVisible();
+    await expect(page.getByText('Child date range', { exact: true }).first()).toBeVisible();
+    await mkdir('work/screenshots', { recursive: true });
+    await capture('work/screenshots/timeline-project.png');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator('.tl-cell-name').first()).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false);
+    await capture('work/screenshots/timeline-project-mobile.png');
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    // The all-project view lists permitted project summaries with a real total.
+    await page.getByRole('combobox', { name: 'Select a project', exact: true }).selectOption('');
+    await expect(page.locator('.tl-kind-project').first()).toBeVisible();
+    await expect(page.getByText(/^All permitted projects$/, { exact: true })).toHaveCount(1);
+    console.log('PASS  Read-only timeline: project entry, hierarchy, legend, all-project summaries, responsive');
+
     // Workload: the axis states the unit and the date, and today carries its own marker.
     await page.locator('.app-nav').getByRole('link', { name: 'Workload', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Workload report', exact: true })).toBeVisible();
@@ -303,9 +327,13 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await expect(page.getByRole('heading', { name: 'Browser edited project', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Collapse Browser verified subproject', exact: true })).toBeVisible();
 
-    // Contextual creation inside the subproject preselects it.
+    // Contextual creation inside the subproject preselects it. The location is summarised until the
+    // manager asks to change it, so the retained value is asserted after expanding that section.
     const subprojectRow = page.locator('.hierarchy-row-subproject').filter({ hasText: 'Browser verified subproject' });
     await subprojectRow.getByRole('button', { name: 'New task', exact: true }).click();
+    await expect(dialog.getByText('Browser edited project / Browser verified subproject', { exact: true })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Change location', exact: true })).toBeVisible();
+    await dialog.getByRole('button', { name: 'Change location', exact: true }).click();
     await expect(dialog.locator('label.field').filter({ hasText: 'Subproject' }).locator('select')).toHaveValue(/^SUB-/);
     await dialog.getByLabel('Task name', { exact: true }).fill('Subproject browser task');
     await dialog.getByLabel('Deadline', { exact: true }).fill('2026-11-07');
@@ -324,6 +352,7 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
 
     // A nested subproject is created from its parent header and keeps the stored parent link.
     await subprojectRow.getByRole('button', { name: 'Nested subproject', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Change location', exact: true }).click();
     await expect(dialog.locator('label.field').filter({ hasText: 'Parent subproject' }).locator('select')).toHaveValue(/^SUB-/);
     await dialog.getByLabel('Subproject name', { exact: true }).fill('Browser nested subproject');
     await dialog.getByRole('button', { name: 'Create', exact: true }).click();

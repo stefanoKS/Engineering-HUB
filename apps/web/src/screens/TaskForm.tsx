@@ -1,4 +1,4 @@
-/**
+﻿/**
  * One form for creating and editing a task.
  *
  * The routine form is deliberately small: a readable location, the name, the deadline, the
@@ -7,8 +7,8 @@
  * does not need. On edit the body is a partial patch, so a hidden historical column is never
  * rewritten with a blank or a default.
  */
-import { useEffect, useMemo, useState } from 'react';
-import { MAX_TASK_DEPTH, SKILL_GRADES, formatSkillGrade, gradeToLevel, levelToGrade } from '@eh/domain';
+import { useMemo, useState } from 'react';
+import { SKILL_GRADES, formatSkillGrade, gradeToLevel, levelToGrade } from '@eh/domain';
 import { ProjectPicker } from '../components/ProjectPicker';
 import { AssigneePicker } from '../components/AssigneePicker';
 import type { Reference, Task, TaskDetail } from '@eh/contracts';
@@ -19,21 +19,19 @@ import { ErrorBox, Modal, SaveState } from '../components/ui';
 import {
   BlockedReasons,
   createIdempotencyKey,
+  RemoteSelect,
   RequiredTag,
   SearchSelect,
   SelectInput,
   TextInput,
   useSave
 } from '../components/forms';
-import { taskPath, type TaskNode } from '../components/hierarchy';
 
 type References = {
   members: { memberId: string; name: string; active: boolean; employeeId?: string }[];
   skills: { skillId: string; skillName: string }[];
   subprojects: Reference[];
 };
-
-type ParentOption = TaskNode & { container: boolean; status: string };
 
 /** Display-only context supplied by the screen that opened the form. */
 export type TaskFormContext = {
@@ -82,9 +80,9 @@ export function TaskForm({
   const { t, label } = useI18n();
   const save = useSave();
   const [idempotencyKey, setIdempotencyKey] = useState(createIdempotencyKey);
-  const [optionError, setOptionError] = useState<unknown>(null);
-  const [parentOptions, setParentOptions] = useState<ParentOption[]>([]);
-  // A contextual creation keeps the known location; changing it is always an explicit step.
+  const [parentLabel, setParentLabel] = useState<string>('');
+  // A contextual creation keeps the known location; changing it is always an explicit step. An
+  // edit starts collapsed on its readable location, so "Change location" is the only way in.
   const [locationOpen, setLocationOpen] = useState(!task && !initialProjectId);
   const locationDisabled = !locationOpen;
   const [retained, setRetained] = useState<{ assignees: string; priority: string } | null>(null);
@@ -108,39 +106,16 @@ export function TaskForm({
 
   const deadlineChanged = !!task && (form.deadline ?? '') !== (task.dueDate ?? '');
 
-  useEffect(() => {
-    let current = true;
-    setParentOptions([]);
-    setOptionError(null);
-    if (form.projectId) {
-      // An explicit empty subproject selects only direct project tasks.
-      const params = new URLSearchParams({
-        projectId: form.projectId,
-        subprojectId: form.subprojectId,
-        excludeTaskId: task?.taskId ?? ''
-      });
-      void api
-        .get<{ items: ParentOption[] }>('/api/manager/tasks/parent-options?' + params)
-        .then((result) => {
-          if (current) setParentOptions(Array.isArray(result.items) ? result.items : []);
-        })
-        .catch((error) => {
-          if (current) setOptionError(error);
-        });
-    }
-    return () => {
-      current = false;
-    };
-  }, [form.projectId, form.subprojectId, task?.taskId]);
-
   // The picker and this form share one cache key, so the readable name costs no extra request.
+  const knownProjectId = task?.projectId ?? initialProjectId;
+  // The name is read for the selected project, including after the manager changes away from the
+  // context that opened the form; the context name is only valid for the project it describes.
   const projectRecord = useQuery<{ record: { projectId: string; projectName: string } }>(
     `manager/project/${form.projectId}`,
     () => api.get<{ record: { projectId: string; projectName: string } }>(`/api/manager/projects/${form.projectId}`),
-    { enabled: !!form.projectId && !context?.projectName }
+    { enabled: !!form.projectId && (form.projectId !== knownProjectId || !context?.projectName) }
   );
 
-  const knownProjectId = task?.projectId ?? initialProjectId;
   const knownSubprojectId = task?.subprojectId ?? initialSubprojectId;
   const effectiveProjectName =
     context?.projectName && form.projectId === knownProjectId
@@ -153,8 +128,8 @@ export function TaskForm({
         ? subprojectPathOf(references.subprojects, form.subprojectId)
         : '';
   const parentName =
-    parentOptions.find((option) => option.id === form.parentTaskId)?.name ??
-    (form.parentTaskId === (task?.parentTaskId ?? initialParentTaskId) ? context?.parentTaskName : undefined) ??
+    parentLabel ||
+    (form.parentTaskId === (task?.parentTaskId ?? initialParentTaskId) ? context?.parentTaskName ?? '' : '') ||
     (form.parentTaskId ? form.parentTaskId : '');
   const locationPath = [effectiveProjectName, effectiveSubprojectName, form.parentTaskId ? parentName : '']
     .filter(Boolean)
@@ -226,7 +201,10 @@ export function TaskForm({
       keys.overview,
       keys.project(saved.projectId),
       keys.workload,
-      keys.myWork
+      keys.myWork,
+      // A new or renamed task changes every parent selector's candidate list.
+      keys.parentOptions,
+      keys.timeline
     ]);
   };
 
@@ -304,8 +282,6 @@ export function TaskForm({
     </>
   );
 
-  const candidateParents = parentOptions.filter((option) => option.depth < MAX_TASK_DEPTH);
-
   const locationFields = (
     <div className="stack location-fields">
       <div className="field-row">
@@ -314,9 +290,10 @@ export function TaskForm({
           <ProjectPicker
             value={form.projectId}
             disabled={!!task || locationDisabled}
-            onChange={(projectId) =>
-              setForm((current) => ({ ...current, projectId, parentTaskId: '', subprojectId: '' }))
-            }
+            onChange={(projectId) => {
+              setForm((current) => ({ ...current, projectId, parentTaskId: '', subprojectId: '' }));
+              setParentLabel('');
+            }}
           />
         </div>
         <label className="field">
@@ -326,6 +303,7 @@ export function TaskForm({
             onChange={(value) => {
               set('subprojectId', value);
               set('parentTaskId', '');
+              setParentLabel('');
             }}
             allowEmpty={t('common.unset')}
             searchLabel={t('action.search')}
@@ -337,26 +315,52 @@ export function TaskForm({
           />
         </label>
       </div>
-      <label className="field">
+      <div className="field">
         <span className="field-label">{t('tasks.parent')}</span>
-        <SearchSelect
+        <RemoteSelect
           value={form.parentTaskId}
-          onChange={(value) => set('parentTaskId', value)}
+          optionsKey={`parent-options:${form.projectId}:${form.subprojectId}:${task?.taskId ?? ''}`}
+          onChange={(value) => {
+            set('parentTaskId', value);
+            setParentLabel('');
+          }}
           allowEmpty={t('common.none')}
-          searchLabel={t('action.search')}
+          searchLabel={t('taskForm.parentSearch')}
           selectLabel={t('tasks.parent')}
+          emptyHint={t('taskForm.noParentOptions')}
+          enabled={!!form.projectId}
           disabled={!locationOpen}
-          options={candidateParents.map((option) => ({
-            value: option.id,
-            label: taskPath(parentOptions, option.id)
-          }))}
+          load={async ({ query, page }) => {
+            // An explicit empty subproject selects only direct project tasks, so the parameter is
+            // sent even when it is empty.
+            const params = new URLSearchParams({
+              projectId: form.projectId,
+              subprojectId: form.subprojectId,
+              excludeTaskId: task?.taskId ?? '',
+              selectedId: form.parentTaskId,
+              query,
+              page: String(page),
+              pageSize: '25'
+            });
+            const result = await api.get<{
+              items: { id: string; name: string; path: string; depth: number }[];
+              total: number;
+              page: number;
+              pageSize: number;
+              totalPages: number;
+              selected: { id: string; name: string; path: string } | null;
+            }>('/api/manager/tasks/parent-options?' + params.toString());
+            return {
+              items: result.items.map((option) => ({ value: option.id, label: option.path })),
+              total: result.total,
+              page: result.page,
+              totalPages: result.totalPages,
+              selected: result.selected ? { value: result.selected.id, label: result.selected.path } : null
+            };
+          }}
         />
         <span className="field-hint">{t('taskForm.parentHint')}</span>
-      </label>
-      {parentOptions.length > 0 && candidateParents.length === 0 ? (
-        <p className="muted small">{t('taskForm.depthLimit')}</p>
-      ) : null}
-      {parentOptions.length === 0 ? <p className="muted small">{t('taskForm.noParentOptions')}</p> : null}
+      </div>
     </div>
   );
 
@@ -387,8 +391,8 @@ export function TaskForm({
               {locationOpen ? t('taskForm.keepLocation') : t('taskForm.changeLocation')}
             </button>
           </div>
-          {locationFields}
-          <ErrorBox error={optionError} />
+          {/* The location editors exist only while the section is explicitly expanded. */}
+          {locationOpen ? locationFields : <p className="muted small">{t('taskForm.keepLocationHint')}</p>}
         </section>
 
         <div className="field">

@@ -4,7 +4,7 @@ import { SubmitRequestBody } from '@eh/contracts';
 import { DomainError } from '@eh/domain';
 import { actorOf, ok, type AppDependencies } from '../http';
 import { sendError } from '../errors';
-import { employeeSnapshot, myRequests, requestReceipt, submitRequest } from '../services/requests';
+import { employeeSnapshot, myRequests, reportEligibility, requestReceipt, submitRequest } from '../services/requests';
 import type { ServiceCtx } from '../services/common';
 
 function ctx(request: Parameters<typeof actorOf>[0]): ServiceCtx {
@@ -37,6 +37,20 @@ export function registerEmployeeRoutes(app: FastifyInstance, _deps: AppDependenc
   app.get('/api/employee/requests/mine', async (request, reply) => {
     try {
       return ok(reply, request, await myRequests(ctx(request)));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  /**
+   * The server-derived completion-report capability for one task. A client that has no answer (or
+   * a failed one) keeps the action unavailable; the submission re-checks the same state.
+   */
+  app.get('/api/employee/tasks/:id/report-eligibility', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      if (!id) throw new DomainError('VALIDATION_FAILED', 'A task ID is required');
+      return ok(reply, request, await reportEligibility(ctx(request), id));
     } catch (error) {
       return sendError(reply, request.state, error);
     }

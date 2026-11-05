@@ -657,6 +657,7 @@ export const V2_LABELS = {
   'common.required': { ja: '必須', en: 'Required' },
   'common.optional': { ja: '任意', en: 'Optional' },
   'common.notConfigured': { ja: '未設定', en: 'Not configured' },
+  'common.optionCount': { ja: '{n} 件', en: '{n} options' },
   'common.disabled': { ja: '無効', en: 'Disabled' },
   'common.failed': { ja: '失敗', en: 'Failed' },
   'common.ok': { ja: '正常', en: 'OK' },
@@ -693,6 +694,13 @@ export const V2_LABELS = {
     en: 'Tasks nest up to three levels; a deeper task cannot be a parent.'
   },
   'taskForm.noParentOptions': { ja: 'この作成先には親にできるタスクがありません。', en: 'No eligible parent task in this location.' },
+  'taskForm.parentSearch': { ja: '親タスクを検索', en: 'Search parent tasks' },
+  'taskForm.parentTotal': { ja: '候補 {n} 件', en: '{n} eligible parents' },
+  'taskForm.parentPage': { ja: '{page} / {pages}', en: '{page} / {pages}' },
+  'taskForm.keepLocationHint': {
+    ja: '作成先を変えるときだけ「作成先を変更」を押してください。',
+    en: 'Press "Change location" only when this task belongs somewhere else.'
+  },
   'taskForm.contextPath': { ja: '作成先: {path}', en: 'Location: {path}' },
 
   'subForm.planning': { ja: '計画の詳細', en: 'Planning details' },
@@ -735,7 +743,25 @@ export const V2_LABELS = {
   'report.blocked.cancelled': { ja: '取消のタスクには報告できません。', en: 'A cancelled task cannot receive a report.' },
   'report.blocked.pending': { ja: '承認待ちの申請があります。結果をお待ちください。', en: 'A request is awaiting review. Wait for the outcome.' },
   'report.blocked.disabled': { ja: '現在、完了報告の受付は停止しています。', en: 'Completion reports are currently closed.' },
-  'report.blocked.role': { ja: '完了報告は担当メンバーが行います。', en: 'Completion is reported by the assigned member.' },
+  'report.blocked.role': { ja: '閲覧のみのアカウントは完了報告できません。', en: 'A read-only account cannot report completion.' },
+  'report.blocked.notVisible': { ja: 'このタスクは閲覧できません。', en: 'This task is not visible to you.' },
+  'report.blocked.archived': { ja: '廃止された作業には報告できません。', en: 'Archived work cannot receive a report.' },
+  'report.blocked.notAssigned': { ja: '期限変更は担当メンバーのみ申請できます。', en: 'Only the assigned member may request a deadline change.' },
+  'report.reporter': { ja: '完了報告者: {name}', en: 'Reported by: {name}' },
+  'report.reporterHint': {
+    ja: '報告者として記録されるのは、サインイン中のあなた自身です。担当者の変更やタスクの完了は行われません。',
+    en: 'You are recorded as the reporter. The assignee is not changed and the task is not completed.'
+  },
+  'report.eligibilityLoading': { ja: '報告できるか確認しています…', en: 'Checking whether you can report this task…' },
+  'report.eligibilityUnavailable': {
+    ja: '報告の可否を確認できないため、いまは報告できません。再読み込みしてください。',
+    en: 'Reporting stays unavailable because eligibility could not be confirmed. Reload and try again.'
+  },
+  'report.assignedTo': { ja: '担当: {names}', en: 'Assigned to: {names}' },
+  'report.notAssigned': { ja: '担当者以外からの報告です。', en: 'Reported by someone who is not an assignee.' },
+  'report.submittedBy': { ja: '報告者', en: 'Reported by' },
+  'report.reviewedBy': { ja: '確認者: {name}', en: 'Reviewed by: {name}' },
+  'report.noAssignee': { ja: '担当者は未設定です。', en: 'No assignee is set.' },
   'report.state.pending': { ja: '承認待ち', en: 'Awaiting review' },
   'report.state.approved': { ja: '承認済み', en: 'Approved' },
   'report.state.rejected': { ja: '却下', en: 'Rejected' },
@@ -744,7 +770,11 @@ export const V2_LABELS = {
 
   'requests.task': { ja: 'タスク', en: 'Task' },
   'requests.context': { ja: 'プロジェクト / サブプロジェクト', en: 'Project / subproject' },
-  'requests.reporter': { ja: '報告者（申請者の入力）', en: 'Reported by (as submitted)' },
+  'requests.reporter': { ja: '完了報告者', en: 'Reported by' },
+  'requests.selfReported': {
+    ja: '自己申告（検証されたアカウントではありません）',
+    en: 'Self-reported (not a verified account)'
+  },
   'requests.submitted': { ja: '申請日時', en: 'Submitted' },
   'requests.state': { ja: '申請の状態', en: 'Request state' },
   'requests.openTask': { ja: 'タスクを別タブで開く', en: 'Open the task in a new tab' },
@@ -769,11 +799,77 @@ export const V2_LABELS = {
   'myWork.noMatches': { ja: '条件に一致するタスクはありません。', en: 'No tasks match these filters.' },
   'myWork.matching': { ja: '一致 {n} 件', en: '{n} matching' },
   'myWork.allActive': { ja: '未完了 {n} 件', en: '{n} active' },
+  'myWork.loading': { ja: '読み込み中…', en: 'Loading…' },
+  'myWork.filter.projectSearch': { ja: 'プロジェクト名で検索', en: 'Search project name' },
+  'myWork.filter.projectMore': { ja: '他に {n} 件のプロジェクト', en: '{n} more projects' },
+  'myWork.filter.projectSelected': { ja: '選択中: {name}', en: 'Selected: {name}' },
 
   'nav.group.myWork': { ja: '自分の作業', en: 'My work' },
-  'nav.group.department': { ja: '部門の作業', en: 'Department work' },
+  'nav.group.department': { ja: '課の業務', en: 'Section work' },
   'nav.group.people': { ja: 'メンバーと分野', en: 'People' },
   'nav.group.admin': { ja: '管理', en: 'Administration' },
+
+  'nav.timeline': { ja: 'タイムライン', en: 'Timeline' },
+  'timeline.title': { ja: 'タイムライン', en: 'Timeline' },
+  'timeline.intro': {
+    ja: '計画と期限を横並びで確認できます。読み取り専用で、ここから期限や日程は変更しません。',
+    en: 'Plans and deadlines side by side. Read-only: nothing here changes a deadline or a schedule.'
+  },
+  'timeline.scope.all': { ja: 'すべてのプロジェクト', en: 'All permitted projects' },
+  'timeline.scope.project': { ja: 'プロジェクトを選択', en: 'Select a project' },
+  'timeline.scope.responsibility': { ja: '分野で絞り込み', en: 'Filter by responsibility' },
+  'timeline.scope.allResponsibilities': { ja: 'すべての分野', en: 'All responsibilities' },
+  'timeline.scale': { ja: '表示単位', en: 'Scale' },
+  'timeline.scale.week': { ja: '週', en: 'Week' },
+  'timeline.scale.month': { ja: '月', en: 'Month' },
+  'timeline.scale.quarter': { ja: '四半期', en: 'Quarter' },
+  'timeline.previous': { ja: '前へ', en: 'Previous period' },
+  'timeline.today': { ja: '今日', en: 'Today' },
+  'timeline.next': { ja: '次へ', en: 'Next period' },
+  'timeline.fit': { ja: '全体を表示', en: 'Fit selection' },
+  'timeline.includeCompleted': { ja: '完了した作業も表示', en: 'Show completed work' },
+  'timeline.filter.active': { ja: '絞り込み中', en: 'Filtered' },
+  'timeline.reset': { ja: '条件を解除', en: 'Reset' },
+  'timeline.legend.planned': { ja: '予定（開始〜終了）', en: 'Planned span' },
+  'timeline.legend.deadline': { ja: '期限', en: 'Deadline' },
+  'timeline.legend.childRange': { ja: '子項目の期間', en: 'Child date range' },
+  'timeline.legend.completed': { ja: '完了日', en: 'Recorded completion' },
+  'timeline.undated': { ja: '日付未設定', en: 'No dates' },
+  'timeline.undatedHint': {
+    ja: '日付が保存されていないため、この行は期間を表示しません。',
+    en: 'No stored date, so this row has no span.'
+  },
+  'timeline.startNotSet': { ja: '開始日未設定', en: 'Start date not set' },
+  'timeline.inconsistent': {
+    ja: '開始日が期限より後になっています。値は自動で修正しません。',
+    en: 'The start date falls after the deadline. Nothing is corrected automatically.'
+  },
+  'timeline.childRange': { ja: '子項目の期間', en: 'Child date range' },
+  'timeline.childRangeHint': {
+    ja: '配下の日付から算出した表示上の期間です。作業量としては数えません。',
+    en: 'A display span derived from dated descendants. It is never counted as work.'
+  },
+  'timeline.container': { ja: '入れ物', en: 'Container' },
+  'timeline.expand': { ja: '展開', en: 'Expand' },
+  'timeline.collapse': { ja: '折りたたむ', en: 'Collapse' },
+  'timeline.loading': { ja: '読み込み中…', en: 'Loading…' },
+  'timeline.empty': { ja: '表示できるプロジェクトがありません。', en: 'No project is available to show.' },
+  'timeline.branchLoading': { ja: '階層を読み込み中…', en: 'Loading the hierarchy…' },
+  'timeline.more': { ja: '他に {n} 件あります', en: '{n} more results' },
+  'timeline.taskTotal': { ja: '表示 {n} 行', en: '{n} rows' },
+  'timeline.truncated': {
+    ja: 'タスクが多いため、先頭 {shown} 件のみ表示しています（全 {total} 件）。',
+    en: 'Only the first {shown} of {total} tasks are shown because the branch is large.'
+  },
+  'timeline.openTask': { ja: 'タスクを開く', en: 'Open the task' },
+  'timeline.details': { ja: '内容', en: 'Details' },
+  'timeline.listView': { ja: '一覧で確認', en: 'Text list' },
+  'timeline.projectLink': { ja: 'タイムラインで表示', en: 'View in timeline' },
+  'timeline.noProjects': { ja: 'この分野に表示できるプロジェクトはありません。', en: 'No project in this responsibility is available.' },
+  'timeline.scope.filtered': { ja: 'この表示は絞り込み後の範囲です。', en: 'This view shows the filtered scope.' },
+  'timeline.dates.plan': { ja: '予定', en: 'Planned' },
+  'timeline.dates.deadline': { ja: '期限', en: 'Deadline' },
+  'timeline.dates.completed': { ja: '完了日', en: 'Completed' },
 
   'automation.configured': { ja: '設定値', en: 'Configured' },
   'automation.effective': { ja: '実効状態', en: 'Effective' },

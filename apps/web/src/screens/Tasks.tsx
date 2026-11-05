@@ -343,7 +343,9 @@ export function TasksScreen({
               keys.taskIndex,
               keys.overview,
               keys.project(action.task.projectId),
-              keys.myWork
+              keys.myWork,
+              keys.parentOptions,
+              keys.timeline
             ]);
           }}
         />
@@ -367,6 +369,8 @@ export function TasksScreen({
               keys.myWork,
               keys.workload,
               keys.employee,
+              keys.parentOptions,
+              keys.timeline,
               'work/tasks',
               'work/project/',
               'work/projects'

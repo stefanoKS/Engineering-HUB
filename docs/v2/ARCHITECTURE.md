@@ -1,5 +1,44 @@
 # V2 Architecture
 
+## Completion reporting by any authorized reporter, and the read-only timeline — 2026-11-05
+
+**Reporting.** `canReportCompletion()` (`packages/domain/src/roles.ts`) allows a verified, active
+MEMBER, MANAGER or ADMIN; `canRequestDeadlineChange()` keeps the MEMBER-only rule. One function,
+`submissionBlockReasons()` (`packages/domain/src/requests.ts`), returns the ordered list of refusals
+(`ROLE`, `NOT_VISIBLE`, `ARCHIVED`, `NOT_ASSIGNED`, `CONTAINER`, `COMPLETED`, `CANCELLED`,
+`PENDING`, `SUBMISSION_DISABLED`), and `submissionRefusal()` maps the first one to the stable error
+code. `GET /api/employee/tasks/:id/report-eligibility` and `POST /api/employee/requests` share one
+assessment in `apps/api/src/services/requests.ts`, so the capability a screen shows and the write
+the server accepts cannot disagree. Reaching the task means "assigned to it" or "the project is
+readable under the existing visibility policy"; reporting never widens visibility, so an unreadable
+task answers `404`. The reporter is written from the verified session into the existing
+`requester_name`/`requester_member_id` columns and the `REQUEST_SUBMITTED` audit row (which also
+records the role and whether the reporter is an assignee); no assignment, completion or approval
+changes. A receipt key owned by another person answers `404` before any eligibility work.
+
+**Personal work.** `pendingRequest` and `reviewState` in `GET /api/employee/my-work` now describe
+the task, so every assignee sees a pending report whoever filed it; `GET /api/employee/requests/mine`
+stays reporter-scoped. The project filter is its own paged, searchable endpoint, so no fixed slice
+decides which of a member's projects can be reached.
+
+**Parent selection.** `GET /api/manager/tasks/parent-options` applies search and paging to the
+eligible candidates (self/descendant excluded, depth limit applied) and returns each candidate's
+full `path`, the honest `total` and the selected option even when it is off-page. Save-time
+validation (`assertTaskPlacement`) remains authoritative.
+
+**Timeline.** `apps/api/src/services/timeline.ts` is a read-only projection for every signed-in
+role. It reuses the documented visibility policy (`canSeeRestrictedWork`, `INTERNAL`-only for others,
+archived hidden unless a manager asks) and the one counting rule (`taskScope`), so a project row's
+`openWork`/`completedWork` are leaf counts and never raw task rows. Dates keep their stored meaning:
+`plannedStart`/`forecastEnd`/`plannedEnd` are a plan, `committedDeadline`/`deadline` are commitments,
+`completedAt` is the recorded completion, and no date is invented from `createdAt`, today or an
+effort figure. A `childRange` is computed on the server from dated descendants inside the authorized
+filter (never from the rendered page), is labelled as a child range in the UI and is never counted
+as work or written back. A branch is bounded (`TIMELINE_TASK_LIMIT`) and reports `truncated` with
+the real `taskTotal`; project rows are paged with a real `total`.
+
+No migration, schema version, contract version or V1 file is involved.
+
 ## Corrective follow-up — 2026-11-03
 
 Member creation and request idempotency scopes include the verified member ID. Request authors

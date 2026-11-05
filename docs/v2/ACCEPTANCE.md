@@ -1,5 +1,94 @@
 # V2 Acceptance Record
 
+## Usability corrections: reporting by any authorized user, restored search, bounded selectors and a read-only timeline — 2026-11-05
+
+Implemented on local `HEAD f87fbde` (clean worktree at start, uncommitted changes at the end) after
+reading `AGENTS.md` and the V2 documents. Scope is V2 only: no V1 Apps Script file (`src/`,
+`dashboard-app/`, `shared/`, `scripts/`), no migration, no schema or contract version change, no
+Script Property, no deployment, no publication, no mail or Calendar activation and no live database
+was touched. The application name stays `設計・開発課 管理`; every database test used the
+disposable PostgreSQL fixture.
+
+**Approved completion-report policy change (the only authorization change)**
+
+| Role | Before | After |
+| --- | --- | --- |
+| MEMBER, assigned | may report completion | may report completion |
+| MEMBER, not assigned | refused | **may report completion for a task they can already reach** |
+| MANAGER, ADMIN | refused (MEMBER only) | **may report completion for accessible work** |
+| VIEWER | refused | refused (read-only) |
+| DEADLINE_CHANGE | assigned MEMBER only | unchanged |
+| Approval, direct completion, editing, reassignment, visibility | — | unchanged |
+
+The reporter is the verified session. `requester_name`/`requester_member_id` and the
+`REQUEST_SUBMITTED` audit row (with role and assignee flag) record who actually reported; the task
+owner, status, progress and revision do not change, and approval stays a separate
+`MANAGER`/`ADMIN` decision with separation of duty. The manager queue and the decision dialog show
+the reporter, and a legacy inbox request with no verified member is labelled *self-reported (not a
+verified account)*.
+
+**Behaviour changes by request**
+
+| Area | Before | After |
+| --- | --- | --- |
+| Completion report availability | member-only, task detail derived it from the member's own request history page | server-derived `GET /api/employee/tasks/:id/report-eligibility`; loading or a failed read leaves the action unavailable and states why |
+| Pending report indicator | visible only to the reporter | task-level: every authorized assignee sees `PENDING`, and a decision on a foreign report also refreshes their list |
+| My Work search | the visible box reset to empty on return while results stayed filtered | the input initialises from the remembered applied query; a mount-time debounce can no longer clear it |
+| My Work pagination | only the active page reset on a filter change | active **and** completed pages reset; a stale response cannot replace the current filtered results (filter identity is part of the cache key) |
+| My Work characters | `笆ｾ`/`笆ｸ`/`ﾂｷ` mojibake in arrows and separators | `▶`/`▼` and `·`, with no repository-wide rewrite |
+| My Work project filter | first 200 projects plus a client-side select | paged, searchable `project-filter` endpoint with the honest total and the selected project kept readable |
+| Change location | editing controls were always rendered | the collapsed section shows only the readable path, and the controls exist only while expanded (task **and** subproject forms); opening or closing changes nothing |
+| Contextual project name | after changing away from the opening project the name could stay blank/original | the name is read for the newly selected project |
+| Parent task selector | every task of the project downloaded into a client-side select | bounded server search/paging over eligible candidates, full paths, honest total, the selected option kept off-page, depth/exclusion rules applied on the server |
+| Modal focus | the first DOM match, which could be the header close button | explicit preferred target → first enabled field → footer action → other control; disabled/hidden fields skipped; focus returns to the invoker |
+| Navigation | `部門の作業` / Department work | `課の業務` / Section work (labels only; keys, routes and stored values unchanged) |
+| Timeline | none | **new** read-only screen under Section work: project summaries, an expandable project → subproject → task hierarchy, week/month/quarter, previous/today/next/fit, a legend, a today line, a text list, undated and inconsistent-date reporting, and a `View in timeline` entry on project detail |
+
+**API/contract additions (no migration, no schema change)**
+
+`GET /api/employee/tasks/:id/report-eligibility`, `GET /api/employee/my-work/project-filter` and
+`GET /api/work/timeline` are new; `POST /api/employee/requests` accepts MEMBER/MANAGER/ADMIN for
+`COMPLETION_REPORT`; `GET /api/employee/my-work` returns task-level `pendingRequest`/`reviewState`
+and no longer a fixed `projects` array; `GET /api/manager/tasks/parent-options` is paged and
+searchable. Documented in [API.md](API.md), [ARCHITECTURE.md](ARCHITECTURE.md),
+[SECURITY.md](SECURITY.md) and [PERFORMANCE.md](PERFORMANCE.md).
+
+**Gate results (executed locally, 2026-11-05)**
+
+| Gate | Command | Result |
+| --- | --- | --- |
+| Type check | `npm run typecheck` | PASS — api, web, worker, contracts, db, domain, i18n, benchmark, migration |
+| Lint (V2) | `npm run lint:v2` | PASS |
+| Unit/integration tests | `npm test` (`REQUIRE_DATABASE=1`) | PASS — V2 **38 files, 453 passed, 1 skipped** (the pre-existing backup-container skip) and the untouched V1 suite **776 tests, 0 failed** |
+| Source validation | `npm run validate:v2` | PASS — 174 files |
+| Build | `npm run build` | PASS — api, web, worker, migration |
+| Production-artifact and browser smoke | `npm run test:browser` | PASS — migrated schema 11 artifact, booted API, worker job, and Chromium journeys including the new read-only timeline (project entry, hierarchy, legend, all-project summaries, 390 px labels) |
+| Reporting matrix | `apps/api/test/reporting.test.ts` (14) | PASS — assigned and non-assigned MEMBER, MANAGER, ADMIN, VIEWER refusal, restricted `404`, spoofing rejected, reporter ≠ assignee, task unchanged, deadline rule, container/completed/cancelled refusal, closed switch, capability reasons, pending independent of history paging, idempotent replay, foreign replay `404`, separate approval |
+| Timeline | `apps/api/test/timeline.test.ts` (9) | PASS — permitted projects only, plan/deadline/counting/range separate, page-size-independent range, manager restricted + archived opt-in, responsibility filter, hierarchy with direct/nested/deadline-only/undated/inconsistent rows, cancelled manager-only, completed toggle, `404` for restricted, no mutation |
+| Selectors | `apps/api/test/parent-options.test.ts` (6) | PASS — paging without loss, search beyond page 1, full paths for identical names, self/descendant exclusion, selected option off-page, depth limit, MEMBER refused, validation |
+| Policy units | `packages/domain/test/submission-policy.test.ts` (7) | PASS |
+| Usability and timeline UI | `apps/web/test/usability-corrections.test.tsx` (11), `apps/web/test/task-parent-selector.test.tsx` (1) | PASS — search restoration and page resets, clean characters, collapsed location, renamed-project resolution, modal focus order/disabled fields/preferred target, timeline summaries/expansion/undated/inconsistent/text list, no write request |
+| Updated existing suites | `apps/api/test/api.test.ts`, `apps/api/test/roles-and-work.test.ts`, `apps/web/test/usability.test.tsx`, `apps/web/test/workflows.test.tsx`, `apps/web/test/readability.test.tsx` | PASS — assertions updated for the approved policy, the task-level pending indicator, the new project-filter endpoint, the collapsed location section, the Section work label and the manager's additional report action |
+
+**Defects found and fixed during this release**
+
+| Finding | Evidence | Fix |
+| --- | --- | --- |
+| A second task form in the same session offered no parent, because the option list was served from a cache entry that predated the task the same session had just created | `npm run test:browser` failed at `selectOption` with an option list of 0 while the server returned 1 candidate in a direct call | `keys.parentOptions` is invalidated by every task save (and on removal), and the selector issues no request until a project is chosen |
+| The same stale-cache class applied to the timeline after a task or project change | inspection of the invalidation lists | `keys.timeline` is invalidated by task, project and decision saves |
+| A long row name collapsed to one character next to a badge in the timeline name column | mobile screenshot of the timeline journey | `.tl-label` keeps a readable minimum width and badges no longer shrink |
+
+**Not run / limitations**
+
+- `npm run test:lan` was not run (needs the LAN host and a live LAN database).
+- No live Workspace, Google, mailbox, Drive or production database was used; nothing was deployed,
+  migrated or activated.
+- Completion reports are verified by API and component tests plus the existing manager journey, not
+  by a clicked browser scenario for each role; the timeline *is* covered by a Chromium journey.
+- The timeline shows a child summary span derived from dated descendants; it is a display range, not
+  a stored plan, and tasks with no stored dates appear in a separate undated section.
+- `docs/PRODUCTION_READINESS.md` remains **NOT APPROVED FOR PRODUCTION**.
+
 ## Usability release: guided creation, contextual work, findability and readable administration — 2026-11-04
 
 Implemented on local `HEAD 4690f42` (uncommitted working tree) after reading `AGENTS.md` and the

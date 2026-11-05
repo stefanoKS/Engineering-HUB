@@ -20,6 +20,7 @@ import {
   insertRequest,
   listHolidays,
   listRequests,
+  listSubprojects,
   lockRequest,
   updateTask
 } from '@eh/db';
@@ -29,7 +30,10 @@ import {
   assertCompletableByDecision,
   assertCompletionDecisionRole,
   assertReportable,
-  canSubmitCompletionRequest,
+  canReadProjectVisibility,
+  canReportCompletion,
+  canRequestDeadlineChange,
+  canSeeRestrictedWork,
   createCalendar,
   displayTaskStatus,
   effectiveEmailMode,
@@ -38,8 +42,12 @@ import {
   requireRole,
   settingFlag,
   SETTING_KEYS,
+  submissionBlockReasons,
+  submissionRefusal,
   submissionSnapshot,
   validateSubmission,
+  type SubmissionAssessment,
+  type SubmissionBlockReason,
   type TaskSnapshot
 } from '@eh/domain';
 import { audit, enqueueJob, requireConfirmation, requireTypedConfirmation, runIdempotent, type ServiceCtx } from './common';
@@ -239,46 +247,170 @@ export async function employeeSnapshot(ctx: ServiceCtx) {
 }
 
 /**
+ * One assessment shared by the reported capability and the submission itself.
+ *
+ * A completion report may be filed for work the reporter can reach even when they are not an
+ * assignee; anything else keeps the assigned-MEMBER rule. A capability answer is never authority:
+ * `submitRequest` re-reads this state inside its own request before writing.
+ */
+async function assessSubmission(
+  ctx: ServiceCtx,
+  task: { taskId: string; projectId: string; subprojectId: string | null; status: string; ownerMemberId: string | null },
+  project: { status: string; dashboardVisibility: string; archivedAt: string | null },
+  requestType: 'COMPLETION_REPORT' | 'DEADLINE_CHANGE',
+  submissionEnabled: boolean
+): Promise<SubmissionAssessment> {
+  const [assignment, childRow, pendingRow, subprojects] = await Promise.all([
+    ctx.db.one<{ assigned: boolean }>(
+      `SELECT (owner_member_id = $2 OR EXISTS (
+                 SELECT 1 FROM task_assignees a
+                  WHERE a.task_id = $1 AND a.member_id = $2 AND a.removed_at IS NULL)) AS assigned
+         FROM tasks WHERE task_id = $1`,
+      [task.taskId, ctx.identity.memberId]
+    ),
+    ctx.db.one<{ count: string }>(
+      'SELECT count(*)::text AS count FROM tasks WHERE parent_task_id = $1 AND deleted_at IS NULL',
+      [task.taskId]
+    ),
+    ctx.db.one<{ count: string }>(
+      `SELECT count(*)::text AS count FROM task_requests
+        WHERE task_id = $1 AND request_type = 'COMPLETION_REPORT' AND status IN ('PENDING','PROCESSING')`,
+      [task.taskId]
+    ),
+    task.subprojectId
+      ? listSubprojects(ctx.db, task.projectId)
+      : Promise.resolve([])
+  ]);
+  const assigned = !!assignment?.assigned;
+  const subprojectArchived = (() => {
+    if (!task.subprojectId) return false;
+    const byId = new Map(subprojects.map((entry) => [entry.subprojectId, entry]));
+    let node = byId.get(task.subprojectId);
+    const seen = new Set<string>();
+    let guard = 0;
+    while (node) {
+      if (seen.has(node.subprojectId)) return true;
+      seen.add(node.subprojectId);
+      if (node.status === 'Archived') return true;
+      if (guard++ > 20) return true;
+      node = node.parentSubprojectId ? byId.get(node.parentSubprojectId) : undefined;
+    }
+    return false;
+  })();
+  // An assignment already gives the member access to their own work; otherwise the project has to
+  // be readable under the documented visibility policy. Reporting never widens visibility.
+  const visible =
+    assigned ||
+    canSeeRestrictedWork(ctx.identity) ||
+    canReadProjectVisibility(ctx.identity, project.dashboardVisibility);
+  return {
+    requestType,
+    mayReportCompletion: canReportCompletion(ctx.identity),
+    mayRequestDeadlineChange: canRequestDeadlineChange(ctx.identity),
+    assigned,
+    visible,
+    submissionEnabled,
+    pending: Number(pendingRow?.count ?? 0) > 0,
+    task: {
+      status: task.status,
+      container: Number(childRow?.count ?? 0) > 0,
+      archived: project.status === 'Archived' || !!project.archivedAt || subprojectArchived
+    }
+  };
+}
+
+function refusalFor(reason: SubmissionBlockReason): DomainError {
+  const refusal = submissionRefusal(reason);
+  const messages: Record<SubmissionBlockReason, string> = {
+    ROLE: 'This account may not file this request',
+    NOT_VISIBLE: 'This task is not visible to you',
+    ARCHIVED: 'Archived work cannot be reported',
+    NOT_ASSIGNED: 'Only your assigned work can be requested',
+    CONTAINER: 'A task with children is organisation only; its completion is derived from leaf work',
+    COMPLETED: 'This task is already complete',
+    CANCELLED: 'This task is cancelled',
+    PENDING: 'A completion report for this task is already pending',
+    SUBMISSION_DISABLED: 'Request submission is closed'
+  };
+  if (reason === 'NOT_VISIBLE') {
+    // An unreadable task answers like an unknown one, so a refusal never confirms that it exists.
+    return new DomainError('NOT_FOUND', `Task not found`, { reason });
+  }
+  return new DomainError(refusal.code, messages[reason], { reason });
+}
+
+/**
+ * The completion-report capability for one task, derived on the server.
+ *
+ * A failed or missing answer is never treated as "allowed": the action stays unavailable until an
+ * eligible answer arrives, and the submission re-checks everything anyway.
+ */
+export async function reportEligibility(
+  ctx: ServiceCtx,
+  taskId: string
+): Promise<{ taskId: string; eligible: boolean; reasons: SubmissionBlockReason[]; submissionEnabled: boolean; reporterName: string }> {
+  requireRole(ctx.identity, 'VIEWER');
+  const settings = await getSettings(ctx.db);
+  const submissionEnabled = settingFlag(settings, SETTING_KEYS.REQUEST_SUBMISSION_ENABLED, false);
+  const task = await getTask(ctx.db, taskId);
+  if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  const project = await getProject(ctx.db, task.projectId);
+  if (!project) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  const assessment = await assessSubmission(ctx, task, project, 'COMPLETION_REPORT', submissionEnabled);
+  if (!assessment.visible && !canSeeRestrictedWork(ctx.identity)) {
+    // An unreadable task answers like an unknown one, so a refusal never confirms that it exists.
+    throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  }
+  const reasons = submissionBlockReasons(assessment);
+  return {
+    taskId: task.taskId,
+    eligible: reasons.length === 0,
+    reasons,
+    submissionEnabled,
+    reporterName: ctx.identity.name
+  };
+}
+
+/**
  * Employee submission is non-blocking and idempotent. The endpoint answers once the request is
  * durably stored; an unobservable outcome is reported as unknown by the client, never retried
  * automatically and never reported as success.
+ *
+ * The reporter is the verified session: a browser-supplied name, member ID or role is ignored.
  */
 export async function submitRequest(
   ctx: ServiceCtx,
   body: z.infer<typeof SubmitRequestBody>
 ): Promise<{ requestId: string; state: 'RECEIVED' | 'DUPLICATE'; requestType: string; taskId: string; submittedAt: string }> {
-  if (!canSubmitCompletionRequest(ctx.identity)) {
-    throw new DomainError('AUTHORIZATION_DENIED', 'Only a MEMBER files a request for their own work');
-  }
+  requireRole(ctx.identity, 'VIEWER');
   const settings = await getSettings(ctx.db);
-  if (!settingFlag(settings, SETTING_KEYS.REQUEST_SUBMISSION_ENABLED, false)) {
-    throw new DomainError('REQUEST_SUBMISSION_CLOSED', 'Request submission is closed');
-  }
+  const submissionEnabled = settingFlag(settings, SETTING_KEYS.REQUEST_SUBMISSION_ENABLED, false);
   const task = await getTask(ctx.db, body.taskId);
   if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${body.taskId}`);
-  const assigned = await ctx.db.one(
-    `SELECT task_id FROM tasks WHERE task_id = $1 AND deleted_at IS NULL
-       AND (owner_member_id = $2 OR EXISTS (
-         SELECT 1 FROM task_assignees WHERE task_id = $1 AND member_id = $2 AND removed_at IS NULL))`,
-    [task.taskId, ctx.identity.memberId]
-  );
-  if (!assigned) {
-    throw new DomainError('AUTHORIZATION_DENIED', 'Only your assigned work can be requested');
-  }
   const project = await getProject(ctx.db, task.projectId);
   if (!project) {
     throw new DomainError('NOT_FOUND', 'Project not found');
   }
-  const childRow = await ctx.db.one<{ count: string }>(
-    'SELECT count(*)::text AS count FROM tasks WHERE parent_task_id = $1 AND deleted_at IS NULL',
-    [task.taskId]
-  );
+  // A key owned by another person answers as unknown before any eligibility or idempotency work,
+  // so a foreign receipt can neither be read nor replayed. A key of my own replays its answer.
+  const receipt = await getRequestByInboxId(ctx.db, body.clientRequestId);
+  if (receipt && receipt.requesterMemberId !== ctx.identity.memberId) {
+    throw new DomainError('NOT_FOUND', 'Request not found');
+  }
+  const assessment = receipt
+    ? null
+    : await assessSubmission(ctx, task, project, body.requestType, submissionEnabled);
+  if (assessment) {
+    const reasons = submissionBlockReasons(assessment);
+    const firstReason = reasons[0];
+    if (firstReason) throw refusalFor(firstReason);
+  }
   const snapshot: TaskSnapshot = {
     taskId: task.taskId,
     revision: task.revision,
     dueDate: task.dueDate,
     status: task.status,
-    container: Number(childRow?.count ?? 0) > 0
+    container: assessment?.task.container ?? false
   };
   assertReportable(body.requestType, snapshot);
   validateSubmission({
@@ -331,7 +463,12 @@ export async function submitRequest(
         newValue: {
           taskId: task.taskId,
           requestType: body.requestType,
+          // The reporter is the verified session, recorded beside the assignment it does not own.
           requesterName: created.requesterName,
+          requesterMemberId: ctx.identity.memberId,
+          reporterRole: ctx.identity.role,
+          reporterIsAssignee: assessment?.assigned ?? false,
+          taskOwnerMemberId: task.ownerMemberId,
           snapshotVersion: snap.snapshotVersion
         }
       });

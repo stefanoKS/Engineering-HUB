@@ -26,6 +26,7 @@ import {
   listSubprojects,
   listTaskAssignees,
   listTaskNodes,
+  listTaskSummariesForProject,
   setDependencies,
   setEffectiveAssignees,
   taskRecordsForDependencyCheck,
@@ -34,6 +35,7 @@ import {
 } from '@eh/db';
 import {
   DomainError,
+  MAX_TASK_DEPTH,
   applyTaskPlan,
   assertDirectCompletionAllowed,
   assertNoDependencyCycle,
@@ -626,6 +628,94 @@ export async function overrideComplete(  ctx: ServiceCtx,
     });
     return next;
   });
+}
+
+export type ParentTaskOption = {
+  id: string;
+  name: string;
+  /** The full project-relative hierarchy path, so two identically named branches stay distinct. */
+  path: string;
+  depth: number;
+  parentTaskId: string | null;
+  container: boolean;
+  status: string;
+};
+
+/**
+ * A bounded, searchable parent-task selection for the task form.
+ *
+ * Search and paging apply to the eligible candidates, never to an already truncated list, so a
+ * matching parent beyond the first page stays reachable. The submitted value is still validated by
+ * `assertTaskPlacement`; this read only decides what the picker may offer.
+ */
+export async function parentTaskOptions(
+  ctx: ServiceCtx,
+  input: {
+    projectId: string;
+    subprojectId?: string;
+    excludeTaskId?: string;
+    query?: string;
+    page: number;
+    pageSize?: number;
+    selectedId?: string;
+  }
+): Promise<{ items: ParentTaskOption[]; total: number; page: number; pageSize: number; totalPages: number; selected: ParentTaskOption | null }> {
+  requireRole(ctx.identity, WRITE_ROLES);
+  const pageSize = Math.min(Math.max(input.pageSize ?? 25, 1), 100);
+  const summaries = await listTaskSummariesForProject(ctx.db, input.projectId);
+  const byId = new Map(summaries.map((summary) => [summary.taskId, summary]));
+
+  const pathOf = (taskId: string): string => {
+    const names: string[] = [];
+    const seen = new Set<string>();
+    let node = byId.get(taskId);
+    while (node && !seen.has(node.taskId)) {
+      seen.add(node.taskId);
+      names.unshift(node.taskName);
+      node = node.parentTaskId ? byId.get(node.parentTaskId) : undefined;
+    }
+    return names.join(' / ');
+  };
+  const optionOf = (summary: (typeof summaries)[number]): ParentTaskOption => ({
+    id: summary.taskId,
+    name: summary.taskName,
+    path: pathOf(summary.taskId),
+    depth: summary.depth,
+    parentTaskId: summary.parentTaskId,
+    container: summary.container,
+    status: summary.status
+  });
+
+  // The edited task and its whole subtree can never become its own parent.
+  const excluded = new Set<string>(input.excludeTaskId ? [input.excludeTaskId] : []);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const summary of summaries) {
+      if (summary.parentTaskId && excluded.has(summary.parentTaskId) && !excluded.has(summary.taskId)) {
+        excluded.add(summary.taskId);
+        changed = true;
+      }
+    }
+  }
+  const needle = (input.query ?? '').trim().toLowerCase();
+  const eligible = summaries
+    .filter((summary) => !excluded.has(summary.taskId))
+    .filter((summary) => summary.depth < MAX_TASK_DEPTH)
+    .filter((summary) => input.subprojectId === undefined || (summary.subprojectId ?? '') === input.subprojectId)
+    .filter((summary) => !needle || summary.taskName.toLowerCase().includes(needle) || pathOf(summary.taskId).toLowerCase().includes(needle));
+  const total = eligible.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const page = Math.min(Math.max(input.page, 1), totalPages);
+  const selectedSource = input.selectedId ? byId.get(input.selectedId) : undefined;
+  return {
+    items: eligible.slice((page - 1) * pageSize, page * pageSize).map(optionOf),
+    total,
+    page,
+    pageSize,
+    totalPages,
+    selected: selectedSource ? optionOf(selectedSource) : null
+  };
 }
 
 export async function taskDetail(ctx: ServiceCtx, taskId: string): Promise<TaskDetail> {

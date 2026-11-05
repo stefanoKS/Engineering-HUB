@@ -1,5 +1,22 @@
 # Performance
 
+## Timeline and bounded selector reads — 2026-11-05
+
+No live or large-dataset measurement was taken for this release; the numbers below are the
+documented query shape, not a latency claim. `docs/PRODUCTION_READINESS.md` stays **NOT APPROVED
+FOR PRODUCTION**.
+
+| Read | Queries per request | Notes |
+| --- | --- | --- |
+| `GET /api/work/timeline` (project summaries) | 1 paged project query + 1 task aggregate + 1 subproject aggregate for the page's project ids + the memoized `taskScope` pass | The aggregate covers the whole authorized scope of those projects, so the summary span cannot change with the page size. No per-project query. |
+| `GET /api/work/timeline?projectId=…` (branch) | 1 project, 1 subproject list, 1 task list, 1 `completed_at` list for that project + memoized `taskScope` | Bounded by `TIMELINE_TASK_LIMIT` (2000) with an honest `truncated` flag and `taskTotal`; ranges are computed in memory once per branch. |
+| `GET /api/manager/tasks/parent-options` | 1 project-scoped task list, then in-memory filter/page | Search and paging apply before the cut, so a candidate beyond the first page stays reachable; no query per option. |
+| `GET /api/employee/my-work/project-filter` | 1 count + 1 grouped page (optional 1 selected row) | Replaces a fixed 200-row slice; the page is bounded by `pageSize`. |
+| `GET /api/employee/tasks/:id/report-eligibility` | 1 task, 1 project, 1 assignment, 1 child count, 1 pending count, 1 subproject list when the task sits in a subproject | One assessment, shared with the submission path. |
+
+The browser holds the timeline selection, zoom, expansion and window in page memory only; no
+private manager data is persisted.
+
 ## Member explorer measurement — 2026-11-04
 
 The member read-only endpoints were added to the harness (`tools/benchmark`) and measured on the

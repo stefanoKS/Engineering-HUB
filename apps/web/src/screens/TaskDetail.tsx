@@ -1,7 +1,7 @@
 /** Task detail: the authoritative record, its relationships and the reviewed actions. */
 import { useState } from 'react';
 import { MAX_TASK_DEPTH } from '@eh/domain';
-import type { Actor, MemberRequests, Reference, Task, TaskDetail } from '@eh/contracts';
+import type { Actor, Reference, ReportEligibility, Task, TaskDetail } from '@eh/contracts';
 import { api } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
@@ -16,7 +16,7 @@ import {
   statusTone
 } from '../components/ui';
 import { ConfirmDialog } from '../components/forms';
-import { CompletionReportPanel } from '../components/completion-report';
+import { CompletionReportPanel, reportReasonLabel } from '../components/completion-report';
 import { TaskForm } from './TaskForm';
 import { displayTone } from './Tasks';
 import { formatSkillGrade, projectColor } from '@eh/domain';
@@ -48,16 +48,17 @@ export function TaskDetailScreen({
   const [notice, setNotice] = useState('');
   const endpoint = readOnly ? `/api/work/tasks/${taskId}` : `/api/manager/tasks/${taskId}`;
   const canManage = !readOnly && (actor.role === 'ADMIN' || actor.role === 'MANAGER');
-  const canReport = readOnly && actor.role === 'MEMBER';
+  // A completion report may be filed by any authenticated MEMBER, MANAGER or ADMIN; a VIEWER stays
+  // read-only. Eligibility itself is a server answer, never a conclusion drawn here.
+  const canReport = actor.role !== 'VIEWER';
   const detail = useQuery<TaskDetail>(keys.task(taskId), () => api.get<TaskDetail>(endpoint));
   const references = useQuery<References>(keys.references, () =>
     readOnly ? Promise.resolve({ members: [], skills: [], subprojects: [] }) : api.get<References>('/api/manager/references')
   );
-  // A member's own request receipts decide whether a completion report is already pending. The key
-  // is shared with My Work, so both entry points read one authorized payload.
-  const myRequests = useQuery<MemberRequests>(
-    keys.myRequests,
-    () => api.get<MemberRequests>('/api/employee/requests/mine'),
+  // The server decides whether a report is possible for this task and this reader.
+  const eligibility = useQuery<ReportEligibility>(
+    keys.reportEligibility(taskId),
+    () => api.get<ReportEligibility>(`/api/employee/tasks/${taskId}/report-eligibility`),
     { enabled: canReport }
   );
 
@@ -73,17 +74,10 @@ export function TaskDetailScreen({
     : detail.data.depth >= MAX_TASK_DEPTH
       ? t('tasks.addChildBlockedDepth')
       : '';
-  const pendingRequest = (myRequests.data?.items ?? []).some(
-    (request) => request.taskId === taskId && ['PENDING', 'PROCESSING'].includes(request.status)
-  );
-  const reportBlocked: string[] = [];
-  if (canReport) {
-    if (detail.data.children.length > 0) reportBlocked.push(t('report.blocked.container'));
-    if (record.displayStatus === 'DONE') reportBlocked.push(t('report.blocked.done'));
-    if (record.displayStatus === 'CANCELLED') reportBlocked.push(t('report.blocked.cancelled'));
-    if (pendingRequest) reportBlocked.push(t('report.blocked.pending'));
-    if (myRequests.data && !myRequests.data.submissionEnabled) reportBlocked.push(t('report.blocked.disabled'));
-  }
+  // Eligibility is only "available" when the server answered and listed no refusal.
+  const reportBlocked = (eligibility.data?.reasons ?? []).map((reason) => t(reportReasonLabel(reason)));
+  const reportReady = eligibility.data?.eligible === true;
+  const assigneeNames = detail.data.assignees.map((entry) => entry.name);
   return (
     <div className="screen">
       <BackButton actor={actor} fallback="all-work" disabled={editing || addingChild || action !== null} />
@@ -329,13 +323,35 @@ export function TaskDetailScreen({
             <button
               type="button"
               className="button"
-              disabled={reportBlocked.length > 0 || reporting}
+              disabled={!reportReady || reporting}
               onClick={() => setReporting(true)}
             >
               {t('report.heading')}
             </button>
           }
         >
+          <p className="muted small">
+            {assigneeNames.length > 0
+              ? t('report.assignedTo', { names: assigneeNames.join(', ') })
+              : t('report.noAssignee')}
+          </p>
+          {eligibility.data ? (
+            <p className="muted small">{t('report.reporter', { name: eligibility.data.reporterName })}</p>
+          ) : null}
+          {canManage ? (
+            <p className="muted small">{t('tasks.completeDirectBody')}</p>
+          ) : null}
+          {!eligibility.data && eligibility.loading ? (
+            <p className="muted small">{t('report.eligibilityLoading')}</p>
+          ) : null}
+          {eligibility.error ? (
+            <div className="banner warning" role="status">
+              <span>{t('report.eligibilityUnavailable')}</span>
+              <button type="button" className="link-button" onClick={() => eligibility.refresh()}>
+                {t('state.retry')}
+              </button>
+            </div>
+          ) : null}
           {reportBlocked.length > 0 ? (
             <div className="validation-summary" role="status">
               <ul>
@@ -344,17 +360,18 @@ export function TaskDetailScreen({
                 ))}
               </ul>
             </div>
-          ) : (
+          ) : reportReady ? (
             <p className="muted small">{t('myWork.completionHeading')}</p>
-          )}
+          ) : null}
           {reporting ? (
             <CompletionReportPanel
               taskId={record.taskId}
               blockedReasons={reportBlocked}
+              reporterName={eligibility.data?.reporterName}
               onDismiss={() => setReporting(false)}
               onSubmitted={() => {
                 detail.refresh();
-                myRequests.refresh();
+                eligibility.refresh();
               }}
             />
           ) : null}
@@ -373,7 +390,7 @@ export function TaskDetailScreen({
           onClose={() => setEditing(false)}
           onSaved={(task: Task) => {
             setEditing(false);
-            queryCache.invalidate([keys.task(task.taskId), keys.tasks]);
+            queryCache.invalidate([keys.task(task.taskId), keys.tasks, keys.parentOptions, keys.timeline]);
           }}
         />
       ) : null}
@@ -396,7 +413,9 @@ export function TaskDetailScreen({
               keys.taskIndex,
               keys.overview,
               keys.project(record.projectId),
-              keys.myWork
+              keys.myWork,
+              keys.parentOptions,
+              keys.timeline
             ]);
             detail.refresh();
           }}
@@ -441,7 +460,7 @@ export function TaskDetailScreen({
               });
             }
             setAction(null);
-            queryCache.invalidate([keys.task(record.taskId), keys.tasks, keys.taskIndex, keys.overview, keys.project(record.projectId), keys.myWork]);
+            queryCache.invalidate([keys.task(record.taskId), keys.tasks, keys.taskIndex, keys.overview, keys.project(record.projectId), keys.myWork, keys.timeline]);
           }}
         />
       ) : null}
@@ -458,7 +477,9 @@ export function TaskDetailScreen({
               keys.taskIndex,
               keys.overview,
               keys.project(record.projectId),
-              keys.myWork
+              keys.myWork,
+              keys.parentOptions,
+              keys.timeline
             ]);
             window.location.hash = '#/all-work';
           }}

@@ -1,21 +1,36 @@
-﻿/**
- * My Assigned Work: 閾ｪ蛻・・諡・ｽ薙ち繧ｹ繧ｯ.
+/**
+ * My Assigned Work: 自分の担当タスク.
  *
  * The list is always the signed-in member's own work, resolved on the server from the verified
  * session - never from a name, an employee number or a task owner sent by the browser. A manager
- * keeps this personal list beside the departmental one; a MEMBER also files and reports work here;
- * a VIEWER sees the same list read-only.
+ * keeps this personal list beside the departmental one; a MEMBER, a MANAGER and an ADMIN report
+ * completion here (a VIEWER sees the same list read-only).
  */
 import { useEffect, useMemo, useState } from 'react';
-import type { Actor, MemberRequest, MemberRequests, MyWorkList, MyWorkProjectOptions } from '@eh/contracts';
-import { api } from '../api/client';
+import type {
+  Actor,
+  MemberRequest,
+  MemberRequests,
+  MyWorkList,
+  MyWorkProjectFilter,
+  MyWorkProjectOptions
+} from '@eh/contracts';
+import { api, queryString } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
 import { Badge, DataFreshness, ErrorBox } from '../components/ui';
 import { DeadlineCell } from '../components/deadline';
 import { MemberSubprojectForm, subprojectPath } from '../components/member-subproject-form';
 import { CompletionReportPanel } from '../components/completion-report';
-import { ConfirmDialog, createIdempotencyKey, SelectInput, TextInput, useIdempotencyKey, useSave } from '../components/forms';
+import {
+  ConfirmDialog,
+  createIdempotencyKey,
+  RemoteSelect,
+  SelectInput,
+  TextInput,
+  useIdempotencyKey,
+  useSave
+} from '../components/forms';
 import { useRouteMemoryState } from '../state/navigation';
 
 const PAGE_SIZE = 25;
@@ -41,23 +56,29 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
   const [completedPage, setCompletedPage] = useRouteMemoryState('my-work:completed-page', 1);
   const [completedExpanded, setCompletedExpanded] = useRouteMemoryState('my-work:completed-expanded', false);
   // Filters live in route memory only: a filter is never persisted in the browser.
-  const [search, setSearch] = useState('');
+  // The visible input starts from the remembered applied query, so returning from a task detail
+  // restores the search box instead of clearing the results it describes.
   const [query, setQuery] = useRouteMemoryState('my-work:query', '');
+  const [search, setSearch] = useState(query);
   const [projectId, setProjectId] = useRouteMemoryState('my-work:project', '');
   const [overdue, setOverdue] = useRouteMemoryState('my-work:overdue', false);
   const [dueThisWeek, setDueThisWeek] = useRouteMemoryState('my-work:due-this-week', false);
   const [awaitingReview, setAwaitingReview] = useRouteMemoryState('my-work:awaiting-review', false);
   const canCreate = actor.role === 'MEMBER';
-  const canReport = actor.role === 'MEMBER';
+  // Any authenticated MEMBER, MANAGER or ADMIN may report completion for accessible work.
+  const canReport = actor.role !== 'VIEWER';
 
+  // A debounced search change resets both sections: a page number from the previous result set
+  // never addresses the new one.
   useEffect(() => {
     if (search === query) return undefined;
     const timer = setTimeout(() => {
       setQuery(search);
       setPage(1);
+      setCompletedPage(1);
     }, 250);
     return () => clearTimeout(timer);
-  }, [search, query]);
+  }, [search, query, setQuery, setPage, setCompletedPage]);
 
   const filterParams = {
     query: query || undefined,
@@ -105,8 +126,7 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
             total: 0,
             activeTotal: list.data?.activeTotal ?? 0,
             completedTotal: list.data?.completedTotal ?? 0,
-            unfilteredActiveTotal: list.data?.unfilteredActiveTotal ?? 0,
-            projects: list.data?.projects ?? []
+            unfilteredActiveTotal: list.data?.unfilteredActiveTotal ?? 0
           })
   );
   const projects = useQuery<MyWorkProjectOptions>(keys.myProjects, () =>
@@ -133,7 +153,6 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
   const unfilteredTotal = list.data?.unfilteredActiveTotal ?? total;
   const items = list.data?.items ?? [];
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const projectOptions = list.data?.projects ?? [];
 
   return (
     <div className="screen stack">
@@ -238,18 +257,41 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
               onChange={(event) => setSearch(event.target.value)}
             />
           </label>
-          <label className="field">
+          <div className="field">
             <span className="field-label">{t('myWork.filter.project')}</span>
-            <SelectInput
+            <RemoteSelect
               value={projectId}
+              optionsKey="my-work:project-filter"
               onChange={(value) => {
                 setProjectId(value);
                 setPage(1);
+                setCompletedPage(1);
               }}
               allowEmpty={t('filter.all')}
-              options={projectOptions.map((entry) => ({ value: entry.projectId, label: entry.projectName }))}
+              searchLabel={t('myWork.filter.projectSearch')}
+              selectLabel={t('myWork.filter.project')}
+              load={async ({ query: projectQuery, page: projectPage }) => {
+                const result = await api.get<MyWorkProjectFilter>(
+                  '/api/employee/my-work/project-filter' +
+                    queryString({
+                      query: projectQuery,
+                      page: projectPage,
+                      pageSize: 25,
+                      selectedId: projectId
+                    })
+                );
+                return {
+                  items: result.items.map((entry) => ({ value: entry.projectId, label: entry.projectName })),
+                  total: result.total,
+                  page: result.page,
+                  totalPages: result.totalPages,
+                  selected: result.selected
+                    ? { value: result.selected.projectId, label: result.selected.projectName }
+                    : null
+                };
+              }}
             />
-          </label>
+          </div>
         </div>
         <div className="filters">
           <label className="checkbox">
@@ -259,6 +301,7 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
               onChange={(event) => {
                 setOverdue(event.target.checked);
                 setPage(1);
+                setCompletedPage(1);
               }}
             />
             {t('myWork.filter.overdue')}
@@ -270,6 +313,7 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
               onChange={(event) => {
                 setDueThisWeek(event.target.checked);
                 setPage(1);
+                setCompletedPage(1);
               }}
             />
             {t('myWork.filter.dueThisWeek')}
@@ -281,6 +325,7 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
               onChange={(event) => {
                 setAwaitingReview(event.target.checked);
                 setPage(1);
+                setCompletedPage(1);
               }}
             />
             {t('myWork.filter.awaitingReview')}
@@ -293,14 +338,16 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
         </div>
         {filtersActive ? (
           <p className="muted small">
-            {t('myWork.filter.active')}: {t('myWork.matching', { n: total })} ﾂｷ {t('myWork.allActive', { n: unfilteredTotal })}
+            {t('myWork.filter.active')}: {t('myWork.matching', { n: total })} · {t('myWork.allActive', { n: unfilteredTotal })}
           </p>
         ) : null}
       </section>
 
       <DataFreshness snapshot={false} />
 
-      {items.length === 0 ? (
+      {list.loading && !list.data ? <p className="muted">{t('myWork.loading')}</p> : null}
+
+      {!list.loading && items.length === 0 ? (
         <p className="muted">
           {filtersActive && unfilteredTotal > 0 ? t('myWork.noMatches') : t('myWork.noAssignments')}
         </p>
@@ -316,6 +363,7 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
           key={`${item.taskId}:${item.revision}`}
           item={item}
           canReport={canReport}
+          reporterName={actor.name}
           canManage={actor.role === 'ADMIN' || actor.role === 'MANAGER'}
           submissionEnabled={requests.data?.submissionEnabled ?? false}
           onChanged={refreshAll}
@@ -342,7 +390,7 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
           aria-expanded={completedExpanded}
           onClick={() => setCompletedExpanded((value) => !value)}
         >
-          {completedExpanded ? '笆ｾ' : '笆ｸ'} {t('projects.completedTasks')} ({completedTotal})
+          {completedExpanded ? '▼' : '▶'} {t('projects.completedTasks')} ({completedTotal})
         </button>
         {completedExpanded ? (
           <>
@@ -353,6 +401,7 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
                   key={`${item.taskId}:${item.revision}`}
                   item={item}
                   canReport={false}
+                  reporterName={actor.name}
                   canManage={false}
                   submissionEnabled={false}
                   onChanged={refreshAll}
@@ -512,12 +561,14 @@ function CreateTaskCard({
 function WorkRow({
   item,
   canReport,
+  reporterName,
   canManage,
   submissionEnabled,
   onChanged
 }: {
   item: MyWorkList['items'][number];
   canReport: boolean;
+  reporterName: string;
   canManage: boolean;
   submissionEnabled: boolean;
   onChanged: () => void;
@@ -547,7 +598,7 @@ function WorkRow({
       </h3>
       <p className="my-work-row-meta muted small">
         <a href={`#/project/${item.projectId}`}>{item.projectName}</a>
-        {item.subprojectName ? ` / ${item.subprojectName}` : ''} ﾂｷ {label('priority', item.priority)}
+        {item.subprojectName ? ` / ${item.subprojectName}` : ''} · {label('priority', item.priority)}
       </p>
       </div>
       <div className="my-work-row-status">
@@ -610,7 +661,7 @@ function WorkRow({
               {
                 onSuccess: () => {
                   setCompleting(false);
-                  queryCache.invalidate([keys.myWork, keys.tasks, keys.taskIndex, keys.overview, keys.task(item.taskId), keys.project(item.projectId)]);
+                  queryCache.invalidate([keys.myWork, keys.tasks, keys.taskIndex, keys.overview, keys.task(item.taskId), keys.project(item.projectId), keys.timeline]);
                   onChanged();
                 }
               }
@@ -623,6 +674,7 @@ function WorkRow({
         <CompletionReportPanel
           taskId={item.taskId}
           blockedReasons={reportBlocked}
+          reporterName={reporterName}
           onDismiss={() => {
             setReporting(false);
             onChanged();
@@ -666,9 +718,9 @@ function MyRequestsCard({ requests }: { requests: MemberRequest[] }): JSX.Elemen
         aria-label={t('myWork.requestsToggle')}
         onClick={() => setExpanded((value) => !value)}
       >
-        <span aria-hidden="true">{expanded ? '笆ｾ' : '笆ｸ'}</span> {t('myWork.requestsHeading')} (
+        <span aria-hidden="true">{expanded ? '▼' : '▶'}</span> {t('myWork.requestsHeading')} (
         {t('myWork.requestsSummary', { total: requests.length })})
-        <span className="muted small"> ﾂｷ {t('myWork.requestsPendingSummary', { n: pending })}</span>
+        <span className="muted small"> · {t('myWork.requestsPendingSummary', { n: pending })}</span>
       </button>
       {expanded ? (
         requests.length === 0 ? (
@@ -683,7 +735,7 @@ function MyRequestsCard({ requests }: { requests: MemberRequest[] }): JSX.Elemen
                   <div className="request-row">
                     <strong>{request.taskName || request.taskId}</strong>
                     <span className="muted small">
-                      {t(`myWork.requestType.${request.requestType}`)} ﾂｷ {label('request.status', request.status)} ﾂｷ{' '}
+                      {t(`myWork.requestType.${request.requestType}`)} · {label('request.status', request.status)} ·{' '}
                       {request.submittedAt.slice(0, 10)}
                     </span>
                     <span className="muted request-id">{request.requestId}</span>

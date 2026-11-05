@@ -62,8 +62,24 @@ export function canCreateOwnTask(identity: Identity | null): boolean {
   return !!identity && identity.verified && identity.active && identity.role === 'MEMBER';
 }
 
-/** Only a MEMBER files a completion request for work personally assigned to them. */
-export function canSubmitCompletionRequest(identity: Identity | null): boolean {
+/**
+ * A completion report may be filed by any verified, active MEMBER, MANAGER or ADMIN who can reach
+ * the task - assignment is not required, because a person who observed the work may report it.
+ * VIEWER stays read-only. This is the approved exception for COMPLETION_REPORT only: it never
+ * grants visibility, editing, reassignment, direct completion, approval or a deadline change, and
+ * the reporter is recorded from the verified session rather than becoming the task owner.
+ */
+export function canReportCompletion(identity: Identity | null): boolean {
+  return (
+    !!identity &&
+    identity.verified &&
+    identity.active &&
+    (identity.role === 'MEMBER' || identity.role === 'MANAGER' || identity.role === 'ADMIN')
+  );
+}
+
+/** A deadline-change request stays limited to the MEMBER whose work it is. */
+export function canRequestDeadlineChange(identity: Identity | null): boolean {
   return !!identity && identity.verified && identity.active && identity.role === 'MEMBER';
 }
 

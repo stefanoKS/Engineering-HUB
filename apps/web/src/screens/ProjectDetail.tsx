@@ -714,6 +714,7 @@ export function ProjectDetailScreen({
       cacheKey,
       keys.project(projectId),
       keys.projects,
+      keys.timeline,
       keys.references,
       keys.tasks,
       keys.overview,
@@ -787,6 +788,9 @@ export function ProjectDetailScreen({
           </p>
         </div>
         <div className="filters">
+          <a className="button secondary" href={`#/timeline/${record.projectId}`}>
+            {t('timeline.projectLink')}
+          </a>
           {canManage && (
             <button type="button" className="button secondary" onClick={() => setEditProject(true)}>
               {t('projects.edit')}

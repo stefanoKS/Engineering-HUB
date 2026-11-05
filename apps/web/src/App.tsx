@@ -26,6 +26,7 @@ const RequestsScreen = lazy(() => import('./screens/Requests').then(module => ({
 const WorkloadScreen = lazy(() => import('./screens/Workload').then(module => ({ default: module.WorkloadScreen })));
 const AutomationScreen = lazy(() => import('./screens/Automation').then(module => ({ default: module.AutomationScreen })));
 const StatusScreen = lazy(() => import('./screens/Status').then(module => ({ default: module.StatusScreen })));
+const TimelineScreen = lazy(() => import('./screens/Timeline').then(module => ({ default: module.TimelineScreen })));
 import { LanguageSwitch } from './components/ui';
 import { recordRoute, rememberScroll, rememberedScroll } from './state/navigation';
 
@@ -83,7 +84,7 @@ export function App(): JSX.Element {
   useEffect(() => {
     const role = session?.actor.role;
     if (!role || role === 'ADMIN' || role === 'MANAGER') return;
-    const allowed = new Set(['my-work', 'all-work', 'overview', 'task', 'projects', 'project']);
+    const allowed = new Set(['my-work', 'all-work', 'overview', 'task', 'projects', 'project', 'timeline']);
     if (!allowed.has(route.segments[0] ?? 'overview')) navigate('my-work');
   }, [session, route.path]);
 
@@ -139,6 +140,7 @@ export function App(): JSX.Element {
       { path: 'my-work', label: t('local.myWork'), group: 'nav.group.myWork' },
       { path: 'all-work', label: t('nav.allWork'), group: 'nav.group.department' },
       { path: 'projects', label: t('nav.projects'), group: 'nav.group.department' },
+      { path: 'timeline', label: t('nav.timeline'), group: 'nav.group.department' },
       { path: 'responsibilities', label: t('nav.responsibilities'), group: 'nav.group.department' },
       { path: 'requests', label: t('nav.requests'), group: 'nav.group.department' },
       { path: 'members', label: t('nav.members'), group: 'nav.group.people' },
@@ -149,7 +151,11 @@ export function App(): JSX.Element {
     ].filter((entry) =>
       isManager
         ? true
-        : entry.path === 'my-work' || entry.path === 'all-work' || entry.path === 'projects' || entry.path === 'overview'
+        : entry.path === 'my-work' ||
+          entry.path === 'all-work' ||
+          entry.path === 'projects' ||
+          entry.path === 'timeline' ||
+          entry.path === 'overview'
     );
     // Frequent destinations stay directly reachable; grouping only adds a heading, never a menu.
     return ['nav.group.myWork', 'nav.group.department', 'nav.group.people', 'nav.group.admin'].map((group) => ({
@@ -249,6 +255,11 @@ function renderScreen(route: Route, actor: Actor, isManager: boolean): JSX.Eleme
   if (first === 'task') {
     if (!second) return <TasksScreen actor={actor} readOnly={!isManager} />;
     return <TaskDetailScreen actor={actor} taskId={second} readOnly={!isManager} />;
+  }
+  // The timeline is a read-only projection available to every signed-in role.
+  if (first === 'timeline') {
+    const from = new URLSearchParams(route.search).get('from') ?? undefined;
+    return <TimelineScreen actor={actor} initialProjectId={second} initialAnchor={from} />;
   }
   // MEMBER and VIEWER browse permitted projects through the read-only explorer, never through the
   // management list (which reads `/api/manager/projects`).

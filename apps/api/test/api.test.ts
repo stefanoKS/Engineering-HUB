@@ -801,15 +801,51 @@ describe('member completion requests', () => {
     expect(task?.status).toBe('Not Started');
   });
 
-  it('refuses a request for work the member is not assigned to', async () => {
+  it('allows a MEMBER to report accessible work they are not assigned to, and refuses restricted work', async () => {
     await insertResponsibility(db, { name: 'Area' }, 'RSP-X');
     await insertProject(db, { projectName: 'Foreign', dashboardVisibility: 'INTERNAL' }, 'PRJ-X');
     await insertTask(db, { projectId: 'PRJ-X', taskName: 'Not mine', dueDate: '2026-06-01' }, 'TSK-X');
     await saveSettings(db, { REQUEST_SUBMISSION_ENABLED: 'true' }, ADMIN);
     const member = await signIn(MEMBER);
-    const response = await submitCompletion(member, 'TSK-X');
-    expect(response.statusCode).toBe(403);
-    expect(response.json().error.code).toBe('AUTHORIZATION_DENIED');
+    // Approved policy: any authenticated MEMBER may report completion for accessible work.
+    const accessible = await submitCompletion(member, 'TSK-X', 'accessible-report-1');
+    expect(accessible.statusCode, accessible.body).toBe(200);
+    const stored = await db.one<{ requester_member_id: string; status: string }>(
+      'SELECT requester_member_id, status FROM task_requests WHERE task_id = $1',
+      ['TSK-X']
+    );
+    expect(stored?.requester_member_id).toBe('MEM-MEMBER');
+    expect(stored?.status).toBe('PENDING');
+    const task = await db.one<{ owner_member_id: string | null; status: string }>(
+      'SELECT owner_member_id, status FROM tasks WHERE task_id = $1',
+      ['TSK-X']
+    );
+    // Reporting neither assigns the task nor completes it.
+    expect(task?.owner_member_id).toBeNull();
+    expect(task?.status).not.toBe('Done');
+
+    // A restricted project the member cannot reach stays refused, and answers like an unknown ID.
+    await insertProject(db, { projectName: 'Private', dashboardVisibility: 'RESTRICTED' }, 'PRJ-XP');
+    await insertTask(db, { projectId: 'PRJ-XP', taskName: 'Hidden', dueDate: '2026-06-01' }, 'TSK-XP');
+    const refused = await submitCompletion(member, 'TSK-XP', 'restricted-report-1');
+    expect(refused.statusCode).toBe(404);
+    expect(refused.json().error.code).toBe('NOT_FOUND');
+
+    // A deadline change keeps the assigned-member rule.
+    const deadline = await app.inject({
+      method: 'POST',
+      url: '/api/employee/requests',
+      headers: headers(member, true),
+      payload: {
+        clientRequestId: 'not-assigned-deadline-1',
+        taskId: 'TSK-X',
+        requestType: 'DEADLINE_CHANGE',
+        requestedDueDate: '2026-07-01',
+        reason: 'Please move'
+      }
+    });
+    expect(deadline.statusCode).toBe(403);
+    expect(deadline.json().error.code).toBe('AUTHORIZATION_DENIED');
   });
 
   it('lets a MANAGER approve a member-created completion request', async () => {
@@ -952,7 +988,29 @@ describe('personal work filtering', () => {
     expect(all.statusCode, all.body).toBe(200);
     expect(all.json().data.items.map((item: { taskId: string }) => item.taskId).sort()).toEqual(['TSK-F1', 'TSK-F2', 'TSK-F3']);
     expect(all.json().data).toMatchObject({ total: 3, activeTotal: 3, unfilteredActiveTotal: 3 });
-    expect(all.json().data.projects.map((entry: { projectId: string }) => entry.projectId).sort()).toEqual(['PRJ-F', 'PRJ-O']);
+
+    // The project filter is its own paged, searchable read: no silent row cap, and the selected
+    // project stays readable off-page.
+    const projectOptions = await app.inject({
+      url: '/api/employee/my-work/project-filter?page=1&pageSize=25',
+      headers: headers(auth)
+    });
+    expect(projectOptions.statusCode, projectOptions.body).toBe(200);
+    expect(projectOptions.json().data.items.map((entry: { projectId: string }) => entry.projectId).sort()).toEqual([
+      'PRJ-F',
+      'PRJ-O'
+    ]);
+    expect(projectOptions.json().data).toMatchObject({ total: 2, page: 1, totalPages: 1, selected: null });
+    const searchedProjects = await app.inject({
+      url: '/api/employee/my-work/project-filter?query=' + encodeURIComponent('Other'),
+      headers: headers(auth)
+    });
+    expect(searchedProjects.json().data.items.map((entry: { projectId: string }) => entry.projectId)).toEqual(['PRJ-O']);
+    const selectedProject = await app.inject({
+      url: '/api/employee/my-work/project-filter?page=2&pageSize=1&selectedId=PRJ-F',
+      headers: headers(auth)
+    });
+    expect(selectedProject.json().data.selected).toMatchObject({ projectId: 'PRJ-F' });
 
     const named = await app.inject({ url: '/api/employee/my-work?page=1&section=active&query=' + encodeURIComponent('稟議'), headers: headers(auth) });
     expect(named.json().data.items.map((item: { taskId: string }) => item.taskId)).toEqual(['TSK-F1']);

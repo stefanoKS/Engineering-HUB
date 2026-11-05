@@ -2,7 +2,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, ApiFailure } from '../api/client';
 import { useI18n } from '../i18n';
-import { Modal } from './ui';
+import { useQuery } from '../state/cache';
+import { ErrorBox, Modal } from './ui';
 
 export type SaveStateValue = 'idle' | 'saving' | 'saved' | 'failed' | 'conflict' | 'unknown';
 
@@ -156,6 +157,7 @@ export function TextInput({
       aria-required={required || undefined}
       aria-label={ariaLabel}
       autoFocus={autoFocus}
+      data-autofocus={autoFocus ? '' : undefined}
       min={min}
       max={max}
       step={step}
@@ -251,8 +253,136 @@ export function SearchSelect({
   );
 }
 
-/** Marks a field that the server will reject when it is empty. */
-export function RequiredTag(): JSX.Element {
+/**
+ * A bounded, server-searched option list.
+ *
+ * The list is never a truncated local slice: search, paging and the honest total come from one
+ * authorized endpoint, the debounced query is discarded when it is stale, and the selected value
+ * stays visible and selected while the visible page changes.
+ */
+export type RemoteOption = { value: string; label: string };
+
+export type RemoteOptionPage = {
+  page: number;
+  total: number;
+  totalPages: number;
+  items: RemoteOption[];
+  selected: RemoteOption | null;
+};
+
+export function RemoteSelect({
+  value,
+  onChange,
+  optionsKey,
+  load,
+  allowEmpty,
+  searchLabel,
+  selectLabel,
+  emptyHint,
+  disabled,
+  enabled = true
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  /** Reset the search and the page whenever the surrounding scope changes. */
+  optionsKey: string;
+  load: (input: { query: string; page: number }) => Promise<RemoteOptionPage>;
+  allowEmpty?: string;
+  searchLabel: string;
+  selectLabel: string;
+  emptyHint?: string;
+  disabled?: boolean;
+  /** A scope that cannot be searched yet (for example no project chosen) issues no request. */
+  enabled?: boolean;
+}): JSX.Element {
+  const { t } = useI18n();
+  const [search, setSearch] = useState('');
+  const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  useEffect(() => {
+    setSearch('');
+    setQuery('');
+    setPage(1);
+  }, [optionsKey]);
+  useEffect(() => {
+    if (search === query) return undefined;
+    const timer = setTimeout(() => {
+      setQuery(search);
+      setPage(1);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [search, query]);
+  const list = useQuery<RemoteOptionPage>(`${optionsKey}:${query}:${page}`, () => load({ query, page }), {
+    enabled: !disabled && enabled
+  });
+  const options = list.data?.items ?? [];
+  const selected = list.data?.selected ?? null;
+  const keepsValue = !!value && !options.some((option) => option.value === value);
+  return (
+    <div className="search-select stack">
+      <input
+        type="search"
+        aria-label={searchLabel}
+        placeholder={searchLabel}
+        value={search}
+        disabled={disabled}
+        onChange={(event) => setSearch(event.target.value)}
+      />
+      <select
+        aria-label={selectLabel}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {allowEmpty !== undefined ? <option value="">{allowEmpty}</option> : null}
+        {keepsValue ? <option value={value}>{selected ? selected.label : value}</option> : null}
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      {disabled ? null : (
+        <div className="inline-actions remote-select-footer">
+          {list.data ? (
+            <span className="muted small">{t('common.optionCount', { n: list.data.total })}</span>
+          ) : (
+            <span className="muted small">{t('state.loading')}</span>
+          )}
+          {list.data && list.data.totalPages > 1 ? (
+            <>
+              <button
+                type="button"
+                className="link-button"
+                disabled={page <= 1}
+                onClick={() => setPage(page - 1)}
+              >
+                {t('local.previous')}
+              </button>
+              <span className="muted small">
+                {t('taskForm.parentPage', { page, pages: list.data.totalPages })}
+              </span>
+              <button
+                type="button"
+                className="link-button"
+                disabled={page >= list.data.totalPages}
+                onClick={() => setPage(page + 1)}
+              >
+                {t('local.next')}
+              </button>
+            </>
+          ) : null}
+        </div>
+      )}
+      {!list.loading && !list.error && options.length === 0 && emptyHint ? (
+        <span className="muted small">{emptyHint}</span>
+      ) : null}
+      <ErrorBox error={list.error} onRetry={() => list.refresh()} />
+    </div>
+  );
+}
+
+/** Marks a field that the server will reject when it is empty. */export function RequiredTag(): JSX.Element {
   const { t } = useI18n();
   return <span className="field-required">{t('common.required')}</span>;
 }

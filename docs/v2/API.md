@@ -1,5 +1,31 @@
 # V2 HTTP API
 
+## Completion reports by any authorized reporter, and a read-only timeline (2026-11-05)
+
+Approved policy change: `POST /api/employee/requests` accepts a `COMPLETION_REPORT` from a verified,
+active **MEMBER**, **MANAGER** or **ADMIN** who can already reach the task, whether or not they are
+assigned to it. `DEADLINE_CHANGE` keeps the assigned-MEMBER rule, `VIEWER` stays read-only, and the
+reporter is always the verified session. A report never completes, reassigns, or grants approval.
+
+| Endpoint | Change | Why |
+| --- | --- | --- |
+| `GET /api/employee/tasks/:id/report-eligibility` | **new.** `{ taskId, eligible, reasons[], submissionEnabled, reporterName }`; an unreadable task is `404` | The action's availability and every blocked reason come from the server; a client never infers eligibility from a request-history page |
+| `POST /api/employee/requests` | `COMPLETION_REPORT` accepts MEMBER/MANAGER/ADMIN for accessible work; the refusal set is unchanged otherwise | The approved exception; server re-checks the same assessment before writing |
+| `GET /api/employee/my-work` | the body no longer carries `projects`; `pendingRequest` and `reviewState` describe the **task**, so any assignee sees a pending report | A foreign key → one task-level state instead of a per-reporter slice |
+| `GET /api/employee/my-work/project-filter` | **new.** `query`, `page`, `pageSize`, `selectedId`; paged distinct projects of the caller's own work with `taskCount` and the `selected` option | Removes the fixed 200-project slice from the filter |
+| `GET /api/manager/tasks/parent-options` | `query`, `page`, `pageSize`, `selectedId`; returns `{ items: [{ id, name, path, depth, parentTaskId, container, status }], total, page, pageSize, totalPages, selected }` | Search and paging apply to the eligible candidates, never to an already truncated list; `path` keeps same-named branches distinct |
+| `GET /api/work/timeline` | **new, read-only, every signed-in role.** Without `projectId`: paged project summaries (`plannedStart`, `forecastEnd`, `committedDeadline`, `openWork`, `completedWork`, `childRange`) plus the readable `responsibilities`. With `projectId`: the project branch (`project`, `subprojects`, `tasks`, `truncated`, `taskTotal`) | One allowlisted timeline projection for all roles; plan, deadline and completion stay separate fields |
+
+`childRange` is a display span the server derives from dated descendants inside the authorized
+filter (`start`, `end`, `datedItems`, `totalItems`). It is never written to a record, never counted
+as work, and never depends on the rendered page. `includeCompleted=false` hides completed tasks from
+a branch; cancelled work and archived branches stay manager-only, matching the other read-only
+screens.
+
+Refusals stay stable codes: `ROLE`/`NOT_ASSIGNED` → `403 AUTHORIZATION_DENIED`, an unreadable task →
+`404 NOT_FOUND`, `CONTAINER` → `409 CONTAINER_NOT_COMPLETABLE`, `COMPLETED`/`CANCELLED`/`PENDING`/
+`ARCHIVED` → `409 INVALID_TRANSITION`, `SUBMISSION_DISABLED` → `403 REQUEST_SUBMISSION_CLOSED`.
+
 ## Usability release: guided forms, request context and My Work filters (2026-11-04)
 
 No route was added, removed or re-authorized. Three existing projections were extended narrowly so
@@ -19,6 +45,8 @@ bounded filter: `query` is ≤120 characters, `projectId` ≤64, and the three f
 exact strings `true`/`false`. The requested `section` keeps its own `total`, while
 `unfilteredActiveTotal` is the active-work count without filters. `projects` lists at most 200
 projects that occur in the caller's own work and is the only valid set of `projectId` values.
+*(Superseded on 2026-11-05: `projects` was removed and replaced by the paged, searchable
+`GET /api/employee/my-work/project-filter`, so no row cap decides which project is reachable.)*
 
 ## Manager Overview and All Work filters (2026-11-04)
 
@@ -193,7 +221,7 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | GET | `/api/manager/projects/:id` | Record, rollup, subprojects with rollup, task summaries, milestones, phases |
 | GET | `/api/manager/subprojects` | `projectId` |
 | GET | `/api/manager/tasks` | `projectId`, `subprojectId`, `responsibilityId`, `unassigned`, `workState=OPEN`, `displayStatus`, `status`, `ownerMemberId`, `query`, `containerOnly`, paging, sorting |
-| GET | `/api/manager/tasks/parent-options` | `projectId`, `subprojectId?`, `excludeTaskId?` |
+| GET | `/api/manager/tasks/parent-options` | `projectId`, `subprojectId?`, `excludeTaskId?`, `query`, `page`, `pageSize`, `selectedId`; search and paging apply to the eligible candidates and each item carries its `path` |
 | GET | `/api/manager/tasks/:id` | Record, effective assignees, history, confirmations, deadline history, children |
 | GET | `/api/manager/task-index` | Compact navigation index (bounded) |
 | GET | `/api/manager/search/tasks` | `query`, `limit` ≤ 50 |
@@ -321,11 +349,13 @@ request author and the deadline/status effect are decided on the server.
 | Method | Path | Notes |
 | --- | --- | --- |
 | GET | `/api/employee/snapshot` | Published contract 1.6, `INTERNAL` projects only, `submissionEnabled` |
-| GET | `/api/employee/my-work` | `page`; My Assigned Work for **any** signed-in role, resolved from the verified session. Never another member's work |
+| GET | `/api/employee/my-work` | `page`, `section`, `query`, `projectId`, `overdue`, `dueThisWeek`, `awaitingReview`; My Assigned Work for **any** signed-in role, resolved from the verified session. Never another member's work. `pendingRequest`/`reviewState` are task-level |
+| GET | `/api/employee/my-work/project-filter` | Paged, searchable distinct projects of the caller's own work (`query`, `page`, `pageSize`, `selectedId`); each item carries `taskCount`, and `selected` keeps a chosen project readable off-page |
 | GET | `/api/employee/my-work/projects` | MEMBER only. Active projects and non-archived subprojects a member may file work under: id, name and responsibility name per project, and `subprojectId`, `subprojectName`, `parentSubprojectId`, `depth` per subproject (hierarchy metadata only) |
 | POST | `/api/employee/my-work` | MEMBER only. `idempotencyKey`, `projectId`, `subprojectId?`, `taskName`, `description?`, `deadline`, `priority?`. The owner is the verified member, the status is `Not Started` and progress is 0. An owner, assignee, status or progress sent by the browser is rejected by the strict contract. A MANAGER or ADMIN uses the manager task form instead |
 | POST | `/api/employee/subprojects` | MEMBER only. `idempotencyKey`, `projectId`, `parentSubprojectId?`, `subprojectName`, `description?`, `deadline?`. Creation is **not** an approval step: the owner is the verified member, the status is `Active`, `estimatedHours` is empty and the audit row is `SUBPROJECT_CREATED`. The whole subtree is validated (active project, active parent, same project, four-level limit, no cycle) and a retry with the same key returns the first subproject. `POST /api/manager/subprojects` stays MANAGER/ADMIN only |
-| POST | `/api/employee/requests` | MEMBER only. `clientRequestId`, `taskId`, `requestType`, `requestedDueDate?`, `reason?`, `explanation?`, `completionNote?`; idempotent; only for work the member is assigned to |
+| POST | `/api/employee/requests` | MEMBER, MANAGER or ADMIN for `COMPLETION_REPORT` on accessible work; MEMBER only and assigned for `DEADLINE_CHANGE`. `clientRequestId`, `taskId`, `requestType`, `requestedDueDate?`, `reason?`, `explanation?`, `completionNote?`; idempotent; the reporter is the verified session |
+| GET | `/api/employee/tasks/:id/report-eligibility` | The server-derived completion-report capability: `eligible`, every `reasons` code, `submissionEnabled` and the verified `reporterName`; an unreadable task is `404` |
 | GET | `/api/employee/requests/mine` | The caller's own requests with `submissionEnabled`; state and decision note only |
 | GET | `/api/employee/requests/:id` | Receipt state only; another member's receipt is `404` |
 
@@ -340,6 +370,7 @@ or a stored status; the only completion path is the reviewed request below.
 | GET | `/api/work/tasks/:id` | Task detail for MEMBER/VIEWER: an allowlisted record plus the display-only `context` (project name and subproject chain, root first), assignees and children |
 | GET | `/api/work/projects` | Member project explorer. `query` (project name only), `responsibilityId`, `page`, `pageSize`; each item carries `description` and the `TaskScope` counts `activeTaskCount`/`completedTaskCount`, and the page carries the `responsibilities` that group at least one readable project |
 | GET | `/api/work/projects/:id` | Read-only project detail: allowlisted record (with `description` and the two counts), rollup, subprojects (with `description` and the stored `parentSubprojectId`) and the tasks of the visible branches |
+| GET | `/api/work/timeline` | Read-only timeline. Without `projectId`: paged project summaries with `plannedStart`, `forecastEnd`, `committedDeadline`, `openWork`, `completedWork` and a server-derived `childRange`, plus the readable `responsibilities`. With `projectId`: the project branch (project, subprojects, tasks, `truncated`, `taskTotal`). `responsibilityId`, `query`, `page`, `pageSize`, `includeCompleted`, `includeArchived` (managers only) |
 
 Visibility is resolved on the server before a page is cut:
 

@@ -17,6 +17,7 @@ const APP_ROUTES = new Set([
   'task',
   'projects',
   'project',
+  'timeline',
   'responsibilities',
   'members',
   'member',
@@ -32,7 +33,7 @@ export function routeAllowed(path: string, actor: Actor): boolean {
   const first = path.split('?')[0]?.split('/').filter(Boolean)[0] ?? 'overview';
   if (!APP_ROUTES.has(first)) return false;
   if (actor.role === 'ADMIN' || actor.role === 'MANAGER') return true;
-  return new Set(['overview', 'my-work', 'all-work', 'tasks', 'task', 'projects', 'project']).has(first);
+  return new Set(['overview', 'my-work', 'all-work', 'tasks', 'task', 'projects', 'project', 'timeline']).has(first);
 }
 
 export function recordRoute(path: string): void {

@@ -5,6 +5,7 @@
  * role on the server. Nothing here trusts a role, actor or owner sent by the browser.
  */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 import {
   ArchiveBody,
   ApproveAssignmentBody,
@@ -83,6 +84,7 @@ import {
   confirmScheduleCommand,
   createTask,
   overrideComplete,
+  parentTaskOptions,
   patchTask,
   taskDetail
 } from '../services/tasks';
@@ -123,8 +125,18 @@ function serviceCtx(request: FastifyRequest): ServiceCtx {
   };
 }
 
-async function projectPage(request: FastifyRequest, query: ReturnType<typeof ProjectListQuery.parse>) {
-  const ctx = readCtx(request);
+/** A bounded, searchable parent selector: search and paging apply before any result is cut. */
+const ParentOptionsQuery = z.object({
+  projectId: z.string().trim().min(1).max(64),
+  subprojectId: z.string().trim().max(64).optional(),
+  excludeTaskId: z.string().trim().max(64).optional(),
+  query: z.string().trim().max(120).optional(),
+  page: z.coerce.number().int().min(1).max(10000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
+  selectedId: z.string().trim().max(64).optional()
+});
+
+async function projectPage(request: FastifyRequest, query: ReturnType<typeof ProjectListQuery.parse>) {  const ctx = readCtx(request);
   const { scope, dir } = await taskScope(ctx);
   const page = await listProjects(
     request.state.db,
@@ -332,32 +344,8 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
   });
 
   read('/api/manager/tasks/parent-options', async (request) => {
-    const query = request.query as { projectId?: string; subprojectId?: string; excludeTaskId?: string };
-    if (!query.projectId) throw new DomainError('VALIDATION_FAILED', 'projectId is required');
-    const summaries = await listTaskSummariesForProject(request.state.db, query.projectId);
-    const excluded = new Set<string>(query.excludeTaskId ? [query.excludeTaskId] : []);
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const summary of summaries) {
-        if (summary.parentTaskId && excluded.has(summary.parentTaskId) && !excluded.has(summary.taskId)) {
-          excluded.add(summary.taskId);
-          changed = true;
-        }
-      }
-    }
-    const items = summaries
-      .filter((summary) => !excluded.has(summary.taskId))
-      .filter((summary) => query.subprojectId === undefined || (summary.subprojectId ?? '') === query.subprojectId)
-      .map((summary) => ({
-        id: summary.taskId,
-        name: summary.taskName,
-        depth: summary.depth,
-        parentTaskId: summary.parentTaskId,
-        container: summary.container,
-        status: summary.status
-      }));
-    return { items };
+    const query = ParentOptionsQuery.parse(request.query ?? {});
+    return parentTaskOptions(serviceCtx(request), query);
   });
 
   read('/api/manager/task-index', async (request) => {

@@ -75,6 +75,24 @@ export const REQUEST_DECISIONS = ['APPROVE', 'REJECT', 'RETURN'] as const;
 export const RequestDecision = z.enum(REQUEST_DECISIONS);
 export type RequestDecision = z.infer<typeof RequestDecision>;
 
+/**
+ * Why a request cannot be filed. The values are stable codes: the browser localizes the label and
+ * never classifies the wording of a refusal.
+ */
+export const SUBMISSION_BLOCK_REASONS = [
+  'ROLE',
+  'NOT_VISIBLE',
+  'ARCHIVED',
+  'NOT_ASSIGNED',
+  'CONTAINER',
+  'COMPLETED',
+  'CANCELLED',
+  'PENDING',
+  'SUBMISSION_DISABLED'
+] as const;
+export const SubmissionBlockReason = z.enum(SUBMISSION_BLOCK_REASONS);
+export type SubmissionBlockReason = z.infer<typeof SubmissionBlockReason>;
+
 export const NOTIFICATION_MODES = ['OFF', 'PREVIEW', 'LIVE'] as const;
 export const NotificationMode = z.enum(NOTIFICATION_MODES);
 export type NotificationMode = z.infer<typeof NotificationMode>;
