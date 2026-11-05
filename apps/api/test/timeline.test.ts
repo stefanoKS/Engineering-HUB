@@ -215,6 +215,9 @@ describe('all-project timeline view', () => {
         completedWork: number;
         childRange: { start: string | null; end: string | null; datedItems: number; totalItems: number };
         undated: boolean;
+        scheduleStart: string | null;
+        scheduleFinish: string | null;
+        dateSource: string;
       }[];
       total: number;
       page: number;
@@ -228,9 +231,9 @@ describe('all-project timeline view', () => {
     expect(project.plannedStart).toBe('2026-03-01');
     expect(project.forecastEnd).toBe('2026-06-30');
     expect(project.committedDeadline).toBe('2026-07-15');
-    // The range covers the dated descendants, including a nested task and a subproject deadline.
+    // The range covers eligible leaf work only: a container's misleading stored date is excluded.
     expect(project.childRange.start).toBe('2026-02-01');
-    expect(project.childRange.end).toBe('2026-09-30');
+    expect(project.childRange.end).toBe('2026-09-10');
     expect(project.childRange.datedItems).toBeGreaterThan(0);
     expect(project.childRange.totalItems).toBeGreaterThan(project.childRange.datedItems);
     // Counting uses leaf work: the container TSK-BOX is never counted, so the five open leaves
@@ -239,6 +242,9 @@ describe('all-project timeline view', () => {
     expect(project.openWork).toBe(5);
     expect(project.completedWork).toBe(1);
     expect(project.undated).toBe(false);
+    expect(project.scheduleStart).toBe('2026-03-01');
+    expect(project.scheduleFinish).toBe('2026-07-15');
+    expect(project.dateSource).toBe('EXPLICIT');
     expect(data.responsibilities.map((entry) => entry.responsibilityId)).toContain('RSP-T');
     expect(data.responsibilities.map((entry) => entry.responsibilityId)).not.toContain('RSP-Q');
   });
@@ -286,7 +292,7 @@ describe('one project branch', () => {
     expect(response.statusCode, response.body).toBe(200);
     const data = response.json().data as {
       project: { projectId: string; undated: boolean };
-      subprojects: { subprojectId: string; depth: number; plannedStart: string | null; deadline: string | null; childRange: { start: string | null; end: string | null } }[];
+      subprojects: { subprojectId: string; depth: number; plannedStart: string | null; deadline: string | null; childRange: { start: string | null; end: string | null }; scheduleStart: string | null; scheduleFinish: string | null }[];
       tasks: {
         taskId: string;
         plannedStart: string | null;
@@ -297,6 +303,7 @@ describe('one project branch', () => {
         undated: boolean;
         inconsistent: boolean;
         childRange: { start: string | null; end: string | null };
+        scheduleFinish: string | null;
       }[];
       truncated: boolean;
       taskTotal: number;
@@ -305,9 +312,11 @@ describe('one project branch', () => {
     expect(data.subprojects.map((entry) => entry.subprojectId).sort()).toEqual(['SUB-V1', 'SUB-V2']);
     const nested = data.subprojects.find((entry) => entry.subprojectId === 'SUB-V2');
     expect(nested?.depth).toBe(2);
-    // A subproject deadline stays its own field next to the planned end.
+    // Folder schedules derive from eligible leaves, never obsolete stored folder dates.
     const prototype = data.subprojects.find((entry) => entry.subprojectId === 'SUB-V1');
     expect(prototype).toMatchObject({ plannedStart: '2026-03-05', deadline: '2026-04-25' });
+    expect(prototype?.scheduleStart).toBe('2026-03-10');
+    expect(prototype?.scheduleFinish).toBe('2026-03-20');
 
     const planned = data.tasks.find((task) => task.taskId === 'TSK-PLAN');
     expect(planned).toMatchObject({ plannedStart: '2026-03-10', dueDate: '2026-03-20', undated: false });
@@ -316,10 +325,11 @@ describe('one project branch', () => {
     expect(deadlineOnly).toMatchObject({ plannedStart: null, dueDate: '2026-05-01', undated: false });
     const undated = data.tasks.find((task) => task.taskId === 'TSK-NONE');
     expect(undated).toMatchObject({ plannedStart: null, dueDate: null, undated: true });
-    // A container keeps its own dates and gains a range from its child.
+    // A container ignores its own stored date and derives its display range from its leaf child.
     const container = data.tasks.find((task) => task.taskId === 'TSK-BOX');
     expect(container).toMatchObject({ container: true, plannedStart: null, dueDate: '2026-09-30' });
     expect(container?.childRange.start).toBe('2026-09-01');
+    expect(container?.scheduleFinish).toBe('2026-09-10');
     // A recorded completion is reported separately from the deadline.
     const done = data.tasks.find((task) => task.taskId === 'TSK-DONE');
     expect(done?.completedAt).toContain('2026-02-11');

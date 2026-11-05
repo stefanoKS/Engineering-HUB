@@ -10,10 +10,12 @@ import type { WorkProjectList } from '@eh/contracts';
 import { api, queryString } from '../api/client';
 import { useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
-import { Badge, EmptyState, ErrorBox, Pagination, ProgressBar, statusTone } from '../components/ui';
-import { DeadlineCell } from '../components/deadline';
+import { Badge, EmptyState, ErrorBox, Pagination, ProgressBar } from '../components/ui';
+import { DeadlineCell, deadlineStateOf } from '../components/deadline';
+import { ScheduleBadge } from '../components/project-schedule';
 import { projectColor } from '@eh/domain';
 import { useRouteMemoryState } from '../state/navigation';
+import { useBusinessDate } from '../state/business-date';
 
 const PAGE_SIZE = 24;
 
@@ -24,7 +26,8 @@ export function WorkProjectsScreen(): JSX.Element {
   const [responsibilityId, setResponsibilityId] = useRouteMemoryState('explore:responsibility', '');
   const [page, setPage] = useRouteMemoryState('explore:page', 1);
 
-  const key = `work/projects${queryString({ query, responsibilityId, page })}`;
+  const today = useBusinessDate();
+  const key = `work/projects${queryString({ query, responsibilityId, page })}:${today}`;
   const list = useQuery<WorkProjectList>(key, () =>
     api.get<WorkProjectList>(
       `/api/work/projects${queryString({ query, responsibilityId, page, pageSize: PAGE_SIZE })}`
@@ -97,9 +100,12 @@ export function WorkProjectsScreen(): JSX.Element {
                   {project.projectOwnerName || t('common.unset')}
                 </p>
                 <p className="project-card-badges">
-                  <Badge tone={statusTone(project.status)}>{label('project.status', project.status)}</Badge>
+                  <ScheduleBadge schedule={project.schedule} />
                   <Badge tone="neutral">{label('priority', project.priority)}</Badge>
-                  <DeadlineCell dueDate={project.committedDeadline} />
+                  <DeadlineCell
+                    dueDate={project.committedDeadline}
+                    state={deadlineStateOf(project.schedule)}
+                  />
                 </p>
                 <ProgressBar value={project.progressPercent} />
                 <p className="muted small">

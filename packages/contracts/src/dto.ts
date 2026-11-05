@@ -16,8 +16,10 @@ import {
   PhaseStatus,
   PlannedStartSource,
   Priority,
+  ProjectScheduleState,
   ProjectStatus,
   RequestStatus,
+  ScheduleMissingPart,
   RequestType,
   ResponsibilityStatus,
   Role,
@@ -97,6 +99,16 @@ export const ResponsibilityCard = z.object({
 });
 export type ResponsibilityCard = z.infer<typeof ResponsibilityCard>;
 
+/**
+ * The displayed schedule status of one project. Calculated by the server from the plan dates and
+ * the Asia/Tokyo business date; never persisted and never accepted from a browser.
+ */
+export const ProjectScheduleDisplay = z.object({
+  state: ProjectScheduleState,
+  missing: ScheduleMissingPart
+});
+export type ProjectScheduleDisplay = z.infer<typeof ProjectScheduleDisplay>;
+
 export const Project = z.object({
   projectId: Id,
   projectName: z.string(),
@@ -106,7 +118,10 @@ export const Project = z.object({
   responsibilityName: z.string(),
   projectOwnerId: z.string().nullable(),
   projectOwnerName: z.string(),
+  /** The stored lifecycle fact; display uses `schedule` instead of this value. */
   status: ProjectStatus,
+  /** Derived from the plan dates and today's business date; never stored. */
+  schedule: ProjectScheduleDisplay,
   priority: Priority,
   plannedStart: IsoDate.nullable(),
   forecastEnd: IsoDate.nullable(),
@@ -134,6 +149,8 @@ export const ProjectSummary = z.object({
   responsibilityName: z.string(),
   projectOwnerId: z.string().nullable(),
   status: ProjectStatus,
+  /** The badge a list, card or filter shows: derived, never the stored lifecycle value. */
+  schedule: ProjectScheduleDisplay,
   priority: Priority,
   committedDeadline: IsoDate.nullable(),
   deadlineState: z.enum(['NONE', 'OK', 'DUE_SOON', 'OVERDUE', 'COMPLETED']),
@@ -170,6 +187,8 @@ export const Subproject = z.object({
   ownerId: z.string().nullable(),
   ownerName: z.string(),
   status: ProjectStatus,
+  /** Derived schedule badge; a subproject does not store a second lifecycle enum. */
+  schedule: ProjectScheduleDisplay,
   plannedStart: IsoDate.nullable(),
   plannedEnd: IsoDate.nullable(),
   deadline: IsoDate.nullable(),

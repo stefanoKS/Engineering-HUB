@@ -433,27 +433,29 @@ function TaskTreeRows(props: TreeProps & { items: TaskSummary[] }): JSX.Element 
                 <td>
                   <Badge tone={displayTone(task.displayStatus)}>{t(`taskStatus.${task.displayStatus}`)}</Badge>
                 </td>
-                <td><DeadlineCell dueDate={task.dueDate} displayStatus={task.displayStatus} showLabel={false} /></td>
+                <td><DeadlineCell dueDate={task.dueDate} state={task.displayStatus} showLabel={false} /></td>
                 {canManage ? (
-                  <td className="actions">
-                    <button type="button" className="link-button" onClick={() => void openEdit(task)}>
-                      {t('action.edit')}
-                    </button>
-                    {!task.container && task.displayStatus !== 'DONE' && task.displayStatus !== 'CANCELLED' ? (
-                      <button type="button" className="link-button" onClick={() => setAction({ kind: 'complete', task })}>
-                        {t('tasks.completeDirect')}
+                  <td className="project-actions-cell">
+                    <div className="actions">
+                      <button type="button" className="link-button" onClick={() => void openEdit(task)}>
+                        {t('action.edit')}
                       </button>
-                    ) : null}
-                    {actor.role === 'ADMIN' ? (
-                      <>
-                        <button type="button" className="link-button" onClick={() => setAction({ kind: 'override', task })}>
-                          {t('tasks.override')}
+                      {!task.container && task.displayStatus !== 'DONE' && task.displayStatus !== 'CANCELLED' ? (
+                        <button type="button" className="link-button" onClick={() => setAction({ kind: 'complete', task })}>
+                          {t('tasks.completeDirect')}
                         </button>
-                        <button type="button" className="link-button danger" onClick={() => void startDelete(task)}>
-                          {t('projects.delete')}
-                        </button>
-                      </>
-                    ) : null}
+                      ) : null}
+                      {actor.role === 'ADMIN' ? (
+                        <>
+                          <button type="button" className="link-button" onClick={() => setAction({ kind: 'override', task })}>
+                            {t('tasks.override')}
+                          </button>
+                          <button type="button" className="link-button danger" onClick={() => void startDelete(task)}>
+                            {t('projects.delete')}
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
                   </td>
                 ) : null}
               </tr>

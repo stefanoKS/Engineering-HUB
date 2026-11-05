@@ -143,21 +143,23 @@ afterEach(() => {
 });
 
 describe('deadline emphasis', () => {
-  it('derives a tone from the stored date and the Asia/Tokyo business date', () => {
-    expect(deadlineTone('2026-11-01', { today: '2026-11-04' })).toBe('overdue');
-    expect(deadlineTone('2026-11-04', { today: '2026-11-04' })).toBe('today');
-    expect(deadlineTone('2026-11-09', { today: '2026-11-04' })).toBe('open');
-    expect(deadlineTone(null, { today: '2026-11-04' })).toBe('none');
-    expect(deadlineTone('2026-11-01', { displayStatus: 'DONE', today: '2026-11-04' })).toBe('done');
-    expect(deadlineTone('2026-11-01', { deadlineState: 'OVERDUE', today: '2026-11-04' })).toBe('overdue');
+  it('derives a tone from the authoritative state and the Asia/Tokyo business date', () => {
+    expect(deadlineTone('2026-11-01', 'IN_PROGRESS', '2026-11-04')).toBe('overdue');
+    expect(deadlineTone('2026-11-04', 'IN_PROGRESS', '2026-11-04')).toBe('today');
+    expect(deadlineTone('2026-11-09', 'IN_PROGRESS', '2026-11-04')).toBe('open');
+    expect(deadlineTone(null, 'IN_PROGRESS', '2026-11-04')).toBe('none');
+    expect(deadlineTone('2026-11-01', 'DONE', '2026-11-04')).toBe('done');
+    expect(deadlineTone('2026-11-01', 'CANCELLED', '2026-11-04')).toBe('cancelled');
+    expect(deadlineTone('2026-11-01', 'ARCHIVED', '2026-11-04')).toBe('cancelled');
+    expect(deadlineTone('2026-11-01', 'OVERDUE', '2026-11-04')).toBe('overdue');
   });
 
   it('renders 納期 with an overdue badge, a today badge and 未設定 for a missing date', () => {
     render(
       <I18nProvider>
-        <DeadlineCell dueDate="2026-11-01" displayStatus="OVERDUE" />
-        <DeadlineCell dueDate={businessDate()} />
-        <DeadlineCell dueDate={null} />
+        <DeadlineCell dueDate="2026-11-01" state="OVERDUE" />
+        <DeadlineCell dueDate={businessDate()} state="IN_PROGRESS" />
+        <DeadlineCell dueDate={null} state="IN_PROGRESS" />
       </I18nProvider>
     );
     expect(screen.getAllByText('納期')).toHaveLength(3);

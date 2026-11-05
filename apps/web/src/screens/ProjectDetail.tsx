@@ -14,18 +14,29 @@ import { useCallback, useMemo, useState } from 'react';
 import { ProjectForm } from './Projects';
 import { SubprojectForm } from './SubprojectForm';
 import { TaskForm } from './TaskForm';
-import type { Actor, Project, Reference, ProgressRollup, Subproject, TaskSummary } from '@eh/contracts';
+import type {
+  Actor,
+  Project,
+  ProjectScheduleDisplay,
+  Reference,
+  ProgressRollup,
+  Subproject,
+  TaskSummary
+} from '@eh/contracts';
 import { api } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
-import { Badge, Breadcrumbs, DescriptionText, EmptyState, ErrorBox, ProgressBar, Section, statusTone } from '../components/ui';
+import { Badge, Breadcrumbs, DescriptionText, EmptyState, ErrorBox, ProgressBar, Section } from '../components/ui';
 import { displayTone } from './Tasks';
 import { projectColor } from '@eh/domain';
 import { BackButton, useRouteMemoryState } from '../state/navigation';
+import { useBusinessDate } from '../state/business-date';
 import { DeleteEntityDialog } from '../components/DeleteEntityDialog';
 import { MemberSubprojectForm } from '../components/member-subproject-form';
 import { subprojectPath } from '../components/hierarchy';
-import { DeadlineCell } from '../components/deadline';
+import { DeadlineCell, deadlineStateOf } from '../components/deadline';
+import { ConfirmDialog } from '../components/forms';
+import { ScheduleBadge } from '../components/project-schedule';
 
 /* ------------------------------------------------------------------ data shapes */
 
@@ -34,20 +45,6 @@ type ManagerDetail = {
   progress: ProgressRollup;
   subprojects: (Subproject & { progress: ProgressRollup })[];
   tasks: TaskSummary[];
-  milestones: {
-    milestone_id: string;
-    milestone_name: string;
-    target_date: string | null;
-    actual_date: string | null;
-    status: string;
-  }[];
-  phases: {
-    project_phase_id: string;
-    phase_name: string;
-    planned_start: string | null;
-    planned_end: string | null;
-    status: string;
-  }[];
 };
 
 type ReadOnlyDetail = {
@@ -58,6 +55,7 @@ type ReadOnlyDetail = {
     responsibilityName: string;
     projectOwnerName: string;
     status: Project['status'];
+    schedule: ProjectScheduleDisplay;
     priority: Project['priority'];
     committedDeadline: string | null;
     progressPercent: number | null;
@@ -70,6 +68,7 @@ type ReadOnlyDetail = {
     description?: string;
     parentSubprojectId?: string | null;
     status: Subproject['status'];
+    schedule: ProjectScheduleDisplay;
     deadline: string | null;
     depth: number;
     progress: ProgressRollup;
@@ -77,7 +76,7 @@ type ReadOnlyDetail = {
   tasks: TaskSummary[];
 };
 
-type ViewModel = ReadOnlyDetail & { milestones?: ManagerDetail['milestones']; phases?: ManagerDetail['phases'] };
+type ViewModel = ReadOnlyDetail;
 
 function toViewModel(detail: ManagerDetail | ReadOnlyDetail): ViewModel {
   if ('milestones' in detail) {
@@ -85,9 +84,7 @@ function toViewModel(detail: ManagerDetail | ReadOnlyDetail): ViewModel {
       record: detail.record,
       progress: detail.progress,
       subprojects: detail.subprojects,
-      tasks: detail.tasks,
-      milestones: detail.milestones,
-      phases: detail.phases
+      tasks: detail.tasks
     };
   }
   return detail;
@@ -101,6 +98,7 @@ export type HierarchySubproject = {
   description?: string;
   parentSubprojectId: string | null;
   status: string;
+  schedule: ProjectScheduleDisplay;
   deadline: string | null;
   depth: number;
   revision?: number | null;
@@ -220,26 +218,13 @@ export function buildProjectHierarchy(input: {
   const taskTreeOf = (subprojectId: string | null): TaskNode[] =>
     buildTaskTree(buckets.get(subprojectId ?? '__direct__') ?? []);
 
-  const childMap = new Map<string, HierarchySubproject[]>();
-  const roots: HierarchySubproject[] = [];
-  for (const subproject of visibleSubprojects) {
-    const parentId = subproject.parentSubprojectId;
-    if (parentId && visibleSubprojectIds.has(parentId)) {
-      const siblings = childMap.get(parentId) ?? [];
-      siblings.push(subproject);
-      childMap.set(parentId, siblings);
-    } else {
-      roots.push(subproject);
-    }
-  }
   const byName = (a: HierarchySubproject, b: HierarchySubproject): number =>
     a.subprojectName.localeCompare(b.subprojectName, 'ja') || a.subprojectId.localeCompare(b.subprojectId);
 
-  const buildSubproject = (subproject: HierarchySubproject, guard: number): SubprojectNode => {
+  const buildSubproject = (subproject: HierarchySubproject): SubprojectNode => {
     const tasks = taskTreeOf(subproject.subprojectId);
-    const children =
-      guard > 20 ? [] : (childMap.get(subproject.subprojectId) ?? []).slice().sort(byName).map((child) => buildSubproject(child, guard + 1));
-    const counts = children.reduce((total, child) => addCounts(total, child.counts), countsOfNodes(tasks));
+    const children: SubprojectNode[] = [];
+    const counts = countsOfNodes(tasks);
     return {
       ...subproject,
       revision: subproject.revision ?? null,
@@ -249,7 +234,8 @@ export function buildProjectHierarchy(input: {
     };
   };
 
-  const subprojects = roots.slice().sort(byName).map((subproject) => buildSubproject(subproject, 0));
+  // Legacy parent links remain stored for archival eligibility, but normal navigation is flat.
+  const subprojects = visibleSubprojects.slice().sort(byName).map(buildSubproject);
   const directTasks = taskTreeOf(null);
   return {
     subprojects,
@@ -304,7 +290,7 @@ type HierarchyProps = {
   includeInactive: boolean;
   onToggleInactive: (value: boolean) => void;
   onNewTask: (subprojectId: string | null) => void;
-  onNewSubproject: (parentSubprojectId: string | null) => void;
+  onNewSubproject: () => void;
   onEditSubproject: (subproject: SubprojectNode) => void;
   onDelete: (entityType: 'TASKS' | 'SUBPROJECTS', entityId: string, entityName: string) => void;
   /**
@@ -344,7 +330,9 @@ export function ProjectHierarchy(props: HierarchyProps): JSX.Element {
     <Section
       title={t('hierarchy.title')}
       actions={
-        <>
+        // Scoped so the checkbox label, the count phrase and the buttons share one centre line
+        // without changing how the other section headers lay out their own actions.
+        <div className="hierarchy-toolbar">
           {canManage ? (
             <label className="checkbox inline-checkbox">
               <input
@@ -355,26 +343,27 @@ export function ProjectHierarchy(props: HierarchyProps): JSX.Element {
               {t('hierarchy.showInactive')}
             </label>
           ) : null}
-          <span className="muted small">
+          <span className="hierarchy-counts muted small">
             {t('hierarchy.counts', { active: hierarchy.counts.active, done: hierarchy.counts.done })}
           </span>
           {canManage ? (
-            <>
-              <button type="button" className="button secondary" onClick={() => props.onNewSubproject(null)}>
+            <div className="hierarchy-toolbar-buttons">
+              <button type="button" className="button secondary" onClick={props.onNewSubproject}>
                 {t('subprojects.new')}
               </button>
               <button type="button" className="button" onClick={() => props.onNewTask(null)}>
                 {t('tasks.new')}
               </button>
-            </>
+            </div>
           ) : null}
-        </>
+        </div>
       }
     >
       {isEmpty ? <EmptyState text={t('hierarchy.empty')} /> : null}
       {hierarchy.hiddenTasks > 0 ? (
         <p className="muted small">{t('hierarchy.hiddenTasks', { n: hierarchy.hiddenTasks })}</p>
       ) : null}
+      {isEmpty ? null : (
       <ul className="hierarchy" role="list">
         {hierarchy.subprojects.map((node) => (
           <SubprojectItem
@@ -385,7 +374,6 @@ export function ProjectHierarchy(props: HierarchyProps): JSX.Element {
             onToggle={toggle}
             onEdit={props.onEditSubproject}
             onNewTask={props.onNewTask}
-            onNewSubproject={props.onNewSubproject}
             onDelete={props.onDelete}
             canManage={canManage}
             canDelete={canDelete}
@@ -441,6 +429,7 @@ export function ProjectHierarchy(props: HierarchyProps): JSX.Element {
           )}
         </li>
       </ul>
+      )}
     </Section>
   );
 }
@@ -452,7 +441,6 @@ function SubprojectItem({
   onToggle,
   onEdit,
   onNewTask,
-  onNewSubproject,
   onDelete,
   canManage,
   canDelete
@@ -463,12 +451,11 @@ function SubprojectItem({
   onToggle: (key: string) => void;
   onEdit: (subproject: SubprojectNode) => void;
   onNewTask: (subprojectId: string | null) => void;
-  onNewSubproject: (parentSubprojectId: string | null) => void;
   onDelete: (entityType: 'TASKS' | 'SUBPROJECTS', entityId: string, entityName: string) => void;
   canManage: boolean;
   canDelete: boolean;
 }): JSX.Element {
-  const { t, label } = useI18n();
+  const { t } = useI18n();
   const key = `sub:${node.subprojectId}`;
   const open = !collapsed.has(key);
   const description = (node.description ?? '').trim();
@@ -489,16 +476,15 @@ function SubprojectItem({
           <FolderIcon />
         </span>
         <span className="hierarchy-name">{node.subprojectName}</span>
-        <Badge tone={statusTone(node.status)}>{label('project.status', node.status)}</Badge>
-        {node.deadline ? <DeadlineCell dueDate={node.deadline} showLabel={false} /> : null}
+        <ScheduleBadge schedule={node.schedule} />
+        {node.deadline ? (
+          <DeadlineCell dueDate={node.deadline} state={deadlineStateOf(node.schedule)} showLabel={false} />
+        ) : null}
         <span className="hierarchy-counts">{t('hierarchy.counts', { active: node.counts.active, done: node.counts.done })}</span>
         {canManage ? (
           <span className="hierarchy-actions">
             <button type="button" className="link-button" onClick={() => onNewTask(node.subprojectId)}>
               {t('tasks.new')}
-            </button>
-            <button type="button" className="link-button" onClick={() => onNewSubproject(node.subprojectId)}>
-              {t('hierarchy.newSubproject')}
             </button>
             <button type="button" className="link-button" onClick={() => onEdit(node)}>
               {t('action.edit')}
@@ -554,7 +540,6 @@ function SubprojectItem({
                 onToggle={onToggle}
                 onEdit={onEdit}
                 onNewTask={onNewTask}
-                onNewSubproject={onNewSubproject}
                 onDelete={onDelete}
                 canManage={canManage}
                 canDelete={canDelete}
@@ -610,7 +595,7 @@ function TaskItem({
         {task.container ? <Badge>{t('hierarchy.container')}</Badge> : null}
         {task.reviewState === 'PENDING' ? <Badge tone="warn">{t('tasks.review')}</Badge> : null}
         <span className="hierarchy-assignees muted small">{assignees || t('common.unset')}</span>
-        <DeadlineCell dueDate={task.dueDate} displayStatus={task.displayStatus} showLabel={false} />
+        <DeadlineCell dueDate={task.dueDate} state={task.displayStatus} showLabel={false} />
         <Badge tone={displayTone(task.displayStatus)}>{t(`taskStatus.${task.displayStatus}`)}</Badge>
         {canDelete ? (
           <button
@@ -658,7 +643,11 @@ export function ProjectDetailScreen({
   // The manager detail shares the `manager/projects` prefix so any project save invalidates it;
   // the read-only projection gets its own key and never collides with the picker payload.
   const cacheKey = readOnly ? `work/project/${projectId}` : keys.project(projectId);
-  const detail = useQuery<ManagerDetail | ReadOnlyDetail>(cacheKey, () => api.get<ManagerDetail | ReadOnlyDetail>(endpoint));
+  // The derived schedule badge depends on today; the Tokyo date re-reads it after midnight.
+  const today = useBusinessDate();
+  const detail = useQuery<ManagerDetail | ReadOnlyDetail>(`${cacheKey}:${today}`, () =>
+    api.get<ManagerDetail | ReadOnlyDetail>(endpoint)
+  );
   const canManage = !readOnly && (actor.role === 'ADMIN' || actor.role === 'MANAGER');
   const canDelete = !readOnly && actor.role === 'ADMIN';
   // A MEMBER files a subproject here straight away; every manager-only operation stays hidden.
@@ -697,6 +686,8 @@ export function ProjectDetailScreen({
     entityName: string;
   } | null>(null);
   const [notice, setNotice] = useState('');
+  /** An explicit, confirmed lifecycle decision - never an ordinary edit. */
+  const [statusChange, setStatusChange] = useState<'Completed' | 'Cancelled' | 'Active' | null>(null);
 
   const references = useQuery<{
     responsibilities: Reference[];
@@ -739,6 +730,7 @@ export function ProjectDetailScreen({
         description: subproject.description ?? '',
         parentSubprojectId: subproject.parentSubprojectId ?? null,
         status: subproject.status,
+        schedule: subproject.schedule,
         deadline: subproject.deadline,
         depth: subproject.depth,
         revision: (subproject as Subproject).revision
@@ -752,6 +744,8 @@ export function ProjectDetailScreen({
   if (!detail.data || !hierarchy) return <p className="muted">{t('state.loading')}</p>;
   const view = toViewModel(detail.data);
   const { record } = view;
+  /** The stored lifecycle fact decides which explicit actions are offered. */
+  const storedStatus = record.status;
 
   const editTarget = (node: SubprojectNode): Subproject => {
     const source = view.subprojects.find((subproject) => subproject.subprojectId === node.subprojectId);
@@ -796,6 +790,21 @@ export function ProjectDetailScreen({
               {t('projects.edit')}
             </button>
           )}
+          {canManage && storedStatus !== 'Completed' && storedStatus !== 'Archived' && storedStatus !== 'Cancelled' ? (
+            <button type="button" className="button secondary" onClick={() => setStatusChange('Completed')}>
+              {t('project.schedule.markCompleted')}
+            </button>
+          ) : null}
+          {canManage && storedStatus !== 'Completed' && storedStatus !== 'Archived' && storedStatus !== 'Cancelled' ? (
+            <button type="button" className="button secondary" onClick={() => setStatusChange('Cancelled')}>
+              {t('project.schedule.cancel')}
+            </button>
+          ) : null}
+          {canManage && storedStatus === 'Cancelled' ? (
+            <button type="button" className="button secondary" onClick={() => setStatusChange('Active')}>
+              {t('project.schedule.reactivate')}
+            </button>
+          ) : null}
           {canCreateAsMember ? (
             <button
               type="button"
@@ -806,7 +815,7 @@ export function ProjectDetailScreen({
               {t('myWork.newSubproject')}
             </button>
           ) : null}
-          <Badge tone={statusTone(record.status)}>{label('project.status', record.status)}</Badge>
+          <ScheduleBadge schedule={record.schedule} />
           {canManage ? (
             <Badge tone={(record as Project).dashboardVisibility === 'INTERNAL' ? 'ok' : 'neutral'}>
               {(record as Project).dashboardVisibility}
@@ -824,9 +833,10 @@ export function ProjectDetailScreen({
       <Section title={t('project.info')}>
         <div className="detail-grid">
           <div>
-            <dt>{t('projects.status')}</dt>
+            <dt>{t('project.schedule.title')}</dt>
             <dd>
-              <Badge tone={statusTone(record.status)}>{label('project.status', record.status)}</Badge>
+              <ScheduleBadge schedule={record.schedule} showDetail />
+              <span className="field-hint">{t('project.schedule.derivedHint')}</span>
             </dd>
           </div>
           <div>
@@ -844,7 +854,12 @@ export function ProjectDetailScreen({
           <div>
             <dt>{t('projects.deadline')}</dt>
             <dd>
-              <DeadlineCell dueDate={record.committedDeadline} showLabel={false} size="large" />
+              <DeadlineCell
+                dueDate={record.committedDeadline}
+                state={deadlineStateOf(record.schedule)}
+                showLabel={false}
+                size="large"
+              />
             </dd>
           </div>
         </div>
@@ -892,43 +907,11 @@ export function ProjectDetailScreen({
         onToggle={toggleCollapsed}
         onToggleInactive={(value) => setIncludeInactive(value)}
         onNewTask={(subprojectId) => setNewTaskSubproject(subprojectId)}
-        onNewSubproject={(parentSubprojectId) => setNewSubprojectParent(parentSubprojectId)}
+        onNewSubproject={() => setNewSubprojectParent(null)}
         onEditSubproject={(node) => setEditingSubproject(editTarget(node))}
         onDelete={(entityType, entityId, entityName) => setDeleteTarget({ entityType, entityId, entityName })}
       />
 
-      {canManage && view.milestones ? (
-        <Section title={t('projects.milestones')}>
-          {view.milestones.length === 0 ? (
-            <EmptyState />
-          ) : (
-            <ul className="list">
-              {view.milestones.map((milestone) => (
-                <li key={milestone.milestone_id}>
-                  {milestone.milestone_name} · {milestone.target_date ?? t('common.unset')} · {milestone.status}
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-      ) : null}
-
-      {canManage && view.phases ? (
-        <Section title={t('projects.phases')}>
-          {view.phases.length === 0 ? (
-            <EmptyState />
-          ) : (
-            <ul className="list">
-              {view.phases.map((phase) => (
-                <li key={phase.project_phase_id}>
-                  {phase.phase_name} · {phase.planned_start ?? t('common.unset')} → {phase.planned_end ?? t('common.unset')} ·{' '}
-                  <Badge tone={phase.status === 'PLANNED' ? 'ok' : 'warn'}>{label('phase.status', phase.status)}</Badge>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-      ) : null}
 
       {editProject && canManage ? (
         <ProjectForm
@@ -948,7 +931,6 @@ export function ProjectDetailScreen({
           projectId={projectId}
           projectName={record.projectName}
           item={editingSubproject}
-          siblings={view.subprojects as unknown as Subproject[]}
           members={references.data?.members ?? []}
           onClose={() => setEditingSubproject(null)}
           onSaved={() => {
@@ -962,8 +944,6 @@ export function ProjectDetailScreen({
         <SubprojectForm
           projectId={projectId}
           projectName={record.projectName}
-          initialParentSubprojectId={newSubprojectParent}
-          siblings={view.subprojects as unknown as Subproject[]}
           members={references.data?.members ?? []}
           onClose={() => setNewSubprojectParent(undefined)}
           onSaved={() => {
@@ -1008,6 +988,38 @@ export function ProjectDetailScreen({
           onDeleted={() => {
             setDeleteTarget(null);
             setNotice(t('delete.done'));
+            refresh();
+          }}
+        />
+      ) : null}
+
+      {statusChange && canManage ? (
+        <ConfirmDialog
+          title={
+            statusChange === 'Completed'
+              ? t('project.schedule.markCompletedTitle')
+              : statusChange === 'Cancelled'
+                ? t('project.schedule.cancelTitle')
+                : t('project.schedule.reactivateTitle')
+          }
+          message={
+            statusChange === 'Completed'
+              ? t('project.schedule.markCompletedBody')
+              : statusChange === 'Cancelled'
+                ? t('project.schedule.cancelBody')
+                : t('project.schedule.reactivateBody')
+          }
+          onCancel={() => setStatusChange(null)}
+          onConfirm={async () => {
+            const target = statusChange;
+            await api.patch(`/api/manager/projects/${projectId}`, {
+              revision: (record as Project).revision,
+              status: target,
+              // A terminal decision is explicit and confirmed, never an ordinary form save.
+              confirmStatusChange: true
+            });
+            setStatusChange(null);
+            setNotice(t('project.schedule.changed'));
             refresh();
           }}
         />

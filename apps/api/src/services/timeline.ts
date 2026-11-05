@@ -33,12 +33,19 @@ import {
   canIncludeArchivedWork,
   canSeeRestrictedWork,
   displayTaskStatus,
+  projectScheduleStatus,
   requireRole
 } from '@eh/domain';
 import { taskScope } from './views';
 import type { WorkCtx } from './work';
 
 type Range = { start: string | null; end: string | null; dated: number; total: number };
+type DisplaySchedule = {
+  scheduleStart: string | null;
+  scheduleFinish: string | null;
+  dateState: 'RANGE' | 'FINISH_ONLY' | 'START_ONLY' | 'UNDATED' | 'INVALID';
+  dateSource: 'EXPLICIT' | 'DERIVED' | 'NONE';
+};
 
 function emptyRange(): Range {
   return { start: null, end: null, dated: 0, total: 0 };
@@ -65,17 +72,45 @@ function toChildRange(range: Range): TimelineChildRange {
   return { start: range.start, end: range.end, datedItems: range.dated, totalItems: range.total };
 }
 
-/** A task's usable display dates, keeping the stored meaning of each field. */
-function taskDates(task: { plannedStart: string | null; dueDate: string | null }): {
-  start: string | null;
-  end: string | null;
-  dated: boolean;
-} {
+function explicitSchedule(start: string | null, finish: string | null): DisplaySchedule {
+  if (start && finish && start > finish) {
+    return { scheduleStart: null, scheduleFinish: null, dateState: 'INVALID', dateSource: 'EXPLICIT' };
+  }
+  if (start && finish) {
+    return { scheduleStart: start, scheduleFinish: finish, dateState: 'RANGE', dateSource: 'EXPLICIT' };
+  }
+  if (finish) {
+    return { scheduleStart: finish, scheduleFinish: finish, dateState: 'FINISH_ONLY', dateSource: 'EXPLICIT' };
+  }
+  if (start) {
+    return { scheduleStart: null, scheduleFinish: null, dateState: 'START_ONLY', dateSource: 'EXPLICIT' };
+  }
+  return { scheduleStart: null, scheduleFinish: null, dateState: 'UNDATED', dateSource: 'NONE' };
+}
+
+function derivedSchedule(range: Range): DisplaySchedule {
+  if (!range.start || !range.end) {
+    return { scheduleStart: null, scheduleFinish: null, dateState: 'UNDATED', dateSource: 'NONE' };
+  }
   return {
-    start: task.plannedStart ?? task.dueDate,
-    end: task.dueDate ?? task.plannedStart,
-    dated: !!task.plannedStart || !!task.dueDate
+    scheduleStart: range.start,
+    scheduleFinish: range.end,
+    dateState: range.start === range.end ? 'FINISH_ONLY' : 'RANGE',
+    dateSource: 'DERIVED'
   };
+}
+
+function rangeOfSchedules(schedules: Iterable<DisplaySchedule>): Range {
+  const range = emptyRange();
+  for (const schedule of schedules) {
+    if (!schedule.scheduleStart || !schedule.scheduleFinish) continue;
+    addRecord(range, schedule.scheduleStart, schedule.scheduleFinish, true);
+  }
+  return range;
+}
+
+function fitRange(range: Range): { start: string; end: string } | null {
+  return range.start && range.end ? { start: range.start, end: range.end } : null;
 }
 
 function projectVisibleTo(
@@ -90,49 +125,44 @@ function projectVisibleTo(
   );
 }
 
-type ChildAggregate = { project_id: string; start: string | null; end: string | null; dated: string; total: string };
-
 /**
  * One aggregate per project for the dated descendants of the page that was just read.
  *
  * The aggregate covers the whole authorized scope of those projects, never a rendered page, so a
  * summary span cannot change when the reader scrolls or changes the page size.
  */
-async function descendantRanges(ctx: WorkCtx, projectIds: string[]): Promise<Map<string, Range>> {
+function descendantRanges(
+  tasks: readonly {
+    taskId: string; projectId: string; subprojectId: string | null; parentTaskId: string | null;
+    plannedStart: string | null; dueDate: string | null; status: string;
+  }[],
+  subprojects: readonly { subprojectId: string; parentSubprojectId: string | null; status: string }[],
+  includeCompleted: boolean
+): Map<string, Range> {
+  const allById = new Map(tasks.map((task) => [task.taskId, task]));
+  const subprojectById = new Map(subprojects.map((subproject) => [subproject.subprojectId, subproject]));
+  const archived = (subprojectId: string | null): boolean => {
+    const seen = new Set<string>();
+    let current = subprojectId ? subprojectById.get(subprojectId) : undefined;
+    while (current) {
+      if (seen.has(current.subprojectId) || current.status === 'Archived') return true;
+      seen.add(current.subprojectId);
+      current = current.parentSubprojectId ? subprojectById.get(current.parentSubprojectId) : undefined;
+    }
+    return false;
+  };
+  const childIds = new Set(tasks.filter((task) => task.parentTaskId && allById.has(task.parentTaskId)).map((task) => task.parentTaskId as string));
   const ranges = new Map<string, Range>();
-  if (projectIds.length === 0) return ranges;
-  const [taskRows, subprojectRows] = await Promise.all([
-    ctx.db.many<ChildAggregate>(
-      `SELECT t.project_id,
-              min(COALESCE(t.planned_start, t.due_date)) AS start,
-              max(COALESCE(t.due_date, t.planned_start)) AS end,
-              count(*) FILTER (WHERE t.planned_start IS NOT NULL OR t.due_date IS NOT NULL)::text AS dated,
-              count(*)::text AS total
-         FROM tasks t
-        WHERE t.deleted_at IS NULL AND t.status <> 'Cancelled' AND t.project_id = ANY($1::text[])
-        GROUP BY t.project_id`,
-      [projectIds]
-    ),
-    ctx.db.many<ChildAggregate>(
-      `SELECT s.project_id,
-              min(COALESCE(s.planned_start, s.deadline)) AS start,
-              max(COALESCE(s.planned_end, s.deadline)) AS end,
-              count(*) FILTER (WHERE s.planned_start IS NOT NULL OR s.deadline IS NOT NULL
-                                  OR s.planned_end IS NOT NULL)::text AS dated,
-              count(*)::text AS total
-         FROM subprojects s
-        WHERE s.deleted_at IS NULL AND s.status <> 'Archived' AND s.project_id = ANY($1::text[])
-        GROUP BY s.project_id`,
-      [projectIds]
-    )
-  ]);
-  for (const row of [...taskRows, ...subprojectRows]) {
-    const range = ranges.get(row.project_id) ?? emptyRange();
-    if (row.start && (!range.start || row.start < range.start)) range.start = row.start;
-    if (row.end && (!range.end || row.end > range.end)) range.end = row.end;
-    range.dated += Number(row.dated ?? 0);
-    range.total += Number(row.total ?? 0);
-    ranges.set(row.project_id, range);
+  for (const task of tasks) {
+    if (childIds.has(task.taskId) || task.status === 'Cancelled' || (!includeCompleted && task.status === 'Done') || archived(task.subprojectId)) continue;
+    const range = ranges.get(task.projectId) ?? emptyRange();
+    const schedule = explicitSchedule(task.plannedStart, task.dueDate);
+    if (schedule.scheduleStart && schedule.scheduleFinish) {
+      addRecord(range, schedule.scheduleStart, schedule.scheduleFinish, true);
+    } else {
+      range.total += 1;
+    }
+    ranges.set(task.projectId, range);
   }
   return ranges;
 }
@@ -151,6 +181,7 @@ export async function timelineProjects(
     page: number;
     pageSize?: number;
     includeArchived?: boolean;
+    includeCompleted?: boolean;
   }
 ): Promise<TimelineProjectPage> {
   requireRole(ctx.identity, 'VIEWER');
@@ -172,24 +203,26 @@ export async function timelineProjects(
         direction: 'asc'
       },
       input.page,
-      pageSize
+      pageSize,
+      ctx.today
     ),
     listWorkResponsibilityOptions(ctx.db, !manager),
     taskScope(ctx)
   ]);
-  const ranges = await descendantRanges(
-    ctx,
-    page.items.map((project) => project.projectId)
-  );
+  const ranges = descendantRanges(loaded.tasks, loaded.dir.subprojects, input.includeCompleted !== false);
   const counts = loaded.scope.countsBy((task) => task.projectId, ctx.today);
   const items: TimelineProjectRow[] = page.items.map((project) => {
     const range = ranges.get(project.projectId) ?? emptyRange();
+    const schedule = project.plannedStart || project.committedDeadline
+      ? explicitSchedule(project.plannedStart, project.committedDeadline)
+      : derivedSchedule(range);
     return {
       projectId: project.projectId,
       projectName: project.projectName,
       responsibilityId: project.responsibilityId,
       responsibilityName: project.responsibilityName ?? '',
       status: project.status,
+      schedule: project.schedule,
       plannedStart: project.plannedStart,
       forecastEnd: project.forecastEnd,
       committedDeadline: project.committedDeadline,
@@ -197,16 +230,33 @@ export async function timelineProjects(
       openWork: counts.get(project.projectId)?.openWork ?? 0,
       completedWork: counts.get(project.projectId)?.completedWork ?? 0,
       childRange: toChildRange(range),
-      undated: !project.plannedStart && !project.forecastEnd && !project.committedDeadline && range.dated === 0
+      undated: schedule.dateState === 'UNDATED',
+      ...schedule
     };
   });
+  const scopeProjects = loaded.dir.projects.filter((project) =>
+    projectVisibleTo(ctx, project) &&
+    (input.includeArchived === true || (project.status !== 'Archived' && !project.archivedAt)) &&
+    (!input.responsibilityId || project.responsibilityId === input.responsibilityId) &&
+    (!input.query || project.projectName.toLocaleLowerCase().includes(input.query.toLocaleLowerCase()))
+  );
   return {
     items,
     total: page.total,
     page: input.page,
     pageSize,
     totalPages: Math.max(1, Math.ceil(page.total / pageSize)),
-    responsibilities
+    responsibilities,
+    fitRange: fitRange(
+      rangeOfSchedules(
+        scopeProjects.map((project) => {
+          const range = ranges.get(project.projectId) ?? emptyRange();
+          return project.plannedStart || project.committedDeadline
+            ? explicitSchedule(project.plannedStart, project.committedDeadline)
+            : derivedSchedule(range);
+        })
+      )
+    )
   };
 }
 
@@ -286,6 +336,12 @@ export async function timelineBranch(
     .filter((task) => options.includeCompleted !== false || task.status !== 'Done');
   const tasks = visibleTasks;
 
+  const allChildrenOf = new Map<string, string[]>();
+  const allTaskIds = new Set(allTasks.map((task) => task.taskId));
+  for (const task of allTasks) {
+    if (!task.parentTaskId || !allTaskIds.has(task.parentTaskId)) continue;
+    allChildrenOf.set(task.parentTaskId, [...(allChildrenOf.get(task.parentTaskId) ?? []), task.taskId]);
+  }
   const childrenOf = new Map<string, string[]>();
   for (const task of tasks) {
     const parent = task.parentTaskId ?? '';
@@ -300,9 +356,15 @@ export async function timelineBranch(
     if (seen.has(taskId)) return range;
     seen.add(taskId);
     const task = byId.get(taskId);
-    if (task) {
-      const dates = taskDates(task);
-      addRecord(range, dates.start, dates.end, dates.dated);
+    // A task that has children is a container. Its stored schedule is never an additional work
+    // item; only eligible descendant leaf schedules define its display range.
+    if (task && !(allChildrenOf.get(taskId)?.length)) {
+      const schedule = explicitSchedule(task.plannedStart, task.dueDate);
+      if (schedule.scheduleStart && schedule.scheduleFinish) {
+        addRecord(range, schedule.scheduleStart, schedule.scheduleFinish, true);
+      } else {
+        range.total += 1;
+      }
     }
     for (const childId of childrenOf.get(taskId) ?? []) {
       addRange(range, rangeOfTask(childId, seen));
@@ -311,31 +373,19 @@ export async function timelineBranch(
     return range;
   };
 
-  const subprojectChildren = new Map<string, string[]>();
-  for (const subproject of scopedSubprojects) {
-    const parent = subproject.parentSubprojectId ?? '';
-    subprojectChildren.set(parent, [...(subprojectChildren.get(parent) ?? []), subproject.subprojectId]);
-  }
   const rangeOfSubproject = (subprojectId: string, seen = new Set<string>()): Range => {
     const range = emptyRange();
     if (seen.has(subprojectId)) return range;
     seen.add(subprojectId);
-    const subproject = allById.get(subprojectId);
-    if (subproject) {
-      const start = subproject.plannedStart ?? subproject.deadline;
-      const end = subproject.plannedEnd ?? subproject.deadline;
-      addRecord(range, start, end, !!start || !!end);
-    }
     for (const task of tasks) {
       if (task.subprojectId !== subprojectId) continue;
-      const parent = task.parentTaskId ? byId.get(task.parentTaskId) : undefined;
-      // Only a task-tree root belongs directly to this subproject. Its descendants are added by
-      // rangeOfTask once, preventing container children from being counted repeatedly.
-      if (parent && parent.subprojectId === subprojectId) continue;
-      addRange(range, rangeOfTask(task.taskId));
-    }
-    for (const childId of subprojectChildren.get(subprojectId) ?? []) {
-      addRange(range, rangeOfSubproject(childId, seen));
+      if (allChildrenOf.get(task.taskId)?.length) continue;
+      const schedule = explicitSchedule(task.plannedStart, task.dueDate);
+      if (schedule.scheduleStart && schedule.scheduleFinish) {
+        addRecord(range, schedule.scheduleStart, schedule.scheduleFinish, true);
+      } else {
+        range.total += 1;
+      }
     }
     return range;
   };
@@ -348,22 +398,26 @@ export async function timelineBranch(
   );
   const completedAt = new Map(completedRows.map((row) => [row.task_id, row.completed_at]));
   const childRange = emptyRange();
-  for (const subproject of visibleSubprojects) {
-    if (subproject.parentSubprojectId && allById.has(subproject.parentSubprojectId)) continue;
-    addRange(childRange, rangeOfSubproject(subproject.subprojectId));
-  }
   for (const task of tasks) {
-    if (task.subprojectId) continue;
-    if (task.parentTaskId && byId.has(task.parentTaskId)) continue;
-    addRange(childRange, rangeOfTask(task.taskId));
+    if (allChildrenOf.get(task.taskId)?.length) continue;
+    const schedule = explicitSchedule(task.plannedStart, task.dueDate);
+    if (schedule.scheduleStart && schedule.scheduleFinish) {
+      addRecord(childRange, schedule.scheduleStart, schedule.scheduleFinish, true);
+    } else {
+      childRange.total += 1;
+    }
   }
 
+  const projectSchedule = project.plannedStart || project.committedDeadline
+    ? explicitSchedule(project.plannedStart, project.committedDeadline)
+    : derivedSchedule(childRange);
   const projectRow: TimelineProjectRow = {
     projectId: project.projectId,
     projectName: project.projectName,
     responsibilityId: project.responsibilityId,
     responsibilityName: project.responsibilityName ?? '',
     status: project.status,
+    schedule: project.schedule,
     plannedStart: project.plannedStart,
     forecastEnd: project.forecastEnd,
     committedDeadline: project.committedDeadline,
@@ -371,31 +425,42 @@ export async function timelineBranch(
     openWork: counts?.openWork ?? 0,
     completedWork: counts?.completedWork ?? 0,
     childRange: toChildRange(childRange),
-    undated:
-      !project.plannedStart &&
-      !project.forecastEnd &&
-      !project.committedDeadline &&
-      childRange.dated === 0
+    undated: projectSchedule.dateState === 'UNDATED',
+    ...projectSchedule
   };
 
   const subprojects: TimelineSubprojectRow[] = scopedSubprojects.map((subproject) => {
     const range = rangeOfSubproject(subproject.subprojectId);
+    const schedule = derivedSchedule(range);
     return {
       subprojectId: subproject.subprojectId,
       projectId: subproject.projectId,
       parentSubprojectId: subproject.parentSubprojectId,
       subprojectName: subproject.subprojectName,
       status: subproject.status,
+      schedule: projectScheduleStatus(
+        {
+          status: subproject.status,
+          plannedStart: subproject.plannedStart,
+          committedDeadline: subproject.deadline
+        },
+        ctx.today
+      ),
       plannedStart: subproject.plannedStart,
       plannedEnd: subproject.plannedEnd,
       deadline: subproject.deadline,
       depth: subproject.depth,
       childRange: toChildRange(range),
-      undated: range.dated === 0
+      undated: schedule.dateState === 'UNDATED',
+      ...schedule
     };
   });
 
-  const taskRows: TimelineTaskRow[] = tasks.map((task) => ({
+  const taskRows: TimelineTaskRow[] = tasks.map((task) => {
+    const schedule = allChildrenOf.get(task.taskId)?.length
+      ? derivedSchedule(rangeOfTask(task.taskId))
+      : explicitSchedule(task.plannedStart, task.dueDate);
+    return {
     taskId: task.taskId,
     projectId: task.projectId,
     subprojectId: task.subprojectId,
@@ -406,19 +471,22 @@ export async function timelineBranch(
     plannedStart: task.plannedStart,
     dueDate: task.dueDate,
     completedAt: completedAt.get(task.taskId) ?? null,
-    container: task.container,
+    container: !!allChildrenOf.get(task.taskId)?.length,
     depth: task.depth,
     progressPercent: task.progressPercent,
     childRange: toChildRange(rangeOfTask(task.taskId)),
-    undated: !task.plannedStart && !task.dueDate,
-    inconsistent: !!task.plannedStart && !!task.dueDate && task.plannedStart > task.dueDate
-  }));
+    undated: schedule.dateState === 'UNDATED',
+    inconsistent: schedule.dateState === 'INVALID',
+    ...schedule
+  };
+  });
 
   return {
     project: projectRow,
     subprojects,
     tasks: taskRows,
     truncated: false,
-    taskTotal: visibleTasks.length
+    taskTotal: visibleTasks.length,
+    fitRange: fitRange(rangeOfSchedules([projectSchedule, ...subprojects, ...taskRows]))
   };
 }

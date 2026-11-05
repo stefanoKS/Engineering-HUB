@@ -16,6 +16,7 @@ import { DeadlineCell } from '../components/deadline';
 import { navigate } from '../App';
 import { projectColor } from '@eh/domain';
 import { useRouteMemoryState } from '../state/navigation';
+import { useBusinessDate } from '../state/business-date';
 
 type BootstrapShape = { references: { responsibilities: Reference[] } };
 
@@ -32,7 +33,9 @@ function ManagerOverview(): JSX.Element {
   const [upcomingDays, setUpcomingDays] = useRouteMemoryState<7 | 14 | 30>('overview:upcomingDays', 7);
 
   const bootstrap = useQuery<BootstrapShape>(keys.bootstrap, () => api.get<BootstrapShape>('/api/manager/bootstrap'));
-  const key = `${keys.overview}${queryString({ responsibilityId, unassigned, upcomingDays })}`;
+  // Overdue and upcoming figures are date-dependent: the Tokyo date is part of the cache identity.
+  const today = useBusinessDate();
+  const key = `${keys.overview}${queryString({ responsibilityId, unassigned, upcomingDays })}:${today}`;
   const overview = useQuery<Overview>(key, () =>
     api.get<Overview>(`/api/manager/overview${queryString({ responsibilityId, unassigned, upcomingDays })}`)
   );
@@ -138,7 +141,7 @@ function ManagerOverview(): JSX.Element {
                         </a>
                       </td>
                       <td>{taskAssignees(task, t('common.unset'))}</td>
-                      <td><DeadlineCell dueDate={task.dueDate} displayStatus={task.displayStatus} showLabel={false} /></td>
+                      <td><DeadlineCell dueDate={task.dueDate} state={task.displayStatus} showLabel={false} /></td>
                       <td>{daysBetween(task.dueDate, data.upcomingWindow.from)}</td>
                       <td>
                         <Badge tone="danger">{t(`taskStatus.${task.displayStatus}`)}</Badge>
@@ -169,7 +172,7 @@ function ManagerOverview(): JSX.Element {
             )}
           >
             <p className="muted small overview-date-range">
-              {data.upcomingWindow.from} – {data.upcomingWindow.to}
+              {data.upcomingWindow.from}  E{data.upcomingWindow.to}
             </p>
             {data.upcoming.length === 0 ? <EmptyState /> : (
               <table className="table overview-work-table">
@@ -192,7 +195,7 @@ function ManagerOverview(): JSX.Element {
                       </a>
                     </td>
                     <td>{taskAssignees(task, t('common.unset'))}</td>
-                    <td><DeadlineCell dueDate={task.dueDate} displayStatus={task.displayStatus} showLabel={false} /></td>
+                    <td><DeadlineCell dueDate={task.dueDate} state={task.displayStatus} showLabel={false} /></td>
                     <td>
                       <Badge tone={task.displayStatus === 'OVERDUE' ? 'danger' : 'info'}>
                         {t(`taskStatus.${task.displayStatus}`)}
@@ -471,7 +474,7 @@ export function EmployeeHome({ actor }: { actor: Actor }): JSX.Element {
                   </p>
                   <div className="task-card-meta">
                     <Badge tone={statusTone(task.status)}>{label('task.status', task.status)}</Badge>
-                    <DeadlineCell dueDate={task.dueDate} displayStatus={task.displayStatus} />
+                    <DeadlineCell dueDate={task.dueDate} state={task.displayStatus} />
                     {task.pendingRequest ? <Badge tone="warn">{t('request.status.PENDING')}</Badge> : null}
                   </div>
                   <ProgressBar value={task.progressPercent} />

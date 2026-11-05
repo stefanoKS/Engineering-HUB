@@ -107,7 +107,8 @@ export function registerWorkRoutes(app: FastifyInstance, _deps: AppDependencies)
           query: query.query || undefined,
           page: query.page,
           pageSize: query.pageSize,
-          includeArchived: query.includeArchived === 'true'
+          includeArchived: query.includeArchived === 'true',
+          includeCompleted: query.includeCompleted !== 'false'
         })
       );
     } catch (error) {

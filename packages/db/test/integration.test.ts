@@ -22,7 +22,10 @@ import {
   insertResponsibility,
   insertSubproject,
   insertTask,
+  listAllProjects,
+  listProjects,
   listTaskSummaries,
+  projectScheduleStateSql,
   readActiveSnapshot,
   reconcileInterruptedDeliveries,
   releaseDeliveryAttempt,
@@ -35,6 +38,7 @@ import {
   updateTask,
   writeSnapshotSlot
 } from '../src/index';
+import { projectScheduleStatus } from '@eh/domain';
 import { freshDatabase, expectDatabase } from './support/db';
 
 let db: Database;
@@ -329,6 +333,80 @@ describe('publication slots', () => {
     const active = await readActiveSnapshot(db);
     expect(active.meta?.active_slot).toBe('A');
     expect(active.rows.length).toBe(1);
+  });
+});
+
+describe('derived project schedule state', () => {
+  it('keeps the filtering expression and the domain rule identical for every combination', async () => {
+    expectDatabase({ skip: () => undefined });
+    const today = '2026-11-05';
+    const statuses = ['Active', 'Planned', 'On Hold', 'Completed', 'Cancelled', 'Archived'];
+    const starts = [null, '2026-10-01', today, '2026-12-01'];
+    const finishes = [null, '2026-10-01', today, '2026-12-01'];
+    let index = 0;
+    for (const status of statuses) {
+      for (const start of starts) {
+        for (const finish of finishes) {
+          index += 1;
+          const id = `PRJ-S${String(index).padStart(3, '0')}`;
+          await insertProject(
+            db,
+            {
+              projectName: `${status} ${start ?? 'none'} ${finish ?? 'none'}`,
+              status: status === 'Archived' ? 'Active' : status,
+              plannedStart: start,
+              committedDeadline: finish
+            },
+            id
+          );
+          if (status === 'Archived') {
+            // The schema requires `Archived` and its timestamp to be written together.
+            await db.query("UPDATE projects SET status = 'Archived', archived_at = '2026-10-01T00:00:00Z' WHERE project_id = $1", [id]);
+          }
+        }
+      }
+    }
+
+    const projected = await db.many<{ project_id: string; state: string }>(
+      `SELECT p.project_id, ${projectScheduleStateSql('$1')} AS state FROM projects p WHERE p.deleted_at IS NULL`,
+      [today]
+    );
+    const records = await listAllProjects(db, 1000);
+    expect(records).toHaveLength(projected.length);
+    for (const record of records) {
+      const sqlState = projected.find((row) => row.project_id === record.projectId)?.state;
+      const domainState = projectScheduleStatus(
+        {
+          status: record.status,
+          plannedStart: record.plannedStart,
+          committedDeadline: record.committedDeadline,
+          archivedAt: record.archivedAt
+        },
+        today
+      ).state;
+      expect(sqlState, record.projectName).toBe(domainState);
+    }
+  });
+
+  it('filters and sorts the derived state on the server before paging', async () => {
+    expectDatabase({ skip: () => undefined });
+    const today = '2026-11-05';
+    await insertProject(db, { projectName: 'Late', status: 'Active', plannedStart: '2026-10-01', committedDeadline: '2026-10-20' }, 'PRJ-L');
+    await insertProject(db, { projectName: 'Open', status: 'Active', plannedStart: '2026-10-01', committedDeadline: '2026-12-20' }, 'PRJ-O');
+    await insertProject(db, { projectName: 'Later', status: 'Planned', plannedStart: '2026-11-01', committedDeadline: '2026-12-01' }, 'PRJ-P');
+    await insertProject(db, { projectName: 'Undated', status: 'Active' }, 'PRJ-U');
+
+    const late = await listProjects(db, { schedule: 'LATE', sort: 'name', direction: 'asc' }, 1, 25, today);
+    expect(late.items.map((project) => project.projectId)).toEqual(['PRJ-L']);
+    expect(late.total).toBe(1);
+    expect(late.items[0]?.schedule).toEqual({ state: 'LATE', missing: 'NONE' });
+
+    // The order is resolved on the server, so a second page continues it instead of re-sorting.
+    const firstPage = await listProjects(db, { sort: 'schedule', direction: 'asc' }, 1, 3, today);
+    const secondPage = await listProjects(db, { sort: 'schedule', direction: 'asc' }, 2, 3, today);
+    const states = [...firstPage.items, ...secondPage.items].map((project) => project.schedule.state);
+    expect(states).toEqual([...states].sort());
+    expect(firstPage.total).toBe(4);
   });
 });
 

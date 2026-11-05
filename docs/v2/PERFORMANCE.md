@@ -1,5 +1,16 @@
 # Performance
 
+## Derived-status projection — 2026-11-05
+
+No live or large-dataset measurement was taken. The derived project schedule status adds **no
+query**: it is either computed from a row that was already read or projected as one `CASE`
+expression inside the existing project query. When the list is filtered or sorted by that state,
+the expression is evaluated in the same statement that already pages and counts, so pagination
+cost is unchanged and the count query stays parameter-clean (the sort-only parameter is excluded
+from it). The workload drill-down adds one in-memory mapping per returned row and no column read.
+Date-dependent pages include the Tokyo date in the browser's cache identity, which re-reads a
+projection at the day boundary instead of polling.
+
 ## Timeline and bounded selector reads — 2026-11-05
 
 No live or large-dataset measurement was taken for this release; the numbers below are the
@@ -14,8 +25,9 @@ FOR PRODUCTION**.
 | `GET /api/employee/my-work/project-filter` | 1 count + 1 grouped page (optional 1 selected row) | Replaces a fixed 200-row slice; the page is bounded by `pageSize`. |
 | `GET /api/employee/tasks/:id/report-eligibility` | 1 task, 1 project, 1 assignment, 1 child count, 1 pending count, 1 subproject list when the task sits in a subproject | One assessment, shared with the submission path. |
 
-The browser holds the timeline selection, zoom, expansion and window in page memory only; no
-private manager data is persisted.
+The browser holds the timeline selection, display range and expansion in page memory only; no
+private manager data is persisted. Zoom and pan were removed. The mounted drawing column is
+measured locally, with bounded adaptive labels; date presets and resizing add no server writes.
 
 ## Member explorer measurement — 2026-11-04
 

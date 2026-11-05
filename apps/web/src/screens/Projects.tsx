@@ -1,17 +1,20 @@
 import { useEditorState } from '../state/editor';
 /** Project list, create/edit form, archive and the guarded permanent removal. */
 import { useState } from 'react';
-import type { Actor, Project, ProjectSummary, Reference } from '@eh/contracts';
+import type { Actor, Project, ProjectScheduleState, ProjectSummary, Reference } from '@eh/contracts';
+import { PROJECT_SCHEDULE_STATES } from '@eh/contracts';
 import { api, queryString } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
-import { Badge, EmptyState, ErrorBox, Pagination, ProgressBar, Section, statusTone } from '../components/ui';
+import { EmptyState, ErrorBox, Pagination, ProgressBar, Section } from '../components/ui';
 import { ConfirmDialog, SelectInput, TextInput, useIdempotencyKey, useSave, type SaveStateValue } from '../components/forms';
 import { SaveState } from '../components/ui';
-import { DeadlineCell } from '../components/deadline';
+import { DeadlineCell, deadlineStateOf } from '../components/deadline';
+import { ScheduleBadge } from '../components/project-schedule';
 import { navigate } from '../App';
 import { projectColor } from '@eh/domain';
 import { useRouteMemoryState } from '../state/navigation';
+import { useBusinessDate } from '../state/business-date';
 
 type ProjectRow = ProjectSummary & { _revision: number };
 type Page = {
@@ -24,15 +27,16 @@ type Page = {
 };
 type References = { responsibilities: Reference[]; members: { memberId: string; name: string; active: boolean }[] };
 
-const STATUSES: Project['status'][] = ['Planned', 'Active', 'On Hold', 'Completed', 'Cancelled', 'Archived'];
+/** The status filter is the derived schedule state, resolved on the server before paging. */
+const SCHEDULE_STATES: ProjectScheduleState[] = [...PROJECT_SCHEDULE_STATES];
 const PRIORITIES: Project['priority'][] = ['Low', 'Medium', 'High', 'Critical'];
-type ProjectSort = 'deadline' | 'name' | 'responsibility' | 'owner' | 'status' | 'priority' | 'updated';
+type ProjectSort = 'deadline' | 'name' | 'responsibility' | 'owner' | 'schedule' | 'priority' | 'updated';
 
 export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
-  const { t, label } = useI18n();
+  const { t } = useI18n();
   const [responsibilityId, setResponsibilityId] = useRouteMemoryState('projects:responsibility', '');
   const [unassigned, setUnassigned] = useRouteMemoryState('projects:unassigned', false);
-  const [status, setStatus] = useRouteMemoryState('projects:status', '');
+  const [schedule, setStatus] = useRouteMemoryState('projects:schedule', '');
   const [query, setQuery] = useRouteMemoryState('projects:query', '');
   const [page, setPage] = useRouteMemoryState('projects:page', 1);
   const [sort, setSort] = useRouteMemoryState<ProjectSort>('projects:sort', 'deadline');
@@ -43,9 +47,11 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
   const [deleteTarget, setDeleteTarget] = useState<{ summary: ProjectRow; confirmation: string; blockers: string[] } | null>(null);
 
   const references = useQuery<References>(keys.references, () => api.get<References>('/api/manager/references'));
-  const listKey = `${keys.projects}${queryString({ responsibilityId, unassigned, status, query, sort, direction, page })}`;
+  // The derived status depends on today, so the cache identity carries the Tokyo business date.
+  const today = useBusinessDate();
+  const listKey = `${keys.projects}${queryString({ responsibilityId, unassigned, schedule, query, sort, direction, page })}:${today}`;
   const list = useQuery<Page>(listKey, () =>
-    api.get<Page>(`/api/manager/projects${queryString({ responsibilityId, unassigned, status, query, sort, direction, page, pageSize: 25 })}`)
+    api.get<Page>(`/api/manager/projects${queryString({ responsibilityId, unassigned, schedule, query, sort, direction, page, pageSize: 25 })}`)
   );
   const canManage = actor.role === 'ADMIN' || actor.role === 'MANAGER';
   const grouped = !responsibilityId && !unassigned && list.data
@@ -114,13 +120,13 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
             ]}
           />
           <SelectInput
-            value={status}
+            value={schedule}
             onChange={(value) => {
               setStatus(value);
               setPage(1);
             }}
             allowEmpty={t('filter.all')}
-            options={STATUSES.map((value) => ({ value, label: label('project.status', value) }))}
+            options={SCHEDULE_STATES.map((value) => ({ value, label: t(`project.schedule.${value}`) }))}
           />
           <input
             placeholder={t('filter.query')}
@@ -152,7 +158,7 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
             <tr>
               <th>{sortHeader('name', t('column.name'))}</th>
               <th>{sortHeader('responsibility', t('projects.responsibility'))}</th>
-              <th>{sortHeader('status', t('column.status'))}</th>
+              <th>{sortHeader('schedule', t('column.status'))}</th>
               <th>{sortHeader('deadline', t('column.deadline'))}</th>
               <th>{t('column.progress')}</th>
               <th>{t('column.actions')}</th>
@@ -181,10 +187,10 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
                 </td>
                 <td>{project.responsibilityName || t('overview.unassigned')}</td>
                 <td>
-                  <Badge tone={statusTone(project.status)}>{label('project.status', project.status)}</Badge>
+                  <ScheduleBadge schedule={project.schedule} />
                 </td>
                 <td>
-                  <DeadlineCell dueDate={project.committedDeadline} deadlineState={project.deadlineState} showLabel={false} />
+                  <DeadlineCell dueDate={project.committedDeadline} state={deadlineStateOf(project.schedule)} showLabel={false} />
                 </td>
                 <td>
                   <ProgressBar value={project.progressPercent} />
@@ -192,22 +198,24 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
                     {t('overview.openWork')}: {project.openWork} · {t('overview.overdue')}: {project.overdueWork}
                   </div>
                 </td>
-                <td className="actions">
-                  {canManage ? (
-                    <>
-                      <button type="button" className="link-button" onClick={() => void openEditor(project)}>
-                        {t('action.edit')}
-                      </button>
-                      <button type="button" className="link-button" onClick={() => setArchiveTarget(project)}>
-                        {t('projects.archive')}
-                      </button>
-                      {actor.role === 'ADMIN' ? (
-                        <button type="button" className="link-button danger" onClick={() => void startDelete(project)}>
-                          {t('projects.delete')}
+                <td className="project-actions-cell">
+                  <div className="actions">
+                    {canManage ? (
+                      <>
+                        <button type="button" className="link-button" onClick={() => void openEditor(project)}>
+                          {t('action.edit')}
                         </button>
-                      ) : null}
-                    </>
-                  ) : null}
+                        <button type="button" className="link-button" onClick={() => setArchiveTarget(project)}>
+                          {t('projects.archive')}
+                        </button>
+                        {actor.role === 'ADMIN' ? (
+                          <button type="button" className="link-button danger" onClick={() => void startDelete(project)}>
+                            {t('projects.delete')}
+                          </button>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
               )) : null}
@@ -223,10 +231,10 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
                 </td>
                 <td>{project.responsibilityName || t('overview.unassigned')}</td>
                 <td>
-                  <Badge tone={statusTone(project.status)}>{label('project.status', project.status)}</Badge>
+                  <ScheduleBadge schedule={project.schedule} />
                 </td>
                 <td>
-                  <DeadlineCell dueDate={project.committedDeadline} deadlineState={project.deadlineState} showLabel={false} />
+                  <DeadlineCell dueDate={project.committedDeadline} state={deadlineStateOf(project.schedule)} showLabel={false} />
                 </td>
                 <td>
                   <ProgressBar value={project.progressPercent} />
@@ -234,22 +242,24 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
                     {t('overview.openWork')}: {project.openWork} · {t('overview.overdue')}: {project.overdueWork}
                   </div>
                 </td>
-                <td className="actions">
-                  {canManage ? (
-                    <>
-                      <button type="button" className="link-button" onClick={() => void openEditor(project)}>
-                        {t('action.edit')}
-                      </button>
-                      <button type="button" className="link-button" onClick={() => setArchiveTarget(project)}>
-                        {t('projects.archive')}
-                      </button>
-                      {actor.role === 'ADMIN' ? (
-                        <button type="button" className="link-button danger" onClick={() => void startDelete(project)}>
-                          {t('projects.delete')}
+                <td className="project-actions-cell">
+                  <div className="actions">
+                    {canManage ? (
+                      <>
+                        <button type="button" className="link-button" onClick={() => void openEditor(project)}>
+                          {t('action.edit')}
                         </button>
-                      ) : null}
-                    </>
-                  ) : null}
+                        <button type="button" className="link-button" onClick={() => setArchiveTarget(project)}>
+                          {t('projects.archive')}
+                        </button>
+                        {actor.role === 'ADMIN' ? (
+                          <button type="button" className="link-button danger" onClick={() => void startDelete(project)}>
+                            {t('projects.delete')}
+                          </button>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -351,14 +361,14 @@ export function ProjectForm({
     category: project?.category ?? '',
     responsibilityId: project?.responsibilityId ?? '',
     projectOwnerId: project?.projectOwnerId ?? '',
-    status: project?.status ?? 'Planned',
     priority: project?.priority ?? 'Medium',
     committedDeadline: project?.committedDeadline ?? '',
     forecastEnd: project?.forecastEnd ?? '',
     plannedStart: project?.plannedStart ?? '',
     nextAction: project?.nextAction ?? '',
     notificationEnabled: project?.notificationEnabled ?? true,
-    dashboardVisibility: project?.dashboardVisibility ?? 'RESTRICTED',
+    // A new V2 project is INTERNAL by default; the selector still allows an explicit RESTRICTED.
+    dashboardVisibility: project?.dashboardVisibility ?? 'INTERNAL',
     dashboardSummary: project?.dashboardSummary ?? ''
   });
   const [acknowledge, setAcknowledge] = useState(false);
@@ -421,14 +431,11 @@ export function ProjectForm({
             />
           </label>
           <div className="field-row">
-            <label className="field">
-              <span className="field-label">{t('projects.status')}</span>
-              <SelectInput
-                value={form.status}
-                onChange={(value) => set('status', value as Project['status'])}
-                options={STATUSES.map((value) => ({ value, label: label('project.status', value) }))}
-              />
-            </label>
+            <div className="field">
+              <span className="field-label">{t('project.schedule.title')}</span>
+              {project ? <ScheduleBadge schedule={project.schedule} showDetail /> : null}
+              <span className="field-hint">{t('project.schedule.derivedHint')}</span>
+            </div>
             <label className="field">
               <span className="field-label">{t('projects.priority')}</span>
               <SelectInput
@@ -493,11 +500,12 @@ export function ProjectForm({
               value={form.dashboardVisibility}
               onChange={(value) => set('dashboardVisibility', value as Project['dashboardVisibility'])}
               options={[
-                { value: 'RESTRICTED', label: 'RESTRICTED' },
-                { value: 'INTERNAL', label: 'INTERNAL' }
+                { value: 'INTERNAL', label: t('projects.visibility.internal') },
+                { value: 'RESTRICTED', label: t('projects.visibility.restricted') }
               ]}
             />
             <span className="field-hint">{t('projects.visibilityHint')}</span>
+            <span className="field-hint">{t('projects.visibilityScopeHint')}</span>
           </label>
           <label className="field">
             <span className="field-label">{t('projects.summary')}</span>
@@ -530,7 +538,6 @@ export function ProjectForm({
                         category: form.category || undefined,
                         responsibilityId: form.responsibilityId,
                         projectOwnerId: form.projectOwnerId || undefined,
-                        status: form.status,
                         priority: form.priority,
                         plannedStart: form.plannedStart || undefined,
                         forecastEnd: form.forecastEnd || undefined,
@@ -551,7 +558,6 @@ export function ProjectForm({
                       category: form.category,
                       responsibilityId: form.responsibilityId || null,
                       projectOwnerId: form.projectOwnerId || null,
-                      status: form.status,
                       priority: form.priority,
                       plannedStart: form.plannedStart || null,
                       forecastEnd: form.forecastEnd || null,

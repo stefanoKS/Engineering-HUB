@@ -391,7 +391,7 @@ describe('project visibility policy', () => {
     expect(detail.statusCode, detail.body).toBe(200);
     const record = detail.json().data.record as Record<string, unknown>;
     expect(Object.keys(record).sort()).toEqual(
-      ['activeTaskCount', 'committedDeadline', 'completedTaskCount', 'description', 'health', 'priority', 'projectId', 'projectName', 'progressPercent', 'projectOwnerName', 'responsibilityName', 'status'].sort()
+      ['activeTaskCount', 'committedDeadline', 'completedTaskCount', 'description', 'health', 'priority', 'projectId', 'projectName', 'progressPercent', 'projectOwnerName', 'responsibilityName', 'schedule', 'status'].sort()
     );
     expect(detail.body).not.toContain('dashboardSummary');
     expect(detail.body).not.toContain('notificationEnabled');

@@ -3,53 +3,64 @@
  *
  * A deadline is its own labelled region (納期 / Deadline) instead of a fragment inside a muted
  * metadata paragraph, so the date stays scannable in a long list. The tone is presentation only:
- * it comes from the server-side display state and the Asia/Tokyo business date, and it never
+ * it comes from the authoritative display state and the Asia/Tokyo business date, and it never
  * changes a stored date. Overdue is red, due today is amber, an ordinary future deadline keeps
  * readable body text - a deadline is never red just because it exists.
+ *
+ * The lifecycle state is a required prop. A caller that already holds a task or a project cannot
+ * silently omit it and let this component guess from the date alone - that guess is exactly how a
+ * completed task ends up painted as overdue. `deadlineStateOf` is the one mapping from the
+ * server-derived project schedule state to a deadline state.
  */
+import type { DisplayTaskStatus, ProjectScheduleDisplay } from '@eh/contracts';
 import { businessDate } from '@eh/domain';
 import { useI18n } from '../i18n';
 import { Badge } from './ui';
 
+export type DeadlineState = DisplayTaskStatus | 'ARCHIVED';
 export type DeadlineTone = 'overdue' | 'today' | 'open' | 'done' | 'cancelled' | 'none';
 
-type ProjectDeadlineState = 'NONE' | 'OK' | 'DUE_SOON' | 'OVERDUE' | 'COMPLETED';
-
-function toneFromStatus(
-  dueDate: string | null | undefined,
-  displayStatus: string | undefined,
-  today: string
-): DeadlineTone {
-  if (!dueDate) return displayStatus === 'DONE' ? 'done' : 'none';
-  if (displayStatus === 'DONE') return 'done';
-  if (displayStatus === 'CANCELLED') return 'cancelled';
-  if (displayStatus === 'OVERDUE') return 'overdue';
-  if (dueDate < today) return 'overdue';
-  if (dueDate === today) return 'today';
-  return 'open';
+/** One mapping from a derived project schedule state to a deadline state. */
+export function deadlineStateOf(schedule: ProjectScheduleDisplay | undefined): DeadlineState {
+  switch (schedule?.state) {
+    case 'COMPLETED':
+      return 'DONE';
+    case 'CANCELLED':
+      return 'CANCELLED';
+    case 'ARCHIVED':
+      return 'ARCHIVED';
+    case 'LATE':
+      return 'OVERDUE';
+    default:
+      return 'IN_PROGRESS';
+  }
 }
 
-function toneFromProject(
-  dueDate: string | null | undefined,
-  deadlineState: ProjectDeadlineState | undefined,
-  today: string
-): DeadlineTone {
-  if (!dueDate || deadlineState === 'NONE') return 'none';
-  if (deadlineState === 'COMPLETED') return 'done';
-  if (deadlineState === 'OVERDUE') return 'overdue';
-  if (dueDate < today) return 'overdue';
-  if (dueDate === today) return 'today';
-  return 'open';
-}
-
+/**
+ * Precedence: done wins over overdue, cancelled and archived work is never current, otherwise the
+ * authoritative state decides, and only an open record falls back to the calendar comparison.
+ */
 export function deadlineTone(
   dueDate: string | null | undefined,
-  options: { displayStatus?: string; deadlineState?: ProjectDeadlineState; today?: string } = {}
+  state: DeadlineState,
+  today: string = businessDate()
 ): DeadlineTone {
-  const today = options.today ?? businessDate();
-  return options.deadlineState
-    ? toneFromProject(dueDate, options.deadlineState, today)
-    : toneFromStatus(dueDate, options.displayStatus, today);
+  if (state === 'DONE') return 'done';
+  if (state === 'CANCELLED' || state === 'ARCHIVED') return 'cancelled';
+  if (!dueDate) return 'none';
+  if (state === 'OVERDUE') return 'overdue';
+  if (dueDate < today) return 'overdue';
+  if (dueDate === today) return 'today';
+  return 'open';
+}
+
+/** A completion that happened after its own deadline is stated separately, never as overdue. */
+export function isCompletedLate(
+  dueDate: string | null | undefined,
+  completedOn: string | null | undefined
+): boolean {
+  if (!dueDate || !completedOn) return false;
+  return completedOn.slice(0, 10) > dueDate;
 }
 
 /**
@@ -60,25 +71,35 @@ export function deadlineTone(
  */
 export function DeadlineCell({
   dueDate,
-  displayStatus,
-  deadlineState,
+  state,
+  completedOn,
   showLabel = true,
   size = 'normal'
 }: {
   dueDate: string | null | undefined;
-  displayStatus?: string;
-  deadlineState?: ProjectDeadlineState;
+  /** The server-derived display state; never inferred by this component alone. */
+  state: DeadlineState;
+  /** The recorded completion date, used only for the separate "completed late" label. */
+  completedOn?: string | null;
   showLabel?: boolean;
   size?: 'normal' | 'large';
 }): JSX.Element {
   const { t } = useI18n();
-  const tone = deadlineTone(dueDate, { displayStatus, deadlineState });
+  const tone = deadlineTone(dueDate, state);
+  const late = state === 'DONE' && isCompletedLate(dueDate, completedOn);
   return (
     <span className={`deadline deadline-${tone} deadline-size-${size}`}>
       {showLabel ? <span className="deadline-label">{t('deadline.label')}</span> : null}
       <span className="deadline-value">{dueDate ?? t('common.unset')}</span>
       {tone === 'overdue' ? <Badge tone="danger">{t('taskStatus.OVERDUE')}</Badge> : null}
       {tone === 'today' ? <Badge tone="warn">{t('deadline.todayBadge')}</Badge> : null}
+      {late ? <Badge tone="neutral">{t('deadline.completedLate')}</Badge> : null}
     </span>
   );
+}
+
+/** A stored date with no lifecycle meaning of its own (a plan value, a history timestamp). */
+export function DateValue({ value }: { value: string | null | undefined }): JSX.Element {
+  const { t } = useI18n();
+  return <span className="date-value">{value ?? t('common.unset')}</span>;
 }

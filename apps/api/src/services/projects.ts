@@ -25,6 +25,8 @@ import {
   DomainError,
   assertDeadlineChangeConfirmed,
   assertProjectCompletable,
+  assertProjectCreationStatus,
+  assertProjectLifecycleChange,
   assertWarningsAcknowledged,
   businessDate,
   planningWarnings,
@@ -85,6 +87,7 @@ export async function createProject(
   body: z.infer<typeof CreateProjectBody>
 ): Promise<{ project: Project; replayed: boolean }> {
   requireRole(ctx.identity, WRITE_ROLES);
+  assertProjectCreationStatus(body.status);
   await ensureActiveResponsibility(ctx, body.responsibilityId);
   if (body.projectOwnerId) await ensureMember(ctx, body.projectOwnerId);
   assertScheduleOrder(body.plannedStart, body.committedDeadline);
@@ -100,7 +103,9 @@ export async function createProject(
         category: body.category,
         responsibilityId: body.responsibilityId,
         projectOwnerId: body.projectOwnerId ?? ctx.identity.memberId,
-        status: body.status ?? 'Planned',
+        // Schedule progress is derived, so a new project starts as an explicit, non-terminal
+        // record; only completion, cancellation and archive change the stored lifecycle.
+        status: body.status ?? 'Active',
         priority: body.priority,
         plannedStart: body.plannedStart,
         forecastEnd: body.forecastEnd,
@@ -109,7 +114,9 @@ export async function createProject(
         nextMilestone: body.nextMilestone,
         nextAction: body.nextAction,
         notificationEnabled: body.notificationEnabled,
-        dashboardVisibility: body.dashboardVisibility ?? 'RESTRICTED',
+        // V2 default: a new project is INTERNAL, so it is eligible for internal visibility under
+        // the existing access and publication rules. An explicit RESTRICTED is still respected.
+        dashboardVisibility: body.dashboardVisibility ?? 'INTERNAL',
         dashboardSummary: body.dashboardSummary
       });
       await audit(tx, ctx, {
@@ -150,6 +157,14 @@ export async function patchProject(
   }
   assertDeadlineChangeConfirmed(project.committedDeadline, body.committedDeadline, body.confirmDeadlineChange === true);
   await deadlineGate(ctx, body.committedDeadline, undefined, body.acknowledgeNonWorking);
+
+  if (body.status !== undefined && body.status !== project.status) {
+    assertProjectLifecycleChange(project.status, body.status);
+    requireConfirmation(
+      body.confirmStatusChange === true,
+      'Completing, cancelling or reactivating a project requires explicit confirmation'
+    );
+  }
 
   if (body.status === 'Completed') {
     const tasks = await listTaskSummariesForProject(ctx.db, projectId);
@@ -233,10 +248,7 @@ export async function createSubproject(
   const project = await getProject(ctx.db, body.projectId);
   if (!project) throw new DomainError('NOT_FOUND', `Project not found: ${body.projectId}`);
   if (body.parentSubprojectId) {
-    const parent = await getSubproject(ctx.db, body.parentSubprojectId);
-    if (!parent || parent.projectId !== body.projectId) {
-      throw new DomainError('HIERARCHY_INVALID', 'Parent and child subprojects must belong to the same project');
-    }
+    throw new DomainError('HIERARCHY_INVALID', 'New subprojects must be direct children of their project');
   }
   if (body.ownerId) await ensureMember(ctx, body.ownerId);
   assertScheduleOrder(body.plannedStart, body.deadline);
@@ -247,7 +259,7 @@ export async function createSubproject(
     async (tx) => {
       const subproject = await insertSubproject(tx, {
         projectId: body.projectId,
-        parentSubprojectId: body.parentSubprojectId ?? null,
+        parentSubprojectId: null,
         subprojectName: body.subprojectName,
         description: body.description,
         ownerId: body.ownerId,
@@ -282,6 +294,9 @@ export async function patchSubproject(
     throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
   }
   if (body.ownerId) await ensureMember(ctx, body.ownerId);
+  if (body.parentSubprojectId !== undefined && body.parentSubprojectId !== subproject.parentSubprojectId) {
+    throw new DomainError('HIERARCHY_INVALID', 'Subproject nesting is retained only for legacy records');
+  }
   if (body.plannedStart !== undefined || body.deadline !== undefined || body.plannedEnd !== undefined) {
     assertScheduleOrder(
       body.plannedStart !== undefined ? body.plannedStart : subproject.plannedStart,
@@ -303,7 +318,6 @@ export async function patchSubproject(
   const changes: Record<string, unknown> = {};
   const allowed = [
     'projectId',
-    'parentSubprojectId',
     'subprojectName',
     'description',
     'ownerId',

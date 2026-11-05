@@ -110,7 +110,7 @@ describe('member subproject creation', () => {
     expect(Number(audited?.count ?? 0)).toBe(1);
   });
 
-  it('creates a nested subproject and offers it for an immediate task', async () => {
+  it('refuses a new nested subproject while preserving direct-folder creation', async () => {
     const member = await login('0010');
     const root = await createSubproject(member, {
       idempotencyKey: 'member-sub-nest-root',
@@ -124,24 +124,10 @@ describe('member subproject creation', () => {
       parentSubprojectId: rootId,
       subprojectName: 'Child area'
     });
-    expect(child.statusCode, child.body).toBe(200);
-    const childRecord = (child.json().data as { subproject: { subprojectId: string; depth: number; parentSubprojectId: string } })
-      .subproject;
-    expect(childRecord.depth).toBe(2);
-    expect(childRecord.parentSubprojectId).toBe(rootId);
+    expect(child.statusCode, child.body).toBe(400);
+    expect((child.json() as { error: { code: string } }).error.code).toBe('HIERARCHY_INVALID');
 
-    // The hierarchy metadata reaches the member's creation options.
-    const options = await app.inject({ url: '/api/employee/my-work/projects', headers: { cookie: member.cookie! } });
-    expect(options.statusCode, options.body).toBe(200);
-    const option = (
-      options.json() as {
-        data: { items: { projectId: string; subprojects: { subprojectId: string; parentSubprojectId: string | null; depth: number }[] }[] };
-      }
-    ).data.items.find((entry) => entry.projectId === 'PRJ-A');
-    const childOption = option?.subprojects.find((entry) => entry.subprojectId === childRecord.subprojectId);
-    expect(childOption).toMatchObject({ parentSubprojectId: rootId, depth: 2 });
-
-    // A task can be filed under the subproject that was just created.
+    // A task can be filed under the direct subproject that was just created.
     const task = await app.inject({
       method: 'POST',
       url: '/api/employee/my-work',
@@ -149,7 +135,7 @@ describe('member subproject creation', () => {
       payload: {
         idempotencyKey: 'member-task-under-new-sub',
         projectId: 'PRJ-A',
-        subprojectId: childRecord.subprojectId,
+        subprojectId: rootId,
         taskName: 'Evaluate the trial part',
         deadline: '2026-12-24'
       }
@@ -159,7 +145,7 @@ describe('member subproject creation', () => {
       'SELECT subproject_id, owner_member_id FROM tasks WHERE task_id = $1',
       [(task.json() as { data: { taskId: string } }).data.taskId]
     );
-    expect(stored?.subproject_id).toBe(childRecord.subprojectId);
+    expect(stored?.subproject_id).toBe(rootId);
     expect(stored?.owner_member_id).toBe('MEM-A');
   });
 
@@ -252,27 +238,22 @@ describe('member subproject creation', () => {
     expect((underArchived.json() as { error: { code: string } }).error.code).toBe('HIERARCHY_INVALID');
   });
 
-  it('refuses to exceed the four-level subproject policy', async () => {
+  it('refuses new nesting at the first attempted child', async () => {
     const member = await login('0010');
-    let parentId: string | null = null;
-    for (let level = 1; level <= 4; level += 1) {
-      const response = await createSubproject(member, {
-        idempotencyKey: `depth-level-${level}`,
-        projectId: 'PRJ-A',
-        ...(parentId ? { parentSubprojectId: parentId } : {}),
-        subprojectName: `Level ${level}`
-      });
-      expect(response.statusCode, response.body).toBe(200);
-      parentId = (response.json() as { data: { subproject: { subprojectId: string } } }).data.subproject.subprojectId;
-    }
-    const tooDeep = await createSubproject(member, {
-      idempotencyKey: 'depth-level-five',
+    const root = await createSubproject(member, {
+      idempotencyKey: 'direct-folder',
+      projectId: 'PRJ-A',
+      subprojectName: 'Direct folder'
+    });
+    const parentId = (root.json() as { data: { subproject: { subprojectId: string } } }).data.subproject.subprojectId;
+    const nested = await createSubproject(member, {
+      idempotencyKey: 'nested-folder',
       projectId: 'PRJ-A',
       parentSubprojectId: parentId,
-      subprojectName: 'Level 5'
+      subprojectName: 'Nested folder'
     });
-    expect(tooDeep.statusCode, tooDeep.body).toBe(400);
-    expect((tooDeep.json() as { error: { code: string } }).error.code).toBe('HIERARCHY_DEPTH');
+    expect(nested.statusCode, nested.body).toBe(400);
+    expect((nested.json() as { error: { code: string } }).error.code).toBe('HIERARCHY_INVALID');
   });
 });
 

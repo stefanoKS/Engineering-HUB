@@ -67,7 +67,16 @@ function subproject(
   parentSubprojectId: string | null = null,
   status = 'Active'
 ): HierarchySubproject {
-  return { subprojectId, subprojectName, parentSubprojectId, status, deadline: '2026-11-30', depth: 1, revision: 1 };
+  return {
+    subprojectId,
+    subprojectName,
+    parentSubprojectId,
+    status,
+    schedule: { state: 'IN_PROGRESS', missing: 'NONE' },
+    deadline: '2026-11-30',
+    depth: 1,
+    revision: 1
+  };
 }
 
 /** A two-level project: subproject A (task + nested subproject A1 with its own tasks) and direct work. */
@@ -96,19 +105,19 @@ describe('project hierarchy model', () => {
     const areaA = model.subprojects.find((node) => node.subprojectId === 'SUB-A')!;
     expect(areaA.tasks.map((node) => node.task.taskId)).toEqual(['T-A1']);
     expect(model.directTasks.map((node) => node.task.taskId)).toEqual(['T-DIRECT']);
-    expect(model.subprojects.map((node) => node.subprojectId)).toEqual(['SUB-A', 'SUB-EMPTY']);
+    expect(model.subprojects.map((node) => node.subprojectId)).toEqual(['SUB-A', 'SUB-A1', 'SUB-EMPTY']);
   });
 
-  it('nests a subproject under its parent and a task under its parent task', () => {
+  it('projects legacy subprojects as peers while retaining task nesting', () => {
     const model = hierarchyFixture();
     const areaA = model.subprojects.find((node) => node.subprojectId === 'SUB-A')!;
-    expect(areaA.children.map((node) => node.subprojectId)).toEqual(['SUB-A1']);
-    expect(areaA.children[0]!.tasks.map((node) => node.task.taskId)).toEqual(['T-A1A']);
+    expect(areaA.children).toEqual([]);
+    expect(model.subprojects.find((node) => node.subprojectId === 'SUB-A1')?.tasks.map((node) => node.task.taskId)).toEqual(['T-A1A']);
     expect(areaA.tasks[0]!.children.map((node) => node.task.taskId)).toEqual(['T-A1-CHILD']);
     expect(model.directTasks[0]!.children.map((node) => node.task.taskId)).toEqual(['T-DIRECT-CHILD']);
   });
 
-  it('keeps multi-level subproject nesting and multiple siblings in stored order', () => {
+  it('projects legacy multi-level subprojects as flat peer folders', () => {
     const model = buildProjectHierarchy({
       subprojects: [
         subproject('S1', 'Root one'),
@@ -123,10 +132,10 @@ describe('project hierarchy model', () => {
       ],
       includeInactive: false
     });
-    expect(model.subprojects.map((node) => node.subprojectId)).toEqual(['S1', 'S2']);
-    const root = model.subprojects[0]!;
+    expect(model.subprojects.map((node) => node.subprojectId)).toEqual(['S1-1-1', 'S1', 'S1-1', 'S2']);
+    const root = model.subprojects.find((node) => node.subprojectId === 'S1')!;
     expect(root.tasks.map((node) => node.task.taskId)).toEqual(['T1', 'T2']);
-    expect(root.children[0]!.children[0]!.tasks.map((node) => node.task.taskId)).toEqual(['T3']);
+    expect(model.subprojects.find((node) => node.subprojectId === 'S1-1-1')?.tasks.map((node) => node.task.taskId)).toEqual(['T3']);
   });
 
   it('renders an empty subproject with no task rows', () => {
@@ -159,11 +168,10 @@ describe('project hierarchy model', () => {
     expect(seen).not.toContain('T-CANCELLED');
   });
 
-  it('counts active and completed work through nested subprojects without double counting', () => {
+  it('counts active and completed work through flat legacy folders without double counting', () => {
     const model = hierarchyFixture();
     const areaA = model.subprojects.find((node) => node.subprojectId === 'SUB-A')!;
-    // T-A1 + T-A1-CHILD active, plus the completed T-A1A inside the nested subproject.
-    expect(areaA.counts).toEqual({ active: 2, done: 1, total: 3 });
+    expect(areaA.counts).toEqual({ active: 2, done: 0, total: 2 });
     expect(model.counts).toEqual({ active: 4, done: 1, total: 5 });
     // The parent task counts itself plus its derived child once.
     expect(areaA.tasks[0]!.counts).toEqual({ active: 2, done: 0, total: 2 });
@@ -229,7 +237,7 @@ describe('project hierarchy tree', () => {
     const branch = header.closest('li')!;
     expect(within(branch).getByText('Area A work')).toBeTruthy();
     expect(within(branch).getByText('Area A child')).toBeTruthy();
-    expect(within(branch).getByRole('button', { name: 'Area A1 を閉じる' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Area A1 を閉じる' })).toBeTruthy();
   });
 
   it('keeps expansion state when the hierarchy object is replaced by a refresh', () => {
@@ -281,6 +289,38 @@ describe('project hierarchy tree', () => {
     manager.unmount();
     renderTree(true);
     expect(screen.getAllByRole('button', { name: /を削除/ }).length).toBeGreaterThan(0);
+  });
+
+  it('offers exactly one New task action for an empty project', () => {
+    render(
+      <I18nProvider>
+        <ProjectHierarchy
+          hierarchy={buildProjectHierarchy({ subprojects: [], tasks: [], includeInactive: false })}
+          canManage
+          canDelete
+          includeInactive={false}
+          onToggleInactive={() => undefined}
+          onNewTask={() => undefined}
+          onNewSubproject={() => undefined}
+          onEditSubproject={() => undefined}
+          onDelete={() => undefined}
+        />
+      </I18nProvider>
+    );
+    expect(screen.getByText('サブプロジェクトもタスクもまだありません。')).toBeTruthy();
+    // The header keeps one clear action; the redundant direct-folder row is not rendered.
+    expect(screen.getAllByRole('button', { name: '新規タスク' })).toHaveLength(1);
+    expect(screen.queryByText('プロジェクト直下のタスクはありません。')).toBeNull();
+  });
+
+  it('centres the header checkbox, counts and buttons on one line', () => {
+    renderTree(false);
+    const header = document.querySelector('.card-header')!;
+    const actions = header.querySelector('.card-actions')!;
+    expect(actions.querySelector('.inline-checkbox')).not.toBeNull();
+    expect(actions.querySelector('.muted.small')).not.toBeNull();
+    // A scoped toolbar class keeps the alignment rule away from the other section headers.
+    expect(document.querySelector('.hierarchy-toolbar')).not.toBeNull();
   });
 
   it('renders no create or delete controls for a reader without manager rights', () => {

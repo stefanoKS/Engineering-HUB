@@ -1,5 +1,79 @@
 # V2 Acceptance Record
 
+## Flat folder timeline correction — 2026-11-05
+
+| Gate | Result |
+| --- | --- |
+| Flat display schedule API and timeline tests | PASS locally — 17 focused tests |
+| `npm run test:v2` | PASS locally — 40 files, 462 passed, 1 skipped |
+| `npm run typecheck`, `npm run lint:v2`, `npm run validate:v2`, `npm run build` | PASS locally; V2 validation checked 176 files |
+| Real-browser screenshots / isolated browser smoke | NOT_RUN in this session |
+| Deployment, production data and integrations | NOT_RUN |
+| Production readiness | **NOT APPROVED FOR PRODUCTION** |
+
+The correction uses a single display schedule line per dated row, retains incomplete/invalid
+records in place, derives folders and containers from eligible leaf work, and projects legacy
+subproject links as peer folders without changing stored data. Responsibility movement now swaps
+an expected adjacent peer inside its Active/Retired group under a transaction lock; ordinary
+milestone and phase UI sections were removed while historical rows remain untouched.
+
+## Timeline folder expansion correction — 2026-11-05
+
+The folder chevron now controls root tasks assigned to that subproject through their stable
+parent key; nested task expansion remains independent. No stored relationships are changed.
+This is only one part of the requested timeline and work-list simplification, not a completed
+implementation of either specification.
+
+| Gate | Result |
+| --- | --- |
+| Folder expansion regression | PASS locally; the regression failed before the correction and passed afterward |
+| Timeline component suite | PASS locally — 2 tests, including the existing asynchronous measurement test |
+| V2 baseline before the correction | 40 files, 461 passed, 1 skipped; the skipped backup test is not a passing gate |
+| `npm run typecheck`, `npm run lint:v2`, `npm run validate:v2`, `npm run build` | PASS locally on Node 24.21.0 |
+| Remaining requested functionality and browser evidence | NOT_RUN / incomplete |
+| Live deployment, production data and integrations | NOT_RUN |
+| Production readiness | **NOT APPROVED FOR PRODUCTION** |
+
+## Timeline fit-to-width and date header correction — 2026-11-05
+
+This supersedes the zoom/pan behavior recorded immediately below. The timeline is read-only and
+uses one inclusive, page-memory display range. Presets are 7 days, 2 weeks, one calendar month
+and Custom. One month ends the day before the same numbered date next month, or on that month's
+last day if it has no such date. An invalid draft retains the committed range; changing a fixed
+preset's start recalculates its finish. Reset dates selects the current Tokyo month without
+changing filters or expansion; Fit selection selects Custom. Zoom and pan were removed at the
+user's request. A mount-aware observer measures the naturally sized track and the full interval
+fits that width, with a two-band header; a start without a finish is a marker, not a duration.
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck`, `npm run lint:v2`, `npm run validate:v2`, `npm run build` | PASS locally; Node 24.21.0 |
+| Targeted timeline geometry, component and API tests | PASS — 16 tests, including delayed mount, observer cleanup, empty/populated transitions, preset changes and the API's role/read-only cases |
+| `npm run test:v2` | PASS — 40 files, 461 passed, 1 skipped; the backup test requiring `pg_dump` was not run because the embedded server lacks client tools. This suite ran before the final start-only marker and boundary alignment adjustments; targeted tests were run afterward. |
+| Isolated Chromium | PASS — delayed timeline response, preset and long-range geometry, label bounds/collisions, header/row alignment, sticky header, resize, desktop and narrow viewport, English and Japanese. Screenshots of the week, two-week, month, long-range and mobile views were visually inspected. The browser harness uses synthetic data and a disposable database. |
+| Live deployment, production data and integrations | NOT_RUN; no activation or deployment. Local browser smoke creates test records only in its disposable database. |
+| Production readiness | **NOT APPROVED FOR PRODUCTION** |
+
+## Responsive timeline viewport — 2026-11-05
+
+Local V2 presentation-only implementation. Display dates remain inclusive Asia/Tokyo calendar
+dates and define the selected range; zoom and pan define only a clamped, in-memory visible range.
+The timeline now measures its drawing track and fits the visible interval to it, with adaptive
+calendar labels, pointer-centred Alt + wheel zoom, button zoom/reset and background drag or
+keyboard pan. Timeline interactions do not send a write request or modify schedules, schema,
+contracts, permissions, production systems or integrations.
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | PASS — all workspaces |
+| `npm run lint:v2` | PASS |
+| `npm run validate:v2` | PASS — 175 files checked |
+| `npm run build` | PASS — API, web, worker and migration artifacts |
+| `npx vitest run apps/web/test/timeline-dates.test.ts apps/web/test/usability-corrections.test.tsx` | PASS — 18 tests; disposable PostgreSQL fixture |
+| `npm run test:v2` | PASS — 39 files, 462 passed, 1 skipped |
+| `npm run test:browser` | FAIL — isolated database, built migration/API/worker and authorized flow passed, then the browser smoke timed out locating the `Deadline` dialog field; no timeline layout measurement or screenshot evidence was produced |
+| Production readiness | **NOT APPROVED FOR PRODUCTION** |
+
 ## Timeline display-range and schedule validation correction — 2026-11-05
 
 Local V2 implementation only. The timeline remains read-only: `Display start` and `Display finish`
@@ -850,5 +924,39 @@ remain unchanged. No Script Property, column or index was added.
 | `npm run build` | PASS | API, web, worker and migration CLI artifacts built. |
 | `npm run smoke:prod` | PASS | Disposable PostgreSQL, built migration CLI to schema 10, built API read/mutation, worker outbox flow. |
 | `npm run test:browser` | PASS | Built-artifact Chromium journeys: manager, member and viewer, Japanese login and language switch, responsive widths, the member-only create control expectation, the workload axis/`Today` marker assertions, and screenshots under `work/screenshots` (`my-work-*`, `workload-timeline*`). |
+| Live deployment / Workspace / LAN | NOT_RUN | No deployment, production database, Workspace tenant or live LAN host was touched. |
+| Production approval | **NOT APPROVED** | `docs/PRODUCTION_READINESS.md` is unchanged; no live evidence exists. |
+
+## Status, deadline and layout corrections — 2026-11-05
+
+Schema 11, employee contract 1.6, every migration and the V1 Apps Script project remain unchanged.
+No column, Script Property, background job or dependency was added.
+
+Root causes: the timeline bar height and the point-mark width were the same 3 px value; a
+`<td className="actions">` was a flex container, which removed every action cell from the table
+layout; the card-header action row had no vertical alignment; and `DeadlineCell` received no
+lifecycle state from the workload breakdown, so it compared dates and painted a finished task as
+overdue. The stored project lifecycle was still an editable dropdown whose value drove the badge.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| Timeline bar geometry | PASS (local browser) | Measured in Chromium against the built app: every `.tl-bar` is 12 px tall, a deadline-only/same-day row is `.tl-bar.is-point` at 3 px wide and 12 px tall, and every bar centres within 0.5 px of its row centre, including a wrapped container name. `barGeometry` keeps a 6 px minimum for a very short range, clamps a boundary mark inside the chart and returns null for work entirely outside the window. Unit cases in `apps/web/test/timeline-dates.test.ts`. |
+| Single-bar presentation | PASS (local browser) | One bar per row, no deadline diamond, dashed child range, completion symbol or five-symbol legend; `npm run test:browser` asserts the bar height, the absence of `.timeline-legend`/`.tl-swatch` and the project entry point. |
+| Project table layout | PASS (local browser) | `td.project-actions-cell > div.actions` in Projects, Tasks, Members, Requests and Responsibilities; the browser journey asserts every project cell keeps `display: table-cell` and that all cells of a row share one bottom edge. `apps/web/test/project-schedule-ui.test.tsx` covers the structure. |
+| Hierarchy header alignment | PASS (local browser) | Scoped `.hierarchy-toolbar` with `align-items: center`, a count phrase that stays on one line and intentional wrapping; the browser journey compares the vertical centres when the items share a line and asserts no horizontal overflow when they wrap. The empty hierarchy renders one New task action. |
+| Deadline display state | PASS (local) | `DeadlineCell` requires a state; done wins over overdue, cancelled/archived is never current, and a late completion gets its own label. `apps/web/test/deadline-state.test.tsx` pins the reported case (status Done, deadline 2026-11-04, completion 2026-11-04, viewed 2026-11-05). The workload drill-down returns `displayStatus` (`apps/api/test/workload-report.test.ts`) and the browser capture of 期間内完了 shows a green date with no overdue badge. |
+| Derived project schedule status | PASS (local) | `projectScheduleStatus` covers archived, cancelled, completed, reversed dates, late, planned, in progress and both missing-date cases with the Tokyo business date and an inclusive finish. Filtering and sorting use `projectScheduleStateSql` before pagination; `packages/db/test/integration.test.ts` proves the SQL projection equals the domain rule for 96 status/date combinations and that a filtered, sorted second page continues the order. `apps/api/test/api.test.ts` covers the HTTP filter, pagination total and derived payload. |
+| Project status is no longer editable | PASS (local) | The project form has no Planned/In progress/On hold selector; `assertProjectLifecycleChange` refuses those transitions and archive through the patch route, and requires `confirmStatusChange` for completion, cancellation and reactivation (`apps/api/test/api.test.ts`). Completion still requires every task to be done or cancelled. Legacy stored values are untouched. |
+| New project INTERNAL default | PASS (local) | Form and service default to INTERNAL, an explicit RESTRICTED is honoured, existing projects and blank visibility are unchanged and publication still gates on ADMIN plus the exact phrase. `apps/api/test/api.test.ts`, `packages/contracts/test/contracts.test.ts`, `apps/web/test/project-schedule-ui.test.tsx`. |
+| Date-dependent display | PASS (local) | `useBusinessDate` refreshes at the next Tokyo midnight and on focus; the project list, detail and read-only explorer include the business date in their query identity. No polling and no write. |
+| `npm ci` | NOT_RUN | No dependency manifest changed; the existing install was used. |
+| `npm run typecheck` | PASS | All V2 workspaces compile cleanly. |
+| `npm run lint` | PASS | V1 and V2 ESLint both exit 0. |
+| `npm run test` | PASS | V1 776/776; V2 43 files, 495 passed / 1 skipped (new: project-schedule domain, timeline bar geometry, deadline state, project schedule UI). |
+| `npm run validate` | PASS | V1 source validation (42 manager files, 3 dashboard files, 989 translation keys), V2 validation (182 files) and the deployment templates. |
+| `npm run build` | PASS | API, web, worker and migration CLI artifacts built. |
+| `npm run smoke:prod` | PASS | Disposable PostgreSQL, built migration CLI to schema 11, built API read/mutation, worker outbox flow. |
+| `npm run test:browser` | PASS | Built-artifact Chromium journeys (manager, member, viewer) now also assert the table-cell layout, the derived schedule badge, the hierarchy toolbar alignment, the single-bar timeline with a 12 px bar and no legend. Two stale expectations were corrected to the already documented behaviour: the flat-folder policy (no nested create control) and the simplified single-bar legend. |
+| Local screenshot review | PASS (local) | Japanese and English captures at 1480 px and 640 px for the project list, project detail/hierarchy, project form and timeline, plus the workload overdue and completed breakdowns. Stored outside the repository; not live Workspace evidence. |
 | Live deployment / Workspace / LAN | NOT_RUN | No deployment, production database, Workspace tenant or live LAN host was touched. |
 | Production approval | **NOT APPROVED** | `docs/PRODUCTION_READINESS.md` is unchanged; no live evidence exists. |

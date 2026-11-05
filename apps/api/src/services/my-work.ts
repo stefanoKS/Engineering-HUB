@@ -9,14 +9,13 @@
  */
 import type { z } from 'zod';
 import type { CreateMySubprojectBody, CreateMyTaskBody, MyWorkList, MyWorkProjectFilter, MyWorkProjectOptions, Subproject } from '@eh/contracts';
-import { getProject, insertSubproject, insertTask, getTask, listSubprojects } from '@eh/db';
+import { getProject, insertSubproject, insertTask, getTask } from '@eh/db';
 import {
   DomainError,
   businessDate,
   canCreateOwnTask,
   displayTaskStatus,
-  requireRole,
-  validateSubprojectParent
+  requireRole
 } from '@eh/domain';
 import { audit, enqueueJob, hashRequest, runIdempotent, type ServiceCtx } from './common';
 import { assertTaskPlacement, planTaskDeadline } from './tasks';
@@ -466,30 +465,10 @@ export async function createMySubproject(
     throw new DomainError('INVALID_TRANSITION', 'A subproject can only be filed under an active project');
   }
 
-  const siblings = await listSubprojects(ctx.db, body.projectId);
   const parentSubprojectId = body.parentSubprojectId ?? null;
   if (parentSubprojectId) {
-    const byId = new Map(siblings.map((entry) => [entry.subprojectId, entry]));
-    let node = byId.get(parentSubprojectId);
-    if (!node) throw new DomainError('HIERARCHY_INVALID', `Parent subproject not found: ${parentSubprojectId}`);
-    const seen = new Set<string>();
-    while (node) {
-      if (seen.has(node.subprojectId)) throw new DomainError('HIERARCHY_CYCLE', 'Subproject links form a cycle');
-      seen.add(node.subprojectId);
-      if (node.status !== 'Active') {
-        throw new DomainError('HIERARCHY_INVALID', 'A new subproject cannot sit under an inactive or archived parent');
-      }
-      node = node.parentSubprojectId ? byId.get(node.parentSubprojectId) : undefined;
-    }
+    throw new DomainError('HIERARCHY_INVALID', 'New subprojects must be direct children of their project');
   }
-  validateSubprojectParent(
-    { id: null, projectId: body.projectId, parentId: parentSubprojectId },
-    siblings.map((entry) => ({
-      id: entry.subprojectId,
-      parentId: entry.parentSubprojectId,
-      projectId: entry.projectId
-    }))
-  );
 
   const result = await runIdempotent(
     ctx,
@@ -497,7 +476,7 @@ export async function createMySubproject(
     async (tx) => {
       const subproject = await insertSubproject(tx, {
         projectId: body.projectId,
-        parentSubprojectId,
+        parentSubprojectId: null,
         subprojectName,
         description: body.description ?? '',
         ownerId: ctx.identity.memberId,

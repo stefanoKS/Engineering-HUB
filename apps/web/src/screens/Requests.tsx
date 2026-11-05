@@ -149,32 +149,34 @@ export function RequestsScreen({ actor }: { actor: Actor }): JSX.Element {
                       <div className="muted small">{t('report.reviewedBy', { name: request.reviewer })}</div>
                     ) : null}
                   </td>
-                  <td className="actions">
-                    {['PENDING', 'PROCESSING'].includes(request.status) ? (
-                      <>
-                        <button
-                          type="button"
-                          className="link-button"
-                          onClick={() => setDecision({ request, kind: 'APPROVE' })}
-                        >
-                          {t('requests.approve')}
-                        </button>
-                        <button
-                          type="button"
-                          className="link-button"
-                          onClick={() => setDecision({ request, kind: 'REJECT' })}
-                        >
-                          {t('requests.reject')}
-                        </button>
-                        <button
-                          type="button"
-                          className="link-button"
-                          onClick={() => setDecision({ request, kind: 'RETURN' })}
-                        >
-                          {t('requests.return')}
-                        </button>
-                      </>
-                    ) : null}
+                  <td className="project-actions-cell">
+                    <div className="actions">
+                      {['PENDING', 'PROCESSING'].includes(request.status) ? (
+                        <>
+                          <button
+                            type="button"
+                            className="link-button"
+                            onClick={() => setDecision({ request, kind: 'APPROVE' })}
+                          >
+                            {t('requests.approve')}
+                          </button>
+                          <button
+                            type="button"
+                            className="link-button"
+                            onClick={() => setDecision({ request, kind: 'REJECT' })}
+                          >
+                            {t('requests.reject')}
+                          </button>
+                          <button
+                            type="button"
+                            className="link-button"
+                            onClick={() => setDecision({ request, kind: 'RETURN' })}
+                          >
+                            {t('requests.return')}
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))}

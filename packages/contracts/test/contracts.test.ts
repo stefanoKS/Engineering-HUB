@@ -85,6 +85,7 @@ describe('read-only member projection', () => {
       responsibilityName: 'Design',
       projectOwnerName: 'Owner',
       status: 'Active',
+      schedule: { state: 'IN_PROGRESS', missing: 'NONE' },
       priority: 'High',
       committedDeadline: null,
       progressPercent: 25,
@@ -95,6 +96,9 @@ describe('read-only member projection', () => {
     expect(WorkProject.safeParse(base).success).toBe(true);
     expect(WorkProject.safeParse({ ...base, description: undefined }).success).toBe(false);
     expect(WorkProject.safeParse({ ...base, activeTaskCount: undefined }).success).toBe(false);
+    // The derived schedule badge is part of the projection; the stored lifecycle value also stays.
+    expect(WorkProject.safeParse({ ...base, schedule: undefined }).success).toBe(false);
+    expect(Object.keys(WorkProject.shape)).toContain('schedule');
     // The projection has no field for a private project value at all.
     expect(Object.keys(WorkProject.shape)).not.toContain('dashboardSummary');
     expect(Object.keys(WorkProject.shape)).not.toContain('nextAction');

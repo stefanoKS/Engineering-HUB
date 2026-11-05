@@ -19,6 +19,7 @@ export function ResponsibilitiesScreen({ actor }: { actor: Actor }): JSX.Element
   const [statusChange, setStatusChange] = useState<{ item: Responsibility; status: 'Active' | 'Retired' } | null>(null);
   const [deleting, setDeleting] = useState<Responsibility | null>(null);
   const [notice, setNotice] = useState('');
+  const [moving, setMoving] = useState<string | null>(null);
   // Retired areas stay stored; the default view simply hides them until the manager asks.
   const [showRetired, setShowRetired] = useRouteMemoryState('responsibilities:showRetired', false);
   const list = useQuery<{ items: (Responsibility & { _revision: number })[] }>(keys.responsibilities, () =>
@@ -31,12 +32,24 @@ export function ResponsibilitiesScreen({ actor }: { actor: Actor }): JSX.Element
   const items = list.data?.items ?? [];
   const visible = visibleResponsibilities(items, showRetired);
 
-  async function move(item: Responsibility, delta: number): Promise<void> {
-    await api.patch(`/api/manager/responsibilities/${item.responsibilityId}/order`, {
-      revision: item.revision,
-      sortOrder: Math.max(0, item.sortOrder + delta)
-    });
-    queryCache.invalidate([keys.responsibilities, keys.overview, keys.employee]);
+  async function move(item: Responsibility, direction: 'UP' | 'DOWN'): Promise<void> {
+    const group = items
+      .filter((entry) => entry.status === item.status)
+      .sort((left, right) => left.sortOrder - right.sortOrder || left.responsibilityId.localeCompare(right.responsibilityId));
+    const position = group.findIndex((entry) => entry.responsibilityId === item.responsibilityId);
+    const neighbor = group[position + (direction === 'UP' ? -1 : 1)];
+    if (!neighbor) return;
+    setMoving(item.responsibilityId);
+    try {
+      await api.patch(`/api/manager/responsibilities/${item.responsibilityId}/order`, {
+        revision: item.revision,
+        direction,
+        expectedNeighborId: neighbor.responsibilityId
+      });
+      queryCache.invalidate([keys.responsibilities, keys.overview, keys.employee, keys.references, keys.projects]);
+    } finally {
+      setMoving(null);
+    }
   }
 
   return (
@@ -100,31 +113,33 @@ export function ResponsibilitiesScreen({ actor }: { actor: Actor }): JSX.Element
                   <Badge tone={statusTone(item.status)}>{label('responsibility.status', item.status)}</Badge>
                 </td>
                 <td>
-                  <button type="button" className="link-button" onClick={() => void move(item, -1)}>
+                  <button type="button" className="link-button" disabled={moving !== null} onClick={() => void move(item, 'UP')}>
                     ↑
                   </button>
-                  <button type="button" className="link-button" onClick={() => void move(item, 1)}>
+                  <button type="button" className="link-button" disabled={moving !== null} onClick={() => void move(item, 'DOWN')}>
                     ↓
                   </button>
                 </td>
-                <td className="actions">
-                  <button type="button" className="link-button" onClick={() => setEditing(item)}>
-                    {t('action.edit')}
-                  </button>
-                  <button
-                    type="button"
-                    className="link-button"
-                    onClick={() =>
-                      setStatusChange({ item, status: item.status === 'Active' ? 'Retired' : 'Active' })
-                    }
-                  >
-                    {item.status === 'Active' ? t('responsibilities.retire') : t('responsibilities.reactivate')}
-                  </button>
-                  {actor.role === 'ADMIN' ? (
-                    <button type="button" className="link-button danger" onClick={() => setDeleting(item)}>
-                      {t('responsibilities.delete')}
+                <td className="project-actions-cell">
+                  <div className="actions">
+                    <button type="button" className="link-button" onClick={() => setEditing(item)}>
+                      {t('action.edit')}
                     </button>
-                  ) : null}
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() =>
+                        setStatusChange({ item, status: item.status === 'Active' ? 'Retired' : 'Active' })
+                      }
+                    >
+                      {item.status === 'Active' ? t('responsibilities.retire') : t('responsibilities.reactivate')}
+                    </button>
+                    {actor.role === 'ADMIN' ? (
+                      <button type="button" className="link-button danger" onClick={() => setDeleting(item)}>
+                        {t('responsibilities.delete')}
+                      </button>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
             ))}

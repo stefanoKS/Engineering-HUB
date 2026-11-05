@@ -1,16 +1,16 @@
-﻿/**
+/**
  * Read-only timeline.
  *
  * One project or every permitted project, on a horizontal date axis. Nothing here writes: a bar is
- * a stored plan, a diamond is a committed deadline, a dashed span is a child date range computed by
- * the server, and a tick marks a recorded completion. Interaction is inspection only.
+ * a single server-derived display schedule. Interaction is inspection only.
  */
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   Actor,
   TimelineProjectBranch,
   TimelineProjectPage,
   TimelineProjectRow,
+  ProjectScheduleDisplay,
   TimelineSubprojectRow,
   TimelineTaskRow,
   WorkProjectList
@@ -21,22 +21,24 @@ import { useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
 import { ErrorBox } from '../components/ui';
 import { RemoteSelect } from '../components/forms';
+import { ScheduleBadge } from '../components/project-schedule';
 import { useRouteMemoryState } from '../state/navigation';
 import {
-  DAY_WIDTH,
+  axisTicks,
+  axisContext,
+  barGeometry,
   calendarMonthWindow,
   markerOf,
   parseDate,
+  presetFinish,
   spanOf,
   todayJst,
-  scaleForRange,
-  rangeOf,
-  type TimelineScale
+  windowOf,
+  type TimelinePreset,
+  type TimelineWindow
 } from '../components/timeline-dates';
 
-const DAY_MS = 86_400_000;
-
-type ViewWindow = { from: string; to: string; days: number };
+type ViewWindow = TimelineWindow;
 
 type Row = {
   key: string;
@@ -57,10 +59,17 @@ type Row = {
   inconsistent: boolean;
   container: boolean;
   status: string;
+  /** Derived schedule badge for a project or subproject row; a task uses its display status. */
+  schedule?: ProjectScheduleDisplay;
+  displayStatus?: string;
   taskId?: string;
   projectId: string;
   parentKey?: string;
   expandable: boolean;
+  scheduleStart: string | null;
+  scheduleFinish: string | null;
+  dateState: 'RANGE' | 'FINISH_ONLY' | 'START_ONLY' | 'UNDATED' | 'INVALID';
+  dateSource: 'EXPLICIT' | 'DERIVED' | 'NONE';
 };
 
 function projectRowOf(row: TimelineProjectRow): Row {
@@ -81,8 +90,13 @@ function projectRowOf(row: TimelineProjectRow): Row {
     inconsistent: false,
     container: false,
     status: row.status,
+    schedule: row.schedule,
     projectId: row.projectId,
-    expandable: true
+    expandable: true,
+    scheduleStart: row.scheduleStart,
+    scheduleFinish: row.scheduleFinish,
+    dateState: row.dateState,
+    dateSource: row.dateSource
   };
 }
 
@@ -104,8 +118,13 @@ function subprojectRowOf(row: TimelineSubprojectRow): Row {
     inconsistent: false,
     container: false,
     status: row.status,
+    schedule: row.schedule,
     projectId: row.projectId,
-    expandable: false
+    expandable: false,
+    scheduleStart: row.scheduleStart,
+    scheduleFinish: row.scheduleFinish,
+    dateState: row.dateState,
+    dateSource: row.dateSource
   };
 }
 
@@ -127,26 +146,24 @@ function taskRowOf(row: TimelineTaskRow): Row {
     inconsistent: row.inconsistent,
     container: row.container,
     status: row.status,
+    displayStatus: row.displayStatus,
     taskId: row.taskId,
     projectId: row.projectId,
-    expandable: false
+    expandable: false,
+    scheduleStart: row.scheduleStart,
+    scheduleFinish: row.scheduleFinish,
+    dateState: row.dateState,
+    dateSource: row.dateSource
   };
 }
 
 function branchRows(branch: TimelineProjectBranch): Row[] {
   const subprojects = new Map(branch.subprojects.map((entry) => [entry.subprojectId, entry]));
   const tasks = new Map(branch.tasks.map((entry) => [entry.taskId, entry]));
-  const subprojectChildren = new Map<string, TimelineSubprojectRow[]>();
   const subprojectRoots: TimelineSubprojectRow[] = [];
   for (const subproject of branch.subprojects) {
-    const parent = subproject.parentSubprojectId ? subprojects.get(subproject.parentSubprojectId) : undefined;
-    if (!parent) {
-      subprojectRoots.push(subproject);
-      continue;
-    }
-    const children = subprojectChildren.get(parent.subprojectId) ?? [];
-    children.push(subproject);
-    subprojectChildren.set(parent.subprojectId, children);
+    // Legacy storage can retain a parent link, but timeline folders are deliberately flat.
+    subprojectRoots.push(subproject);
   }
   const taskChildren = new Map<string, TimelineTaskRow[]>();
   const taskRoots = new Map<string, TimelineTaskRow[]>();
@@ -176,10 +193,15 @@ function branchRows(branch: TimelineProjectBranch): Row[] {
     if (seenTasks.has(task.taskId)) return;
     seenTasks.add(task.taskId);
     const children = (taskChildren.get(task.taskId) ?? []).slice().sort(byName);
+    const parent = task.parentTaskId ? tasks.get(task.parentTaskId) : undefined;
     rows.push({
       ...taskRowOf(task),
       depth,
-      parentKey: task.parentTaskId && tasks.has(task.parentTaskId) ? `task:${task.parentTaskId}` : undefined,
+      parentKey: parent && parent.subprojectId === task.subprojectId
+        ? `task:${parent.taskId}`
+        : task.subprojectId && subprojects.has(task.subprojectId)
+          ? `subproject:${task.subprojectId}`
+          : undefined,
       expandable: children.length > 0
     });
     children.forEach((child) => appendTask(child, depth + 1));
@@ -187,17 +209,12 @@ function branchRows(branch: TimelineProjectBranch): Row[] {
   const appendSubproject = (subproject: TimelineSubprojectRow, depth: number): void => {
     if (seenSubprojects.has(subproject.subprojectId)) return;
     seenSubprojects.add(subproject.subprojectId);
-    const children = (subprojectChildren.get(subproject.subprojectId) ?? []).slice().sort(byName);
     rows.push({
       ...subprojectRowOf(subproject),
-      depth,
-      parentKey:
-        subproject.parentSubprojectId && subprojects.has(subproject.parentSubprojectId)
-          ? `subproject:${subproject.parentSubprojectId}`
-          : undefined,
-      expandable: children.length > 0 || (taskRoots.get(subproject.subprojectId)?.length ?? 0) > 0
+      depth: 1,
+      parentKey: undefined,
+      expandable: (taskRoots.get(subproject.subprojectId)?.length ?? 0) > 0
     });
-    children.forEach((child) => appendSubproject(child, depth + 1));
     (taskRoots.get(subproject.subprojectId) ?? []).slice().sort(byName).forEach((task) => appendTask(task, depth + 1));
   };
   subprojectRoots.slice().sort(byName).forEach((subproject) => appendSubproject(subproject, 1));
@@ -245,6 +262,9 @@ export function TimelineScreen({
   const [displayFinish, setDisplayFinish] = useRouteMemoryState('timeline:display-finish', initialWindow.to, {
     resetToInitial: !!initialAnchor
   });
+  const [preset, setPreset] = useRouteMemoryState<TimelinePreset>('timeline:preset', 'custom', {
+    resetToInitial: !!initialAnchor
+  });
   const [draftStart, setDraftStart] = useState(displayStart);
   const [draftFinish, setDraftFinish] = useState(displayFinish);
   const [subprojectId, setSubprojectId] = useRouteMemoryState('timeline:subproject', '');
@@ -252,25 +272,48 @@ export function TimelineScreen({
   const [page, setPage] = useRouteMemoryState('timeline:page', 1);
   const [expanded, setExpanded] = useRouteMemoryState<string[]>('timeline:expanded', []);
   const [details, setDetails] = useRouteMemoryState<string | null>('timeline:details', null);
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const [trackWidth, setTrackWidth] = useState(0);
+  const trackRef = useCallback((element: HTMLDivElement | null) => {
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+    setTrackWidth(0);
+    if (!element) return;
+    let active = true;
+    const measure = (): void => {
+      if (!active) return;
+      const width = element.getBoundingClientRect().width;
+      if (width > 0) setTrackWidth((current) => current === width ? current : width);
+    };
+    measure();
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(measure);
+      observer.observe(element);
+      observerRef.current = observer;
+    }
+    return () => {
+      active = false;
+      observerRef.current?.disconnect();
+      observerRef.current = null;
+    };
+  }, []);
 
   useEffect(() => setDraftStart(displayStart), [displayStart]);
   useEffect(() => setDraftFinish(displayFinish), [displayFinish]);
   const window: ViewWindow = useMemo(() => {
-    const from = parseDate(displayStart);
-    const to = parseDate(displayFinish);
-    if (from === null || to === null || from > to) return initialWindow;
-    return { from: displayStart, to: displayFinish, days: Math.round((to - from) / DAY_MS) + 1 };
+    return windowOf(displayStart, displayFinish) ?? initialWindow;
   }, [displayStart, displayFinish, initialWindow]);
-  const scale: TimelineScale = scaleForRange(window.days);
-  const dayWidth = DAY_WIDTH[scale];
-  const totalWidth = window.days * dayWidth;
+  // A hidden track has no drawable width yet, but date semantics must remain renderable until it is measured.
+  const pixelsPerDay = trackWidth > 0 ? trackWidth / window.days : 1;
+  const dayWidth = pixelsPerDay;
+  const totalWidth = trackWidth;
   const todayOffset = markerOf(todayJst(), window, dayWidth);
 
   const overview = useQuery<TimelineProjectPage>(
-    `work/timeline:overview:${responsibilityId}:${page}`,
+    `work/timeline:overview:${responsibilityId}:${includeCompleted}:${page}`,
     () =>
       api.get<TimelineProjectPage>(
-        '/api/work/timeline' + queryString({ responsibilityId, page, pageSize: 25 })
+        '/api/work/timeline' + queryString({ responsibilityId, page, pageSize: 25, includeCompleted: includeCompleted ? 'true' : 'false' })
       ),
     { enabled: !projectId }
   );
@@ -295,49 +338,43 @@ export function TimelineScreen({
   const projectRows = (overview.data?.items ?? []).map(projectRowOf);
   const selectedRows = branch.data ? visibleBranchRows(branchRows(branch.data), expanded) : [];
   const rows = projectId ? selectedRows : projectRows;
-  const undated = rows.filter((row) => row.undated);
-  const dated = rows.filter((row) => !row.undated);
+  const dated = rows.filter((row) => row.scheduleStart && row.scheduleFinish);
   const outsideCount = dated.filter(
     (row) =>
-      spanOf(row.plannedStart, row.plannedEnd, window, dayWidth) === null &&
-      markerOf(row.deadline, window, dayWidth) === null &&
-      spanOf(row.childStart, row.childEnd, window, dayWidth) === null
+      spanOf(row.scheduleStart, row.scheduleFinish, window, dayWidth) === null
   ).length;
   const filtersActive = !!projectId || !!subprojectId || !!responsibilityId || !includeCompleted;
-  /** The stored dates of everything on screen, so "fit" never guesses a window. */
-  const fitBounds = useMemo(
-    () =>
-      rangeOf(
-        rows.flatMap((row) => [
-          row.plannedStart,
-          row.plannedEnd,
-          row.deadline,
-          row.completedAt ? row.completedAt.slice(0, 10) : null,
-          row.childStart,
-          row.childEnd
-        ])
-      ),
-    [rows]
-  );
+  /** The server calculates this before pagination and independently of expanded folders. */
+  const fitBounds = projectId ? branch.data?.fitRange ?? null : overview.data?.fitRange ?? null;
   const fit = (): void => {
     if (!fitBounds) return;
-    const start = parseDate(fitBounds.from);
-    const end = parseDate(fitBounds.to);
+    const start = parseDate(fitBounds.start);
+    const end = parseDate(fitBounds.end);
     if (start === null || end === null) return;
-    const days = Math.round((end - start) / DAY_MS) + 1;
+    const days = Math.round((end - start) / 86_400_000) + 1;
     const padding = days === 1 ? 1 : Math.min(Math.max(2, Math.ceil(days * 0.05)), 14);
-    setDisplayStart(new Date(start - padding * DAY_MS).toISOString().slice(0, 10));
-    setDisplayFinish(new Date(end + padding * DAY_MS).toISOString().slice(0, 10));
+    setPreset('custom');
+    applyDates(
+      new Date(start - padding * 86_400_000).toISOString().slice(0, 10),
+      new Date(end + padding * 86_400_000).toISOString().slice(0, 10)
+    );
   };
   const applyDates = (start: string, finish: string): void => {
-    const parsedStart = parseDate(start);
-    const parsedFinish = parseDate(finish);
-    if (parsedStart !== null && parsedFinish !== null && parsedStart <= parsedFinish) {
+    const next = windowOf(start, finish);
+    if (next) {
       setDisplayStart(start);
       setDisplayFinish(finish);
+      setDraftStart(start);
+      setDraftFinish(finish);
     }
   };
   const datesValid = parseDate(draftStart) !== null && parseDate(draftFinish) !== null && draftStart <= draftFinish;
+  const selectPreset = (next: TimelinePreset): void => {
+    setPreset(next);
+    if (next === 'custom') return;
+    const finish = presetFinish(displayStart, next);
+    if (finish) applyDates(displayStart, finish);
+  };
 
   const toggleExpanded = (key: string): void => {
     setExpanded((current) =>
@@ -347,9 +384,10 @@ export function TimelineScreen({
   const reset = (): void => {
     setProjectId('');
     setResponsibilityId('');
+    setSubprojectId('');
     const month = calendarMonthWindow();
-    setDisplayStart(month.from);
-    setDisplayFinish(month.to);
+    setPreset('custom');
+    applyDates(month.from, month.to);
     setIncludeCompleted(true);
     setPage(1);
     setExpanded([]);
@@ -439,20 +477,32 @@ export function TimelineScreen({
           </label>
         </div>
 
+        <div className="inline-actions" role="group" aria-label={t('timeline.period')}>
+          {(['week', 'fortnight', 'month', 'custom'] as const).map((value) => (
+            <button key={value} type="button" className="button secondary" aria-pressed={preset === value} onClick={() => selectPreset(value)}>
+              {t(`timeline.preset.${value}`)}
+            </button>
+          ))}
+        </div>
         <div className="field-row timeline-nav">
           <label className="field">
             <span className="field-label">{t('timeline.displayStart')}</span>
-            <input type="date" value={draftStart} onChange={(event) => { setDraftStart(event.target.value); applyDates(event.target.value, draftFinish); }} />
+            <input type="date" value={draftStart} onChange={(event) => {
+              const start = event.target.value;
+              setDraftStart(start);
+              const finish = preset === 'custom' ? draftFinish : presetFinish(start, preset);
+              if (finish) applyDates(start, finish);
+            }} />
           </label>
           <label className="field">
             <span className="field-label">{t('timeline.displayFinish')}</span>
-            <input type="date" value={draftFinish} onChange={(event) => { setDraftFinish(event.target.value); applyDates(draftStart, event.target.value); }} />
+            <input type="date" value={draftFinish} onChange={(event) => { setPreset('custom'); setDraftFinish(event.target.value); applyDates(draftStart, event.target.value); }} />
           </label>
           <div className="inline-actions">
             <button type="button" className="button secondary" onClick={() => {
               const month = calendarMonthWindow();
-              setDisplayStart(month.from);
-              setDisplayFinish(month.to);
+              setPreset('custom');
+              applyDates(month.from, month.to);
             }}>
               {t('timeline.resetDates')}
             </button>
@@ -478,25 +528,11 @@ export function TimelineScreen({
         </div>
 
         <p className="muted small">
-          {window.from} – {window.to} · {t('timeline.taskTotal', { n: rows.length })}
+          {`${window.from} – ${window.to}`}
+          {' · '}{t('timeline.taskTotal', { n: rows.length })}
           {filtersActive ? ` · ${t('timeline.filter.active')}` : ''}
           {outsideCount > 0 ? ` · ${t('timeline.more', { n: outsideCount })}` : ''}
         </p>
-
-        <ul className="timeline-legend" aria-label={t('timeline.legend.deadline')}>
-          <li>
-            <span className="tl-swatch tl-swatch-bar" aria-hidden="true" /> {t('timeline.legend.planned')}
-          </li>
-          <li>
-            <span className="tl-swatch tl-swatch-deadline" aria-hidden="true" /> {t('timeline.legend.deadline')}
-          </li>
-          <li>
-            <span className="tl-swatch tl-swatch-span" aria-hidden="true" /> {t('timeline.legend.childRange')}
-          </li>
-          <li>
-            <span className="tl-swatch tl-swatch-done" aria-hidden="true" /> {t('timeline.legend.completed')}
-          </li>
-        </ul>
       </section>
 
       <ErrorBox
@@ -522,27 +558,30 @@ export function TimelineScreen({
       ) : null}
 
       {rows.length > 0 || (projectId && branch.data) ? (
-        <div className="tl-scroller" role="table" aria-label={t('timeline.title')}>
+        <div
+          className="tl-scroller"
+          role="table"
+          aria-label={t('timeline.chartHelp')}
+          tabIndex={0}
+        >
           <div className="tl-row tl-head" role="row">
             <div className="tl-cell-name" role="columnheader">
               {t('timeline.title')}
             </div>
-            <div className="tl-cell-track" style={{ width: totalWidth }} role="columnheader">
-              {scale === 'QUARTER'
-                ? monthLabels(window, dayWidth).map((entry) => (
-                    <span key={entry.label} className="tl-scale-cell tl-scale-month" style={{ left: entry.left }}>
-                      {entry.label}
-                    </span>
-                  ))
-                : dayLabels(window, dayWidth, scale === 'WEEK', locale).map((entry) => (
-                    <span
-                      key={entry.label + entry.left}
-                      className={entry.weekend ? 'tl-scale-cell weekend' : 'tl-scale-cell'}
-                      style={{ left: entry.left, width: dayWidth }}
-                    >
-                      {entry.label}
-                    </span>
-                  ))}
+            <div ref={trackRef} className="tl-cell-track tl-axis" role="columnheader">
+              {trackWidth <= 0 ? <span className="tl-measuring">{t('timeline.measuring')}</span> : null}
+              {axisContext(window, totalWidth, locale).map((entry) => (
+                <span key={entry.key} className="tl-scale-cell tl-context" style={{ left: entry.left }}>{entry.label}</span>
+              ))}
+              {axisTicks(window, totalWidth, locale).map((entry) => (
+                <span
+                  key={entry.key}
+                  className={`tl-scale-cell${entry.weekend ? ' weekend' : ''}${entry.major ? ' tl-scale-major' : ''}${entry.alignEnd ? ' tl-scale-end' : ''}`}
+                  style={{ left: entry.left }}
+                >
+                  {entry.label}
+                </span>
+              ))}
             </div>
           </div>
 
@@ -554,7 +593,6 @@ export function TimelineScreen({
                       row={{ ...projectRowOf(branch.data.project), expandable: false }}
                       window={window}
                       dayWidth={dayWidth}
-                      totalWidth={totalWidth}
                       todayOffset={todayOffset}
                       expanded
                       detailsOpen={details === `project:${branch.data.project.projectId}`}
@@ -574,7 +612,6 @@ export function TimelineScreen({
                         row={row}
                         window={window}
                         dayWidth={dayWidth}
-                        totalWidth={totalWidth}
                         todayOffset={todayOffset}
                         expanded={expanded.includes(row.key)}
                         detailsOpen={details === row.key}
@@ -591,7 +628,6 @@ export function TimelineScreen({
                     row={row}
                     window={window}
                     dayWidth={dayWidth}
-                    totalWidth={totalWidth}
                     todayOffset={todayOffset}
                     expanded={expanded.includes(row.key)}
                     detailsOpen={details === row.key}
@@ -604,7 +640,6 @@ export function TimelineScreen({
                       includeCompleted={includeCompleted}
                       window={window}
                       dayWidth={dayWidth}
-                      totalWidth={totalWidth}
                       todayOffset={todayOffset}
                       details={details}
                       setDetails={setDetails}
@@ -615,21 +650,6 @@ export function TimelineScreen({
                 </Fragment>
               ))}
         </div>
-      ) : null}
-
-      {undated.length > 0 ? (
-        <section className="card stack">
-          <h3>{t('timeline.undated')}</h3>
-          <p className="muted small">{t('timeline.undatedHint')}</p>
-          <ul className="list">
-            {undated.map((row) => (
-              <li key={`undated-${row.key}`} style={{ paddingLeft: row.depth * 12 }}>
-                {row.taskId ? <a href={`#/task/${row.taskId}`}>{row.name}</a> : row.name}
-                <span className="muted small"> · {t('timeline.undated')}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
       ) : null}
 
       {!projectId && overview.data && overview.data.totalPages > 1 ? (
@@ -682,7 +702,13 @@ export function TimelineScreen({
                 </td>
                 <td className="muted small">{row.deadline ?? t('common.unset')}</td>
                 <td className="muted small">{row.completedAt ? row.completedAt.slice(0, 10) : t('common.unset')}</td>
-                <td className="muted small">{row.status}</td>
+                <td className="muted small">
+                  {row.kind === 'TASK'
+                    ? row.displayStatus
+                      ? t(`taskStatus.${row.displayStatus}`)
+                      : row.status
+                    : <ScheduleBadge schedule={row.schedule} />}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -700,7 +726,6 @@ function ProjectBranchRows({
   includeCompleted,
   window,
   dayWidth,
-  totalWidth,
   todayOffset,
   details,
   setDetails,
@@ -711,7 +736,6 @@ function ProjectBranchRows({
   includeCompleted: boolean;
   window: ViewWindow;
   dayWidth: number;
-  totalWidth: number;
   todayOffset: number | null;
   details: string | null;
   setDetails: (value: string | null) => void;
@@ -740,7 +764,6 @@ function ProjectBranchRows({
           row={row}
           window={window}
           dayWidth={dayWidth}
-          totalWidth={totalWidth}
           todayOffset={todayOffset}
           expanded={expanded.includes(row.key)}
           detailsOpen={details === `${projectId}-${row.key}`}
@@ -758,7 +781,6 @@ function TimelineRow({
   row,
   window,
   dayWidth,
-  totalWidth,
   todayOffset,
   expanded,
   detailsOpen,
@@ -768,7 +790,6 @@ function TimelineRow({
   row: Row;
   window: ViewWindow;
   dayWidth: number;
-  totalWidth: number;
   todayOffset: number | null;
   expanded: boolean;
   detailsOpen: boolean;
@@ -776,14 +797,15 @@ function TimelineRow({
   onDetails: () => void;
 }): JSX.Element {
   const { t } = useI18n();
-  const planned = row.plannedStart ? spanOf(row.plannedStart, row.plannedEnd, window, dayWidth) : null;
-  const childSpan = spanOf(row.childStart, row.childEnd, window, dayWidth);
-  const deadline = markerOf(row.deadline ?? (!row.plannedStart ? row.plannedEnd : null), window, dayWidth);
-  const completed = markerOf(row.completedAt ? row.completedAt.slice(0, 10) : null, window, dayWidth);
-  const planLabel =
-    row.plannedStart || row.plannedEnd
-      ? `${row.plannedStart ?? t('timeline.startNotSet')} → ${row.plannedEnd ?? '-'}`
-      : t('timeline.undated');
+  const schedule = barGeometry(row.scheduleStart, row.scheduleFinish, window, dayWidth);
+  const scheduleLabel =
+    row.dateState === 'START_ONLY'
+      ? `${row.plannedStart ?? t('timeline.startNotSet')} · ${t('timeline.finishNotSet')}`
+      : row.dateState === 'INVALID'
+        ? t('timeline.inconsistent')
+        : row.scheduleStart && row.scheduleFinish
+          ? `${row.scheduleStart} → ${row.scheduleFinish}`
+          : t('timeline.undated');
   return (
     <>
       <div
@@ -806,7 +828,9 @@ function TimelineRow({
             <span className="tl-toggle-spacer" aria-hidden="true" />
           )}
           <span className="tl-label" style={{ paddingLeft: row.depth * 10 }}>
-            {row.taskId ? <a href={`#/task/${row.taskId}`}>{row.name}</a> : row.name}
+            {row.taskId ? <a href={`#/task/${row.taskId}`}>{row.name}</a> :
+              row.kind === 'PROJECT' ? <a href={`#/project/${row.projectId}`}>{row.name}</a> :
+                <a href={`#/timeline/${row.projectId}/${row.key.replace('subproject:', '')}`}>{row.name}</a>}
           </span>
           {row.container ? <span className="badge info">{t('timeline.container')}</span> : null}
           {row.inconsistent ? <span className="badge danger">{t('timeline.inconsistent')}</span> : null}
@@ -820,34 +844,16 @@ function TimelineRow({
             {t('timeline.details')}
           </button>
         </div>
-        <div className="tl-cell-track" style={{ width: totalWidth }} role="cell">
+        <div className="tl-cell-track" role="cell">
           {todayOffset !== null ? <span className="tl-today" style={{ left: todayOffset }} aria-hidden="true" /> : null}
-          {childSpan ? (
+          {schedule ? (
             <span
-              className="tl-span"
-              title={`${t('timeline.childRange')}: ${row.childStart ?? '-'} → ${row.childEnd ?? '-'}`}
-              style={{ left: childSpan.left, width: childSpan.width }}
-            />
-          ) : null}
-          {planned ? (
-            <span
-              className="tl-bar"
-              title={`${t('timeline.dates.plan')}: ${planLabel}`}
-              style={{ left: planned.left, width: planned.width }}
-            />
-          ) : null}
-          {deadline !== null ? (
-            <span
-              className="tl-deadline"
-              title={`${t('timeline.dates.deadline')}: ${row.deadline}`}
-              style={{ left: deadline }}
-            />
-          ) : null}
-          {completed !== null ? (
-            <span
-              className="tl-done"
-              title={`${t('timeline.dates.completed')}: ${row.completedAt?.slice(0, 10)}`}
-              style={{ left: completed }}
+              className={`tl-bar${schedule.point ? ' is-point' : ''}${schedule.clampedStart ? ' is-clamped-start' : ''}${schedule.clampedEnd ? ' is-clamped-end' : ''}`}
+              title={scheduleLabel}
+              // The visible mark is decoration; the row's own "details" button is the accessible,
+              // comfortably sized target that shows the exact dates.
+              aria-hidden="true"
+              style={{ left: schedule.left, width: schedule.width }}
             />
           ) : null}
         </div>
@@ -856,58 +862,22 @@ function TimelineRow({
         <div className="tl-detail" role="row">
           <dl className="request-summary">
             <dt>{t('timeline.dates.plan')}</dt>
-            <dd>{planLabel}</dd>
-            <dt>{t('timeline.dates.deadline')}</dt>
-            <dd>{row.deadline ?? t('common.unset')}</dd>
+            <dd>{scheduleLabel}</dd>
             <dt>{t('timeline.dates.completed')}</dt>
             <dd>{row.completedAt ? row.completedAt.slice(0, 10) : t('common.unset')}</dd>
             <dt>{t('column.status')}</dt>
-            <dd>{row.status}</dd>
-            {row.childStart || row.childEnd ? (
-              <>
-                <dt>{t('timeline.childRange')}</dt>
-                <dd>
-                  {row.childStart ?? '-'} → {row.childEnd ?? '-'} · {t('timeline.childRangeHint')}
-                </dd>
-              </>
-            ) : null}
+            <dd>
+              {row.kind === 'TASK' ? (
+                row.displayStatus ? t(`taskStatus.${row.displayStatus}`) : row.status
+              ) : (
+                <ScheduleBadge schedule={row.schedule} showDetail />
+              )}
+            </dd>
+            <dt>{t('timeline.dates.deadline')}</dt>
+            <dd>{row.deadline ?? row.plannedEnd ?? t('common.unset')}</dd>
           </dl>
         </div>
       ) : null}
     </>
   );
-}
-
-function dayLabels(
-  window: ViewWindow,
-  dayWidth: number,
-  withWeekday: boolean,
-  locale: string
-): { label: string; left: number; weekend: boolean }[] {
-  const start = parseDate(window.from);
-  if (start === null) return [];
-  const weekday = new Intl.DateTimeFormat(locale, { weekday: 'narrow', timeZone: 'UTC' });
-  return Array.from({ length: window.days }, (_, index) => {
-    const value = new Date(start + index * DAY_MS);
-    const day = value.getUTCDate();
-    return {
-      label: withWeekday ? `${day} ${weekday.format(value)}` : String(day),
-      left: index * dayWidth,
-      weekend: value.getUTCDay() === 0 || value.getUTCDay() === 6
-    };
-  });
-}
-
-function monthLabels(window: ViewWindow, dayWidth: number): { label: string; left: number }[] {
-  const start = parseDate(window.from);
-  if (start === null) return [];
-  const first = new Date(start);
-  return Array.from({ length: 3 }, (_, index) => {
-    const date = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + index, 1));
-    const offset = Math.round((date.getTime() - start) / DAY_MS);
-    return {
-      label: `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`,
-      left: offset * dayWidth
-    };
-  });
 }

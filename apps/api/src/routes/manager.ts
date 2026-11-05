@@ -144,12 +144,14 @@ async function projectPage(request: FastifyRequest, query: ReturnType<typeof Pro
       responsibilityId: query.responsibilityId,
       unassigned: query.unassigned,
       status: query.status,
+      schedule: query.schedule,
       query: query.query,
       sort: query.sort,
       direction: query.direction
     },
     query.page,
-    query.pageSize
+    query.pageSize,
+    ctx.today
   );
   const byId = new Map(dir.projects.map((project) => [project.projectId, project]));
   return {

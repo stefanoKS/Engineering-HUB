@@ -10,7 +10,8 @@
  * parameter, every list is bounded, and the drilldown is paginated. No hour, capacity or
  * utilisation value is computed here, because the report measures tasks, not time.
  */
-import type { TaskStatus } from '@eh/contracts';
+import type { DisplayTaskStatus, TaskStatus } from '@eh/contracts';
+import { displayTaskStatus } from '@eh/domain';
 import type { Queryable } from '../pool';
 
 type Db = Queryable;
@@ -325,6 +326,8 @@ export type WorkloadTaskRecord = {
   subprojectName: string | null;
   /** The `tasks.status` CHECK constraint is the source of truth for this stored vocabulary. */
   status: TaskStatus;
+  /** The canonical display state, so a done or cancelled row is never shown as overdue. */
+  displayStatus: DisplayTaskStatus;
   dueDate: string | null;
   completedDate: string | null;
   assigneeNames: string[];
@@ -398,6 +401,10 @@ export async function workloadTaskPage(
       projectName: row.project_name,
       subprojectName: row.subproject_name,
       status: row.status as TaskStatus,
+      displayStatus: displayTaskStatus(
+        { status: row.status, dueDate: row.due_date },
+        filters.today
+      ),
       dueDate: row.due_date,
       completedDate: row.completed_date,
       assigneeNames: row.assignee_names ?? [],

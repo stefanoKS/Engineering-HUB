@@ -1,5 +1,6 @@
 /** Project and subproject repositories. */
 import type { Project, Subproject } from '@eh/contracts';
+import { businessDate } from '@eh/domain';
 import type { Queryable } from '../pool';
 import { newId } from '../ids';
 import { toProject, toSubproject, type ProjectRow, type SubprojectRow } from '../map';
@@ -18,14 +19,39 @@ const PROJECT_SELECT = `
     LEFT JOIN responsibilities r ON r.responsibility_id = p.responsibility_id
     LEFT JOIN members owner ON owner.member_id = p.project_owner_id`;
 
+/**
+ * The one SQL projection of the derived schedule state.
+ *
+ * `projectScheduleStatus` in `@eh/domain` is the reference implementation; this expression exists
+ * only so a filter or a sort can be resolved before pagination instead of in the browser. The
+ * equivalence is asserted in `packages/db/test/integration.test.ts` for every status/date
+ * combination, so the two cannot drift silently.
+ */
+export function projectScheduleStateSql(today: string): string {
+  return `CASE
+      WHEN p.status = 'Archived' OR p.archived_at IS NOT NULL THEN 'ARCHIVED'
+      WHEN p.status = 'Cancelled' THEN 'CANCELLED'
+      WHEN p.status = 'Completed' THEN 'COMPLETED'
+      WHEN p.planned_start IS NOT NULL AND p.committed_deadline IS NOT NULL
+           AND p.planned_start > p.committed_deadline THEN 'INVALID_DATES'
+      WHEN p.planned_start IS NULL AND p.committed_deadline IS NULL THEN 'DATES_NOT_SET'
+      WHEN p.committed_deadline IS NOT NULL AND ${today}::date > p.committed_deadline THEN 'LATE'
+      WHEN p.planned_start IS NULL THEN 'START_NOT_SET'
+      WHEN ${today}::date < p.planned_start THEN 'PLANNED'
+      ELSE 'IN_PROGRESS'
+    END`;
+}
+
 export type ProjectFilters = {
   responsibilityId?: string;
   unassigned?: boolean;
   status?: string;
+  /** Derived schedule state, filtered and sorted before any page is cut. */
+  schedule?: string;
   query?: string;
   /** The member explorer searches the project name only, never a private column. */
   queryProjectNameOnly?: boolean;
-  sort?: 'deadline' | 'name' | 'responsibility' | 'owner' | 'status' | 'priority' | 'updated';
+  sort?: 'deadline' | 'name' | 'responsibility' | 'owner' | 'status' | 'schedule' | 'priority' | 'updated';
   direction?: 'asc' | 'desc';
   /** Visibility policy: only `INTERNAL` projects are employee-visible. */
   internalOnly?: boolean;
@@ -39,6 +65,8 @@ const PROJECT_SORTS: Record<NonNullable<ProjectFilters['sort']>, string> = {
   responsibility: "lower(COALESCE(r.name, ''))",
   owner: "lower(COALESCE(owner.name, ''))",
   status: 'p.status',
+  // The status column of the manager list shows the derived state, so the sort follows it.
+  schedule: '',
   priority: "CASE p.priority WHEN 'Critical' THEN 0 WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END",
   updated: 'p.updated_at'
 };
@@ -47,10 +75,20 @@ export async function listProjects(
   db: Db,
   filters: ProjectFilters,
   page: number,
-  pageSize: number
+  pageSize: number,
+  today: string = businessDate()
 ): Promise<{ items: Project[]; total: number; groupTotals: { responsibilityId: string | null; total: number }[] }> {
   const where: string[] = ['p.deleted_at IS NULL'];
   const params: unknown[] = [];
+  // A single shared parameter keeps the derived expression identical in a filter and a sort.
+  let todayIndex: number | null = null;
+  const scheduleSql = (): string => {
+    if (todayIndex === null) {
+      params.push(today);
+      todayIndex = params.length;
+    }
+    return projectScheduleStateSql(`$${todayIndex}`);
+  };
   if (filters.responsibilityId) {
     params.push(filters.responsibilityId);
     where.push(`p.responsibility_id = $${params.length}`);
@@ -59,6 +97,11 @@ export async function listProjects(
   if (filters.status) {
     params.push(filters.status);
     where.push(`p.status = $${params.length}`);
+  }
+  if (filters.schedule) {
+    params.push(filters.schedule);
+    const valueIndex = params.length;
+    where.push(`${scheduleSql()} = $${valueIndex}`);
   }
   if (filters.query) {
     params.push(`%${filters.query.toLowerCase()}%`);
@@ -77,22 +120,25 @@ export async function listProjects(
     where.push("p.status <> 'Archived' AND p.archived_at IS NULL");
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  // A sort-only parameter must not reach the count queries, which share the filter parameters.
+  const filterParams = [...params];
   const [total, groupTotals] = await Promise.all([
-    db.one<{ count: string }>(`SELECT count(*)::text AS count FROM projects p ${whereSql}`, params),
+    db.one<{ count: string }>(`SELECT count(*)::text AS count FROM projects p ${whereSql}`, filterParams),
     db.many<{ responsibility_id: string | null; count: string }>(
       `SELECT p.responsibility_id, count(*)::text AS count FROM projects p ${whereSql}
        GROUP BY p.responsibility_id`,
-      params
+      filterParams
     )
   ]);
-  const order = PROJECT_SORTS[filters.sort ?? 'deadline'];
+  const sort = filters.sort ?? 'deadline';
+  const order = sort === 'schedule' || sort === 'status' ? scheduleSql() : PROJECT_SORTS[sort];
   const direction = filters.direction === 'desc' ? 'DESC' : 'ASC';
   const rows = await db.many<ProjectRow>(
     `${PROJECT_SELECT} ${whereSql} ORDER BY ${order} ${direction} NULLS LAST, p.project_id ASC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
     [...params, pageSize, (page - 1) * pageSize]
   );
   return {
-    items: rows.map(toProject),
+    items: rows.map((row) => toProject(row, today)),
     total: Number(total?.count ?? 0),
     groupTotals: groupTotals.map((group) => ({ responsibilityId: group.responsibility_id, total: Number(group.count) }))
   };
@@ -103,7 +149,7 @@ export async function listAllProjects(db: Db, limit = 500): Promise<Project[]> {
     `${PROJECT_SELECT} WHERE p.deleted_at IS NULL ORDER BY p.project_name ASC LIMIT $1`,
     [limit]
   );
-  return rows.map(toProject);
+  return rows.map((row) => toProject(row));
 }
 
 export async function getProject(db: Db, projectId: string): Promise<Project | null> {
@@ -249,7 +295,7 @@ export async function listSubprojects(db: Db, projectId?: string): Promise<Subpr
       ORDER BY s.project_id, eh_subproject_depth(s.subproject_id), s.subproject_name`,
     [projectId ?? null]
   );
-  return rows.map(toSubproject);
+  return rows.map((row) => toSubproject(row));
 }
 
 export async function getSubproject(db: Db, subprojectId: string): Promise<Subproject | null> {

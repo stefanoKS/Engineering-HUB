@@ -617,7 +617,7 @@ function WorkRow({
       {canReport ? <Badge tone={review.tone}>{t(review.label)}</Badge> : null}
       </div>
       <div className="my-work-row-due">
-        <DeadlineCell dueDate={item.dueDate} displayStatus={item.displayStatus} />
+        <DeadlineCell dueDate={item.dueDate} state={item.displayStatus} completedOn={item.completedAt} />
       </div>
 
       <div className="my-work-row-actions">

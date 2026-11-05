@@ -79,6 +79,51 @@ export const V2_LABELS = {
  'action.open': { ja: '詳細を開く', en: 'Open' },
  'deadline.label': { ja: '納期', en: 'Deadline' },
  'deadline.todayBadge': { ja: '今日', en: 'Today' },
+ 'deadline.completedLate': { ja: '期限後に完了', en: 'Completed late' },
+ // The displayed project status is derived from the plan dates and today's business date.
+ 'project.schedule.ARCHIVED': { ja: 'アーカイブ済み', en: 'Archived' },
+ 'project.schedule.CANCELLED': { ja: '中止', en: 'Cancelled' },
+ 'project.schedule.COMPLETED': { ja: '完了', en: 'Completed' },
+ 'project.schedule.INVALID_DATES': { ja: '日程データ要確認', en: 'Check the schedule dates' },
+ 'project.schedule.LATE': { ja: '遅延', en: 'Late' },
+ 'project.schedule.PLANNED': { ja: '開始前', en: 'Planned' },
+ 'project.schedule.IN_PROGRESS': { ja: '進行中', en: 'In progress' },
+ 'project.schedule.START_NOT_SET': { ja: '開始日未設定', en: 'Start not set' },
+ 'project.schedule.DATES_NOT_SET': { ja: '日程未設定', en: 'Dates not set' },
+ 'project.schedule.missingStart': { ja: '開始日未設定', en: 'Start not set' },
+ 'project.schedule.missingFinish': { ja: '終了日未設定', en: 'Finish not set' },
+ 'project.schedule.missingBoth': { ja: '開始日と終了日が未設定', en: 'Start and finish not set' },
+ 'project.schedule.title': { ja: '日程ステータス', en: 'Schedule status' },
+ 'project.schedule.derivedHint': {
+   ja: '表示中の状態は開始日・終了日と今日の日付から自動で決まります。保存される状態は「完了」「中止」「アーカイブ」だけです。',
+   en: 'The displayed state is derived from the start and finish dates and today. Only completion, cancellation and archive are stored.'
+ },
+ 'project.schedule.markCompleted': { ja: '完了にする', en: 'Mark completed' },
+ 'project.schedule.markCompletedTitle': { ja: 'プロジェクトを完了にします', en: 'Mark the project completed' },
+ 'project.schedule.markCompletedBody': {
+   ja: '完了にするには、すべてのタスクが完了または取消である必要があります。',
+   en: 'Every task must be done or cancelled before the project can be completed.'
+ },
+ 'project.schedule.cancel': { ja: '中止にする', en: 'Cancel project' },
+ 'project.schedule.cancelTitle': { ja: 'プロジェクトを中止にします', en: 'Cancel the project' },
+ 'project.schedule.cancelBody': {
+   ja: '中止にすると作業対象から外れます。記録は残り、再有効化できます。',
+   en: 'A cancelled project leaves active work. The record is retained and can be reactivated.'
+ },
+ 'project.schedule.reactivate': { ja: '再有効化', en: 'Reactivate' },
+ 'project.schedule.reactivateTitle': { ja: 'プロジェクトを再有効化します', en: 'Reactivate the project' },
+ 'project.schedule.reactivateBody': {
+   ja: 'このプロジェクトを再び作業対象に戻します。',
+   en: 'This project returns to active work.'
+ },
+ 'project.schedule.changed': { ja: '状態を変更しました。', en: 'The status was changed.' },
+ 'projects.lifecycle': { ja: 'ライフサイクル', en: 'Lifecycle' },
+ 'projects.visibility.internal': { ja: '社内公開 (INTERNAL)', en: 'Internal (INTERNAL)' },
+ 'projects.visibility.restricted': { ja: '限定 (RESTRICTED)', en: 'Restricted (RESTRICTED)' },
+ 'projects.visibilityScopeHint': {
+   ja: '社内公開にすると、既存の閲覧権限と公開処理の範囲で共有ダッシュボードの対象になります。公開は次回の公開処理で反映されます。',
+   en: 'Internal makes the project eligible for the shared dashboard under the existing access and publication rules. It appears at the next publication.'
+ },
  'nav.allWork': { ja: 'すべてのタスク', en: 'All work' },
  'allWork.intro': {
    ja: '社内で共有されている作業を閲覧できます。閲覧のみで、変更はできません。',
@@ -851,12 +896,23 @@ export const V2_LABELS = {
   'timeline.displayStart': { ja: '表示開始日', en: 'Display start' },
   'timeline.displayFinish': { ja: '表示終了日', en: 'Display finish' },
   'timeline.resetDates': { ja: '表示期間をリセット', en: 'Reset dates' },
+  'timeline.period': { ja: '表示期間', en: 'Display period' },
+  'timeline.preset.week': { ja: '7日間', en: '7 days' },
+  'timeline.preset.fortnight': { ja: '2週間', en: '2 weeks' },
+  'timeline.preset.month': { ja: '1か月', en: '1 month' },
+  'timeline.preset.custom': { ja: 'カスタム', en: 'Custom' },
+  'timeline.measuring': { ja: '表示幅を測定中…', en: 'Measuring chart…' },
+  'timeline.chartHelp': {
+    ja: '選択期間全体を表示する閲覧専用タイムライン。',
+    en: 'Read-only timeline showing the entire selected period.'
+  },
   'timeline.invalidDates': { ja: '開始日は終了日以前の日付を入力してください。現在の表示は変更されません。', en: 'Enter complete dates with start on or before finish. The current chart remains unchanged.' },
   'timeline.dateHint': { ja: '表示期間は閲覧専用です。保存済みの予定は変更されません。', en: 'Display dates are read-only filters and never change stored schedules.' },
   'timeline.includeCompleted': { ja: '完了した作業も表示', en: 'Show completed work' },
   'timeline.filter.active': { ja: '絞り込み中', en: 'Filtered' },
-  'timeline.reset': { ja: '条件を解除', en: 'Reset' },
+  'timeline.reset': { ja: 'すべての条件と表示期間をリセット', en: 'Reset filters and dates' },
   'timeline.legend.planned': { ja: '予定（開始〜終了）', en: 'Planned span' },
+  'timeline.legend.startOnly': { ja: '開始日のみ', en: 'Start only' },
   'timeline.legend.deadline': { ja: '期限', en: 'Deadline' },
   'timeline.legend.childRange': { ja: '子項目の期間', en: 'Child date range' },
   'timeline.legend.completed': { ja: '完了日', en: 'Recorded completion' },
@@ -866,6 +922,7 @@ export const V2_LABELS = {
     en: 'No stored date, so this row has no span.'
   },
   'timeline.startNotSet': { ja: '開始日未設定', en: 'Start date not set' },
+  'timeline.finishNotSet': { ja: '終了日未設定', en: 'Finish not set' },
   'timeline.inconsistent': {
     ja: '開始日が期限より後になっています。値は自動で修正しません。',
     en: 'The start date falls after the deadline. Nothing is corrected automatically.'

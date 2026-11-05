@@ -27,6 +27,7 @@ import {
   canIncludeArchivedWork,
   canReadProjectVisibility,
   canSeeRestrictedWork,
+  projectScheduleStatus,
   requireRole,
   rollup
 } from '@eh/domain';
@@ -242,7 +243,8 @@ export async function listWorkProjects(
         direction: 'asc'
       },
       input.page,
-      pageSize
+      pageSize,
+      ctx.today
     ),
     listWorkResponsibilityOptions(ctx.db, !manager),
     taskScope(ctx).then((loaded) => loaded.scope)
@@ -256,6 +258,7 @@ export async function listWorkProjects(
       responsibilityName: project.responsibilityName,
       projectOwnerName: project.projectOwnerName,
       status: project.status,
+      schedule: project.schedule,
       priority: project.priority,
       committedDeadline: project.committedDeadline,
       progressPercent: project.progressPercent,
@@ -352,6 +355,7 @@ export async function readOnlyProjectDetail(ctx: WorkCtx, projectId: string): Pr
       responsibilityName: project.responsibilityName,
       projectOwnerName: project.projectOwnerName,
       status: project.status,
+      schedule: project.schedule,
       priority: project.priority,
       committedDeadline: project.committedDeadline,
       progressPercent: project.progressPercent,
@@ -366,6 +370,14 @@ export async function readOnlyProjectDetail(ctx: WorkCtx, projectId: string): Pr
       description: subproject.description,
       parentSubprojectId: subproject.parentSubprojectId,
       status: subproject.status,
+      schedule: projectScheduleStatus(
+        {
+          status: subproject.status,
+          plannedStart: subproject.plannedStart,
+          committedDeadline: subproject.deadline
+        },
+        ctx.today
+      ),
       deadline: subproject.deadline,
       depth: subproject.depth,
       progress: rollupOf(

@@ -1,5 +1,33 @@
 # Operations Runbook (V2)
 
+## Project status, new-project visibility and date rollover — 2026-11-05
+
+* **Nothing runs at midnight.** A project's displayed status is calculated at read time from its
+  start date, finish date and the current Asia/Tokyo date. There is no scheduled job, no nightly
+  write and no audit row produced by time passing; restarting a service or leaving a tab open all
+  show the same rule. Opening or focusing a page (and the next Tokyo midnight while it stays open)
+  re-reads the date-dependent projections.
+* **Only lifecycle decisions are stored.** "Mark completed", "Cancel project" and "Reactivate" are
+  the only ordinary status changes, each confirmed in the UI and validated on the server (a project
+  can still only be completed when every task is done or cancelled). Archive keeps its own
+  confirmed action. A stored `On Hold`/`Planned`/`Active` value is historical data: it is never
+  rewritten, and it no longer overrides the derived badge. There is no migration and no bulk
+  status update.
+* **A new V2 project is `INTERNAL`.** The visibility selector defaults to INTERNAL and still offers
+  RESTRICTED; an omitted value on the API also defaults to INTERNAL. Existing projects keep their
+  stored visibility - including RESTRICTED - and a change appears at the next publication run, not
+  immediately. Publication stays OFF by default and is unchanged by this default.
+* **Deadlines follow the task lifecycle.** A done or cancelled task is never shown as overdue; a
+  completion after its deadline is labelled "completed late" ("期限後に完了"). The workload
+  drill-down returns the display state next to the stored status, so the report and the task list
+  agree.
+* **Timeline marks.** Each row draws one bar 12 px tall; a deadline-only or same-day record is a
+  3 px point mark centred in its day, and work outside the selected window is simply absent rather
+  than pinned to an edge. The row's Details control shows the exact dates.
+
+The timeline's subproject arrow expands or collapses that folder's task tree without changing
+stored task or subproject relationships. Project-direct tasks are not controlled by that arrow.
+
 ## Local LAN update — 2026-11-02
 
 [LOCAL_LAN.md](LOCAL_LAN.md) specifies the employee-ID/password mode, schema 7, optional email, first-login change, administrator reset, employee-owned progress editing, Windows launcher, durable local backup and optional Shared Drive upload. It supersedes Google-only or Linux-only assumptions below for this mode. [Verification record](LOCAL_LAN_ACCEPTANCE.md).

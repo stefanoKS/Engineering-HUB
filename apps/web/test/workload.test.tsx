@@ -89,6 +89,7 @@ function drillPage(): WorkloadTaskPage {
         projectName: 'Alpha',
         subprojectName: null,
         status: 'In Progress',
+        displayStatus: 'IN_PROGRESS',
         dueDate: today,
         completedDate: null,
         assigneeNames: ['Aki Tanaka'],

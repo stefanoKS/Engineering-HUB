@@ -2,6 +2,7 @@ export * from './errors';
 export * from './time';
 export * from './taxonomy';
 export * from './task-status';
+export * from './project-schedule';
 export * from './skills';
 export * from './hierarchy';
 export * from './eligibility';

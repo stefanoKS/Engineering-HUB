@@ -19,6 +19,31 @@ export const PROJECT_STATUSES = [
 export const ProjectStatus = z.enum(PROJECT_STATUSES);
 export type ProjectStatus = z.infer<typeof ProjectStatus>;
 
+/**
+ * The displayed project schedule state. It is derived from the plan dates and the Asia/Tokyo
+ * business date at read time - it is never stored and never a new database lifecycle enum. The
+ * stored `PROJECT_STATUSES` value stays the lifecycle fact (explicit completion, cancellation
+ * and archive).
+ */
+export const PROJECT_SCHEDULE_STATES = [
+  'ARCHIVED',
+  'CANCELLED',
+  'COMPLETED',
+  'INVALID_DATES',
+  'LATE',
+  'PLANNED',
+  'IN_PROGRESS',
+  'START_NOT_SET',
+  'DATES_NOT_SET'
+] as const;
+export const ProjectScheduleState = z.enum(PROJECT_SCHEDULE_STATES);
+export type ProjectScheduleState = z.infer<typeof ProjectScheduleState>;
+
+/** Which plan boundary is missing, so a label states it instead of inventing a state. */
+export const SCHEDULE_MISSING_PARTS = ['NONE', 'START', 'FINISH', 'BOTH'] as const;
+export const ScheduleMissingPart = z.enum(SCHEDULE_MISSING_PARTS);
+export type ScheduleMissingPart = z.infer<typeof ScheduleMissingPart>;
+
 export const TASK_STATUSES = [
   'Not Started',
   'Assigned',

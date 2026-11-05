@@ -74,10 +74,12 @@ export function MembersScreen({ actor }: { actor: Actor }): JSX.Element {
                 <td>
                   <Badge tone={member.active ? 'ok' : 'neutral'}>{member.active ? 'ON' : 'OFF'}</Badge>
                 </td>
-                <td className="actions">
-                  <button type="button" className="link-button" onClick={() => setEditing(member)}>
-                    {t('action.edit')}
-                  </button>
+                <td className="project-actions-cell">
+                  <div className="actions">
+                    <button type="button" className="link-button" onClick={() => setEditing(member)}>
+                      {t('action.edit')}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -250,7 +252,7 @@ export function MemberProfileScreen({ actor, memberId }: { actor: Actor; memberI
               <li key={task.taskId}>
                 <a href={`#/task/${task.taskId}`}>{task.taskName}</a>
                 <Badge tone={statusTone(task.status)}>{label('task.status', task.status)}</Badge>
-                <DeadlineCell dueDate={task.dueDate} displayStatus={task.displayStatus} showLabel={false} />
+                <DeadlineCell dueDate={task.dueDate} state={task.displayStatus} showLabel={false} />
               </li>
             ))}
           </ul>

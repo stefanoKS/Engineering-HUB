@@ -1,5 +1,45 @@
 # V2 HTTP API
 
+## Derived project schedule status and deadline display state — 2026-11-05
+
+`Project`, `ProjectSummary`, `Subproject`, `WorkProject`, `WorkSubproject`,
+`TimelineProjectRow` and `TimelineSubprojectRow` gain a required `schedule` object:
+
+```json
+"schedule": { "state": "LATE", "missing": "NONE" }
+```
+
+`state` is one of `ARCHIVED`, `CANCELLED`, `COMPLETED`, `INVALID_DATES`, `LATE`, `PLANNED`,
+`IN_PROGRESS`, `START_NOT_SET`, `DATES_NOT_SET`; `missing` is `NONE`, `START`, `FINISH` or `BOTH`.
+The value is calculated on the server from `plannedStart`, `committedDeadline`, the stored
+lifecycle status and the Asia/Tokyo business date. It is never stored, never accepted from a
+browser and is not a second lifecycle enum. The stored `status` remains in every payload so an
+audit or a migration can still read the lifecycle fact.
+
+| Endpoint | Change | Why |
+| --- | --- | --- |
+| `GET /api/manager/projects` | Accepts `schedule=<state>` and `sort=schedule`; both resolve in PostgreSQL before pagination, so `total` and `totalPages` describe the whole filtered scope | A derived status filter must never cut a page and then filter it |
+| `GET /api/manager/projects`, `GET /api/work/projects`, `GET /api/work/timeline`, `GET /api/work/projects/:id` | Every project and folder row carries `schedule` | List, card, detail, timeline and the read-only explorer show one derived badge |
+| `PATCH /api/manager/projects/:id` | `status` may only move to `Completed` or `Cancelled`, or from `Cancelled` back to `Active`, and requires `confirmStatusChange: true`. `Planned`, `Active` and `On Hold` are refused with `INVALID_TRANSITION` (409); archive keeps its own confirmed action | The schedule states are derived, so an ordinary edit must not write a lifecycle guess |
+| `POST /api/manager/projects` | An omitted `status` defaults to `Active`; any explicit status other than `Active` or `Planned` is refused. An omitted `dashboardVisibility` defaults to `INTERNAL` (V2 policy change); an explicit `RESTRICTED` is respected | A new project starts as ordinary work, and a terminal state must go through its workflow |
+| `GET /api/manager/reports/workload/tasks` | `WorkloadTaskRow` gains a required `displayStatus` (`IN_PROGRESS`, `OVERDUE`, `DONE`, `CANCELLED`) alongside the stored `status` | A completed or cancelled row must never be presented from the date alone |
+
+`displayStatus` uses the one canonical `displayTaskStatus` rule (done wins, cancelled is never
+current, otherwise a deadline strictly before today is overdue). The workload drill-down scope
+still excludes cancelled work and container tasks, and its overdue figures still count open leaf
+work only.
+
+## Flat timeline display schedules — 2026-11-05
+
+`GET /api/work/timeline` returns `scheduleStart`, `scheduleFinish`, `dateState`, and
+`dateSource` for every project, folder and task row, plus a bounded `fitRange`. The all-project
+request accepts `includeCompleted` and applies it to displayed schedules and fit metadata.
+`fitRange` is derived before branch expansion; it never includes completion timestamps.
+
+The endpoint remains read-only. Folder schedules are leaf-derived, container schedules exclude
+their stored dates, and invalid or incomplete task schedules return an explanatory state instead
+of a fabricated interval.
+
 ## Start / Finish fields — 2026-11-05
 
 `plannedStart` remains an optional `YYYY-MM-DD` task input on `POST /api/manager/tasks`,

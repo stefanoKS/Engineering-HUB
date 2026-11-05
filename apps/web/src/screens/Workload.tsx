@@ -572,7 +572,14 @@ function DrilldownPanel({
                 <td>
                   <Badge tone={statusTone(task.status)}>{label('task.status', task.status)}</Badge>
                 </td>
-                <td><DeadlineCell dueDate={task.dueDate} showLabel={false} /></td>
+                <td>
+                  <DeadlineCell
+                    dueDate={task.dueDate}
+                    state={task.displayStatus}
+                    completedOn={task.completedDate}
+                    showLabel={false}
+                  />
+                </td>
                 <td>{task.completedDate ?? t('common.unset')}</td>
               </tr>
             ))}

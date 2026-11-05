@@ -1,5 +1,97 @@
 # V2 Architecture
 
+## Derived project status, deadline precedence and timeline bar geometry — 2026-11-05
+
+**One derived status, one lifecycle.** `projectScheduleStatus` in `packages/domain` is the only
+place that turns a plan into a displayed project status. It reports `ARCHIVED`, `CANCELLED`,
+`COMPLETED` (explicit lifecycle), `INVALID_DATES` (start after finish), `LATE`, `PLANNED`,
+`IN_PROGRESS`, `START_NOT_SET` or `DATES_NOT_SET`, plus which boundary is missing. Precedence is
+lifecycle first, then unusable dates, then late, planned and in progress; a finish is inclusive, so
+a project is not late during its own finish day. A missing start is stated as a missing start
+instead of being read as "in progress". The business date is always the Asia/Tokyo calendar date.
+
+`PROJECT_SCHEDULE_STATES` lives in `packages/contracts`; `Project`, `ProjectSummary`,
+`Subproject`, `WorkProject`, `WorkSubproject` and the timeline rows carry `schedule: { state,
+missing }`. The stored `projects.status` value stays, keeps its audit meaning and is never
+rewritten by the passage of time; no migration, column, Script Property, background job or audit
+row is added. A legacy `Planned`/`Active`/`On Hold` value is only ever an ordinary non-terminal
+record, so it cannot override the badge.
+
+Filtering and sorting by the derived state happen in PostgreSQL (`projectScheduleStateSql`) before
+pagination, because a filtered page must describe the whole scope. That expression is a projection
+of the same rule and cannot drift silently: `packages/db/test/integration.test.ts` compares it with
+`projectScheduleStatus` for every status × start × finish combination.
+
+**Lifecycle edits are explicit.** `assertProjectLifecycleChange` refuses an ordinary edit between
+non-terminal states and refuses archive/reopen through the patch route; completion, cancellation and
+reactivation require `confirmStatusChange`. `assertProjectCreationStatus` keeps a new project out of
+a terminal state, so a creation request cannot bypass the completion workflow. A new project is
+created `Active` and `INTERNAL`; visibility and status both remain overridable by an authorized
+client, and an omitted field on a later patch preserves the stored value.
+
+**Deadline precedence.** `DeadlineCell` requires an explicit state. It paints done first, then
+cancelled/archived, then the authoritative overdue state, and only an open record falls back to the
+Tokyo date comparison. A completion after the deadline gets its own "completed late" label. The
+workload drill-down therefore returns `displayStatus` next to the stored `status`, so a report row
+cannot be rendered from a date alone.
+
+**Timeline bars.** `TIMELINE_BAR` in `apps/web/src/components/timeline-dates.ts` is the single
+geometry source: 12 CSS px height for every bar, a 3 px *horizontal* width for a deadline-only or
+same-day point mark, and a 6 px minimum width for a very short real duration. `barGeometry` centres
+a point mark in its day cell, clamps a boundary mark into the chart and returns `null` for work
+that lies entirely outside the window, so no fake boundary mark appears. The bar is vertically
+centred with `top: 50%` and `translateY(-50%)`, which keeps it on the row centre for a wrapped
+name; the height comes from the `--tl-bar-height` token in `.timeline-screen`. The mark itself is
+decorative (`aria-hidden`): the row's own Details control is the accessible target that shows the
+exact dates, so nothing depends on clicking a 3 px strip. The chart keeps one bar per row - no
+deadline diamond, dashed child range, completion symbol or five-symbol legend.
+
+**Table cells stay table cells.** `display: flex` on a `<td>` removes it from the table layout and
+splits the row separator. Every action cell is now `td.project-actions-cell > div.actions`, so the
+cell keeps `display: table-cell` and the button row wraps inside it. The hierarchy header uses a
+scoped `.hierarchy-toolbar` (centred items, wrapping, a count phrase that stays on one line) instead
+of changing the shared card header for every screen.
+
+**Date-dependent display.** `useBusinessDate` re-reads the Tokyo date at the next Tokyo midnight
+and on page focus, and the project list, project detail and read-only explorer include that date in
+their query identity. A tab left open overnight therefore re-reads the server answer instead of
+keeping a stale badge, without polling and without a write.
+
+## Flat folder timeline — 2026-11-05
+
+The read-only timeline has one display schedule per row: `scheduleStart`, `scheduleFinish`,
+`dateState`, and `dateSource`. Task Start/Finish are used directly; Finish-only work is rendered
+as a same-day mark, Start-only and invalid records remain visible with an explanation, and no
+display duration is invented. Container tasks derive from eligible descendant leaves. Folder rows
+derive only from eligible leaf tasks assigned to that folder, while an explicit project schedule
+remains explicit and otherwise falls back to eligible leaf work.
+
+Legacy subproject parent links remain stored for history and archived-ancestor eligibility, but
+the timeline and project detail project all folders as flat peers. New create/reparent commands
+refuse nesting. No migration or database cleanup occurs.
+
+## Responsive read-only timeline — 2026-11-05
+
+The timeline has one inclusive Tokyo calendar-date display range in page memory. The 7-day and
+2-week presets use the committed start plus 6 and 13 days; the one-month preset ends on the day
+before the same date in the following month, or the end of that month when the date does not
+exist. Custom preserves the current dates. Changing the start with a fixed preset recomputes its
+finish; editing the finish selects Custom. Invalid drafts retain the last valid chart. Reset dates
+selects the current Tokyo calendar month and Custom without changing filters or expansion; Fit
+selection chooses Custom with bounded padding around known dates.
+
+A callback ref measures the naturally sized drawing column when it actually mounts, including
+after asynchronous data, and disconnects its `ResizeObserver` on replacement or unmount. Until
+the measurement is positive the header says it is measuring. CSS sizes the aligned header and
+rows; the measured width drives a shared pixels-per-day transform and adaptive two-level calendar
+labels. The entire interval fits without a separate zoomed viewport. Zoom and pan were removed at
+the user's request; ordinary browser zoom and scrolling remain. Controls are presentation-only,
+issue no schedule writes, and do not persist private browser data.
+
+Timeline visibility follows stable parent keys: a root task assigned to a subproject is a child
+of that subproject for expansion, while a task with a parent in the same subproject is a child of
+that task. Project-direct task roots remain visible independently of subproject expansion.
+
 ## Start / Finish schedule presentation and hierarchy timeline correction — 2026-11-05
 
 Ordinary V2 forms now present the existing schedule fields as **Start date / Finish date**

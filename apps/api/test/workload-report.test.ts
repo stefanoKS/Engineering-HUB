@@ -96,7 +96,7 @@ type DrillBody = {
   kind: string;
   from: string;
   to: string;
-  items: { taskId: string; projectName: string }[];
+  items: { taskId: string; projectName: string; status?: string; displayStatus?: string }[];
   total: number;
   page: number;
   pageSize: number;
@@ -324,6 +324,22 @@ describe('drilldown', () => {
     await task({ id: 'TSK-W2', name: 'Second half', dueDate: sunday, owner: 'MEM-A' });
     const bucket = await drill(`mode=WEEK&anchor=${today}&kind=DUE&from=${sunday}&to=${sunday}`);
     expect(bucket.items.map((item: { taskId: string }) => item.taskId)).toEqual(['TSK-W2']);
+  });
+
+  it('carries the display state so a done row is never presented as overdue', async () => {
+    await task({ id: 'TSK-DONE', name: 'Finished', dueDate: yesterday, owner: 'MEM-A', status: 'Done' });
+    await task({ id: 'TSK-OPEN', name: 'Late', dueDate: yesterday, owner: 'MEM-A' });
+
+    const window = await drill(`mode=WEEK&anchor=${today}&kind=DUE&from=${yesterday}&to=${yesterday}`);
+    const byId = new Map(window.items.map((item) => [item.taskId, item]));
+    // The stored status and the derived display state travel together, so the report can never
+    // paint a completed row with an overdue badge from the date alone.
+    expect(byId.get('TSK-DONE')).toMatchObject({ status: 'Done', displayStatus: 'DONE' });
+    expect(byId.get('TSK-OPEN')).toMatchObject({ status: 'In Progress', displayStatus: 'OVERDUE' });
+
+    // Only eligible open work is in the overdue backlog; the done row keeps its own state.
+    const backlog = await drill(`mode=DAY&anchor=${today}&kind=BACKLOG`);
+    expect(backlog.items.map((item: { taskId: string }) => item.taskId)).toEqual(['TSK-OPEN']);
   });
 
   it('reports the real total for a page past the end instead of a false empty result', async () => {

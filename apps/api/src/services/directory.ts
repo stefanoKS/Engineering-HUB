@@ -242,7 +242,7 @@ export async function saveResponsibility(
 export async function moveResponsibility(
   ctx: ServiceCtx,
   responsibilityId: string,
-  input: { revision: number; sortOrder: number }
+  input: { revision: number; direction: 'UP' | 'DOWN'; expectedNeighborId: string | null }
 ): Promise<Responsibility> {
   requireRole(ctx.identity, 'MANAGER');
   const before = (await listResponsibilities(ctx.db)).find(
@@ -253,14 +253,37 @@ export async function moveResponsibility(
     throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
   }
   return ctx.db.transaction(async (tx) => {
-    const next = await updateResponsibility(tx, responsibilityId, { sortOrder: input.sortOrder }, input.revision);
+    await tx.advisoryLock(`responsibilities:order:${before.status}`);
+    const ordered = (await listResponsibilities(tx))
+      .filter((entry) => entry.status === before.status)
+      .sort((left, right) => left.sortOrder - right.sortOrder || left.responsibilityId.localeCompare(right.responsibilityId));
+    const index = ordered.findIndex((entry) => entry.responsibilityId === responsibilityId);
+    const neighbor = ordered[index + (input.direction === 'UP' ? -1 : 1)];
+    if (!neighbor) {
+      throw new DomainError('VALIDATION_FAILED', 'Responsibility is already at the boundary of its status group');
+    }
+    if (neighbor.responsibilityId !== input.expectedNeighborId) {
+      throw new DomainError('EDIT_CONFLICT', 'Responsibility order changed; reload and review');
+    }
+    const current = ordered[index];
+    if (!current || current.revision !== input.revision) {
+      throw new DomainError('EDIT_CONFLICT', 'Responsibility order changed; reload and review');
+    }
+    const neighborNext = await updateResponsibility(
+      tx,
+      neighbor.responsibilityId,
+      { sortOrder: current.sortOrder },
+      neighbor.revision
+    );
+    if (!neighborNext) throw new DomainError('EDIT_CONFLICT', 'Responsibility order changed; reload and review');
+    const next = await updateResponsibility(tx, responsibilityId, { sortOrder: neighbor.sortOrder }, input.revision);
     if (!next) throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
     await audit(tx, ctx, {
       entityType: 'RESPONSIBILITIES',
       entityId: responsibilityId,
       action: 'RESPONSIBILITY_MOVED',
-      previousValue: { sortOrder: before.sortOrder },
-      newValue: { sortOrder: next.sortOrder }
+      previousValue: { sortOrder: before.sortOrder, neighborId: neighbor.responsibilityId },
+      newValue: { sortOrder: next.sortOrder, neighborId: neighbor.responsibilityId, direction: input.direction }
     });
     return next;
   });

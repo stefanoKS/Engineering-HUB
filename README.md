@@ -20,6 +20,22 @@ is derived (進行中 / 期限超過 / 完了) from the deadline and completion,
 one searchable picker assigns several employees at once. Backups are encrypted locally first, with an
 optional Google Drive copy. Mail, Calendar and publication remain optional and off by default.
 
+The read-only timeline fits the selected inclusive date range to the chart width. Choose 7 days,
+2 weeks, 1 month or Custom; Reset dates returns to the current Tokyo month without clearing filters.
+For the month preset, the finish is the day before the corresponding date in the next month, or
+that month's last day when the corresponding date does not exist. These controls do not edit schedules.
+Within an expanded project, a subproject's arrow independently shows or hides its own task tree.
+
+A project's displayed status is derived, not chosen: the start date, the finish date and today's
+Tokyo date decide between planned, in progress, late and a readable missing-date warning. Only an
+explicit completion, cancellation or archive changes the stored lifecycle, so no nightly job
+rewrites a status and a stored "On hold" value no longer overrides the badge. A deadline is never
+shown as overdue once its task is done or cancelled, and a completion after its deadline is labelled
+separately as *completed late*. The timeline draws one 12-pixel bar per row; a deadline-only or
+same-day record is a 3-pixel point mark centred in its day. A new V2 project is `INTERNAL` by
+default and can still be created as `RESTRICTED`; existing visibility values are untouched and a
+change still appears at the next publication run.
+
 ## Install on Windows LAN
 
 Use an always-on Windows PC, Node.js 22.13+ (tested with Node 24), PostgreSQL 18 running as a service,

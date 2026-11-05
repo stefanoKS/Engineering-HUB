@@ -154,7 +154,7 @@ export function TaskDetailScreen({
           <div>
             <dt>{t('column.deadline')}</dt>
             <dd>
-              <DeadlineCell dueDate={record.dueDate} displayStatus={record.displayStatus} size="large" />
+              <DeadlineCell dueDate={record.dueDate} state={record.displayStatus} size="large" />
             </dd>
           </div>
           <div>

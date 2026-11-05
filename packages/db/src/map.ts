@@ -14,7 +14,7 @@ import type {
   Task,
   TaskRequest
 } from '@eh/contracts';
-import { displayTaskStatus, effectiveRole } from '@eh/domain';
+import { businessDate, displayTaskStatus, effectiveRole, projectScheduleStatus } from '@eh/domain';
 
 export type MemberRow = {
   member_id: string;
@@ -116,7 +116,7 @@ export type ProjectRow = {
   revision: number;
 };
 
-export function toProject(row: ProjectRow): Project {
+export function toProject(row: ProjectRow, today: string = businessDate()): Project {
   return {
     projectId: row.project_id,
     projectName: row.project_name,
@@ -127,6 +127,16 @@ export function toProject(row: ProjectRow): Project {
     projectOwnerId: row.project_owner_id,
     projectOwnerName: row.project_owner_name ?? '',
     status: row.status,
+    // Display only: the stored lifecycle status above stays the audited fact.
+    schedule: projectScheduleStatus(
+      {
+        status: row.status,
+        plannedStart: row.planned_start,
+        committedDeadline: row.committed_deadline,
+        archivedAt: row.archived_at
+      },
+      today
+    ),
     priority: row.priority,
     plannedStart: row.planned_start,
     forecastEnd: row.forecast_end,
@@ -247,7 +257,7 @@ export type SubprojectRow = {
   updated_at: string;
 };
 
-export function toSubproject(row: SubprojectRow): Subproject {
+export function toSubproject(row: SubprojectRow, today: string = businessDate()): Subproject {
   return {
     subprojectId: row.subproject_id,
     projectId: row.project_id,
@@ -257,6 +267,14 @@ export function toSubproject(row: SubprojectRow): Subproject {
     ownerId: row.owner_id,
     ownerName: row.owner_name ?? '',
     status: row.status,
+    schedule: projectScheduleStatus(
+      {
+        status: row.status,
+        plannedStart: row.planned_start,
+        committedDeadline: row.deadline
+      },
+      today
+    ),
     plannedStart: row.planned_start,
     plannedEnd: row.planned_end,
     deadline: row.deadline,

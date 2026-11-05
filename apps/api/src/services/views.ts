@@ -33,6 +33,7 @@ import {
   businessDate,
   createScope,
   deadlineState,
+  projectScheduleStatus,
   rollup,
   type Identity,
   type SubprojectLike
@@ -116,7 +117,9 @@ export function buildProjectSummary(
     projectOwnerId: string | null;
     status: ProjectSummary['status'];
     priority: ProjectSummary['priority'];
+    plannedStart?: string | null;
     committedDeadline: string | null;
+    archivedAt?: string | null;
     progressPercent: number | null;
     health: string;
     nextAction: string;
@@ -133,6 +136,15 @@ export function buildProjectSummary(
     responsibilityName: project.responsibilityName,
     projectOwnerId: project.projectOwnerId,
     status: project.status,
+    schedule: projectScheduleStatus(
+      {
+        status: project.status,
+        plannedStart: project.plannedStart ?? null,
+        committedDeadline: project.committedDeadline,
+        archivedAt: project.archivedAt ?? null
+      },
+      today
+    ),
     priority: project.priority,
     committedDeadline: project.committedDeadline,
     deadlineState: deadlineState(project.committedDeadline, project.status, today),

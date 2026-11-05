@@ -294,7 +294,8 @@ const TIMELINE_PROJECT = {
   openWork: 2,
   completedWork: 0,
   childRange: { start: '2026-03-05', end: '2026-09-10', datedItems: 3, totalItems: 5 },
-  undated: false
+  undated: false,
+  scheduleStart: '2026-03-01', scheduleFinish: '2026-07-15', dateState: 'RANGE', dateSource: 'EXPLICIT'
 };
 
 const TIMELINE_BRANCH = {
@@ -311,7 +312,8 @@ const TIMELINE_BRANCH = {
       deadline: '2026-04-25',
       depth: 1,
       childRange: { start: '2026-03-10', end: '2026-03-20', datedItems: 1, totalItems: 2 },
-      undated: false
+      undated: false,
+      scheduleStart: '2026-03-10', scheduleFinish: '2026-03-20', dateState: 'RANGE', dateSource: 'DERIVED'
     }
   ],
   tasks: [
@@ -331,7 +333,8 @@ const TIMELINE_BRANCH = {
       progressPercent: 30,
       childRange: { start: '2026-03-10', end: '2026-03-20', datedItems: 1, totalItems: 1 },
       undated: false,
-      inconsistent: false
+      inconsistent: false,
+      scheduleStart: '2026-03-10', scheduleFinish: '2026-03-20', dateState: 'RANGE', dateSource: 'EXPLICIT'
     },
     {
       taskId: 'TSK-DUE',
@@ -349,7 +352,8 @@ const TIMELINE_BRANCH = {
       progressPercent: 0,
       childRange: { start: '2026-05-01', end: '2026-05-01', datedItems: 1, totalItems: 1 },
       undated: false,
-      inconsistent: false
+      inconsistent: false,
+      scheduleStart: '2026-05-01', scheduleFinish: '2026-05-01', dateState: 'FINISH_ONLY', dateSource: 'EXPLICIT'
     },
     {
       taskId: 'TSK-NONE',
@@ -367,7 +371,8 @@ const TIMELINE_BRANCH = {
       progressPercent: 0,
       childRange: { start: null, end: null, datedItems: 0, totalItems: 1 },
       undated: true,
-      inconsistent: false
+      inconsistent: false,
+      scheduleStart: null, scheduleFinish: null, dateState: 'UNDATED', dateSource: 'NONE'
     },
     {
       taskId: 'TSK-ODD',
@@ -385,11 +390,13 @@ const TIMELINE_BRANCH = {
       progressPercent: 0,
       childRange: { start: '2026-08-01', end: '2026-08-20', datedItems: 1, totalItems: 1 },
       undated: false,
-      inconsistent: true
+      inconsistent: true,
+      scheduleStart: null, scheduleFinish: null, dateState: 'INVALID', dateSource: 'EXPLICIT'
     }
   ],
   truncated: false,
-  taskTotal: 4
+  taskTotal: 4,
+  fitRange: { start: '2026-03-01', end: '2026-07-15' }
 };
 
 function stubTimeline(): ReturnType<typeof vi.fn> {
@@ -403,7 +410,8 @@ function stubTimeline(): ReturnType<typeof vi.fn> {
         page: 1,
         pageSize: 25,
         totalPages: 1,
-        responsibilities: [{ responsibilityId: 'RSP-T', name: 'Design area' }]
+        responsibilities: [{ responsibilityId: 'RSP-T', name: 'Design area' }],
+        fitRange: { start: '2026-03-01', end: '2026-07-15' }
       });
     }
     if (target.includes('/api/work/projects')) {
@@ -428,12 +436,7 @@ describe('read-only timeline', () => {
     render(<I18nProvider><TimelineScreen actor={MEMBER as never} /></I18nProvider>);
     await waitFor(() => expect(document.querySelectorAll('.tl-kind-project').length).toBe(1));
     expect(document.querySelector('.tl-kind-project .tl-label')?.textContent).toBe('Visible project');
-    // The legend names every visual meaning.
-    const legend = within(document.querySelector('.timeline-legend') as HTMLElement);
-    expect(legend.getByText('予定（開始〜終了）')).toBeTruthy();
-    expect(legend.getByText('期限')).toBeTruthy();
-    expect(legend.getByText('子項目の期間')).toBeTruthy();
-    expect(legend.getByText('完了日')).toBeTruthy();
+    expect(document.querySelector('.timeline-legend')).toBeNull();
     expect(fetcher.mock.calls.some(([url]) => String(url).includes('projectId=PRJ-V'))).toBe(false);
 
     fireEvent.click(screen.getByRole('button', { name: '展開' }));
@@ -449,20 +452,18 @@ describe('read-only timeline', () => {
       </I18nProvider>
     );
     await waitFor(() => expect(document.querySelectorAll('.tl-kind-subproject').length).toBe(1));
-    // A finish-only task becomes a marker when its exact selected date is in the display range.
+    // A finish-only task becomes a same-day schedule line.
     fireEvent.change(screen.getByLabelText('表示終了日'), { target: { value: '2026-05-01' } });
-    // A planned bar exists for the planned task; the deadline-only task has a marker, not a plan.
+    // Every valid dated row uses the same schedule primitive.
     expect(document.querySelectorAll('.tl-bar').length).toBeGreaterThan(0);
-    expect(document.querySelectorAll('.tl-deadline').length).toBeGreaterThan(0);
-    // The dashed child range is visibly a different object from the planned bar.
-    expect(document.querySelectorAll('.tl-span').length).toBeGreaterThan(0);
-    // Undated work stays visible with an explanation instead of disappearing.
-    expect(screen.getByText('日付が保存されていないため、この行は期間を表示しません。')).toBeTruthy();
+    expect(document.querySelectorAll('.tl-deadline, .tl-span, .tl-start, .tl-done')).toHaveLength(0);
+    // Undated work stays in its normal hierarchy.
+    expect(screen.getAllByText('No dates').length).toBeGreaterThan(0);
     expect(document.querySelector('.tl-kind-task .tl-label')?.textContent).toBeDefined();
     // A stored inconsistency is reported, not corrected.
     expect(screen.getByText('開始日が期限より後になっています。値は自動で修正しません。')).toBeTruthy();
     // The text representation carries the same dates for assistive use.
-    expect(screen.getByText(/開始日未設定 → 2026-05-01/)).toBeTruthy();
+    expect(document.querySelector('.tl-bar[title*="2026-05-01"]')).toBeTruthy();
   });
 
   it('produces no write request while it is viewed', async () => {

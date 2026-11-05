@@ -5,9 +5,11 @@
 import { z } from 'zod';
 import {
   AuditEntry,
+  DisplayTaskStatus,
   HealthStatus,
   MemberSummary,
   ProgressRollup,
+  ProjectScheduleDisplay,
   ProjectSummary,
   RequestQueue,
   ResponsibilityCard,
@@ -265,6 +267,11 @@ export const WorkloadTaskRow = z.object({
   projectName: z.string(),
   subprojectName: z.string().nullable(),
   status: TaskStatus,
+  /**
+   * The canonical display state. A report row carries it so a completed or cancelled task is
+   * never presented as overdue just because its stored deadline has passed.
+   */
+  displayStatus: DisplayTaskStatus,
   dueDate: IsoDate.nullable(),
   completedDate: IsoDate.nullable(),
   assigneeNames: z.array(z.string()),
@@ -624,6 +631,8 @@ export const WorkProject = z.object({
   responsibilityName: z.string(),
   projectOwnerName: z.string(),
   status: ProjectStatus,
+  /** Derived schedule badge; the stored lifecycle status stays the fact behind it. */
+  schedule: ProjectScheduleDisplay,
   priority: Priority,
   committedDeadline: IsoDate.nullable(),
   progressPercent: z.number().min(0).max(100).nullable(),
@@ -658,6 +667,7 @@ export const WorkSubproject = z.object({
   description: z.string(),
   parentSubprojectId: z.string().nullable(),
   status: ProjectStatus,
+  schedule: ProjectScheduleDisplay,
   deadline: IsoDate.nullable(),
   depth: z.number().int().min(1),
   progress: ProgressRollup
@@ -703,12 +713,37 @@ export const TimelineChildRange = z.object({
 });
 export type TimelineChildRange = z.infer<typeof TimelineChildRange>;
 
+/** One authoritative, read-only display schedule for a timeline row. */
+export const TimelineDateState = z.enum([
+  'RANGE',
+  'FINISH_ONLY',
+  'START_ONLY',
+  'UNDATED',
+  'INVALID'
+]);
+export type TimelineDateState = z.infer<typeof TimelineDateState>;
+
+export const TimelineSchedule = z.object({
+  /** Inclusive display endpoints. A finish-only record repeats its stored finish here. */
+  scheduleStart: IsoDate.nullable(),
+  scheduleFinish: IsoDate.nullable(),
+  dateState: TimelineDateState,
+  /** Explains whether this is an explicit record schedule or an eligible-leaf aggregate. */
+  dateSource: z.enum(['EXPLICIT', 'DERIVED', 'NONE'])
+});
+export type TimelineSchedule = z.infer<typeof TimelineSchedule>;
+
+export const TimelineRange = z.object({ start: IsoDate, end: IsoDate });
+export type TimelineRange = z.infer<typeof TimelineRange>;
+
 export const TimelineProjectRow = z.object({
   projectId: z.string(),
   projectName: z.string(),
   responsibilityId: z.string().nullable(),
   responsibilityName: z.string(),
   status: ProjectStatus,
+  /** Derived schedule badge for the timeline's project details. */
+  schedule: ProjectScheduleDisplay,
   plannedStart: IsoDate.nullable(),
   forecastEnd: IsoDate.nullable(),
   committedDeadline: IsoDate.nullable(),
@@ -719,7 +754,8 @@ export const TimelineProjectRow = z.object({
   completedWork: z.number().int().min(0),
   childRange: TimelineChildRange,
   /** No usable date of its own (neither a plan nor a commitment). */
-  undated: z.boolean()
+  undated: z.boolean(),
+  ...TimelineSchedule.shape
 });
 export type TimelineProjectRow = z.infer<typeof TimelineProjectRow>;
 
@@ -729,12 +765,14 @@ export const TimelineSubprojectRow = z.object({
   parentSubprojectId: z.string().nullable(),
   subprojectName: z.string(),
   status: ProjectStatus,
+  schedule: ProjectScheduleDisplay,
   plannedStart: IsoDate.nullable(),
   plannedEnd: IsoDate.nullable(),
   deadline: IsoDate.nullable(),
   depth: z.number().int().min(1),
   childRange: TimelineChildRange,
-  undated: z.boolean()
+  undated: z.boolean(),
+  ...TimelineSchedule.shape
 });
 export type TimelineSubprojectRow = z.infer<typeof TimelineSubprojectRow>;
 
@@ -755,7 +793,8 @@ export const TimelineTaskRow = z.object({
   childRange: TimelineChildRange,
   undated: z.boolean(),
   /** The stored plan starts after the stored deadline: shown as a warning, never corrected. */
-  inconsistent: z.boolean()
+  inconsistent: z.boolean(),
+  ...TimelineSchedule.shape
 });
 export type TimelineTaskRow = z.infer<typeof TimelineTaskRow>;
 
@@ -766,11 +805,15 @@ export const TimelineProjectBranch = z.object({
   /** Honest indication that the branch exceeded the documented bound. */
   truncated: z.boolean(),
   /** Every task in this authorized branch, including any the bound did not return. */
-  taskTotal: z.number().int().min(0)
+  taskTotal: z.number().int().min(0),
+  /** Fit-selection data is calculated before expansion or row rendering. */
+  fitRange: TimelineRange.nullable()
 });
 export type TimelineProjectBranch = z.infer<typeof TimelineProjectBranch>;
 
 export const TimelineProjectPage = paged(TimelineProjectRow).extend({
-  responsibilities: z.array(WorkResponsibilityOption)
+  responsibilities: z.array(WorkResponsibilityOption),
+  /** Full authorized selected scope, not only the current result page. */
+  fitRange: TimelineRange.nullable()
 });
 export type TimelineProjectPage = z.infer<typeof TimelineProjectPage>;

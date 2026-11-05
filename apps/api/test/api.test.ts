@@ -12,7 +12,7 @@ import { Database, insertMember, insertProject, insertResponsibility, insertSubp
 import { buildApp } from '../src/app';
 import { loadConfig } from '../src/config';
 import { NullInboxSource } from '../src/inbox';
-import { businessDate } from '@eh/domain';
+import { addDays, businessDate } from '@eh/domain';
 import { freshDatabase, requireDatabase } from '../../../packages/db/test/support/db';
 
 let app: FastifyInstance;
@@ -244,7 +244,8 @@ describe('project commands', () => {
     });
     expect(first.statusCode).toBe(200);
     const created = (first.json() as { data: { project: { projectId: string; revision: number; dashboardVisibility: string } } }).data.project;
-    expect(created.dashboardVisibility).toBe('RESTRICTED');
+    // A new V2 project is INTERNAL by default; an explicit RESTRICTED is still honoured.
+    expect(created.dashboardVisibility).toBe('INTERNAL');
 
     const replay = await app.inject({
       method: 'POST',
@@ -298,6 +299,139 @@ describe('project commands', () => {
     });
     expect(response.statusCode).toBe(400);
     expect(response.json().error.code).toBe('CONFIRMATION_REQUIRED');
+  });
+
+  it('keeps a new project INTERNAL unless RESTRICTED is asked for, and derives its schedule', async () => {
+    const auth = await signIn(MANAGER);
+    await insertResponsibility(db, { name: 'Area' }, 'RSP-V');
+    const internal = await app.inject({
+      method: 'POST',
+      url: '/api/manager/projects',
+      headers: headers(auth, true),
+      payload: { idempotencyKey: 'project-create-vis-1', projectName: 'Internal', responsibilityId: 'RSP-V' }
+    });
+    expect(internal.statusCode, internal.body).toBe(200);
+    const internalProject = (internal.json() as {
+      data: { project: { dashboardVisibility: string; status: string; schedule: { state: string } } };
+    }).data.project;
+    expect(internalProject.dashboardVisibility).toBe('INTERNAL');
+    expect(internalProject.status).toBe('Active');
+    expect(internalProject.schedule.state).toBe('DATES_NOT_SET');
+
+    const restricted = await app.inject({
+      method: 'POST',
+      url: '/api/manager/projects',
+      headers: headers(auth, true),
+      payload: {
+        idempotencyKey: 'project-create-vis-2',
+        projectName: 'Restricted',
+        responsibilityId: 'RSP-V',
+        dashboardVisibility: 'RESTRICTED'
+      }
+    });
+    expect(restricted.statusCode, restricted.body).toBe(200);
+    expect((restricted.json() as { data: { project: { dashboardVisibility: string } } }).data.project.dashboardVisibility).toBe(
+      'RESTRICTED'
+    );
+  });
+
+  it('filters and sorts the derived schedule state before pagination', async () => {
+    const auth = await signIn(MANAGER);
+    await insertResponsibility(db, { name: 'Area' }, 'RSP-F');
+    const today = businessDate();
+    await insertProject(
+      db,
+      { projectName: 'Late one', status: 'Active', plannedStart: '2026-01-01', committedDeadline: '2026-01-31' },
+      'PRJ-FL1'
+    );
+    await insertProject(
+      db,
+      { projectName: 'Late two', status: 'Active', plannedStart: '2026-02-01', committedDeadline: '2026-02-28' },
+      'PRJ-FL2'
+    );
+    await insertProject(
+      db,
+      { projectName: 'Running', status: 'Active', plannedStart: addDays(today, -2), committedDeadline: addDays(today, 10) },
+      'PRJ-FR'
+    );
+    await insertProject(db, { projectName: 'Undated', status: 'Active' }, 'PRJ-FU');
+
+    const page = await app.inject({
+      url: '/api/manager/projects?schedule=LATE&sort=schedule&direction=asc&page=1&pageSize=1',
+      headers: headers(auth)
+    });
+    expect(page.statusCode, page.body).toBe(200);
+    const body = page.json() as {
+      data: { items: { projectId: string; schedule: { state: string } }[]; total: number; totalPages: number };
+    };
+    // The filter and the page are resolved on the server: the total counts the whole scope.
+    expect(body.data.total).toBe(2);
+    expect(body.data.totalPages).toBe(2);
+    expect(body.data.items).toHaveLength(1);
+    expect(body.data.items[0]?.schedule.state).toBe('LATE');
+
+    const second = await app.inject({
+      url: '/api/manager/projects?schedule=LATE&sort=schedule&direction=asc&page=2&pageSize=1',
+      headers: headers(auth)
+    });
+    expect(second.statusCode, second.body).toBe(200);
+    const secondBody = second.json() as { data: { items: { projectId: string; schedule: { state: string } }[] } };
+    expect(secondBody.data.items[0]?.schedule.state).toBe('LATE');
+    expect(secondBody.data.items[0]?.projectId).not.toBe(body.data.items[0]?.projectId);
+
+    const undated = await app.inject({
+      url: '/api/manager/projects?schedule=DATES_NOT_SET',
+      headers: headers(auth)
+    });
+    const undatedBody = undated.json() as { data: { items: { projectId: string }[] } };
+    expect(undatedBody.data.items.map((project) => project.projectId)).toContain('PRJ-FU');
+  });
+
+  it('refuses an ordinary status change and requires confirmation for a terminal decision', async () => {
+    const auth = await signIn(MANAGER);
+    await insertResponsibility(db, { name: 'Area' }, 'RSP-S');
+    const project = await insertProject(db, { projectName: 'Lifecycle', status: 'Active' }, 'PRJ-L');
+    const toPlanned = await app.inject({
+      method: 'PATCH',
+      url: `/api/manager/projects/${project.projectId}`,
+      headers: headers(auth, true),
+      payload: { revision: project.revision, status: 'Planned' }
+    });
+    expect(toPlanned.statusCode, toPlanned.body).toBe(409);
+    expect(toPlanned.json().error.code).toBe('INVALID_TRANSITION');
+
+    const unconfirmed = await app.inject({
+      method: 'PATCH',
+      url: `/api/manager/projects/${project.projectId}`,
+      headers: headers(auth, true),
+      payload: { revision: project.revision, status: 'Cancelled' }
+    });
+    expect(unconfirmed.statusCode, unconfirmed.body).toBe(400);
+    expect(unconfirmed.json().error.code).toBe('CONFIRMATION_REQUIRED');
+
+    const cancelled = await app.inject({
+      method: 'PATCH',
+      url: `/api/manager/projects/${project.projectId}`,
+      headers: headers(auth, true),
+      payload: { revision: project.revision, status: 'Cancelled', confirmStatusChange: true }
+    });
+    expect(cancelled.statusCode, cancelled.body).toBe(200);
+    const body = cancelled.json() as { data: { project: { status: string; schedule: { state: string }; revision: number } } };
+    expect(body.data.project.status).toBe('Cancelled');
+    expect(body.data.project.schedule.state).toBe('CANCELLED');
+
+    const reactivated = await app.inject({
+      method: 'PATCH',
+      url: `/api/manager/projects/${project.projectId}`,
+      headers: headers(auth, true),
+      payload: {
+        revision: body.data.project.revision,
+        status: 'Active',
+        confirmStatusChange: true
+      }
+    });
+    expect(reactivated.statusCode, reactivated.body).toBe(200);
+    expect((reactivated.json() as { data: { project: { status: string } } }).data.project.status).toBe('Active');
   });
 });
 

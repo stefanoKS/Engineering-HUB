@@ -10,6 +10,7 @@ import {
   DurationBasis,
   DurationUnit,
   Priority,
+  ProjectScheduleState,
   ProjectStatus,
   RequestDecision,
   RequestType,
@@ -70,7 +71,12 @@ export const PatchProjectBody = z
     dashboardVisibility: DashboardVisibility.optional(),
     dashboardSummary: Text(1000).optional(),
     confirmDeadlineChange: z.boolean().optional(),
-    acknowledgeNonWorking: z.boolean().optional()
+    acknowledgeNonWorking: z.boolean().optional(),
+    /**
+     * A completion, cancellation or reactivation is an explicit manager decision. The server
+     * refuses a terminal transition without it, whatever the client rendered.
+     */
+    confirmStatusChange: z.boolean().optional()
   })
   .strict();
 
@@ -302,7 +308,9 @@ export const SaveResponsibilityBody = z
 export const MoveResponsibilityBody = z
   .object({
     revision: Revision,
-    sortOrder: z.number().int().min(0).max(100000)
+    direction: z.enum(['UP', 'DOWN']),
+    /** The row the editor saw adjacent to this one; prevents stale reorders. */
+    expectedNeighborId: Id.nullable()
   })
   .strict();
 
@@ -448,10 +456,14 @@ export const ProjectListQuery = z
     responsibilityId: Id.optional(),
     unassigned: z.coerce.boolean().default(false),
     status: ProjectStatus.optional(),
+    /** The derived schedule state; resolved on the server before pagination. */
+    schedule: ProjectScheduleState.optional(),
     query: z.string().trim().max(200).optional(),
     page: z.coerce.number().int().min(1).max(10000).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(25),
-    sort: z.enum(['deadline', 'name', 'responsibility', 'owner', 'status', 'priority', 'updated']).default('deadline'),
+    sort: z
+      .enum(['deadline', 'name', 'responsibility', 'owner', 'status', 'schedule', 'priority', 'updated'])
+      .default('deadline'),
     direction: z.enum(['asc', 'desc']).default('asc')
   })
   .strict();
