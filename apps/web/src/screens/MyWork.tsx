@@ -447,13 +447,14 @@ function CreateTaskCard({
   const [subprojectId, setSubprojectId] = useState(initialSubprojectId);
   const [taskName, setTaskName] = useState('');
   const [description, setDescription] = useState('');
+  const [plannedStart, setPlannedStart] = useState('');
   const [deadline, setDeadline] = useState('');
   const [priority, setPriority] = useState('Medium');
   const [notice, setNotice] = useState('');
 
   const current = useMemo(() => projects.find((entry) => entry.projectId === projectId), [projects, projectId]);
   const subprojects = current?.subprojects ?? [];
-  const valid = !!projectId && taskName.trim().length > 0 && !!deadline;
+  const valid = !!projectId && taskName.trim().length > 0 && !!deadline && (!plannedStart || plannedStart <= deadline);
 
   return (
     <form
@@ -469,6 +470,7 @@ function CreateTaskCard({
               subprojectId: subprojectId || null,
               taskName: taskName.trim(),
               description: description.trim() || undefined,
+              plannedStart: plannedStart || undefined,
               deadline,
               priority
             }),
@@ -478,6 +480,7 @@ function CreateTaskCard({
               setIdempotencyKey(createIdempotencyKey());
               setTaskName('');
               setDescription('');
+              setPlannedStart('');
               setDeadline('');
               onCreated();
             }
@@ -532,7 +535,11 @@ function CreateTaskCard({
 
       <div className="field-row">
         <label className="field">
-          <span className="field-label">{t('myWork.deadline')}</span>
+          <span className="field-label">{t('schedule.start')}</span>
+          <TextInput type="date" value={plannedStart} onChange={setPlannedStart} />
+        </label>
+        <label className="field">
+          <span className="field-label">{t('schedule.finish')}</span>
           <TextInput type="date" value={deadline} onChange={setDeadline} required />
         </label>
         <label className="field">
@@ -544,6 +551,7 @@ function CreateTaskCard({
           />
         </label>
       </div>
+      <p className="muted small">{t('schedule.explanation')}</p>
       <p className="muted small">{t('tasks.noDurationNote')}</p>
 
       <ErrorBox error={save.error} onRetry={onCreated} />

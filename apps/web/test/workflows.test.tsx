@@ -118,7 +118,7 @@ describe('member self-service work', () => {
 
     fireEvent.change(screen.getAllByRole('combobox')[0]!, { target: { value: 'PRJ-A' } });
     fireEvent.change(screen.getByLabelText('タスク名'), { target: { value: '配線図の更新' } });
-    fireEvent.change(screen.getByLabelText('期限'), { target: { value: '2026-05-01' } });
+    fireEvent.change(screen.getByLabelText('終了日'), { target: { value: '2026-05-01' } });
     fireEvent.click(screen.getByRole('button', { name: 'タスクを作成' }));
 
     await waitFor(() => expect(calls.some((call) => call.method === 'POST')).toBe(true));
@@ -129,7 +129,7 @@ describe('member self-service work', () => {
     expect(posted).not.toHaveProperty('status');
     expect(await screen.findByText(/タスクを作成しました/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('タスク名'), { target: { value: 'Second task' } });
-    fireEvent.change(screen.getByLabelText('期限'), { target: { value: '2026-05-04' } });
+    fireEvent.change(screen.getByLabelText('終了日'), { target: { value: '2026-05-04' } });
     fireEvent.click(screen.getByRole('button', { name: 'タスクを作成' }));
     await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toHaveLength(2));
     const second = JSON.parse(calls.filter(call => call.method === 'POST')[1]!.body!);

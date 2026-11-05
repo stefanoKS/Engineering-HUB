@@ -1,5 +1,14 @@
 # V2 HTTP API
 
+## Start / Finish fields — 2026-11-05
+
+`plannedStart` remains an optional `YYYY-MM-DD` task input on `POST /api/manager/tasks`,
+`PATCH /api/manager/tasks/:id`, and `POST /api/employee/my-work`. The existing required task
+`deadline` remains its Finish date. Server validation evaluates a patch against the effective
+stored record and rejects an explicit Start after Finish; it does not invent a start for
+deadline-only historical records. A manual start remains manual when legacy duration fields are
+present or a Finish is later edited.
+
 ## Completion reports by any authorized reporter, and a read-only timeline (2026-11-05)
 
 Approved policy change: `POST /api/employee/requests` accepts a `COMPLETION_REPORT` from a verified,
@@ -14,7 +23,7 @@ reporter is always the verified session. A report never completes, reassigns, or
 | `GET /api/employee/my-work` | the body no longer carries `projects`; `pendingRequest` and `reviewState` describe the **task**, so any assignee sees a pending report | A foreign key → one task-level state instead of a per-reporter slice |
 | `GET /api/employee/my-work/project-filter` | **new.** `query`, `page`, `pageSize`, `selectedId`; paged distinct projects of the caller's own work with `taskCount` and the `selected` option | Removes the fixed 200-project slice from the filter |
 | `GET /api/manager/tasks/parent-options` | `query`, `page`, `pageSize`, `selectedId`; returns `{ items: [{ id, name, path, depth, parentTaskId, container, status }], total, page, pageSize, totalPages, selected }` | Search and paging apply to the eligible candidates, never to an already truncated list; `path` keeps same-named branches distinct |
-| `GET /api/work/timeline` | **new, read-only, every signed-in role.** Without `projectId`: paged project summaries (`plannedStart`, `forecastEnd`, `committedDeadline`, `openWork`, `completedWork`, `childRange`) plus the readable `responsibilities`. With `projectId`: the project branch (`project`, `subprojects`, `tasks`, `truncated`, `taskTotal`) | One allowlisted timeline projection for all roles; plan, deadline and completion stay separate fields |
+| `GET /api/work/timeline` | **read-only, every signed-in role.** Without `projectId`: paged project summaries (`plannedStart`, `forecastEnd`, `committedDeadline`, `openWork`, `completedWork`, `childRange`) plus the readable `responsibilities`. With `projectId`: the project branch (`project`, `subprojects`, `tasks`, `truncated`, `taskTotal`); optional `subprojectId` is verified against that project and scopes the branch to the selected subtree. | One allowlisted timeline projection for all roles; plan, deadline and completion stay separate fields |
 
 `childRange` is a display span the server derives from dated descendants inside the authorized
 filter (`start`, `end`, `datedItems`, `totalItems`). It is never written to a record, never counted
@@ -370,7 +379,7 @@ or a stored status; the only completion path is the reviewed request below.
 | GET | `/api/work/tasks/:id` | Task detail for MEMBER/VIEWER: an allowlisted record plus the display-only `context` (project name and subproject chain, root first), assignees and children |
 | GET | `/api/work/projects` | Member project explorer. `query` (project name only), `responsibilityId`, `page`, `pageSize`; each item carries `description` and the `TaskScope` counts `activeTaskCount`/`completedTaskCount`, and the page carries the `responsibilities` that group at least one readable project |
 | GET | `/api/work/projects/:id` | Read-only project detail: allowlisted record (with `description` and the two counts), rollup, subprojects (with `description` and the stored `parentSubprojectId`) and the tasks of the visible branches |
-| GET | `/api/work/timeline` | Read-only timeline. Without `projectId`: paged project summaries with `plannedStart`, `forecastEnd`, `committedDeadline`, `openWork`, `completedWork` and a server-derived `childRange`, plus the readable `responsibilities`. With `projectId`: the project branch (project, subprojects, tasks, `truncated`, `taskTotal`). `responsibilityId`, `query`, `page`, `pageSize`, `includeCompleted`, `includeArchived` (managers only) |
+| GET | `/api/work/timeline` | Read-only timeline. Without `projectId`: paged project summaries with `plannedStart`, `forecastEnd`, `committedDeadline`, `openWork`, `completedWork` and a server-derived `childRange`, plus the readable `responsibilities`. With `projectId`: the project branch (project, subprojects, tasks, `truncated`, `taskTotal`); `subprojectId` is an optional server-verified subtree scope. `responsibilityId`, `query`, `page`, `pageSize`, `includeCompleted`, `includeArchived` (managers only) |
 
 Visibility is resolved on the server before a page is cut:
 

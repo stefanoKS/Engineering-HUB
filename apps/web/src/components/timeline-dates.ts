@@ -80,6 +80,7 @@ export function scaleWindow(scale: TimelineScale, anchor: string): { from: strin
     const from = startOfWeek(base);
     return { from: toDate(from), to: toDate(addDays(from, 6)), days: 7 };
   }
+
   if (scale === 'MONTH') {
     const from = startOfMonth(base);
     const to = endOfMonth(base);
@@ -88,6 +89,21 @@ export function scaleWindow(scale: TimelineScale, anchor: string): { from: strin
   const from = startOfQuarter(base);
   const to = endOfQuarter(base);
   return { from: toDate(from), to: toDate(to), days: dayDiff(from, to) + 1 };
+}
+
+/** The current Tokyo calendar month, used only to reset a display window. */
+export function calendarMonthWindow(anchor = todayJst()): { from: string; to: string; days: number } {
+  const base = parseDate(anchor) ?? (parseDate(todayJst()) as number);
+  const from = startOfMonth(base);
+  const to = endOfMonth(base);
+  return { from: toDate(from), to: toDate(to), days: dayDiff(from, to) + 1 };
+}
+
+/** Date ranges and tick density are deliberately independent. */
+export function scaleForRange(days: number): TimelineScale {
+  if (days <= 35) return 'WEEK';
+  if (days <= 180) return 'MONTH';
+  return 'QUARTER';
 }
 
 /** One step of the same scale: previous period, next period. */

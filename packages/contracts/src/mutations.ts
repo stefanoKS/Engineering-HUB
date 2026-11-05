@@ -205,6 +205,7 @@ export const CreateMyTaskBody = z
     subprojectId: Id.nullable().optional(),
     taskName: Text(200).min(1),
     description: Text(20000).optional(),
+    plannedStart: NullableIsoDate.optional(),
     deadline: IsoDate,
     priority: Priority.optional(),
     acknowledgeNonWorking: z.boolean().optional()

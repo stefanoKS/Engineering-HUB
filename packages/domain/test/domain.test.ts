@@ -303,6 +303,21 @@ describe('planning', () => {
     expect(applied.plan).toBeNull();
   });
 
+  it('keeps an explicit manual start when a legacy duration is present', () => {
+    const applied = applyTaskPlan(
+      {
+        dueDate: '2026-01-09',
+        plannedDurationValue: 5,
+        plannedDurationUnit: 'DAY',
+        plannedDurationBasis: 'WORKING_DAYS',
+        plannedStart: '2026-01-08',
+        plannedStartSource: 'MANUAL'
+      },
+      calendar
+    );
+    expect(applied).toMatchObject({ plannedStart: '2026-01-08', plannedStartSource: 'MANUAL', plan: null });
+  });
+
   it('back-plans phases and marks an unknown duration as DRAFT', () => {
     const schedule = schedulePhases(
       '2026-02-27',

@@ -34,6 +34,12 @@ import { audit, requireConfirmation, runIdempotent, type ServiceCtx } from './co
 
 const WRITE_ROLES = 'MANAGER' as const;
 
+function assertScheduleOrder(start: string | null | undefined, finish: string | null | undefined): void {
+  if (start && finish && start > finish) {
+    throw new DomainError('VALIDATION_FAILED', 'Start date must be on or before finish date');
+  }
+}
+
 export async function ensureActiveResponsibility(ctx: ServiceCtx, responsibilityId: string): Promise<void> {
   const row = await ctx.db.one<{ status: string; name: string }>(
     'SELECT status, name FROM responsibilities WHERE responsibility_id = $1',
@@ -81,6 +87,7 @@ export async function createProject(
   requireRole(ctx.identity, WRITE_ROLES);
   await ensureActiveResponsibility(ctx, body.responsibilityId);
   if (body.projectOwnerId) await ensureMember(ctx, body.projectOwnerId);
+  assertScheduleOrder(body.plannedStart, body.committedDeadline);
   await deadlineGate(ctx, body.committedDeadline, undefined, true);
 
   const result = await runIdempotent(
@@ -135,6 +142,12 @@ export async function patchProject(
     await ensureActiveResponsibility(ctx, body.responsibilityId);
   }
   if (body.projectOwnerId) await ensureMember(ctx, body.projectOwnerId);
+  if (body.plannedStart !== undefined || body.committedDeadline !== undefined) {
+    assertScheduleOrder(
+      body.plannedStart !== undefined ? body.plannedStart : project.plannedStart,
+      body.committedDeadline !== undefined ? body.committedDeadline : project.committedDeadline
+    );
+  }
   assertDeadlineChangeConfirmed(project.committedDeadline, body.committedDeadline, body.confirmDeadlineChange === true);
   await deadlineGate(ctx, body.committedDeadline, undefined, body.acknowledgeNonWorking);
 
@@ -226,6 +239,7 @@ export async function createSubproject(
     }
   }
   if (body.ownerId) await ensureMember(ctx, body.ownerId);
+  assertScheduleOrder(body.plannedStart, body.deadline);
 
   const result = await runIdempotent(
     ctx,
@@ -268,6 +282,12 @@ export async function patchSubproject(
     throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
   }
   if (body.ownerId) await ensureMember(ctx, body.ownerId);
+  if (body.plannedStart !== undefined || body.deadline !== undefined || body.plannedEnd !== undefined) {
+    assertScheduleOrder(
+      body.plannedStart !== undefined ? body.plannedStart : subproject.plannedStart,
+      body.deadline !== undefined ? body.deadline : subproject.deadline
+    );
+  }
   if (body.projectId && body.projectId !== subproject.projectId) {
     const children = await listSubprojects(ctx.db, subproject.projectId);
     const hasChildren = children.some((entry) => entry.parentSubprojectId === subprojectId);

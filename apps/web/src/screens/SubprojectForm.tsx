@@ -206,11 +206,18 @@ export function SubprojectForm({
           />
         </label>
 
-        <label className="field">
-          <span className="field-label">{t('tasks.deadline')}</span>
-          <TextInput type="date" value={deadline} onChange={setDeadline} />
-          <span className="field-hint">{t('projects.deadlineHint')}</span>
-        </label>
+        <div className="field-row">
+          <label className="field">
+            <span className="field-label">{t('schedule.start')}</span>
+            <TextInput type="date" value={start} onChange={setStart} />
+          </label>
+          <label className="field">
+            <span className="field-label">{t('schedule.finish')}</span>
+            <TextInput type="date" value={deadline} onChange={setDeadline} />
+            <span className="field-hint">{t('projects.deadlineHint')}</span>
+          </label>
+        </div>
+        <p className="muted small">{t('schedule.explanation')}</p>
         {changedDeadline ? (
           <label className="checkbox">
             <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
@@ -244,11 +251,7 @@ export function SubprojectForm({
           </label>
           <div className="field-row">
             <label className="field">
-              <span className="field-label">{t('projects.plannedStart')}</span>
-              <TextInput type="date" value={start} onChange={setStart} />
-            </label>
-            <label className="field">
-              <span className="field-label">{t('projects.forecast')}</span>
+              <span className="field-label">{t('schedule.forecastHistory')}</span>
               <TextInput type="date" value={end} onChange={setEnd} />
               <span className="field-hint">{t('subForm.estimateHint')}</span>
             </label>

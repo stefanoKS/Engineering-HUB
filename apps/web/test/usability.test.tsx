@@ -171,7 +171,7 @@ describe('guided task creation', () => {
     );
 
     const name = (await screen.findByLabelText(/タスク名/)) as HTMLInputElement;
-    const deadline = screen.getByLabelText(/期限/) as HTMLInputElement;
+    const deadline = screen.getByLabelText(/終了日/) as HTMLInputElement;
     fireEvent.change(name, { target: { value: 'Task one' } });
     fireEvent.change(deadline, { target: { value: '2026-12-01' } });
     fireEvent.click(screen.getByRole('button', { name: /Ann/ }));

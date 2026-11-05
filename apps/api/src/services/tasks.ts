@@ -51,6 +51,12 @@ import { audit, enqueueJob, requireConfirmation, runIdempotent, type ServiceCtx 
 
 const WRITE_ROLES = 'MANAGER' as const;
 
+function assertScheduleOrder(start: string | null | undefined, finish: string | null | undefined): void {
+  if (start && finish && start > finish) {
+    throw new DomainError('VALIDATION_FAILED', 'Start date must be on or before finish date');
+  }
+}
+
 /**
  * Placement validation shared by the manager create command and the member self-service
  * command: one implementation of the hierarchy, subproject and depth rules.
@@ -215,6 +221,8 @@ export async function createTask(
     durationUnit: body.plannedDurationUnit,
     durationBasis: body.plannedDurationBasis
   });
+  const plannedStart = body.plannedStart ?? plan.plannedStart;
+  assertScheduleOrder(plannedStart, body.deadline);
 
   const result = await runIdempotent(
     ctx,
@@ -229,7 +237,7 @@ export async function createTask(
         ownerMemberId: assignment.ownerMemberId,
         status: body.status,
         priority: body.priority,
-        plannedStart: plan.plannedStart,
+        plannedStart,
         dueDate: body.deadline,
         estimatedHours: body.estimatedHours,
         actualHours: body.actualHours,
@@ -243,7 +251,7 @@ export async function createTask(
         plannedDurationValue: body.plannedDurationValue,
         plannedDurationUnit: body.plannedDurationUnit,
         plannedDurationBasis: body.plannedDurationBasis,
-        plannedStartSource: plan.plannedStartSource,
+        plannedStartSource: body.plannedStart ? 'MANUAL' : plan.plannedStartSource,
         createdByMemberId: ctx.identity.memberId,
         creationChannel: 'MANAGER'
       });
@@ -350,6 +358,14 @@ export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<t
           currentPlannedStartSource: task.plannedStartSource
         })
       : null;
+  const nextDeadline = body.deadline !== undefined ? body.deadline : task.dueDate;
+  const nextPlannedStart =
+    body.plannedStart !== undefined ? body.plannedStart : plan ? plan.plannedStart : task.plannedStart;
+  // Legacy inconsistent schedules remain editable until a schedule input is deliberately changed.
+  // Any date or duration mutation validates the complete effective pair.
+  if (body.plannedStart !== undefined || deadlineChanged || durationProvided) {
+    assertScheduleOrder(nextPlannedStart, nextDeadline);
+  }
 
   if (body.dependencyIds) {
     await assertDependencies(ctx, taskId, task.projectId, body.dependencyIds);
@@ -364,6 +380,7 @@ export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<t
     'ownerMemberId',
     'status',
     'priority',
+    'plannedStart',
     'estimatedHours',
     'actualHours',
     'progressPercent',
@@ -388,7 +405,12 @@ export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<t
   if (plan) {
     changes.plannedStart = plan.plannedStart;
     changes.plannedStartSource = plan.plannedStartSource;
-  }  if (assignmentMoved) {
+  }
+  if (body.plannedStart !== undefined) {
+    changes.plannedStart = body.plannedStart;
+    changes.plannedStartSource = body.plannedStart ? 'MANUAL' : null;
+  }
+  if (assignmentMoved) {
     changes.assignmentVersion = task.assignmentVersion + 1;
     changes.assignmentApprovedAt = null;
   }

@@ -106,6 +106,24 @@ export const V2_LABELS = {
    ja: '期限を変更します。内容を確認して保存してください。',
    en: 'This changes the deadline. Review it before saving.'
  },
+ 'schedule.start': { ja: '開始日', en: 'Start date' },
+ 'schedule.finish': { ja: '終了日', en: 'Finish date' },
+ 'schedule.explanation': {
+   ja: '開始日と終了日は作業の日程です。完了報告・承認とは別です。',
+   en: 'These dates describe the schedule. Completion is recorded separately.'
+ },
+ 'schedule.order': {
+   ja: '開始日は終了日以前にしてください。',
+   en: 'Start date must be on or before finish date.'
+ },
+ 'schedule.forecastHistory': {
+   ja: '過去の完了見込み',
+   en: 'Historical forecast end'
+ },
+ 'schedule.adoptForecast': {
+   ja: 'この見込み日を終了日に採用',
+   en: 'Use this forecast as Finish'
+ },
  'tasks.noDurationNote': {
    ja: '期限だけを登録します。所要期間や工数の入力は不要です。',
    en: 'Only the deadline is recorded. No duration or effort estimate is required.'
@@ -817,6 +835,9 @@ export const V2_LABELS = {
   },
   'timeline.scope.all': { ja: 'すべてのプロジェクト', en: 'All permitted projects' },
   'timeline.scope.project': { ja: 'プロジェクトを選択', en: 'Select a project' },
+  'timeline.scope.subproject': { ja: 'サブプロジェクトを選択', en: 'Select a subproject' },
+  'timeline.scope.allSubprojects': { ja: 'すべてのサブプロジェクト', en: 'All subprojects' },
+  'timeline.scope.selectProject': { ja: '先にプロジェクトを選択してください', en: 'Select a project first' },
   'timeline.scope.responsibility': { ja: '分野で絞り込み', en: 'Filter by responsibility' },
   'timeline.scope.allResponsibilities': { ja: 'すべての分野', en: 'All responsibilities' },
   'timeline.scale': { ja: '表示単位', en: 'Scale' },
@@ -827,6 +848,11 @@ export const V2_LABELS = {
   'timeline.today': { ja: '今日', en: 'Today' },
   'timeline.next': { ja: '次へ', en: 'Next period' },
   'timeline.fit': { ja: '全体を表示', en: 'Fit selection' },
+  'timeline.displayStart': { ja: '表示開始日', en: 'Display start' },
+  'timeline.displayFinish': { ja: '表示終了日', en: 'Display finish' },
+  'timeline.resetDates': { ja: '表示期間をリセット', en: 'Reset dates' },
+  'timeline.invalidDates': { ja: '開始日は終了日以前の日付を入力してください。現在の表示は変更されません。', en: 'Enter complete dates with start on or before finish. The current chart remains unchanged.' },
+  'timeline.dateHint': { ja: '表示期間は閲覧専用です。保存済みの予定は変更されません。', en: 'Display dates are read-only filters and never change stored schedules.' },
   'timeline.includeCompleted': { ja: '完了した作業も表示', en: 'Show completed work' },
   'timeline.filter.active': { ja: '絞り込み中', en: 'Filtered' },
   'timeline.reset': { ja: '条件を解除', en: 'Reset' },

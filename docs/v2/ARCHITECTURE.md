@@ -1,5 +1,22 @@
 # V2 Architecture
 
+## Start / Finish schedule presentation and hierarchy timeline correction — 2026-11-05
+
+Ordinary V2 forms now present the existing schedule fields as **Start date / Finish date**
+(`plannedStart` / `committedDeadline` for projects, `plannedStart` / `deadline` for subprojects,
+and `plannedStart` / `dueDate` for tasks). Finish is a scheduled deadline, not actual completion:
+completion remains the separately recorded workflow history. Task Start is optional, a Finish is
+still required for new tasks, and a supplied Start is stored with `MANUAL` provenance. Validation
+rejects an explicit Start after Finish; same-day schedules remain valid. A duration never overwrites
+a manual start, while old forecast/planned-end values remain historical fields and are not cleared
+or silently adopted.
+
+The read-only timeline traverses `parent_subproject_id`, `subproject_id`, and `parent_task_id`
+using stable IDs. A branch renders each subproject and task once, retains malformed links as
+bounded roots, and derives each schedule summary from task-tree roots, so project-direct work and
+descendants are included without duplicate counting. No timeline path writes dates, changes a
+workflow, or creates a new approval.
+
 ## Completion reporting by any authorized reporter, and the read-only timeline — 2026-11-05
 
 **Reporting.** `canReportCompletion()` (`packages/domain/src/roles.ts`) allows a verified, active

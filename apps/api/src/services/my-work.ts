@@ -391,6 +391,10 @@ export async function createMyTask(
     durationUnit: null,
     durationBasis: null
   });
+  const plannedStart = body.plannedStart ?? plan.plannedStart;
+  if (plannedStart && plannedStart > body.deadline) {
+    throw new DomainError('VALIDATION_FAILED', 'Start date must be on or before finish date');
+  }
 
   const result = await runIdempotent(
     ctx,
@@ -405,10 +409,10 @@ export async function createMyTask(
         ownerMemberId: ctx.identity.memberId,
         status: 'Not Started',
         priority: body.priority ?? 'Medium',
-        plannedStart: plan.plannedStart,
+        plannedStart,
         dueDate: body.deadline,
         progressPercent: 0,
-        plannedStartSource: plan.plannedStartSource,
+        plannedStartSource: body.plannedStart ? 'MANUAL' : plan.plannedStartSource,
         createdByMemberId: ctx.identity.memberId,
         creationChannel: 'MEMBER'
       });

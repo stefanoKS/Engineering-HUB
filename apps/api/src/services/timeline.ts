@@ -38,9 +38,6 @@ import {
 import { taskScope } from './views';
 import type { WorkCtx } from './work';
 
-/** A branch larger than this is truncated, and the answer says so instead of hiding it. */
-export const TIMELINE_TASK_LIMIT = 2000;
-
 type Range = { start: string | null; end: string | null; dated: number; total: number };
 
 function emptyRange(): Range {
@@ -223,7 +220,7 @@ export async function timelineProjects(
 export async function timelineBranch(
   ctx: WorkCtx,
   projectId: string,
-  options: { includeCompleted?: boolean } = {}
+  options: { includeCompleted?: boolean; subprojectId?: string } = {}
 ): Promise<TimelineProjectBranch> {
   requireRole(ctx.identity, 'VIEWER');
   const project = await getProject(ctx.db, projectId);
@@ -254,13 +251,40 @@ export async function timelineBranch(
   const visibleSubprojects = allSubprojects.filter(
     (subproject) => manager || !archivedBranch(subproject.subprojectId)
   );
+  const selectedSubproject = options.subprojectId
+    ? visibleSubprojects.find((subproject) => subproject.subprojectId === options.subprojectId)
+    : undefined;
+  if (options.subprojectId && !selectedSubproject) {
+    throw new DomainError('NOT_FOUND', `Subproject not found in project: ${options.subprojectId}`);
+  }
+  const descendants = new Set<string>();
+  if (selectedSubproject) {
+    const childrenByParent = new Map<string, string[]>();
+    for (const subproject of visibleSubprojects) {
+      if (!subproject.parentSubprojectId) continue;
+      childrenByParent.set(subproject.parentSubprojectId, [
+        ...(childrenByParent.get(subproject.parentSubprojectId) ?? []),
+        subproject.subprojectId
+      ]);
+    }
+    const pending = [selectedSubproject.subprojectId];
+    while (pending.length) {
+      const current = pending.pop()!;
+      if (descendants.has(current)) continue;
+      descendants.add(current);
+      pending.push(...(childrenByParent.get(current) ?? []));
+    }
+  }
+  const scopedSubprojects = selectedSubproject
+    ? visibleSubprojects.filter((subproject) => descendants.has(subproject.subprojectId))
+    : visibleSubprojects;
   const visibleSubprojectIds = new Set(visibleSubprojects.map((subproject) => subproject.subprojectId));
   const visibleTasks = allTasks
     .filter((task) => !task.subprojectId || visibleSubprojectIds.has(task.subprojectId))
+    .filter((task) => !selectedSubproject || (!!task.subprojectId && descendants.has(task.subprojectId)))
     .filter((task) => manager || task.status !== 'Cancelled')
     .filter((task) => options.includeCompleted !== false || task.status !== 'Done');
-  const truncated = visibleTasks.length > TIMELINE_TASK_LIMIT;
-  const tasks = visibleTasks.slice(0, TIMELINE_TASK_LIMIT);
+  const tasks = visibleTasks;
 
   const childrenOf = new Map<string, string[]>();
   for (const task of tasks) {
@@ -288,7 +312,7 @@ export async function timelineBranch(
   };
 
   const subprojectChildren = new Map<string, string[]>();
-  for (const subproject of visibleSubprojects) {
+  for (const subproject of scopedSubprojects) {
     const parent = subproject.parentSubprojectId ?? '';
     subprojectChildren.set(parent, [...(subprojectChildren.get(parent) ?? []), subproject.subprojectId]);
   }
@@ -304,8 +328,11 @@ export async function timelineBranch(
     }
     for (const task of tasks) {
       if (task.subprojectId !== subprojectId) continue;
-      const dates = taskDates(task);
-      addRecord(range, dates.start, dates.end, dates.dated);
+      const parent = task.parentTaskId ? byId.get(task.parentTaskId) : undefined;
+      // Only a task-tree root belongs directly to this subproject. Its descendants are added by
+      // rangeOfTask once, preventing container children from being counted repeatedly.
+      if (parent && parent.subprojectId === subprojectId) continue;
+      addRange(range, rangeOfTask(task.taskId));
     }
     for (const childId of subprojectChildren.get(subprojectId) ?? []) {
       addRange(range, rangeOfSubproject(childId, seen));
@@ -322,7 +349,13 @@ export async function timelineBranch(
   const completedAt = new Map(completedRows.map((row) => [row.task_id, row.completed_at]));
   const childRange = emptyRange();
   for (const subproject of visibleSubprojects) {
+    if (subproject.parentSubprojectId && allById.has(subproject.parentSubprojectId)) continue;
     addRange(childRange, rangeOfSubproject(subproject.subprojectId));
+  }
+  for (const task of tasks) {
+    if (task.subprojectId) continue;
+    if (task.parentTaskId && byId.has(task.parentTaskId)) continue;
+    addRange(childRange, rangeOfTask(task.taskId));
   }
 
   const projectRow: TimelineProjectRow = {
@@ -345,7 +378,7 @@ export async function timelineBranch(
       childRange.dated === 0
   };
 
-  const subprojects: TimelineSubprojectRow[] = visibleSubprojects.map((subproject) => {
+  const subprojects: TimelineSubprojectRow[] = scopedSubprojects.map((subproject) => {
     const range = rangeOfSubproject(subproject.subprojectId);
     return {
       subprojectId: subproject.subprojectId,
@@ -385,7 +418,7 @@ export async function timelineBranch(
     project: projectRow,
     subprojects,
     tasks: taskRows,
-    truncated,
+    truncated: false,
     taskTotal: visibleTasks.length
   };
 }

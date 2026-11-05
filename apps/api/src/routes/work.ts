@@ -37,6 +37,7 @@ const IdParams = z.object({ id: z.string().min(1).max(64) });
 /** The timeline reads a whole active scope at once: same allowlist, never a manager projection. */
 const TimelineQuery = z.object({
   projectId: z.string().trim().max(64).optional(),
+  subprojectId: z.string().trim().max(64).optional(),
   responsibilityId: z.string().trim().max(64).optional(),
   query: z.string().trim().max(200).optional(),
   page: z.coerce.number().int().min(1).max(10000).default(1),
@@ -93,7 +94,8 @@ export function registerWorkRoutes(app: FastifyInstance, _deps: AppDependencies)
           reply,
           request,
           await timelineBranch(ctx(request), query.projectId, {
-            includeCompleted: query.includeCompleted !== 'false'
+            includeCompleted: query.includeCompleted !== 'false',
+            subprojectId: query.subprojectId || undefined
           })
         );
       }

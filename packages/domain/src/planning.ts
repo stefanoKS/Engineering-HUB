@@ -242,6 +242,11 @@ export function applyTaskPlan(
   task: TaskPlanFields,
   calendar: WorkingCalendar = createCalendar()
 ): { plannedStart: string | null; plannedStartSource: 'DERIVED' | 'LEGACY' | 'MANUAL' | null; plan: DerivedPlan | null } {
+  // A person-entered start is an explicit schedule fact. Duration remains historical planning
+  // information and must not silently overwrite it on a later deadline edit.
+  if (task.plannedStart && task.plannedStartSource === 'MANUAL') {
+    return { plannedStart: task.plannedStart, plannedStartSource: 'MANUAL', plan: null };
+  }
   const duration = task.plannedDurationValue;
   const known = duration !== null && duration !== undefined && Number.isFinite(duration) && duration > 0;
   if (known && task.dueDate) {
@@ -257,7 +262,11 @@ export function applyTaskPlan(
     return { plannedStart: plan.startDate, plannedStartSource: 'DERIVED', plan };
   }
   if (!known) {
-    return { plannedStart: task.plannedStart, plannedStartSource: task.plannedStart ? 'LEGACY' : null, plan: null };
+    return {
+      plannedStart: task.plannedStart,
+      plannedStartSource: task.plannedStart ? (task.plannedStartSource ?? 'LEGACY') : null,
+      plan: null
+    };
   }
   return { plannedStart: task.plannedStart, plannedStartSource: task.plannedStartSource, plan: null };
 }

@@ -93,6 +93,7 @@ export function TaskForm({
     taskName: task?.taskName ?? '',
     description: task?.description ?? '',
     priority: task?.priority ?? 'Medium',
+    plannedStart: task?.plannedStart ?? '',
     deadline: task?.dueDate ?? '',
     requiredSkillId: task?.requiredSkillId ?? '',
     requiredSkillGrade: levelToGrade(task?.requiredSkillLevel) ?? ''
@@ -152,6 +153,7 @@ export function TaskForm({
     taskName: form.taskName.trim(),
     description: form.description,
     priority: form.priority,
+    plannedStart: form.plannedStart || null,
     deadline: form.deadline,
     assigneeIds,
     requiredSkillId: form.requiredSkillId || null,
@@ -171,6 +173,7 @@ export function TaskForm({
     if (taskName !== task.taskName) patch.taskName = taskName;
     if (form.description !== task.description) patch.description = form.description;
     if (form.priority !== task.priority) patch.priority = form.priority;
+    if ((form.plannedStart || null) !== (task.plannedStart ?? null)) patch.plannedStart = form.plannedStart || null;
     const subprojectId = form.subprojectId || null;
     if (subprojectId !== task.subprojectId) patch.subprojectId = subprojectId;
     const parentTaskId = form.parentTaskId || null;
@@ -212,6 +215,7 @@ export function TaskForm({
   if (!form.projectId) blocked.push(t('taskForm.projectRequired'));
   if (!form.taskName.trim()) blocked.push(t('taskForm.nameRequired'));
   if (!form.deadline) blocked.push(t('taskForm.deadlineRequired'));
+  if (form.plannedStart && form.deadline && form.plannedStart > form.deadline) blocked.push(t('schedule.order'));
   if (nothingToSave) blocked.push(t('form.noChanges'));
 
   const memberNames = (ids: string[]): string =>
@@ -243,6 +247,7 @@ export function TaskForm({
             ...current,
             taskName: '',
             description: '',
+            plannedStart: '',
             deadline: '',
             requiredSkillId: '',
             requiredSkillGrade: ''
@@ -408,18 +413,30 @@ export function TaskForm({
           />
         </div>
 
-        <div className="field">
+        <div className="field-row">
+          <label className="field">
+            <span className="field-label">{t('schedule.start')}</span>
+            <TextInput
+              type="date"
+              value={form.plannedStart}
+              onChange={(value) => set('plannedStart', value)}
+              ariaLabel={t('schedule.start')}
+            />
+          </label>
+          <div className="field">
           <span className="field-label">
-            {t('tasks.deadline')} <RequiredTag />
+            {t('schedule.finish')} <RequiredTag />
           </span>
           <TextInput
             type="date"
             value={form.deadline}
             onChange={(value) => set('deadline', value)}
             required
-            ariaLabel={t('tasks.deadline')}
+            ariaLabel={t('schedule.finish')}
           />
+          </div>
         </div>
+        <p className="muted small">{t('schedule.explanation')}</p>
         {deadlineChanged ? <div className="banner warning">{t('tasks.deadlineChangedConfirm')}</div> : null}
 
         <section className="stack">

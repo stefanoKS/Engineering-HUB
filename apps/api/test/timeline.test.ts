@@ -342,6 +342,21 @@ describe('one project branch', () => {
     expect((active.json().data.tasks as { taskId: string }[]).some((task) => task.taskId === 'TSK-DONE')).toBe(false);
   });
 
+  it('resolves a selected subproject subtree on the server and rejects a project-direct sibling scope', async () => {
+    await seed();
+    const member = await signIn(MEMBER);
+    const scoped = await branch(member, 'PRJ-V', { subprojectId: 'SUB-V1' });
+    expect(scoped.statusCode, scoped.body).toBe(200);
+    const data = scoped.json().data as {
+      subprojects: { subprojectId: string }[];
+      tasks: { taskId: string; subprojectId: string | null }[];
+    };
+    expect(data.subprojects.map((entry) => entry.subprojectId).sort()).toEqual(['SUB-V1', 'SUB-V2']);
+    expect(data.tasks.map((entry) => entry.taskId)).toContain('TSK-PLAN');
+    expect(data.tasks.map((entry) => entry.taskId)).not.toContain('TSK-DUE');
+    expect((await branch(member, 'PRJ-V', { subprojectId: 'SUB-UNKNOWN' })).statusCode).toBe(404);
+  });
+
   it('refuses a restricted project for a MEMBER and an unknown identifier for everyone', async () => {
     await seed();
     const member = await signIn(MEMBER);

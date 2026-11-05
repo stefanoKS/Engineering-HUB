@@ -449,6 +449,8 @@ describe('read-only timeline', () => {
       </I18nProvider>
     );
     await waitFor(() => expect(document.querySelectorAll('.tl-kind-subproject').length).toBe(1));
+    // A finish-only task becomes a marker when its exact selected date is in the display range.
+    fireEvent.change(screen.getByLabelText('表示終了日'), { target: { value: '2026-05-01' } });
     // A planned bar exists for the planned task; the deadline-only task has a marker, not a plan.
     expect(document.querySelectorAll('.tl-bar').length).toBeGreaterThan(0);
     expect(document.querySelectorAll('.tl-deadline').length).toBeGreaterThan(0);

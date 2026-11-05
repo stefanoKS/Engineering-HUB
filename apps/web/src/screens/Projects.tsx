@@ -440,14 +440,33 @@ export function ProjectForm({
           </div>
           <div className="field-row">
             <label className="field">
-              <span className="field-label">{t('projects.deadline')}</span>
-              <TextInput type="date" value={form.committedDeadline} onChange={(value) => set('committedDeadline', value)} />
+              <span className="field-label">{t('schedule.start')}</span>
+              <TextInput type="date" value={form.plannedStart} onChange={(value) => set('plannedStart', value)} />
             </label>
             <label className="field">
-              <span className="field-label">{t('projects.forecast')}</span>
-              <TextInput type="date" value={form.forecastEnd} onChange={(value) => set('forecastEnd', value)} />
+              <span className="field-label">{t('schedule.finish')}</span>
+              <TextInput type="date" value={form.committedDeadline} onChange={(value) => set('committedDeadline', value)} />
             </label>
           </div>
+          <p className="muted small">{t('schedule.explanation')}</p>
+          {mode === 'edit' && form.forecastEnd && !form.committedDeadline ? (
+            <div className="banner info">
+              <span>{t('schedule.forecastHistory')}: {form.forecastEnd}</span>
+              <button type="button" className="link-button" onClick={() => {
+                set('committedDeadline', form.forecastEnd);
+                setConfirmDeadline(true);
+              }}>
+                {t('schedule.adoptForecast')}
+              </button>
+            </div>
+          ) : null}
+          <details className="advanced-actions">
+            <summary>{t('form.optionalSection')}</summary>
+            <label className="field">
+              <span className="field-label">{t('schedule.forecastHistory')}</span>
+              <TextInput type="date" value={form.forecastEnd} onChange={(value) => set('forecastEnd', value)} />
+            </label>
+          </details>
           <button type="button" className="link-button" onClick={() => void checkPlan()}>
             {t('plan.check')}
           </button>

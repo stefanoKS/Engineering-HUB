@@ -1,5 +1,43 @@
 # V2 Acceptance Record
 
+## Timeline display-range and schedule validation correction — 2026-11-05
+
+Local V2 implementation only. The timeline remains read-only: `Display start` and `Display finish`
+are inclusive Tokyo calendar dates in page memory, never mutation inputs. An incomplete or invalid
+draft keeps the last valid chart. Reset restores the current Tokyo month without clearing scope
+filters; Fit selection adds bounded display-only padding. A selected subproject is server-verified
+against the selected project and includes its descendants while excluding project-direct siblings.
+
+Timeline bars now use the same Finish as the forms: project `committedDeadline`, subproject
+`deadline`, and task `dueDate`; historical forecast/planned-end fields remain stored context.
+Finish-only items render as markers, complete bars do not gain a redundant deadline marker, and
+the branch no longer truncates at 2,000 tasks. Legacy inconsistent schedules remain editable for
+unrelated changes, while every actual date/duration mutation validates the effective date pair.
+No migration, deployment, production access, activation, or live integration operation occurred.
+
+| Gate | Result |
+| --- | --- |
+| `npm run typecheck` | PASS — all workspaces |
+| `npm run lint:v2` | PASS |
+| `npx vitest run apps/api/test/timeline.test.ts apps/web/test/usability-corrections.test.tsx` | PASS — 21 tests, disposable PostgreSQL fixture |
+| `npm run validate:v2` | PASS — 174 files |
+| `npm run build` | PASS — API, web, worker, migration |
+| Browser screenshots / live verification | NOT RUN; production remains **NOT APPROVED FOR PRODUCTION** |
+
+## Schedule terminology and timeline hierarchy correction — 2026-11-05
+
+Local implementation only; no migration, deployment, production access, activation, or live
+integration operation occurred. The V2 forms expose Start / Finish using the existing canonical
+fields, retain forecast/planned-end fields as historical context, and do not infer completion from
+a Finish. Task starts are optional and explicit manual starts survive duration-based planning.
+Timeline hierarchy ordering uses stored stable IDs and its read-only projection includes
+project-direct task trees in schedule summaries without counting descendants twice.
+
+Verification: `npm run typecheck`, `npm run lint:v2`, `npm run test:v2` (**38 files, 454 passed,
+1 skipped**), `npm run validate:v2` (174 files), and `npm run build` all passed locally. Browser
+screenshots and live Workspace evidence are **NOT RUN**; production remains **NOT APPROVED FOR
+PRODUCTION**.
+
 ## Usability corrections: reporting by any authorized user, restored search, bounded selectors and a read-only timeline — 2026-11-05
 
 Implemented on local `HEAD f87fbde` (clean worktree at start, uncommitted changes at the end) after
