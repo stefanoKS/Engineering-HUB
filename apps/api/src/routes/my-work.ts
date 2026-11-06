@@ -4,20 +4,23 @@
  * Every route re-checks the verified role on the server and answers with a small bounded
  * projection. The member identity, the owner and the project scope come from the session, never
  * from the request body. My Assigned Work is available to every role (a manager keeps a personal
- * list beside the departmental one), while creating a task or a subproject belongs to MEMBER only
- * and progress editing no longer exists: a member finishes work through the reviewed completion
- * request. A member-created subproject is live immediately - creation is not an approval step.
+ * list beside the departmental one), while creating a project, a task or a subproject belongs to
+ * MEMBER only and progress editing no longer exists: a member finishes work through the reviewed
+ * completion request. A member-created record is live immediately - creation is not an approval
+ * step. Editing, archiving, deleting and reopening stay manager or ADMIN capabilities.
  */
 import { z } from 'zod';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { CreateMySubprojectBody, CreateMyTaskBody } from '@eh/contracts';
+import { CreateMyProjectBody, CreateMySubprojectBody, CreateMyTaskBody } from '@eh/contracts';
 import { actorOf, ok, type AppDependencies } from '../http';
 import { sendError } from '../errors';
 import {
+  createMyProject,
   createMySubproject,
   createMyTask,
   listMyWork,
   listMyWorkProjectFilter,
+  myWorkProjectFormOptions,
   myWorkProjectOptions,
   type MyWorkSection
 } from '../services/my-work';
@@ -83,6 +86,15 @@ export function registerMyWork(app: FastifyInstance, _deps: AppDependencies): vo
     }
   });
 
+  /** The narrow options for a member-created project: active responsibilities, identity and label. */
+  app.get('/api/employee/references', async (request, reply) => {
+    try {
+      return ok(reply, request, await myWorkProjectFormOptions(ctx(request)));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
   // The project filter of the member's own work: paged and searchable, never a silent row cap.
   app.get('/api/employee/my-work/project-filter', async (request, reply) => {
     try {
@@ -116,6 +128,16 @@ export function registerMyWork(app: FastifyInstance, _deps: AppDependencies): vo
     try {
       const body = CreateMySubprojectBody.parse(request.body ?? {});
       return ok(reply, request, await createMySubproject(ctx(request), body));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  // A MEMBER files a project immediately; the owner, the status and the visibility stay server-side.
+  app.post('/api/employee/projects', async (request, reply) => {
+    try {
+      const body = CreateMyProjectBody.parse(request.body ?? {});
+      return ok(reply, request, await createMyProject(ctx(request), body));
     } catch (error) {
       return sendError(reply, request.state, error);
     }

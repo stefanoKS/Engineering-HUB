@@ -26,17 +26,19 @@ import type {
 import { api } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
-import { Badge, Breadcrumbs, DescriptionText, EmptyState, ErrorBox, ProgressBar, Section } from '../components/ui';
-import { displayTone } from './Tasks';
+import { Badge, Breadcrumbs, DescriptionText, EmptyState, ErrorBox, Menu, ProgressBar, Section } from '../components/ui';
+import { TaskStatusBadge, WorkflowHint } from '../components/task-status';
 import { projectColor } from '@eh/domain';
 import { BackButton, useRouteMemoryState } from '../state/navigation';
 import { useBusinessDate } from '../state/business-date';
 import { DeleteEntityDialog } from '../components/DeleteEntityDialog';
 import { MemberSubprojectForm } from '../components/member-subproject-form';
+import { MemberTaskForm } from '../components/member-task-form';
 import { subprojectPath } from '../components/hierarchy';
 import { DeadlineCell, deadlineStateOf } from '../components/deadline';
 import { ConfirmDialog } from '../components/forms';
 import { ScheduleBadge } from '../components/project-schedule';
+import { capabilitiesOf } from '../state/capabilities';
 
 /* ------------------------------------------------------------------ data shapes */
 
@@ -287,6 +289,9 @@ type HierarchyProps = {
   hierarchy: ProjectHierarchy;
   canManage: boolean;
   canDelete: boolean;
+  /** Creation is a separate capability: a MEMBER creates new work but never edits a record. */
+  canCreateTask: boolean;
+  canCreateSubproject: boolean;
   includeInactive: boolean;
   onToggleInactive: (value: boolean) => void;
   onNewTask: (subprojectId: string | null) => void;
@@ -303,7 +308,7 @@ type HierarchyProps = {
 
 export function ProjectHierarchy(props: HierarchyProps): JSX.Element {
   const { t } = useI18n();
-  const { hierarchy, canManage, canDelete } = props;
+  const { hierarchy, canManage, canDelete, canCreateTask, canCreateSubproject } = props;
   const [localCollapsed, setLocalCollapsed] = useState<Set<string>>(() => new Set());
   const collapsed = props.collapsed ?? localCollapsed;
 
@@ -346,14 +351,18 @@ export function ProjectHierarchy(props: HierarchyProps): JSX.Element {
           <span className="hierarchy-counts muted small">
             {t('hierarchy.counts', { active: hierarchy.counts.active, done: hierarchy.counts.done })}
           </span>
-          {canManage ? (
+          {canCreateTask || canCreateSubproject ? (
             <div className="hierarchy-toolbar-buttons">
-              <button type="button" className="button secondary" onClick={props.onNewSubproject}>
-                {t('subprojects.new')}
-              </button>
-              <button type="button" className="button" onClick={() => props.onNewTask(null)}>
-                {t('tasks.new')}
-              </button>
+              {canCreateSubproject ? (
+                <button type="button" className="button secondary" onClick={props.onNewSubproject}>
+                  {t('subprojects.new')}
+                </button>
+              ) : null}
+              {canCreateTask ? (
+                <button type="button" className="button" onClick={() => props.onNewTask(null)}>
+                  {t('tasks.new')}
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -376,6 +385,7 @@ export function ProjectHierarchy(props: HierarchyProps): JSX.Element {
             onNewTask={props.onNewTask}
             onDelete={props.onDelete}
             canManage={canManage}
+            canCreateTask={canCreateTask}
             canDelete={canDelete}
           />
         ))}
@@ -402,7 +412,7 @@ export function ProjectHierarchy(props: HierarchyProps): JSX.Element {
                 done: countsOfNodes(hierarchy.directTasks).done
               })}
             </span>
-            {canManage ? (
+            {canCreateTask ? (
               <span className="hierarchy-actions">
                 <button type="button" className="link-button" onClick={() => props.onNewTask(null)}>
                   {t('tasks.new')}
@@ -443,6 +453,7 @@ function SubprojectItem({
   onNewTask,
   onDelete,
   canManage,
+  canCreateTask,
   canDelete
 }: {
   node: SubprojectNode;
@@ -453,6 +464,7 @@ function SubprojectItem({
   onNewTask: (subprojectId: string | null) => void;
   onDelete: (entityType: 'TASKS' | 'SUBPROJECTS', entityId: string, entityName: string) => void;
   canManage: boolean;
+  canCreateTask: boolean;
   canDelete: boolean;
 }): JSX.Element {
   const { t } = useI18n();
@@ -481,14 +493,18 @@ function SubprojectItem({
           <DeadlineCell dueDate={node.deadline} state={deadlineStateOf(node.schedule)} showLabel={false} />
         ) : null}
         <span className="hierarchy-counts">{t('hierarchy.counts', { active: node.counts.active, done: node.counts.done })}</span>
-        {canManage ? (
+        {canManage || canCreateTask ? (
           <span className="hierarchy-actions">
-            <button type="button" className="link-button" onClick={() => onNewTask(node.subprojectId)}>
-              {t('tasks.new')}
-            </button>
-            <button type="button" className="link-button" onClick={() => onEdit(node)}>
-              {t('action.edit')}
-            </button>
+            {canCreateTask ? (
+              <button type="button" className="link-button" onClick={() => onNewTask(node.subprojectId)}>
+                {t('tasks.new')}
+              </button>
+            ) : null}
+            {canManage ? (
+              <button type="button" className="link-button" onClick={() => onEdit(node)}>
+                {t('action.edit')}
+              </button>
+            ) : null}
             {canDelete ? (
               <button
                 type="button"
@@ -542,6 +558,7 @@ function SubprojectItem({
                 onNewTask={onNewTask}
                 onDelete={onDelete}
                 canManage={canManage}
+                canCreateTask={canCreateTask}
                 canDelete={canDelete}
               />
             ))}
@@ -596,7 +613,8 @@ function TaskItem({
         {task.reviewState === 'PENDING' ? <Badge tone="warn">{t('tasks.review')}</Badge> : null}
         <span className="hierarchy-assignees muted small">{assignees || t('common.unset')}</span>
         <DeadlineCell dueDate={task.dueDate} state={task.displayStatus} showLabel={false} />
-        <Badge tone={displayTone(task.displayStatus)}>{t(`taskStatus.${task.displayStatus}`)}</Badge>
+        <TaskStatusBadge state={task.displayStatus} missing={task.scheduleMissing} showDetail />
+        <WorkflowHint status={task.status} />
         {canDelete ? (
           <button
             type="button"
@@ -648,10 +666,15 @@ export function ProjectDetailScreen({
   const detail = useQuery<ManagerDetail | ReadOnlyDetail>(`${cacheKey}:${today}`, () =>
     api.get<ManagerDetail | ReadOnlyDetail>(endpoint)
   );
-  const canManage = !readOnly && (actor.role === 'ADMIN' || actor.role === 'MANAGER');
-  const canDelete = !readOnly && actor.role === 'ADMIN';
-  // A MEMBER files a subproject here straight away; every manager-only operation stays hidden.
-  const canCreateAsMember = readOnly && actor.role === 'MEMBER';
+  const capabilities = capabilitiesOf(actor);
+  // Creation and management are separate capabilities: a MEMBER files new work from this page but
+  // never edits, archives, deletes or changes the lifecycle of an existing record.
+  const canManage = !readOnly && capabilities.canEdit;
+  const canDelete = !readOnly && capabilities.canDelete;
+  // Managers create through their own forms; a MEMBER creates through the member endpoints.
+  const canCreateTask = capabilities.canCreateTask || canManage;
+  const canCreateSubproject = capabilities.canCreateSubproject || canManage;
+  const [memberTaskSubproject, setMemberTaskSubproject] = useState<string | null | undefined>(undefined);
   const [memberSubproject, setMemberSubproject] = useState(false);
   const [editProject, setEditProject] = useState(false);
   const [editingSubproject, setEditingSubproject] = useState<Subproject | null>(null);
@@ -713,6 +736,9 @@ export function ProjectDetailScreen({
       keys.myWork,
       keys.workload,
       keys.employee,
+      keys.workProjects,
+      keys.workOverview,
+      keys.myProjects,
       // The read-only projection and the employee lists show the same records.
       'work/tasks',
       'work/project/',
@@ -762,6 +788,8 @@ export function ProjectDetailScreen({
           editingSubproject !== null ||
           newSubprojectParent !== undefined ||
           newTaskSubproject !== undefined ||
+          memberSubproject ||
+          memberTaskSubproject !== undefined ||
           deleteTarget !== null
         }      />
       <Breadcrumbs
@@ -770,59 +798,135 @@ export function ProjectDetailScreen({
           { label: record.projectName }
         ]}
       />
-      <div className="screen-header">
-        <div>
-          <h2>
-            <span className="project-dot" style={{ background: projectColor(record.projectId) }} aria-hidden="true" />
-            {record.projectName}
-          </h2>
-          <p className="muted small">
-            {record.projectId} · {record.responsibilityName || t('overview.unassigned')} ·{' '}
-            {record.projectOwnerName || t('common.unset')}
-          </p>
-        </div>
-        <div className="filters">
-          <a className="button secondary" href={`#/timeline/${record.projectId}`}>
-            {t('timeline.projectLink')}
-          </a>
-          {canManage && (
+      <div className="page-heading">
+        <h2>
+          <span className="project-dot" style={{ background: projectColor(record.projectId) }} aria-hidden="true" />
+          {record.projectName}
+        </h2>
+        <div className="compact-toolbar">
+          {canCreateTask ? (
+            <button type="button" className="button" onClick={() => setMemberTaskSubproject(null)}>
+              {t('myWork.newTask')}
+            </button>
+          ) : null}
+          {canManage ? (
             <button type="button" className="button secondary" onClick={() => setEditProject(true)}>
               {t('projects.edit')}
             </button>
-          )}
-          {canManage && storedStatus !== 'Completed' && storedStatus !== 'Archived' && storedStatus !== 'Cancelled' ? (
-            <button type="button" className="button secondary" onClick={() => setStatusChange('Completed')}>
-              {t('project.schedule.markCompleted')}
-            </button>
           ) : null}
-          {canManage && storedStatus !== 'Completed' && storedStatus !== 'Archived' && storedStatus !== 'Cancelled' ? (
-            <button type="button" className="button secondary" onClick={() => setStatusChange('Cancelled')}>
-              {t('project.schedule.cancel')}
-            </button>
-          ) : null}
-          {canManage && storedStatus === 'Cancelled' ? (
-            <button type="button" className="button secondary" onClick={() => setStatusChange('Active')}>
-              {t('project.schedule.reactivate')}
-            </button>
-          ) : null}
-          {canCreateAsMember ? (
-            <button
-              type="button"
-              className="button secondary"
-              aria-expanded={memberSubproject}
-              onClick={() => setMemberSubproject((value) => !value)}
-            >
-              {t('myWork.newSubproject')}
-            </button>
-          ) : null}
-          <ScheduleBadge schedule={record.schedule} />
-          {canManage ? (
-            <Badge tone={(record as Project).dashboardVisibility === 'INTERNAL' ? 'ok' : 'neutral'}>
-              {(record as Project).dashboardVisibility}
-            </Badge>
-          ) : null}
+          <Menu label={t('action.more')}>
+            {(close) => (
+              <>
+                <a className="menu-item" role="menuitem" href={`#/timeline/${record.projectId}`} onClick={close}>
+                  {t('timeline.projectLink')}
+                </a>
+                {canCreateSubproject ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    onClick={() => {
+                      close();
+                      setMemberSubproject(true);
+                    }}
+                  >
+                    {t('myWork.newSubproject')}
+                  </button>
+                ) : null}                {canManage && storedStatus !== 'Completed' && storedStatus !== 'Archived' && storedStatus !== 'Cancelled' ? (
+                  <>
+                    <div className="menu-separator" role="separator" />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="menu-item"
+                      onClick={() => {
+                        close();
+                        setStatusChange('Completed');
+                      }}
+                    >
+                      {t('project.schedule.markCompleted')}
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="menu-item"
+                      onClick={() => {
+                        close();
+                        setStatusChange('Cancelled');
+                      }}
+                    >
+                      {t('project.schedule.cancel')}
+                    </button>
+                  </>
+                ) : null}
+                {canManage && storedStatus === 'Cancelled' ? (
+                  <>
+                    <div className="menu-separator" role="separator" />
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="menu-item"
+                      onClick={() => {
+                        close();
+                        setStatusChange('Active');
+                      }}
+                    >
+                      {t('project.schedule.reactivate')}
+                    </button>
+                  </>
+                ) : null}
+              </>
+            )}
+          </Menu>
         </div>
       </div>
+
+      <p className="muted small project-identity">
+        {record.projectId} · {record.responsibilityName || t('overview.unassigned')} ·{' '}
+        {record.projectOwnerName || t('common.unset')}
+        {canManage ? (
+          <Badge tone={(record as Project).dashboardVisibility === 'INTERNAL' ? 'ok' : 'neutral'}>
+            {t(`visibility.${(record as Project).dashboardVisibility === 'INTERNAL' ? 'INTERNAL' : 'RESTRICTED'}`)}
+          </Badge>
+        ) : null}
+      </p>
+
+      {/* One compact summary: state, deadline, progress, owner and area on a single readable strip. */}
+      <dl className="project-summary">
+        <div>
+          <dt>{t('column.status')}</dt>
+          <dd>
+            <ScheduleBadge schedule={record.schedule} />
+          </dd>
+        </div>
+        <div>
+          <dt>{t('column.deadline')}</dt>
+          <dd>
+            <DeadlineCell
+              dueDate={record.committedDeadline}
+              state={deadlineStateOf(record.schedule)}
+              showLabel={false}
+            />
+          </dd>
+        </div>
+        <div>
+          <dt>{t('projects.progress')}</dt>
+          <dd>
+            <ProgressBar value={view.progress.percent} />
+            <span className="muted small">
+              {view.progress.doneLeaves}/{view.progress.leaves}
+            </span>
+          </dd>
+        </div>
+        <div>
+          <dt>{t('projects.owner')}</dt>
+          <dd>{record.projectOwnerName || t('common.unset')}</dd>
+        </div>
+        <div>
+          <dt>{t('projects.priority')}</dt>
+          <dd>{label('priority', record.priority)}</dd>
+        </div>
+      </dl>
 
       {notice ? (
         <div className="banner ok" role="status">
@@ -830,42 +934,100 @@ export function ProjectDetailScreen({
         </div>
       ) : null}
 
-      <Section title={t('project.info')}>
-        <div className="detail-grid">
-          <div>
-            <dt>{t('project.schedule.title')}</dt>
-            <dd>
-              <ScheduleBadge schedule={record.schedule} showDetail />
-              <span className="field-hint">{t('project.schedule.derivedHint')}</span>
-            </dd>
-          </div>
-          <div>
-            <dt>{t('projects.priority')}</dt>
-            <dd>{label('priority', record.priority)}</dd>
-          </div>
-          <div>
-            <dt>{t('projects.responsibility')}</dt>
-            <dd>{record.responsibilityName || t('overview.unassigned')}</dd>
-          </div>
-          <div>
-            <dt>{t('projects.owner')}</dt>
-            <dd>{record.projectOwnerName || t('common.unset')}</dd>
-          </div>
-          <div>
-            <dt>{t('projects.deadline')}</dt>
-            <dd>
-              <DeadlineCell
-                dueDate={record.committedDeadline}
-                state={deadlineStateOf(record.schedule)}
-                showLabel={false}
-                size="large"
-              />
-            </dd>
-          </div>
+
+      {canCreateSubproject && memberSubproject ? (
+        <MemberSubprojectForm
+          fixedProjectId={projectId}
+          projects={[
+            {
+              projectId,
+              projectName: record.projectName,
+              responsibilityName: record.responsibilityName ?? '',
+              subprojects: view.subprojects.map((subproject) => ({
+                subprojectId: subproject.subprojectId,
+                subprojectName: subproject.subprojectName,
+                parentSubprojectId: subproject.parentSubprojectId ?? null,
+                depth: subproject.depth
+              }))
+            }
+          ]}
+          onClose={() => setMemberSubproject(false)}
+          onCreated={() => {
+            setMemberSubproject(false);
+            setNotice(t('myWork.subprojectCreated'));
+            refresh();
+          }}
+        />
+      ) : null}
+
+      {canCreateTask && memberTaskSubproject !== undefined ? (
+        <MemberTaskForm
+          projects={[
+            {
+              projectId,
+              projectName: record.projectName,
+              responsibilityName: record.responsibilityName ?? '',
+              subprojects: view.subprojects.map((subproject) => ({
+                subprojectId: subproject.subprojectId,
+                subprojectName: subproject.subprojectName,
+                parentSubprojectId: subproject.parentSubprojectId ?? null,
+                depth: subproject.depth
+              }))
+            }
+          ]}
+          destination={{
+            projectId,
+            subprojectId: memberTaskSubproject,
+            projectName: record.projectName,
+            subprojectName: memberTaskSubproject
+              ? view.subprojects.find((subproject) => subproject.subprojectId === memberTaskSubproject)?.subprojectName
+              : undefined
+          }}
+          onClose={() => setMemberTaskSubproject(undefined)}
+          onCreated={() => {
+            setMemberTaskSubproject(undefined);
+            setNotice(t('myWork.created'));
+            refresh();
+          }}
+        />
+      ) : null}
+
+      <ProjectHierarchy
+        hierarchy={hierarchy}
+        canManage={canManage}
+        canDelete={canDelete}
+        canCreateTask={canCreateTask}
+        canCreateSubproject={canCreateSubproject}
+        includeInactive={includeInactive}
+        collapsed={collapsed}
+        onToggle={toggleCollapsed}
+        onToggleInactive={(value) => setIncludeInactive(value)}
+        onNewTask={(subprojectId) =>
+          canManage ? setNewTaskSubproject(subprojectId) : setMemberTaskSubproject(subprojectId)
+        }
+        onNewSubproject={() => (canManage ? setNewSubprojectParent(null) : setMemberSubproject(true))}
+        onEditSubproject={(node) => setEditingSubproject(editTarget(node))}
+        onDelete={(entityType, entityId, entityName) => setDeleteTarget({ entityType, entityId, entityName })}
+      />
+
+      <details className="disclosure">
+        <summary>{t('project.schedule.title')}</summary>
+        <div className="disclosure-body">
+          <ScheduleBadge schedule={record.schedule} showDetail />
+          <p className="muted small">{t('project.schedule.derivedHint')}</p>
         </div>
-        <h3>{t('projects.description')}</h3>
-        <DescriptionText text={record.description ?? ''} />
-      </Section>
+      </details>
+
+      {record.description && record.description.trim() ? (
+        <Section title={t('projects.description')}>
+          <DescriptionText text={record.description} />
+        </Section>
+      ) : (
+        <p className="muted small">
+          <span className="field-label">{t('projects.description')}</span>{' '}
+          <span>{t('common.noDescription')}</span>
+        </p>
+      )}
 
       <Section title={t('projects.progress')}>
         <ProgressBar value={view.progress.percent} />
@@ -873,44 +1035,6 @@ export function ProjectDetailScreen({
           {t('projects.tasks')}: {view.progress.leaves} · {t('overview.completed')}: {view.progress.doneLeaves}
         </p>
       </Section>
-
-      {canCreateAsMember && memberSubproject ? (
-        <Section title={t('myWork.newSubproject')}>
-          <MemberSubprojectForm
-            fixedProjectId={projectId}
-            projects={[
-              {
-                projectId,
-                projectName: record.projectName,
-                responsibilityName: record.responsibilityName ?? '',
-                subprojects: view.subprojects.map((subproject) => ({
-                  subprojectId: subproject.subprojectId,
-                  subprojectName: subproject.subprojectName,
-                  parentSubprojectId: subproject.parentSubprojectId ?? null,
-                  depth: subproject.depth
-                }))
-              }
-            ]}
-            onCreated={() => {
-              setNotice(t('myWork.subprojectCreated'));
-              refresh();
-            }}
-          />
-        </Section>
-      ) : null}
-
-      <ProjectHierarchy
-        hierarchy={hierarchy}
-        canManage={canManage}        canDelete={canDelete}
-        includeInactive={includeInactive}
-        collapsed={collapsed}
-        onToggle={toggleCollapsed}
-        onToggleInactive={(value) => setIncludeInactive(value)}
-        onNewTask={(subprojectId) => setNewTaskSubproject(subprojectId)}
-        onNewSubproject={() => setNewSubprojectParent(null)}
-        onEditSubproject={(node) => setEditingSubproject(editTarget(node))}
-        onDelete={(entityType, entityId, entityName) => setDeleteTarget({ entityType, entityId, entityName })}
-      />
 
 
       {editProject && canManage ? (

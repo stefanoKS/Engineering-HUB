@@ -76,6 +76,7 @@ export const V2_LABELS = {
  'delete.useLogicalRemoval': { ja: '通常の削除に戻る', en: 'Return to normal removal' },
  'tasks.noChanges': { ja: '変更はありません。', en: 'No changes to save.' },
  'assignee.inactive': { ja: '無効', en: 'Inactive' },
+ 'assignee.addMore': { ja: '担当者を追加', en: 'Add assignee' },
  'action.open': { ja: '詳細を開く', en: 'Open' },
  'deadline.label': { ja: '納期', en: 'Deadline' },
  'deadline.todayBadge': { ja: '今日', en: 'Today' },
@@ -134,10 +135,24 @@ export const V2_LABELS = {
    en: 'Search and manage all work. Your own assignments stay under My assigned work.'
  },
  'allWork.scope': { ja: '表示中の {n} 件 / 全 {total} 件', en: '{n} shown of {total}' },
+ 'taskStatus.PLANNED': { ja: '予定', en: 'Planned' },
  'taskStatus.IN_PROGRESS': { ja: '進行中', en: 'In progress' },
- 'taskStatus.OVERDUE': { ja: '期限超過', en: 'Overdue' },
+ 'taskStatus.OVERDUE': { ja: '遅延', en: 'Late' },
+ 'taskStatus.START_NOT_SET': { ja: '開始日未設定', en: 'Start not set' },
+ 'taskStatus.DATES_NOT_SET': { ja: '日程未設定', en: 'Dates not set' },
+ 'taskStatus.INVALID_DATES': { ja: '日程データ要確認', en: 'Check the schedule dates' },
  'taskStatus.DONE': { ja: '完了', en: 'Done' },
  'taskStatus.CANCELLED': { ja: '取消', en: 'Cancelled' },
+ 'task.schedule.title': { ja: '日程ステータス', en: 'Schedule status' },
+ 'task.schedule.missingStart': { ja: '開始日未設定', en: 'Start not set' },
+ 'task.schedule.missingFinish': { ja: '終了日未設定', en: 'Finish not set' },
+ 'task.schedule.missingBoth': { ja: '開始日と終了日が未設定', en: 'Start and finish not set' },
+ 'task.schedule.workflowHint': { ja: 'ワークフロー: {status}', en: 'Workflow: {status}' },
+ 'task.workflowStatus': { ja: 'ワークフロー状態（保存値）', en: 'Workflow state (stored)' },
+ 'task.schedule.derivedHint': {
+   ja: '日程ステータスは開始日・終了日と今日の日付から自動で決まります。保存値は変更しません。',
+   en: 'The schedule status is derived from the start and finish dates and today. Nothing is rewritten.'
+ },
  'tasks.includeInactive': { ja: '取消・アーカイブも表示', en: 'Include cancelled and archived' },
  'tasks.completeDirect': { ja: '完了にする', en: 'Mark done' },
  'tasks.completeDirectTitle': { ja: 'タスクを完了にします', en: 'Mark the task done' },
@@ -204,8 +219,8 @@ export const V2_LABELS = {
    en: 'Managers create, edit and complete work from All work.'
  },
  'myWork.derivedNote': {
-   ja: '状態は期限と完了状況から自動で決まります（進行中・期限超過・完了）。',
-   en: 'The state is derived from the deadline and completion (in progress, overdue, done).'
+   ja: '状態は開始日・終了日と今日の日付から自動で決まります（予定・進行中・遅延・完了）。',
+   en: 'The state is derived from the start and finish dates and today (planned, in progress, late, done).'
  },
  'myWork.pendingBadge': { ja: '承認待ち', en: 'Awaiting approval' },
  'local.linkExisting': { ja: '既存メンバーにログインを追加', en: 'Link a login to an existing member' },
@@ -377,7 +392,8 @@ export const V2_LABELS = {
   'nav.members': { ja: 'メンバー', en: 'Members' },
   'nav.skills': { ja: 'スキル', en: 'Skills' },
   'nav.requests': { ja: '申請一覧', en: 'Requests' },
-  'nav.workload': { ja: '工数レポート', en: 'Workload' },
+  // The report lists deadlines and task counts only; it never reports recorded effort.
+  'nav.workload': { ja: '担当・期限レポート', en: 'Assignment & deadline report' },
   'nav.automation': { ja: '自動化設定', en: 'Automation' },
   'nav.status': { ja: '状態・公開', en: 'Status & publication' },
   'nav.signOut': { ja: 'サインアウト', en: 'Sign out' },
@@ -448,7 +464,7 @@ export const V2_LABELS = {
   'tasks.edit': { ja: 'タスクを編集', en: 'Edit task' },
   'tasks.name': { ja: 'タスク名', en: 'Task name' },
   'tasks.owner': { ja: '主担当', en: 'Primary owner' },
-  'tasks.assignees': { ja: '追加担当', en: 'Additional assignees' },
+  'tasks.assignees': { ja: '担当者', en: 'Assignees' },
   'tasks.deadline': { ja: '期限', en: 'Deadline' },
   'tasks.duration': { ja: '必要日数', en: 'Required duration' },
   'tasks.durationUnit': { ja: '単位', en: 'Unit' },
@@ -573,7 +589,7 @@ export const V2_LABELS = {
   'status.backupLocal': { ja: 'ローカルバックアップ', en: 'Local backup' },
   'status.backupDrive': { ja: 'Google Drive への最終アップロード', en: 'Last Drive upload' },
   'status.backupFailures': { ja: '直近のバックアップ失敗', en: 'Latest backup failure' },
-  'workload.title': { ja: '工数レポート', en: 'Workload report' },
+  'workload.title': { ja: '担当・期限レポート', en: 'Assignment & deadline report' },
   'workload.basisNote': {
     ja: '現在の割当を、選択した日付で集計しています。過去の割当履歴を復元したものではありません。',
     en: 'Groups current assignments by the selected dates. It is not a reconstructed assignment history.'
@@ -730,7 +746,7 @@ export const V2_LABELS = {
     en: 'Usually not needed for routine creation. Open this only when required.'
   },
   'form.blockedReasons': { ja: 'このままでは登録できません', en: 'This cannot be submitted yet' },
-  'form.noChanges': { ja: '変更された項目はありません。', en: 'No field has changed.' },
+  'form.noChanges': { ja: '変更はありません。', en: 'No changes.' },
   'form.readOnly': { ja: '参照のみ', en: 'Read-only' },
 
   'taskForm.location': { ja: '作成先', en: 'Location' },
@@ -871,6 +887,28 @@ export const V2_LABELS = {
   'nav.group.department': { ja: '課の業務', en: 'Section work' },
   'nav.group.people': { ja: 'メンバーと分野', en: 'People' },
   'nav.group.admin': { ja: '管理', en: 'Administration' },
+  'nav.group.daily': { ja: '日常業務', en: 'Daily work' },
+  'nav.group.team': { ja: 'チーム', en: 'Team' },
+  'nav.group.management': { ja: '管理', en: 'Management' },
+  'nav.menu': { ja: 'メニュー', en: 'Menu' },
+  'nav.closeMenu': { ja: 'メニューを閉じる', en: 'Close menu' },
+  'nav.accountMenu': { ja: 'アカウントメニュー', en: 'Account menu' },
+  'nav.accountSettings': { ja: 'アカウント', en: 'Account' },
+
+  // First-screen productivity: a compact filter row with an accessible disclosure.
+  'myWork.filter.more': { ja: '絞り込み', en: 'Filters' },
+  'myWork.filter.moreActive': { ja: '絞り込み（{n}）', en: 'Filters ({n})' },
+  'myWork.help': { ja: '使い方', en: 'How to use' },
+  'myWork.visibleCount': { ja: '{n} 件を表示', en: '{n} shown' },
+  'filter.allProjects': { ja: 'すべてのプロジェクト', en: 'All projects' },
+  'filter.searchProjects': { ja: 'プロジェクト名で検索', en: 'Search project name' },
+  'action.more': { ja: 'その他', en: 'More' },
+  'action.moreActions': { ja: 'その他の操作', en: 'More actions' },
+  'overview.noOverdue': { ja: '期限超過なし', en: 'No overdue work' },
+  'task.assigneeHeading': { ja: '担当者', en: 'Assignees' },
+  'task.primaryAssignee': { ja: '主担当', en: 'Primary' },
+  'visibility.INTERNAL': { ja: '社内公開', en: 'Internal' },
+  'visibility.RESTRICTED': { ja: '限定公開', en: 'Restricted' },
 
   'nav.timeline': { ja: 'タイムライン', en: 'Timeline' },
   'timeline.title': { ja: 'タイムライン', en: 'Timeline' },
@@ -1013,6 +1051,77 @@ export const V2_LABELS = {
   'freshness.stale': {
     ja: '公開スナップショットが最新ではありません。再公開をお待ちください。',
     en: 'The published snapshot is not current; wait for the next publication.'
+  },
+
+  'action.close': { ja: '閉じる', en: 'Close' },
+
+  'myWork.newProject': { ja: '新規プロジェクト', en: 'New project' },
+  'myWork.createProject': { ja: 'プロジェクトを作成', en: 'Create project' },
+  'myWork.projectOwnerNote': {
+    ja: '作成者はログイン中のあなたになります。状態は「進行中」、公開範囲は「内部公開」で作成されます。',
+    en: 'You become the owner; the project starts Active with internal visibility.'
+  },
+  'myWork.responsibilitiesEmpty': {
+    ja: '有効な担当領域がありません。管理者に確認してください。',
+    en: 'No active responsibility is available; ask an administrator.'
+  },
+  'myWork.destination': { ja: '作成先', en: 'Destination' },
+  'myWork.projectCreated': { ja: 'プロジェクト「{name}」を作成しました。', en: 'Created the project “{name}”.' },
+  'myWork.noRequestForFinished': {
+    ja: '完了・取消済みのため申請できません。',
+    en: 'Completed or cancelled work cannot be requested.'
+  },
+  'myWork.activeTotalLabel': { ja: '自分の進行中タスク', en: 'My open tasks' },
+
+  'overview.authorizedScope': {
+    ja: '社内公開プロジェクトのうち、閲覧が許可された範囲の集計です。組織全体の数値ではありません。',
+    en: 'Counts cover only the internal projects you may read; they are not organization-wide totals.'
+  },
+  'overview.openMyWork': { ja: '自分の担当作業を開く', en: 'Open my assigned work' },
+  'overview.personalNote': {
+    ja: 'ここは自分個人の件数です。上の集計とは別に数えています。',
+    en: 'These figures are personal and are counted separately from the section totals above.'
+  },
+
+  'report.task': { ja: 'タスク', en: 'Task' },
+  'request.form.requiredDeadline': { ja: '希望する期限を入力してください。', en: 'Enter the requested deadline.' },
+  'request.notAvailable': {
+    ja: 'このタスクでは完了報告・期限変更の申請はできません。',
+    en: 'No completion or extension request is available for this task.'
+  },
+
+  'reopen.action': { ja: '完了を取り消す', en: 'Reopen task' },
+  'reopen.title': { ja: '完了を取り消して再開', en: 'Reopen the completed task' },
+  'reopen.body': {
+    ja: '現在の完了を取り消し、タスクを進行中に戻します。過去の申請・承認・監査の記録は変更せずに保持されます。',
+    en: 'The current completion is reversed and the task returns to an open state. Earlier requests, approvals and audit records are retained unchanged.'
+  },
+  'reopen.completedAt': { ja: '現在の完了日時: {at}', en: 'Current completion: {at}' },
+  'reopen.noCompletionRecord': {
+    ja: '完了日時の記録がありません（旧データ）。取り消しは可能ですが、復元できる進捗はありません。',
+    en: 'No completion timestamp is recorded (legacy data). The correction is possible, but no progress can be restored.'
+  },
+  'reopen.resultingState': {
+    ja: '再開後の状態: 進行中・進捗 0%（過去の進捗は推測しません）。期限が過去の場合は「遅延」と表示されます。',
+    en: 'Resulting state: In Progress, progress 0% (no historical progress is invented). A past finish date is shown as late.'
+  },
+  'reopen.projectReopen': {
+    ja: '親プロジェクト「{name}」は完了済みです。同じ操作で「進行中」に戻ります。',
+    en: 'The parent project “{name}” is completed; it returns to Active in the same operation.'
+  },
+  'reopen.done': { ja: '完了を取り消しました。過去の記録は保持されています。', en: 'The completion was reversed; earlier records were retained.' },
+  'reopen.blocked.CONTAINER': {
+    ja: '子タスクを持つタスクは再開できません。完了は作業単位から集計されます。',
+    en: 'A task with children cannot be reopened; its completion is derived from leaf work.'
+  },
+  'reopen.blocked.NOT_COMPLETED': { ja: '完了していないため取り消せません。', en: 'Only a completed task can be reopened.' },
+  'reopen.blocked.PROJECT_ARCHIVED': {
+    ja: '親プロジェクトがアーカイブ済みです。別の手順で再有効化してください。',
+    en: 'The parent project is archived; reactivate it in a separate step.'
+  },
+  'reopen.blocked.PROJECT_CANCELLED': {
+    ja: '親プロジェクトが取消済みです。別の手順で再有効化してください。',
+    en: 'The parent project is cancelled; reactivate it in a separate step.'
   }
 } as const;
 

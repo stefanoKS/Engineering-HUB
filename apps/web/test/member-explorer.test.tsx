@@ -65,6 +65,7 @@ const PROJECT_LIST = {
       progressPercent: 40,
       health: 'OK',
       activeTaskCount: 3,
+      overdueTaskCount: 1,
       completedTaskCount: 2
     }
   ],
@@ -246,7 +247,7 @@ describe('member project navigation', () => {
     stubApi({ '/api/session': session(MEMBER_ACTOR), '/api/work/projects': PROJECT_LIST });
     const first = render(
       <I18nProvider>
-        <WorkProjectsScreen />
+        <WorkProjectsScreen actor={MEMBER_ACTOR as never} />
       </I18nProvider>
     );
     const search = (await screen.findByLabelText('プロジェクト名で検索')) as HTMLInputElement;
@@ -255,7 +256,7 @@ describe('member project navigation', () => {
     first.unmount();
     render(
       <I18nProvider>
-        <WorkProjectsScreen />
+        <WorkProjectsScreen actor={MEMBER_ACTOR as never} />
       </I18nProvider>
     );
     const reopened = (await screen.findByLabelText('プロジェクト名で検索')) as HTMLInputElement;
@@ -275,7 +276,9 @@ describe('read-only project detail', () => {
     expect(await screen.findByText(/車載バッテリー筐体の設計/)).toBeTruthy();
     expect(screen.getByText(/APQP 提出書類一式の準備/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: '編集' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '新規タスク' })).toBeNull();
+    // A MEMBER may file new work from this page but never edit, archive or remove a record.
+    expect(screen.getAllByRole('button', { name: '新規タスク' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: '新規サブプロジェクト' }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /を削除/ })).toBeNull();
     expect(screen.getByRole('navigation', { name: '現在地' })).toBeTruthy();
 
@@ -305,6 +308,9 @@ describe('read-only project detail', () => {
       </I18nProvider>
     );
     expect(await screen.findByText('説明なし')).toBeTruthy();
+    // A VIEWER gains no creation, edit or delete capability.
+    expect(screen.queryByRole('button', { name: '新規タスク' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '新規サブプロジェクト' })).toBeNull();
   });
 });
 

@@ -4,9 +4,9 @@ import type { Actor, Member, MemberProfileView } from '@eh/contracts';
 import { api, queryString } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
-import { Badge, EmptyState, ErrorBox, Pagination, SaveState, Section, statusTone } from '../components/ui';
+import { Badge, EmptyState, ErrorBox, Pagination, SaveState, Section } from '../components/ui';
 import { DeadlineCell } from '../components/deadline';
-import { SelectInput, TextInput, useIdempotencyKey, useSave } from '../components/forms';
+import { TaskStatusBadge, WorkflowHint } from '../components/task-status';import { SelectInput, TextInput, useIdempotencyKey, useSave } from '../components/forms';
 
 type Page = { items: (Member & { _revision: number })[]; total: number; page: number; pageSize: number; totalPages: number };
 const ROLES = ['ADMIN', 'MANAGER', 'MEMBER', 'VIEWER'];
@@ -224,7 +224,7 @@ function MemberForm({
 }
 
 export function MemberProfileScreen({ actor, memberId }: { actor: Actor; memberId: string }): JSX.Element {
-  const { t, label } = useI18n();
+  const { t } = useI18n();
   void actor;
   const profile = useQuery<MemberProfileView>(keys.member(memberId), () =>
     api.get<MemberProfileView>(`/api/manager/members/${memberId}/profile`)
@@ -251,7 +251,8 @@ export function MemberProfileScreen({ actor, memberId }: { actor: Actor; memberI
             {data.current.map((task) => (
               <li key={task.taskId}>
                 <a href={`#/task/${task.taskId}`}>{task.taskName}</a>
-                <Badge tone={statusTone(task.status)}>{label('task.status', task.status)}</Badge>
+                <TaskStatusBadge state={task.displayStatus} missing={task.scheduleMissing} showDetail />
+                <WorkflowHint status={task.status} />
                 <DeadlineCell dueDate={task.dueDate} state={task.displayStatus} showLabel={false} />
               </li>
             ))}

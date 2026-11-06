@@ -101,12 +101,19 @@ describe('overview navigation and period state', () => {
 describe('crimson theme', () => {
   it('uses the approved brand palette without changing semantic status colors', () => {
     const css = readFileSync(resolve(process.cwd(), 'apps/web/src/styles.css'), 'utf8').toLowerCase();
-    expect(css).toContain('--ui-accent: #a8182f');
-    expect(css).toContain('--ui-accent-hover: #871326');
-    expect(css).toContain('--ui-accent-soft: #fbecef');
-    expect(css).toContain('--ui-bg: #fcf7f8');
-    expect(css).toContain('--info: #176b87');
-    expect(css).toContain('--green: #13745c');
+    expect(css).toContain('--ui-accent: #ad1535');
+    expect(css).toContain('--ui-accent-hover: #8e1129');
+    expect(css).toContain('--ui-accent-soft: #fbeef2');
+    expect(css).toContain('--ui-bg: #f6f7f9');
+    expect(css).toContain('--ui-text: #172033');
+    expect(css).toContain('--ui-muted: #526175');
+    expect(css).toContain('--ui-border: #dce2e8');
+    expect(css).toContain('--ui-input-border: #7a8797');
+    expect(css).toContain('--link: #245ea8');
+    expect(css).toContain('--info: #245ea8');
+    expect(css).toContain('--green: #08765b');
+    expect(css).toContain('--amber: #8a5700');
+    expect(css).toContain('--red: #b42318');
     expect(css).not.toContain('#4f46e5');
     expect(css).not.toContain('#6366f1');
   });

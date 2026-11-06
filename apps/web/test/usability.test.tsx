@@ -250,10 +250,10 @@ describe('member completion reporting on task detail', () => {
         <TaskDetailScreen actor={MEMBER_ACTOR as never} taskId="TSK-1" readOnly />
       </I18nProvider>
     );
-    const report = await screen.findByRole('button', { name: '完了を報告' });
+    const report = await screen.findByRole('button', { name: '完了報告' });
     expect((report as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(report);
-    expect(await screen.findByLabelText('完了報告の内容')).toBeTruthy();
+    expect(await screen.findByText('完了メモ（任意）')).toBeTruthy();
   });
 
   it('refuses a container report and explains why', async () => {
@@ -293,9 +293,9 @@ describe('member completion reporting on task detail', () => {
         <TaskDetailScreen actor={MEMBER_ACTOR as never} taskId="TSK-1" readOnly />
       </I18nProvider>
     );
-    const report = await screen.findByRole('button', { name: '完了を報告' });
-    expect((report as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText('子タスクを持つタスクは直接完了できません。子タスクを完了してください。')).toBeTruthy();
+    // A container is never offered a completion action; the reason is still explained.
+    expect(screen.queryByRole('button', { name: '完了報告' })).toBeNull();
+    expect(await screen.findByText('子タスクを持つタスクは直接完了できません。子タスクを完了してください。')).toBeTruthy();
   });
 
   it('never shows the report to a VIEWER', async () => {
@@ -306,7 +306,7 @@ describe('member completion reporting on task detail', () => {
       </I18nProvider>
     );
     await screen.findByRole('heading', { name: '親タスク' });
-    expect(screen.queryByRole('button', { name: '完了を報告' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '完了報告' })).toBeNull();
     expect(screen.queryByRole('button', { name: '編集' })).toBeNull();
     expect(screen.queryByRole('button', { name: '子タスクを追加' })).toBeNull();
   });
@@ -584,12 +584,20 @@ describe('navigation groups', () => {
         <App />
       </I18nProvider>
     );
-    // The organizational group reads Section work / 課の業務; identifiers stay unchanged.
-    expect(await screen.findByText('課の業務')).toBeTruthy();
-    expect(screen.getByText('メンバーと分野')).toBeTruthy();
+    // The navigation groups read Daily work / Team / Management; identifiers stay unchanged.
+    expect(await screen.findByText('日常業務')).toBeTruthy();
+    expect(screen.getByText('チーム')).toBeTruthy();
     expect(screen.getByText('管理')).toBeTruthy();
     expect(screen.getByRole('link', { name: '自分の担当タスク' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'すべてのタスク' })).toBeTruthy();
     expect(screen.getByRole('link', { name: 'プロジェクト' })).toBeTruthy();
     expect(screen.getByRole('link', { name: 'タイムライン' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: '申請一覧' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: '分野' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'メンバー' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'スキル' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: '担当・期限レポート' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: '自動化設定' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: '状態・公開' })).toBeTruthy();
   });
 });

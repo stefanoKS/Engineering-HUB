@@ -8,7 +8,16 @@
  * timeline bucket states both its task count and its date.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+// jsdom has no native <dialog>; the shared Modal needs these two methods to open and close.
+if (typeof HTMLDialogElement !== 'undefined') {
+  HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) {
+    this.open = true;
+  };
+  HTMLDialogElement.prototype.close ??= function close(this: HTMLDialogElement) {
+    this.open = false;
+  };
+}
 import { addDays, businessDate, startOfWorkWeek } from '@eh/domain';
 import type { Actor, MemberRequests, MyWorkList, MyWorkProjectOptions, WorkloadReport } from '@eh/contracts';
 import { I18nProvider } from '../src/i18n';
@@ -164,7 +173,7 @@ describe('deadline emphasis', () => {
     );
     expect(screen.getAllByText('納期')).toHaveLength(3);
     expect(screen.getByText('2026-11-01')).toBeTruthy();
-    expect(screen.getByText('期限超過')).toBeTruthy();
+    expect(screen.getByText('遅延')).toBeTruthy();
     expect(screen.getByText('今日')).toBeTruthy();
     expect(screen.getByText('未設定')).toBeTruthy();
   });
@@ -223,17 +232,17 @@ describe('my work readability', () => {
     expect(screen.queryByText('REQ-1')).toBeNull();
 
     // One creation form at a time, and none of them is expanded by default.
-    const taskTab = screen.getByRole('button', { name: '新規タスク' });
-    const subprojectTab = screen.getByRole('button', { name: '新規サブプロジェクト' });
-    expect(taskTab.getAttribute('aria-pressed')).toBe('false');
-    expect(subprojectTab.getAttribute('aria-pressed')).toBe('false');
-    fireEvent.click(subprojectTab);
-    expect(subprojectTab.getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByText('親サブプロジェクト（任意）')).toBeTruthy();
+    // Creation opens a dialog; both forms are never present at the same time on the page.
+    const taskButton = screen.getByRole('button', { name: '新規タスク' });
+    const subprojectButton = screen.getByRole('button', { name: '新規サブプロジェクト' });
+    expect(document.querySelector('dialog.modal')).toBeNull();
+    fireEvent.click(subprojectButton);
+    expect(await screen.findByText('サブプロジェクト名')).toBeTruthy();
     expect(screen.queryByText('優先度')).toBeNull();
-    fireEvent.click(taskTab);
-    expect(taskTab.getAttribute('aria-pressed')).toBe('true');
-    expect(subprojectTab.getAttribute('aria-pressed')).toBe('false');
+    const dialog = document.querySelector('dialog.modal') as HTMLElement;
+    fireEvent.click(within(dialog).getByRole('button', { name: 'キャンセル' }));
+    fireEvent.click(taskButton);
+    expect(await screen.findByText('タスク名')).toBeTruthy();
   });
 });
 

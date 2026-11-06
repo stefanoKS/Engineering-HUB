@@ -1,7 +1,7 @@
 /** Task detail: the authoritative record, its relationships and the reviewed actions. */
 import { useState } from 'react';
 import { MAX_TASK_DEPTH } from '@eh/domain';
-import type { Actor, Reference, ReportEligibility, Task, TaskDetail } from '@eh/contracts';
+import type { Actor, Reference, ReopenEligibility, ReportEligibility, Task, TaskDetail } from '@eh/contracts';
 import { api } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
@@ -12,17 +12,19 @@ import {
   DescriptionText,
   EmptyState,
   ErrorBox,
+  Menu,
   Section,
   statusTone
 } from '../components/ui';
 import { ConfirmDialog } from '../components/forms';
-import { CompletionReportPanel, reportReasonLabel } from '../components/completion-report';
+import { blockedReasonLabel, RequestDialog, type RequestKind } from '../components/request-dialog';
 import { TaskForm } from './TaskForm';
-import { displayTone } from './Tasks';
 import { formatSkillGrade, projectColor } from '@eh/domain';
 import { BackButton } from '../state/navigation';
 import { DeleteEntityDialog } from '../components/DeleteEntityDialog';
 import { DeadlineCell } from '../components/deadline';
+import { TaskStatusBadge } from '../components/task-status';
+import { capabilitiesOf } from '../state/capabilities';
 
 type References = {
   members: { memberId: string; name: string; active: boolean; employeeId?: string }[];
@@ -42,15 +44,18 @@ export function TaskDetailScreen({
   const { t, label } = useI18n();
   const [editing, setEditing] = useState(false);
   const [addingChild, setAddingChild] = useState(false);
-  const [reporting, setReporting] = useState(false);
+  const [requestType, setRequestType] = useState<RequestKind | null>(null);
+  const [status, setStatus] = useState<{ tone: 'ok' | 'warning' | 'danger'; text: string } | null>(null);
   const [action, setAction] = useState<'approve' | 'confirm' | 'override' | 'complete' | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [reopening, setReopening] = useState(false);
   const [notice, setNotice] = useState('');
   const endpoint = readOnly ? `/api/work/tasks/${taskId}` : `/api/manager/tasks/${taskId}`;
-  const canManage = !readOnly && (actor.role === 'ADMIN' || actor.role === 'MANAGER');
-  // A completion report may be filed by any authenticated MEMBER, MANAGER or ADMIN; a VIEWER stays
-  // read-only. Eligibility itself is a server answer, never a conclusion drawn here.
-  const canReport = actor.role !== 'VIEWER';
+  const capabilities = capabilitiesOf(actor);
+  const canManage = !readOnly && capabilities.canEdit;
+  // A completion report may be filed by any authenticated MEMBER, MANAGER or ADMIN; an extension
+  // request stays limited to the assigned MEMBER. Eligibility itself is a server answer.
+  const canReport = capabilities.canSubmitCompletionRequest;
   const detail = useQuery<TaskDetail>(keys.task(taskId), () => api.get<TaskDetail>(endpoint));
   const references = useQuery<References>(keys.references, () =>
     readOnly ? Promise.resolve({ members: [], skills: [], subprojects: [] }) : api.get<References>('/api/manager/references')
@@ -60,6 +65,12 @@ export function TaskDetailScreen({
     keys.reportEligibility(taskId),
     () => api.get<ReportEligibility>(`/api/employee/tasks/${taskId}/report-eligibility`),
     { enabled: canReport }
+  );
+  // Corrective reopening is an ADMIN-only read; a manager or member never requests it.
+  const reopen = useQuery<ReopenEligibility>(
+    keys.reopenEligibility(taskId),
+    () => api.get<ReopenEligibility>(`/api/manager/tasks/${taskId}/reopen-eligibility`),
+    { enabled: !readOnly && capabilities.canReopenTask }
   );
 
   if (detail.error) return <ErrorBox error={detail.error} onRetry={() => detail.refresh()} />;
@@ -75,9 +86,22 @@ export function TaskDetailScreen({
       ? t('tasks.addChildBlockedDepth')
       : '';
   // Eligibility is only "available" when the server answered and listed no refusal.
-  const reportBlocked = (eligibility.data?.reasons ?? []).map((reason) => t(reportReasonLabel(reason)));
+  const reportBlocked = (eligibility.data?.reasons ?? []).map((reason) => t(blockedReasonLabel(reason)));
   const reportReady = eligibility.data?.eligible === true;
   const assigneeNames = detail.data.assignees.map((entry) => entry.name);
+  // A refused completion capability (completed, cancelled, container) is not offered at all; it is
+  // never rendered as a disabled control that suggests the action might become possible.
+  const completionReasons = new Set(eligibility.data?.reasons ?? []);
+  const completionOffered =
+    canReport &&
+    eligibility.data !== undefined &&
+    !completionReasons.has('COMPLETED') &&
+    !completionReasons.has('CANCELLED') &&
+    !completionReasons.has('CONTAINER');
+  const extensionOffered = capabilities.canSubmitExtensionRequest && !finished && detail.data.children.length === 0;
+  const reopenReasons = (reopen.data?.reasons ?? []).map((reason) => t(`reopen.blocked.${reason}`));
+  const canReopen =
+    capabilities.canReopenTask && record.status === 'Done' && detail.data.children.length === 0;
   return (
     <div className="screen">
       <BackButton actor={actor} fallback="all-work" disabled={editing || addingChild || action !== null} />
@@ -100,7 +124,7 @@ export function TaskDetailScreen({
           </p>
         </div>
         {canManage ? (
-          <div className="filters">
+          <div className="compact-toolbar">
             <button type="button" className="button secondary" onClick={() => setEditing(true)}>
               {t('action.edit')}
             </button>
@@ -113,20 +137,57 @@ export function TaskDetailScreen({
             >
               {t('tasks.addChild')}
             </button>
-            {actor.role === 'ADMIN' ? (
-              <button type="button" className="button danger" onClick={() => setRemoving(true)}>
-                {t('delete.submit')}
-              </button>
-            ) : null}
             {!detail.data.children.length && record.displayStatus !== 'DONE' && record.displayStatus !== 'CANCELLED' ? (
               <button type="button" className="button" onClick={() => setAction('complete')}>
                 {t('tasks.completeDirect')}
               </button>
             ) : null}
+            {canReopen || actor.role === 'ADMIN' ? (
+              <Menu label={t('action.more')} className="row-menu">
+                {(close) => (
+                  <>
+                    {canReopen ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="menu-item"
+                        onClick={() => {
+                          close();
+                          setReopening(true);
+                        }}
+                      >
+                        {t('reopen.action')}
+                      </button>
+                    ) : null}
+                    {actor.role === 'ADMIN' ? (
+                      <>
+                        <div className="menu-separator" role="separator" />
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="menu-item danger"
+                          onClick={() => {
+                            close();
+                            setRemoving(true);
+                          }}
+                        >
+                          {t('delete.submit')}
+                        </button>
+                      </>
+                    ) : null}
+                  </>
+                )}
+              </Menu>
+            ) : null}
           </div>
         ) : null}
       </div>
       {canManage && childBlockedReason ? <p className="muted small">{childBlockedReason}</p> : null}
+      {status ? (
+        <div className={`banner ${status.tone}`} role={status.tone === 'danger' ? 'alert' : 'status'}>
+          {status.text}
+        </div>
+      ) : null}
       {notice ? (
         <div className="banner ok" role="status">
           {notice}
@@ -139,7 +200,7 @@ export function TaskDetailScreen({
           <div>
             <dt>{t('column.status')}</dt>
             <dd>
-              <Badge tone={displayTone(record.displayStatus)}>{t(`taskStatus.${record.displayStatus}`)}</Badge>
+              <TaskStatusBadge state={record.displayStatus} missing={record.scheduleMissing} showDetail />
             </dd>
           </div>
           <div>
@@ -172,7 +233,7 @@ export function TaskDetailScreen({
             <p className="muted small">{t('tasks.technicalHint')}</p>
             <div className="detail-grid">
               <div>
-                <dt>{t('column.status')} (DB)</dt>
+                <dt>{t('task.workflowStatus')}</dt>
                 <dd>
                   <Badge tone={statusTone(record.status)}>{label('task.status', record.status)}</Badge>
                 </dd>
@@ -257,7 +318,7 @@ export function TaskDetailScreen({
                     <a href={`#/task/${child.taskId}`}>{child.taskName}</a>
                   </td>
                   <td>
-                    <Badge tone={statusTone(child.status)}>{label('task.status', child.status)}</Badge>
+                    <TaskStatusBadge state={child.displayStatus} missing={child.scheduleMissing} showDetail />
                   </td>
                   <td>{child.dueDate ?? t('common.unset')}</td>
                 </tr>
@@ -269,10 +330,10 @@ export function TaskDetailScreen({
 
       {canManage ? (
         <>
-          <Section title={t('tasks.history')}>
-            {detail.data.deadlineHistory.length === 0 ? (
-              <EmptyState />
-            ) : (
+          {detail.data.deadlineHistory.length === 0 ? (
+            <CollapsedSection title={t('tasks.history')} />
+          ) : (
+            <Section title={t('tasks.history')}>
               <table className="table">
                 <thead>
                   <tr>
@@ -295,13 +356,13 @@ export function TaskDetailScreen({
                   ))}
                 </tbody>
               </table>
-            )}
-          </Section>
+            </Section>
+          )}
 
-          <Section title={t('tasks.confirmSchedule')}>
-            {detail.data.confirmations.length === 0 ? (
-              <EmptyState />
-            ) : (
+          {detail.data.confirmations.length === 0 ? (
+            <CollapsedSection title={t('tasks.confirmSchedule')} />
+          ) : (
+            <Section title={t('tasks.confirmSchedule')}>
               <ul className="list">
                 {detail.data.confirmations.map((confirmation) => (
                   <li key={confirmation.scheduleConfirmationId}>
@@ -311,23 +372,36 @@ export function TaskDetailScreen({
                   </li>
                 ))}
               </ul>
-            )}
-          </Section>
+            </Section>
+          )}
         </>
       ) : null}
 
-      {canReport ? (
+      {canReport || capabilities.canSubmitExtensionRequest ? (
         <Section
           title={t('report.heading')}
           actions={
-            <button
-              type="button"
-              className="button"
-              disabled={!reportReady || reporting}
-              onClick={() => setReporting(true)}
-            >
-              {t('report.heading')}
-            </button>
+            <div className="inline-actions">
+              {completionOffered ? (
+                <button
+                  type="button"
+                  className="button secondary"
+                  disabled={!reportReady}
+                  onClick={() => setRequestType('COMPLETION_REPORT')}
+                >
+                  {t('request.action.completion')}
+                </button>
+              ) : null}
+              {extensionOffered ? (
+                <button
+                  type="button"
+                  className="button secondary"
+                  onClick={() => setRequestType('DEADLINE_CHANGE')}
+                >
+                  {t('request.action.deadline')}
+                </button>
+              ) : null}
+            </div>
           }
         >
           <p className="muted small">
@@ -338,13 +412,11 @@ export function TaskDetailScreen({
           {eligibility.data ? (
             <p className="muted small">{t('report.reporter', { name: eligibility.data.reporterName })}</p>
           ) : null}
-          {canManage ? (
-            <p className="muted small">{t('tasks.completeDirectBody')}</p>
-          ) : null}
-          {!eligibility.data && eligibility.loading ? (
+          {canManage ? <p className="muted small">{t('tasks.completeDirectBody')}</p> : null}
+          {canReport && !eligibility.data && eligibility.loading ? (
             <p className="muted small">{t('report.eligibilityLoading')}</p>
           ) : null}
-          {eligibility.error ? (
+          {canReport && eligibility.error ? (
             <div className="banner warning" role="status">
               <span>{t('report.eligibilityUnavailable')}</span>
               <button type="button" className="link-button" onClick={() => eligibility.refresh()}>
@@ -352,7 +424,7 @@ export function TaskDetailScreen({
               </button>
             </div>
           ) : null}
-          {reportBlocked.length > 0 ? (
+          {canReport && reportBlocked.length > 0 ? (
             <div className="validation-summary" role="status">
               <ul>
                 {reportBlocked.map((reason) => (
@@ -360,22 +432,98 @@ export function TaskDetailScreen({
                 ))}
               </ul>
             </div>
-          ) : reportReady ? (
-            <p className="muted small">{t('myWork.completionHeading')}</p>
           ) : null}
-          {reporting ? (
-            <CompletionReportPanel
-              taskId={record.taskId}
-              blockedReasons={reportBlocked}
-              reporterName={eligibility.data?.reporterName}
-              onDismiss={() => setReporting(false)}
-              onSubmitted={() => {
-                detail.refresh();
-                eligibility.refresh();
-              }}
-            />
+          {!completionOffered && !extensionOffered ? (
+            <p className="muted small">{t('request.notAvailable')}</p>
           ) : null}
         </Section>
+      ) : null}
+
+      {requestType ? (
+        <RequestDialog
+          key={`${record.taskId}:${requestType}`}
+          taskId={record.taskId}
+          taskName={record.taskName}
+          projectName={context.projectName || record.projectId}
+          subprojectName={subprojectPath || undefined}
+          currentDeadline={record.dueDate}
+          requestType={requestType}
+          submissionEnabled={eligibility.data?.submissionEnabled ?? false}
+          blockedReasons={requestType === 'COMPLETION_REPORT' ? reportBlocked : []}
+          onClose={() => setRequestType(null)}
+          onResult={(value) => {
+            setStatus(value);
+            detail.refresh();
+            eligibility.refresh();
+            queryCache.invalidate([keys.myWork, keys.myRequests]);
+          }}
+        />
+      ) : null}
+
+      {reopening && capabilities.canReopenTask ? (
+        <ConfirmDialog
+          title={t('reopen.title')}
+          destructive
+          confirmText={reopen.data?.confirmationText ?? `REOPEN ${record.taskId}`}
+          reasonRequired
+          message={
+            <div className="stack">
+              <p>
+                <strong>{record.taskName}</strong> · {record.taskId}
+              </p>
+              <p>{t('reopen.body')}</p>
+              {reopen.data?.completedAt ? (
+                <p className="muted small">{t('reopen.completedAt', { at: reopen.data.completedAt.slice(0, 16).replace('T', ' ') })}</p>
+              ) : (
+                <p className="muted small">{t('reopen.noCompletionRecord')}</p>
+              )}
+              <p className="muted small">{t('reopen.resultingState')}</p>
+              {reopen.data?.projectReopenRequired ? (
+                <div className="banner warning">
+                  {t('reopen.projectReopen', { name: reopen.data.projectName })}
+                </div>
+              ) : null}
+              {reopenReasons.length > 0 ? (
+                <div className="banner danger">
+                  <ul>
+                    {reopenReasons.map((reason) => (
+                      <li key={reason}>{reason}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          }
+          onCancel={() => setReopening(false)}
+          onConfirm={async ({ confirmation, reason }) => {
+            await api.post(`/api/manager/tasks/${record.taskId}/reopen`, {
+              idempotencyKey: `reopen-${record.taskId}-${record.revision}-${Date.now()}`,
+              revision: record.revision,
+              reason,
+              confirmation,
+              reopenProject: reopen.data?.projectReopenRequired === true || undefined
+            });
+            setReopening(false);
+            setStatus({ tone: 'ok', text: t('reopen.done') });
+            queryCache.invalidate([
+              keys.task(record.taskId),
+              keys.tasks,
+              keys.taskIndex,
+              keys.overview,
+              keys.project(record.projectId),
+              keys.projects,
+              keys.myWork,
+              keys.timeline,
+              keys.requests,
+              keys.workload,
+              keys.workProjects,
+              keys.workOverview
+            ]);
+            detail.refresh();
+            reopen.refresh();
+            eligibility.refresh();
+          }}
+        />
       ) : null}
 
       {editing ? (
@@ -486,5 +634,19 @@ export function TaskDetailScreen({
         />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * An empty history panel is a single closed line instead of a bordered placeholder, and it stays
+ * reachable so a reader can confirm the history exists and is empty.
+ */
+function CollapsedSection({ title }: { title: string }): JSX.Element {
+  const { t } = useI18n();
+  return (
+    <details className="disclosure history-empty">
+      <summary>{title}</summary>
+      <p className="muted small">{t('state.empty')}</p>
+    </details>
   );
 }

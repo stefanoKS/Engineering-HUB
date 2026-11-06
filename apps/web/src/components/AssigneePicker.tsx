@@ -26,12 +26,15 @@ export function AssigneePicker({
   members,
   selectedIds,
   onChange,
-  disabled
+  disabled,
+  primaryId
 }: {
   members: AssignableMember[];
   selectedIds: string[];
   onChange: (memberIds: string[]) => void;
   disabled?: boolean;
+  /** The stored primary owner, marked in the selection. It is never reordered or replaced. */
+  primaryId?: string;
 }): JSX.Element {
   const { t } = useI18n();
   const [filter, setFilter] = useState('');
@@ -70,40 +73,8 @@ export function AssigneePicker({
   return (
     <div className="assignee-picker stack">
       <p className="muted small">{t('assignee.hint')}</p>
-      <label className="field">
-        <span className="field-label">{t('assignee.search')}</span>
-        <input
-          type="search"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-          disabled={disabled}
-        />
-      </label>
 
-      <section className="assignee-panel" aria-label={t('assignee.available')}>
-        <h4>{t('assignee.available')}</h4>
-        {available.length === 0 ? (
-          <p className="muted small">{active.length === 0 ? t('common.unset') : t('assignee.none')}</p>
-        ) : (
-          <ul className="assignee-list" role="list">
-            {available.map((member) => (
-              <li key={member.memberId}>
-                <button
-                  type="button"
-                  className="assignee-option"
-                  onClick={() => add(member.memberId)}
-                  disabled={disabled}
-                  aria-label={`${t('assignee.available')}: ${member.name}`}
-                >
-                  <span className="assignee-name">{member.name}</span>
-                  {member.employeeId ? <span className="muted small">{member.employeeId}</span> : null}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
+      {/* The effective selection reads first; the searchable roster opens only when needed. */}
       <section className="assignee-panel" aria-label={t('assignee.selected')}>
         <h4>{t('assignee.selected')}</h4>
         {chosen.length === 0 ? (
@@ -111,8 +82,11 @@ export function AssigneePicker({
         ) : (
           <ul className="chip-list" role="list">
             {chosen.map((member) => (
-              <li key={member.memberId} className="chip">
+              <li key={member.memberId} className={member.memberId === primaryId ? 'chip chip-primary' : 'chip'}>
                 <span>{member.name}</span>
+                {member.memberId === primaryId ? (
+                  <span className="chip-primary-label">{t('task.primaryAssignee')}</span>
+                ) : null}
                 {member.active ? null : <span className="chip-inactive">{t('assignee.inactive')}</span>}
                 <button
                   type="button"
@@ -129,6 +103,45 @@ export function AssigneePicker({
         )}
         <p className="muted small">{t('assignee.ownerNote')}</p>
       </section>
+
+      <details className="disclosure">
+        <summary>{t('assignee.addMore')}</summary>
+        <div className="disclosure-body">
+          <label className="field">
+            <span className="field-label">{t('assignee.search')}</span>
+            <input
+              type="search"
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              disabled={disabled}
+            />
+          </label>
+
+          <section className="assignee-panel" aria-label={t('assignee.available')}>
+            <h4>{t('assignee.available')}</h4>
+            {available.length === 0 ? (
+              <p className="muted small">{active.length === 0 ? t('common.unset') : t('assignee.none')}</p>
+            ) : (
+              <ul className="assignee-list" role="list">
+                {available.map((member) => (
+                  <li key={member.memberId}>
+                    <button
+                      type="button"
+                      className="assignee-option"
+                      onClick={() => add(member.memberId)}
+                      disabled={disabled}
+                      aria-label={`${t('assignee.available')}: ${member.name}`}
+                    >
+                      <span className="assignee-name">{member.name}</span>
+                      {member.employeeId ? <span className="muted small">{member.employeeId}</span> : null}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+      </details>
     </div>
   );
 }

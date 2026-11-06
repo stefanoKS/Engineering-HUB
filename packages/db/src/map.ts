@@ -14,7 +14,7 @@ import type {
   Task,
   TaskRequest
 } from '@eh/contracts';
-import { businessDate, displayTaskStatus, effectiveRole, projectScheduleStatus } from '@eh/domain';
+import { businessDate, effectiveRole, projectScheduleStatus, taskScheduleStatus } from '@eh/domain';
 
 export type MemberRow = {
   member_id: string;
@@ -196,6 +196,11 @@ export type TaskRow = {
 };
 
 export function toTask(row: TaskRow): Task {
+  const schedule = taskScheduleStatus({
+    status: row.status,
+    plannedStart: row.planned_start,
+    dueDate: row.due_date
+  });
   return {
     taskId: row.task_id,
     projectId: row.project_id,
@@ -206,7 +211,8 @@ export function toTask(row: TaskRow): Task {
     ownerMemberId: row.owner_member_id,
     ownerName: row.owner_name ?? '',
     status: row.status,
-    displayStatus: displayTaskStatus({ status: row.status, dueDate: row.due_date }),
+    displayStatus: schedule.state,
+    scheduleMissing: schedule.missing,
     priority: row.priority,
     plannedStart: row.planned_start,
     dueDate: row.due_date,

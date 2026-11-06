@@ -6,8 +6,9 @@
  * the page regains focus; including it in a query key re-reads the server's answer, which is
  * calculated from the same calendar date. Nothing polls, and nothing is written.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { businessDate } from '@eh/domain';
+import { DATE_DEPENDENT_PREFIXES, queryCache } from './cache';
 
 const DAY_MS = 86_400_000;
 const TOKYO_OFFSET_MS = 9 * 60 * 60 * 1000;
@@ -46,5 +47,23 @@ export function useBusinessDate(): string {
     };
   }, [sync]);
 
+  return today;
+}
+
+/**
+ * The same business date, plus one invalidation when it changes.
+ *
+ * The server derives every schedule state from its own Asia/Tokyo date, so a page left open across
+ * midnight must re-read the answers it shows rather than keep yesterday's badge. Only mounted
+ * queries are refetched; nothing is written and nothing polls.
+ */
+export function useBusinessDateRefresh(): string {
+  const today = useBusinessDate();
+  const seen = useRef(today);
+  useEffect(() => {
+    if (seen.current === today) return;
+    seen.current = today;
+    queryCache.invalidate([...DATE_DEPENDENT_PREFIXES]);
+  }, [today]);
   return today;
 }

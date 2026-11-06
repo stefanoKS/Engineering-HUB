@@ -209,8 +209,26 @@ export type DeadlineState = z.infer<typeof DeadlineState>;
 export const ReviewState = z.enum(['NONE', 'PENDING', 'APPROVED', 'STALE']);
 export type ReviewState = z.infer<typeof ReviewState>;
 
-/** The only user-facing active states: 進行中 / 期限超過 / 完了 (plus 取消 for cancelled work). */
-export const DisplayTaskStatus = z.enum(['IN_PROGRESS', 'OVERDUE', 'DONE', 'CANCELLED']);
+/**
+ * The displayed task schedule state.
+ *
+ * Derived from the plan dates (`plannedStart`, `dueDate`) and the Asia/Tokyo business date at read
+ * time; it is never stored, never accepted from a browser and never advanced by a scheduled job.
+ * The stored `TaskStatus` value stays the workflow fact (assignment, blocking, completion) and is
+ * a secondary detail, never the primary schedule badge. `OVERDUE` keeps its existing semantic
+ * identifier for 遅延, and `INVALID_DATES` is a schedule-data warning rather than a lifecycle
+ * state.
+ */
+export const DisplayTaskStatus = z.enum([
+  'DONE',
+  'CANCELLED',
+  'INVALID_DATES',
+  'OVERDUE',
+  'PLANNED',
+  'IN_PROGRESS',
+  'START_NOT_SET',
+  'DATES_NOT_SET'
+]);
 export type DisplayTaskStatus = z.infer<typeof DisplayTaskStatus>;
 
 export const Task = z.object({
@@ -223,8 +241,10 @@ export const Task = z.object({
   ownerMemberId: z.string().nullable(),
   ownerName: z.string(),
   status: TaskStatus,
-  /** Derived from the deadline and the completion state; never persisted. */
+  /** Derived from the plan dates and the business date; never persisted. */
   displayStatus: DisplayTaskStatus,
+  /** Which plan boundary the display state had to state as missing; a detail, not a state. */
+  scheduleMissing: ScheduleMissingPart.optional(),
   priority: Priority,
   plannedStart: IsoDate.nullable(),
   dueDate: IsoDate.nullable(),
@@ -264,6 +284,7 @@ export const TaskSummary = z.object({
   taskName: z.string(),
   status: TaskStatus,
   displayStatus: DisplayTaskStatus,
+  scheduleMissing: ScheduleMissingPart.optional(),
   priority: Priority,
   ownerMemberId: z.string().nullable(),
   ownerName: z.string(),

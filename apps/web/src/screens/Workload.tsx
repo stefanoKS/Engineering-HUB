@@ -21,8 +21,9 @@ import { api, queryString } from '../api/client';
 import { keys, useQuery } from '../state/cache';
 import { useRouteMemoryState } from '../state/navigation';
 import { useI18n } from '../i18n';
-import { Badge, ErrorBox, Pagination, Section, statusTone } from '../components/ui';
+import { ErrorBox, Pagination, Section } from '../components/ui';
 import { DeadlineCell } from '../components/deadline';
+import { TaskStatusBadge, WorkflowHint } from '../components/task-status';
 
 type BootstrapShape = {
   references: {
@@ -513,7 +514,7 @@ function DrilldownPanel({
   onPage: (page: number) => void;
   compact?: boolean;
 }): JSX.Element {
-  const { t, label } = useI18n();
+  const { t } = useI18n();
   const params = {
     ...base,
     kind: drill.kind,
@@ -570,7 +571,8 @@ function DrilldownPanel({
                 </td>
                 <td className="muted small">{task.assigneeNames.join('、') || t('common.unset')}</td>
                 <td>
-                  <Badge tone={statusTone(task.status)}>{label('task.status', task.status)}</Badge>
+                  <TaskStatusBadge state={task.displayStatus} missing={task.scheduleMissing} showDetail />
+                  <WorkflowHint status={task.status} />
                 </td>
                 <td>
                   <DeadlineCell

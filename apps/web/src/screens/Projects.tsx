@@ -6,15 +6,15 @@ import { PROJECT_SCHEDULE_STATES } from '@eh/contracts';
 import { api, queryString } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
-import { EmptyState, ErrorBox, Pagination, ProgressBar, Section } from '../components/ui';
+import { EmptyState, ErrorBox, Pagination, Section } from '../components/ui';
 import { ConfirmDialog, SelectInput, TextInput, useIdempotencyKey, useSave, type SaveStateValue } from '../components/forms';
 import { SaveState } from '../components/ui';
-import { DeadlineCell, deadlineStateOf } from '../components/deadline';
 import { ScheduleBadge } from '../components/project-schedule';
+import { ProjectTable, type ProjectRowView, type ProjectSort } from '../components/project-table';
 import { navigate } from '../App';
-import { projectColor } from '@eh/domain';
 import { useRouteMemoryState } from '../state/navigation';
 import { useBusinessDate } from '../state/business-date';
+import { capabilitiesOf } from '../state/capabilities';
 
 type ProjectRow = ProjectSummary & { _revision: number };
 type Page = {
@@ -30,7 +30,6 @@ type References = { responsibilities: Reference[]; members: { memberId: string; 
 /** The status filter is the derived schedule state, resolved on the server before paging. */
 const SCHEDULE_STATES: ProjectScheduleState[] = [...PROJECT_SCHEDULE_STATES];
 const PRIORITIES: Project['priority'][] = ['Low', 'Medium', 'High', 'Critical'];
-type ProjectSort = 'deadline' | 'name' | 'responsibility' | 'owner' | 'schedule' | 'priority' | 'updated';
 
 export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
   const { t } = useI18n();
@@ -53,33 +52,20 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
   const list = useQuery<Page>(listKey, () =>
     api.get<Page>(`/api/manager/projects${queryString({ responsibilityId, unassigned, schedule, query, sort, direction, page, pageSize: 25 })}`)
   );
-  const canManage = actor.role === 'ADMIN' || actor.role === 'MANAGER';
-  const grouped = !responsibilityId && !unassigned && list.data
-    ? Array.from(list.data.items.reduce((groups, project) => {
-        const key = project.responsibilityId ?? '__unassigned__';
-        const existing = groups.get(key) ?? { name: project.responsibilityName || t('overview.unassigned'), items: [] as ProjectRow[] };
-        existing.items.push(project);
-        groups.set(key, existing);
-        return groups;
-      }, new Map<string, { name: string; items: ProjectRow[] }>()))
-    : [];
-  const groupTotal = (groupId: string, displayed: number): number =>
-    list.data?.groupTotals?.find((total) => (total.responsibilityId ?? '__unassigned__') === groupId)?.total ?? displayed;
+  const canManage = capabilitiesOf(actor).canEdit;
+  const capabilities = capabilitiesOf(actor);
   const setSortOrder = (next: ProjectSort): void => {
     setDirection(next === sort ? (direction === 'asc' ? 'desc' : 'asc') : 'asc');
     setSort(next);
     setPage(1);
   };
-  const toggleGroup = (group: string): void => setCollapsedGroups((current) => {
-    const next = new Set(current);
-    if (next.has(group)) next.delete(group); else next.add(group);
-    return next;
-  });
-  const sortHeader = (key: ProjectSort, text: string): JSX.Element => (
-    <button type="button" className="table-sort" onClick={() => setSortOrder(key)} aria-label={`${text}: ${t('workload.sort.toggle')}`}>
-      {text} {sort === key ? <span aria-hidden="true">{direction === 'asc' ? '↑' : '↓'}</span> : null}
-    </button>
-  );
+  const toggleGroup = (group: string): void =>
+    setCollapsedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
 
   async function openEditor(summary: ProjectRow): Promise<void> {
     await loadEditor(async () => {
@@ -101,11 +87,51 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
     });
   }
 
+  // The shared table renders the identity, schedule and counts; only the action cell is a
+  // manager concern, so a role without a management capability renders no action column at all.
+  const toRow = (project: ProjectRow): ProjectRowView => ({
+    projectId: project.projectId,
+    projectName: project.projectName,
+    responsibilityId: project.responsibilityId,
+    responsibilityName: project.responsibilityName,
+    schedule: project.schedule,
+    priority: project.priority,
+    committedDeadline: project.committedDeadline,
+    progressPercent: project.progressPercent,
+    openWork: project.openWork,
+    overdueWork: project.overdueWork,
+    nextAction: project.nextAction,
+    actions: (
+      <div className="actions">
+        <button type="button" className="link-button" onClick={() => void openEditor(project)}>
+          {t('action.edit')}
+        </button>
+        <button type="button" className="link-button" onClick={() => setArchiveTarget(project)}>
+          {t('projects.archive')}
+        </button>
+        {capabilities.canDelete ? (
+          <button type="button" className="link-button danger" onClick={() => void startDelete(project)}>
+            {t('projects.delete')}
+          </button>
+        ) : null}
+      </div>
+    )
+  });
+
   return (
     <div className="screen">
       <div className="screen-header">
         <h2>{t('nav.projects')}</h2>
-        <div className="filters">
+        {canManage ? (
+          <button type="button" className="button" onClick={() => setEditing({ mode: 'create' })}>
+            {t('projects.new')}
+          </button>
+        ) : null}
+      </div>
+
+      <div className="compact-toolbar">
+        <label className="field">
+          <span className="field-label">{t('filter.responsibility')}</span>
           <SelectInput
             value={unassigned ? '__unassigned__' : responsibilityId}
             onChange={(value) => {
@@ -119,6 +145,9 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
               { value: '__unassigned__', label: t('overview.unassigned') }
             ]}
           />
+        </label>
+        <label className="field">
+          <span className="field-label">{t('column.status')}</span>
           <SelectInput
             value={schedule}
             onChange={(value) => {
@@ -128,20 +157,20 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
             allowEmpty={t('filter.all')}
             options={SCHEDULE_STATES.map((value) => ({ value, label: t(`project.schedule.${value}`) }))}
           />
+        </label>
+        <label className="field grow">
+          <span className="field-label">{t('filter.searchProjects')}</span>
           <input
-            placeholder={t('filter.query')}
+            type="search"
+            aria-label={t('filter.searchProjects')}
+            placeholder={t('filter.searchProjects')}
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
               setPage(1);
             }}
           />
-          {canManage ? (
-            <button type="button" className="button" onClick={() => setEditing({ mode: 'create' })}>
-              {t('projects.new')}
-            </button>
-          ) : null}
-        </div>
+        </label>
       </div>
 
       {editorLoading && <p role="status">{t('state.loading')}</p>}
@@ -153,119 +182,17 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
       ) : list.data.items.length === 0 ? (
         <EmptyState />
       ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>{sortHeader('name', t('column.name'))}</th>
-              <th>{sortHeader('responsibility', t('projects.responsibility'))}</th>
-              <th>{sortHeader('schedule', t('column.status'))}</th>
-              <th>{sortHeader('deadline', t('column.deadline'))}</th>
-              <th>{t('column.progress')}</th>
-              <th>{t('column.actions')}</th>
-            </tr>
-          </thead>
-          {grouped.length ? grouped.map(([groupId, group]) => (
-            <tbody key={groupId}>
-              <tr className="project-group-heading">
-                <th colSpan={6}>
-                  <button type="button" className="link-button" aria-expanded={!collapsedGroups.has(groupId)} onClick={() => toggleGroup(groupId)}>
-                    {collapsedGroups.has(groupId) ? '▸' : '▾'} {group.name} ({
-                      groupTotal(groupId, group.items.length)
-                    })
-                  </button>
-                  {groupTotal(groupId, group.items.length) > group.items.length
-                    ? <span className="muted small">{t('projects.groupContinues')}</span>
-                    : null}
-                </th>
-              </tr>
-              {!collapsedGroups.has(groupId) ? group.items.map((project) => (
-              <tr key={project.projectId} style={{ ['--project-accent' as string]: projectColor(project.projectId) }}>
-                <td>
-                  <span className="project-dot" style={{ background: projectColor(project.projectId) }} aria-hidden="true" />
-                  <a href={`#/project/${project.projectId}`}>{project.projectName}</a>
-                  <div className="muted small">{project.nextAction}</div>
-                </td>
-                <td>{project.responsibilityName || t('overview.unassigned')}</td>
-                <td>
-                  <ScheduleBadge schedule={project.schedule} />
-                </td>
-                <td>
-                  <DeadlineCell dueDate={project.committedDeadline} state={deadlineStateOf(project.schedule)} showLabel={false} />
-                </td>
-                <td>
-                  <ProgressBar value={project.progressPercent} />
-                  <div className="muted small">
-                    {t('overview.openWork')}: {project.openWork} · {t('overview.overdue')}: {project.overdueWork}
-                  </div>
-                </td>
-                <td className="project-actions-cell">
-                  <div className="actions">
-                    {canManage ? (
-                      <>
-                        <button type="button" className="link-button" onClick={() => void openEditor(project)}>
-                          {t('action.edit')}
-                        </button>
-                        <button type="button" className="link-button" onClick={() => setArchiveTarget(project)}>
-                          {t('projects.archive')}
-                        </button>
-                        {actor.role === 'ADMIN' ? (
-                          <button type="button" className="link-button danger" onClick={() => void startDelete(project)}>
-                            {t('projects.delete')}
-                          </button>
-                        ) : null}
-                      </>
-                    ) : null}
-                  </div>
-                </td>
-              </tr>
-              )) : null}
-            </tbody>
-          )) : (
-          <tbody>
-            {list.data.items.map((project) => (
-              <tr key={project.projectId} style={{ ['--project-accent' as string]: projectColor(project.projectId) }}>
-                <td>
-                  <span className="project-dot" style={{ background: projectColor(project.projectId) }} aria-hidden="true" />
-                  <a href={`#/project/${project.projectId}`}>{project.projectName}</a>
-                  <div className="muted small">{project.nextAction}</div>
-                </td>
-                <td>{project.responsibilityName || t('overview.unassigned')}</td>
-                <td>
-                  <ScheduleBadge schedule={project.schedule} />
-                </td>
-                <td>
-                  <DeadlineCell dueDate={project.committedDeadline} state={deadlineStateOf(project.schedule)} showLabel={false} />
-                </td>
-                <td>
-                  <ProgressBar value={project.progressPercent} />
-                  <div className="muted small">
-                    {t('overview.openWork')}: {project.openWork} · {t('overview.overdue')}: {project.overdueWork}
-                  </div>
-                </td>
-                <td className="project-actions-cell">
-                  <div className="actions">
-                    {canManage ? (
-                      <>
-                        <button type="button" className="link-button" onClick={() => void openEditor(project)}>
-                          {t('action.edit')}
-                        </button>
-                        <button type="button" className="link-button" onClick={() => setArchiveTarget(project)}>
-                          {t('projects.archive')}
-                        </button>
-                        {actor.role === 'ADMIN' ? (
-                          <button type="button" className="link-button danger" onClick={() => void startDelete(project)}>
-                            {t('projects.delete')}
-                          </button>
-                        ) : null}
-                      </>
-                    ) : null}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          )}
-        </table>
+        <ProjectTable
+          items={list.data.items.map(toRow)}
+          groupTotals={list.data.groupTotals}
+          grouped={!responsibilityId && !unassigned}
+          sort={sort}
+          direction={direction}
+          onSort={setSortOrder}
+          collapsedGroups={collapsedGroups}
+          onToggleGroup={toggleGroup}
+          showActions
+        />
       )}
 
       {list.data ? (

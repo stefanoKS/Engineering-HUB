@@ -123,9 +123,10 @@ Create responsibility areas, then projects and tasks. Assign employees as primar
 * A MANAGER or ADMIN may also complete authorized work directly from すべてのタスク or the task detail
   (完了にする). Containers, cancelled and already-done work are refused; a pending completion report
   is withdrawn with a recorded reason and a `TASK_COMPLETED_DIRECT` audit row.
-* The displayed state is derived: 完了 when done, 期限超過 when the Asia/Tokyo date is past the
-  deadline, otherwise 進行中. Nothing is persisted by a nightly job and the stored legacy status is
-  kept.
+* The displayed state is derived from the plan dates and the Asia/Tokyo date: 予定 before the start,
+  進行中 from the start, 遅延 after the finish, with 開始日未設定 / 日程未設定 / 日程データ要確認 when
+  the plan is incomplete or reversed; 完了 and 取消 win over all of them. Nothing is persisted by a
+  nightly job and the stored legacy status is kept as workflow history.
 * The member sees 承認待ち / 承認済 / 却下 / 差戻し / 再確認が必要 for their own requests only; another
   member's receipt is not readable.
 
@@ -212,9 +213,9 @@ data repair and no database step is required. On an authorized Windows LAN host:
    `npm.cmd run validate`, `npm.cmd run build` and `npm.cmd run smoke:prod`.
 4. Restart with `deploy\windows\Start-Lan.cmd` (or `npm.cmd run start:lan`), confirm `/readyz`, then
    hard-reload the browser so the new bundle is used. Verify that a MEMBER sees `新規タスク` and
-   `新規サブプロジェクト` on 自分の担当タスク, that 納期 is prominent with a red 期限超過 badge only
-   when overdue, that 自分の申請 starts collapsed, and that 工数レポート shows the 今日 marker and a
-   date under every bar.
+   `新規サブプロジェクト` on 自分の担当タスク, that 納期 is prominent and only a past finish shows a
+   遅延 badge (a compact deadline column stays neutral), that 自分の申請 starts collapsed, and that
+   工数レポート shows the 今日 marker and a date under every bar.
 
 Do not run the migration command for this UI/API-only update, and do not point the validation
 commands at the operational database.

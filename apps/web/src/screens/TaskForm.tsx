@@ -447,6 +447,7 @@ export function TaskForm({
             selectedIds={assigneeIds}
             onChange={setAssigneeIds}
             disabled={save.state === 'saving'}
+            primaryId={task?.ownerMemberId ?? undefined}
           />
         </section>
 

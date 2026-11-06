@@ -63,6 +63,38 @@ export function canCreateOwnTask(identity: Identity | null): boolean {
 }
 
 /**
+ * Creating a project, a subproject or a task from the member project screens.
+ *
+ * A MEMBER files new work immediately; the server still decides the owner, the status, the
+ * visibility and the hierarchy. Editing, archiving, deleting and reopening an existing record
+ * stays a manager or ADMIN capability, including for a record the member created.
+ */
+export function canCreateOwnProject(identity: Identity | null): boolean {
+  return !!identity && identity.verified && identity.active && identity.role === 'MEMBER';
+}
+
+/** Editing and archiving an existing record is a management capability. */
+export function canEditRecords(identity: Identity | null): boolean {
+  return isManager(identity);
+}
+
+/** Only an ADMIN holds the administrative removal capability. */
+export function canDeleteRecords(identity: Identity | null): boolean {
+  return isAdmin(identity);
+}
+
+/**
+ * Corrective reopening of an accidentally completed task is an administrative act.
+ *
+ * It is deliberately narrower than completion: a MANAGER decides completion through the reviewed
+ * workflow, while reversing a stored completion is an explicit ADMIN correction with its own
+ * reason, confirmation and audit evidence.
+ */
+export function canReopenTask(identity: Identity | null): boolean {
+  return isAdmin(identity);
+}
+
+/**
  * A completion report may be filed by any verified, active MEMBER, MANAGER or ADMIN who can reach
  * the task - assignment is not required, because a person who observed the work may report it.
  * VIEWER stays read-only. This is the approved exception for COMPLETION_REPORT only: it never

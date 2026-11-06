@@ -82,6 +82,7 @@ describe('read-only member projection', () => {
       projectId: 'PRJ-1',
       projectName: 'Alpha',
       description: 'Overview',
+      responsibilityId: 'RSP-1',
       responsibilityName: 'Design',
       projectOwnerName: 'Owner',
       status: 'Active',
@@ -91,11 +92,16 @@ describe('read-only member projection', () => {
       progressPercent: 25,
       health: 'OK',
       activeTaskCount: 2,
+      overdueTaskCount: 1,
       completedTaskCount: 1
     };
     expect(WorkProject.safeParse(base).success).toBe(true);
     expect(WorkProject.safeParse({ ...base, description: undefined }).success).toBe(false);
     expect(WorkProject.safeParse({ ...base, activeTaskCount: undefined }).success).toBe(false);
+    expect(WorkProject.safeParse({ ...base, overdueTaskCount: undefined }).success).toBe(false);
+    // The unassigned (未分類) scope is a real value, so the grouping key is nullable.
+    expect(WorkProject.safeParse({ ...base, responsibilityId: null }).success).toBe(true);
+    expect(WorkProject.safeParse({ ...base, responsibilityId: undefined }).success).toBe(false);
     // The derived schedule badge is part of the projection; the stored lifecycle value also stays.
     expect(WorkProject.safeParse({ ...base, schedule: undefined }).success).toBe(false);
     expect(Object.keys(WorkProject.shape)).toContain('schedule');

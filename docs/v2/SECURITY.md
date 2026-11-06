@@ -1,5 +1,41 @@
 # V2 Security Model
 
+## Member add-only creation, ADMIN reopening and modal requests — 2026-11-05
+
+**Identity and role stay server-side.** The new member commands (`POST /api/employee/projects`,
+`GET /api/employee/references`) read the role from the verified session. Their bodies are strict, so
+`projectOwnerId`, `status`, `dashboardVisibility`, `role` or any other extra field is a validation
+failure (400) rather than a silently ignored value; the owner is always the session member. The
+reopen routes require ADMIN from the same verified session and accept no role, actor or owner from
+the body.
+
+**Capability flags are presentation only.** `canCreateProject`, `canCreateSubproject`,
+`canCreateTask`, `canEdit`, `canArchive`, `canDelete`, `canReopenTask`, `canSubmitCompletionRequest`
+and `canSubmitExtensionRequest` decide what a screen renders. Every command re-checks the role:
+- MEMBER: may create new work; may not edit, archive, delete or reopen, including its own records.
+- MANAGER: keeps its management commands and is refused by the reopen routes (403).
+- VIEWER: may create nothing and may request nothing.
+- ADMIN: holds the reopening correction; the destructive ADMIN paths keep their own preflight.
+
+**No manager data is reused for member screens.** The member project list and overview read
+`/api/work/*` only; `GET /api/employee/references` publishes only active responsibilities' identity
+and label. Restricted and archived work is resolved on the server before any count, list or filter,
+and a guessed identifier answers `404`. The member overview payload contains no `nextAction`,
+`dashboardSummary`, notification setting, effort value or acceptance criterion.
+
+**A reopening is auditable and reversible only by a new event.** The original completion request,
+its approval and its audit rows are retained unchanged; the correction writes one `TASK_REOPENED`
+row naming the actor, reason, before/after state and the reversed completion request, and one
+`PROJECT_REOPENED` row when a parent project returns to `Active`. An archived or cancelled parent is
+never silently reactivated: the command refuses with an actionable explanation. A repeated delivery
+replays the stored answer instead of applying a second effect.
+
+**Request dialogs do not weaken submission policy.** The dialog is a presentation shell around the
+existing `POST /api/employee/requests`; the server re-checks visibility, role, assignment (for a
+deadline change), container status, lifecycle, pending state and submission availability on every
+submission, even when the action was offered earlier. No note, reason or draft is written to browser
+storage.
+
 ## Completion reports by any authorized reporter, and the read-only timeline — 2026-11-05
 
 **Approved policy change (narrow, deliberate).** A verified, active `MEMBER`, `MANAGER` or `ADMIN`

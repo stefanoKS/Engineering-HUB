@@ -1,6 +1,6 @@
 /** Task repository: records, summaries, relationships, approvals and confirmations. */
-import type { Task, TaskSummary } from '@eh/contracts';
-import { businessDate, deadlineState, displayTaskStatus, MAX_TASK_DEPTH } from '@eh/domain';
+import type { DisplayTaskStatus, Task, TaskSummary } from '@eh/contracts';
+import { businessDate, deadlineState, MAX_TASK_DEPTH, taskScheduleStatus } from '@eh/domain';
 import type { Queryable } from '../pool';
 import { newId } from '../ids';
 import { toTask, type TaskRow } from '../map';
@@ -84,6 +84,10 @@ export function reviewStateOf(row: {
 }
 
 export function toTaskSummary(row: TaskSummaryRow, today?: string): TaskSummary {
+  const schedule = taskScheduleStatus(
+    { status: row.status, plannedStart: row.planned_start, dueDate: row.due_date },
+    today
+  );
   return {
     taskId: row.task_id,
     projectId: row.project_id,
@@ -93,7 +97,8 @@ export function toTaskSummary(row: TaskSummaryRow, today?: string): TaskSummary 
     parentTaskId: row.parent_task_id,
     taskName: row.task_name,
     status: row.status,
-    displayStatus: displayTaskStatus({ status: row.status, dueDate: row.due_date }, today),
+    displayStatus: schedule.state,
+    scheduleMissing: schedule.missing,
     priority: row.priority,
     ownerMemberId: row.owner_member_id,
     ownerName: row.owner_name ?? '',
@@ -123,7 +128,7 @@ export type TaskFilters = {
   status?: string;
   workState?: 'OPEN';
   /** Derived display state; resolved on the server with an explicit Asia/Tokyo business date. */
-  displayStatus?: 'IN_PROGRESS' | 'OVERDUE' | 'DONE' | 'CANCELLED';
+  displayStatus?: DisplayTaskStatus;
   today?: string;
   ownerMemberId?: string;
   query?: string;
@@ -214,8 +219,16 @@ function taskWhere(filters: TaskFilters): { where: string; params: unknown[] } {
   if (filters.workState === 'OPEN') activeWork();
   if (filters.displayStatus) {
     // The derived state is resolved here, with the Asia/Tokyo date supplied by the caller, so a
-    // page is never filtered in the browser after it was cut.
+    // page is never filtered in the browser after it was cut. Each branch mirrors the precedence
+    // in `taskScheduleStatus`, so a filter and the badge on the row cannot disagree. The one
+    // deliberate overlap is a reversed interval whose Finish has passed: it is listed as
+    // INVALID_DATES and also stays in the canonical overdue accounting.
     const today = filters.today ?? businessDate();
+    const usableInterval = '(t.planned_start IS NULL OR t.due_date IS NULL OR t.planned_start <= t.due_date)';
+    const day = (): string => {
+      params.push(today);
+      return `$${params.length}`;
+    };
     switch (filters.displayStatus) {
       case 'DONE':
         where.push("t.status = 'Done'");
@@ -225,15 +238,35 @@ function taskWhere(filters: TaskFilters): { where: string; params: unknown[] } {
         where.push("t.status = 'Cancelled'");
         where.push(leafWork);
         break;
-      case 'OVERDUE':
+      case 'INVALID_DATES':
         activeWork();
-        params.push(today);
-        where.push(`t.due_date IS NOT NULL AND t.due_date < $${params.length}`);
+        where.push('t.planned_start IS NOT NULL AND t.due_date IS NOT NULL AND t.planned_start > t.due_date');
+        break;
+      case 'OVERDUE':
+        // The canonical overdue predicate, unchanged: a Finish before today. A reversed interval is
+        // warned about as INVALID_DATES but stays in the deadline accounting instead of vanishing.
+        activeWork();
+        where.push(`t.due_date IS NOT NULL AND t.due_date < ${day()}`);
+        break;
+      case 'PLANNED':
+        activeWork();
+        where.push(usableInterval);
+        where.push(`t.planned_start IS NOT NULL AND t.planned_start > ${day()}`);
+        break;
+      case 'IN_PROGRESS':
+        activeWork();
+        where.push(usableInterval);
+        where.push(`t.planned_start IS NOT NULL AND t.planned_start <= ${day()}`);
+        where.push(`(t.due_date IS NULL OR t.due_date >= $${params.length})`);
+        break;
+      case 'START_NOT_SET':
+        activeWork();
+        where.push('t.planned_start IS NULL');
+        where.push(`t.due_date IS NOT NULL AND t.due_date >= ${day()}`);
         break;
       default:
         activeWork();
-        params.push(today);
-        where.push(`(t.due_date IS NULL OR t.due_date >= $${params.length})`);
+        where.push('t.planned_start IS NULL AND t.due_date IS NULL');
         break;
     }
   }

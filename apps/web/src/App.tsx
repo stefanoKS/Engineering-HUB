@@ -4,7 +4,7 @@
  * Sign-out and a lost session clear every cached private payload, so a shared workstation never
  * shows the previous manager's data.
  */
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Actor } from '@eh/contracts';
 import { api, sessionEvents, setCsrfToken } from './api/client';
 import { queryCache } from './state/cache';
@@ -27,8 +27,9 @@ const WorkloadScreen = lazy(() => import('./screens/Workload').then(module => ({
 const AutomationScreen = lazy(() => import('./screens/Automation').then(module => ({ default: module.AutomationScreen })));
 const StatusScreen = lazy(() => import('./screens/Status').then(module => ({ default: module.StatusScreen })));
 const TimelineScreen = lazy(() => import('./screens/Timeline').then(module => ({ default: module.TimelineScreen })));
-import { LanguageSwitch } from './components/ui';
+import { LanguageSwitch, Menu } from './components/ui';
 import { recordRoute, rememberScroll, rememberedScroll } from './state/navigation';
+import { useBusinessDateRefresh } from './state/business-date';
 
 export type Session = { authMode?: 'local' | 'google'; mustChangePassword?: boolean; actor: Actor; csrfToken: string; expiresAt: string };
 
@@ -52,6 +53,8 @@ export function navigate(path: string): void {
 
 export function App(): JSX.Element {
   const { t, language, setLanguage } = useI18n();
+  // A page left open across the Tokyo day boundary re-reads its date-dependent answers once.
+  useBusinessDateRefresh();
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [route, setRoute] = useState<Route>(() => {
     const initial = readRoute();
@@ -133,21 +136,26 @@ export function App(): JSX.Element {
 
   const signedIn = session ? session.actor : null;
   const isManager = !!signedIn && (signedIn.role === 'ADMIN' || signedIn.role === 'MANAGER');
+  const desktop = useDesktopNavigation();
+  const [navOpen, setNavOpen] = useState(false);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
 
+  // The navigation groups follow the operating rhythm of the department: daily work first, then the
+  // people and area material a manager consults, then the administration screens.
   const navGroups = useMemo(() => {
     const all = [
-      { path: 'overview', label: t('nav.overview'), group: 'nav.group.myWork' },
-      { path: 'my-work', label: t('local.myWork'), group: 'nav.group.myWork' },
-      { path: 'all-work', label: t('nav.allWork'), group: 'nav.group.department' },
-      { path: 'projects', label: t('nav.projects'), group: 'nav.group.department' },
-      { path: 'timeline', label: t('nav.timeline'), group: 'nav.group.department' },
-      { path: 'responsibilities', label: t('nav.responsibilities'), group: 'nav.group.department' },
-      { path: 'requests', label: t('nav.requests'), group: 'nav.group.department' },
-      { path: 'members', label: t('nav.members'), group: 'nav.group.people' },
-      { path: 'skills', label: t('nav.skills'), group: 'nav.group.people' },
-      { path: 'workload', label: t('nav.workload'), group: 'nav.group.people' },
-      { path: 'automation', label: t('nav.automation'), group: 'nav.group.admin' },
-      { path: 'status', label: t('nav.status'), group: 'nav.group.admin' }
+      { path: 'overview', label: t('nav.overview'), group: 'daily' },
+      { path: 'my-work', label: t('local.myWork'), group: 'daily' },
+      { path: 'all-work', label: t('nav.allWork'), group: 'daily' },
+      { path: 'projects', label: t('nav.projects'), group: 'daily' },
+      { path: 'timeline', label: t('nav.timeline'), group: 'daily' },
+      { path: 'requests', label: t('nav.requests'), group: 'daily' },
+      { path: 'responsibilities', label: t('nav.responsibilities'), group: 'team' },
+      { path: 'members', label: t('nav.members'), group: 'team' },
+      { path: 'skills', label: t('nav.skills'), group: 'team' },
+      { path: 'workload', label: t('nav.workload'), group: 'team' },
+      { path: 'automation', label: t('nav.automation'), group: 'management' },
+      { path: 'status', label: t('nav.status'), group: 'management' }
     ].filter((entry) =>
       isManager
         ? true
@@ -157,12 +165,45 @@ export function App(): JSX.Element {
           entry.path === 'timeline' ||
           entry.path === 'overview'
     );
-    // Frequent destinations stay directly reachable; grouping only adds a heading, never a menu.
-    return ['nav.group.myWork', 'nav.group.department', 'nav.group.people', 'nav.group.admin'].map((group) => ({
-      label: t(group),
-      entries: all.filter((entry) => entry.group === group)
-    }));
-  }, [t, isManager]);
+    // Local account administration is an ADMIN screen in local mode only; its visibility is the
+    // same rule the route itself enforces.
+    if (isManager && signedIn?.role === 'ADMIN' && session?.authMode === 'local') {
+      all.push({ path: 'accounts', label: t('local.accounts'), group: 'management' });
+    }
+    const headings: Record<string, string> = {
+      daily: t('nav.group.daily'),
+      team: t('nav.group.team'),
+      management: t('nav.group.management')
+    };
+    // A group with no visible destination is not rendered at all.
+    return ['daily', 'team', 'management']
+      .map((group) => ({ key: group, label: headings[group], entries: all.filter((entry) => entry.group === group) }))
+      .filter((group) => group.entries.length > 0);
+  }, [t, isManager, signedIn?.role, session?.authMode]);
+
+  // A drawer closes as soon as the destination changes; the route remains the single source of
+  // truth for the active entry, the deep link and the Back behaviour.
+  useEffect(() => {
+    setNavOpen(false);
+  }, [route.location]);
+
+  // While the drawer is open it owns the keyboard: Escape dismisses it and focus returns to the
+  // control that opened it.
+  useEffect(() => {
+    if (!navOpen) return undefined;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      setNavOpen(false);
+      menuButtonRef.current?.focus();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [navOpen]);
+
+  const closeDrawer = useCallback(() => {
+    setNavOpen(false);
+    menuButtonRef.current?.focus();
+  }, []);
 
   if (session === undefined) {
     return (
@@ -182,66 +223,160 @@ export function App(): JSX.Element {
 
   if (session.mustChangePassword || changingPassword) return <PasswordScreen required={!!session.mustChangePassword} onChanged={()=>{setChangingPassword(false);void signOut();}} onCancel={()=>{if(session.mustChangePassword)void signOut();else setChangingPassword(false);}}/>;
 
+  const isActive = (path: string): boolean =>
+    route.segments[0] === path || route.segments[0] + 's' === path;
+
+  const navigation = (
+    <>
+      {navGroups.map((group) => (
+        <div className="nav-group" key={group.key}>
+          <span className="nav-group-label">{group.label}</span>
+          {group.entries.map((entry) => (
+            <a
+              key={entry.path}
+              href={`#/${entry.path}`}
+              aria-current={isActive(entry.path) ? 'page' : undefined}
+              className={isActive(entry.path) ? 'nav-link active' : 'nav-link'}
+              onClick={() => setNavOpen(false)}
+            >
+              {entry.label}
+            </a>
+          ))}
+        </div>
+      ))}
+    </>
+  );
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content" onClick={event => { event.preventDefault(); document.getElementById('main-content')?.focus(); }}>{t('nav.skip')}</a>
       <header className="app-header">
-        <div className="brand">
-          <img src="/branding/designTeam.png" alt="広島化成 製品設計課" className="design-team-logo" />
-          <div className="brand-text"><h1>{t('app.name')}</h1>
-          <p className="muted">{t('app.subtitle')}</p></div>
+        <div className="header-start">
+          {!desktop ? (
+            <button
+              ref={menuButtonRef}
+              type="button"
+              className="nav-toggle"
+              aria-expanded={navOpen}
+              aria-controls="app-navigation"
+              onClick={() => (navOpen ? closeDrawer() : setNavOpen(true))}
+            >
+              <span className="nav-toggle-icon" aria-hidden="true">
+                ☰
+              </span>
+              <span className="nav-toggle-text">{t('nav.menu')}</span>
+            </button>
+          ) : null}
+          <div className="brand">
+            <img src="/branding/designTeam.png" alt="広島化成 製品設計課" className="design-team-logo" />
+            <div className="brand-text"><h1>{t('app.name')}</h1>
+            <p className="muted">{t('app.subtitle')}</p></div>
+          </div>
         </div>
         <div className="header-actions">
           <LanguageSwitch language={language} onChange={setLanguage} />
-          <span className="identity" title={session.actor.email}>
-            {session.actor.name}
-            <span className="role-pill">{session.actor.role}</span>
-          </span>
-          {session.authMode === 'local' && <button className="link-button" onClick={()=>setChangingPassword(true)}>{t('local.change')}</button>}
-          <button type="button" className="link-button" onClick={() => void signOut()}>
-            {t('nav.signOut')}
-          </button>
+          <Menu
+            className="account-menu"
+            label={
+              <>
+                <span className="account-name">{session.actor.name}</span>
+                <span className="role-pill">{session.actor.role}</span>
+                <span className="menu-caret" aria-hidden="true">▾</span>
+              </>
+            }
+          >
+            {(close) => (
+              <>
+                <p className="menu-heading" aria-hidden="true">
+                  {session.actor.name}
+                  <span className="muted small role-line">{session.actor.role}</span>
+                </p>
+                {session.authMode === 'local' ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="menu-item"
+                    onClick={() => {
+                      close();
+                      setChangingPassword(true);
+                    }}
+                  >
+                    {t('local.change')}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="menu-item"
+                  onClick={() => {
+                    close();
+                    void signOut();
+                  }}
+                >
+                  {t('nav.signOut')}
+                </button>
+              </>
+            )}
+          </Menu>
         </div>
       </header>
 
-      <nav className="app-nav" aria-label={t('app.name')}>
-        {navGroups.map((group) =>
-          group.entries.length === 0 ? null : (
-            <div className="nav-group" key={group.label}>
-              <span className="nav-group-label">{group.label}</span>
-              {group.entries.map((entry) => (
-                <a
-                  key={entry.path}
-                  href={`#/${entry.path}`}
-                  aria-current={(route.segments[0] === entry.path || route.segments[0] + 's' === entry.path) ? 'page' : undefined}
-                  className={(route.segments[0] === entry.path || route.segments[0] + 's' === entry.path) ? 'nav-link active' : 'nav-link'}
-                >
-                  {entry.label}
-                </a>
-              ))}
-              {group.label === t('nav.group.admin') && session.authMode === 'local' && session.actor.role === 'ADMIN' ? (
-                <a className="nav-link" href="#/accounts">
-                  {t('local.accounts')}
-                </a>
-              ) : null}
+      {desktop ? (
+        <aside className="app-sidebar" id="app-navigation">
+          <nav className="app-nav" aria-label={t('app.name')}>
+            {navigation}
+          </nav>
+        </aside>
+      ) : navOpen ? (
+        <>
+          <div className="nav-backdrop" aria-hidden="true" onClick={closeDrawer} />
+          <aside className="app-sidebar drawer-open" id="app-navigation">
+            <div className="drawer-head">
+              <span className="drawer-title">{t('nav.menu')}</span>
+              <button type="button" className="link-button" onClick={closeDrawer} aria-label={t('nav.closeMenu')}>
+                ×
+              </button>
             </div>
-          )
-        )}
-      </nav>
-
-      {notice ? (
-        <div className="banner warning" role="status">
-          {notice}
-        </div>
+            <nav className="app-nav" aria-label={t('app.name')}>
+              {navigation}
+            </nav>
+          </aside>
+        </>
       ) : null}
 
       <main className="app-main" id="main-content" tabIndex={-1}>
+        {notice ? (
+          <div className="banner warning app-notice" role="status">
+            {notice}
+          </div>
+        ) : null}
         <Suspense key={route.location} fallback={<p role="status">{t('state.loading')}</p>}>
           <div>{renderScreen(route, session.actor, isManager)}</div>
         </Suspense>
       </main>
     </div>
   );
+}
+
+/**
+ * The sidebar is a layout, the drawer is navigation. The breakpoint is the same one the stylesheet
+ * uses, so a narrow window never receives two navigation surfaces at once.
+ */
+function useDesktopNavigation(): boolean {
+  const read = (): boolean =>
+    typeof window === 'undefined' || typeof window.matchMedia !== 'function'
+      ? true
+      : window.matchMedia('(min-width: 1100px)').matches;
+  const [desktop, setDesktop] = useState(read);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return undefined;
+    const query = window.matchMedia('(min-width: 1100px)');
+    const update = (): void => setDesktop(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  return desktop;
 }
 
 function renderScreen(route: Route, actor: Actor, isManager: boolean): JSX.Element {
@@ -262,8 +397,8 @@ function renderScreen(route: Route, actor: Actor, isManager: boolean): JSX.Eleme
     return <TimelineScreen actor={actor} initialProjectId={second} initialAnchor={from} />;
   }
   // MEMBER and VIEWER browse permitted projects through the read-only explorer, never through the
-  // management list (which reads `/api/manager/projects`).
-  if (first === 'projects' && !isManager) return <WorkProjectsScreen />;
+  // management list (which reads `/api/manager/projects`). A MEMBER may create new work there.
+  if (first === 'projects' && !isManager) return <WorkProjectsScreen actor={actor} />;
   // Read-only project detail stays reachable for MEMBER and VIEWER (the task detail links here).
   if (first === 'project' && second && !isManager) {
     return <ProjectDetailScreen actor={actor} projectId={second} readOnly />;

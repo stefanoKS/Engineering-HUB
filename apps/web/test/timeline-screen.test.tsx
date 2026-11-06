@@ -110,22 +110,31 @@ describe('timeline asynchronous chart', () => {
     expect(observers[0]?.observe).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole('button', { name: '7日間' }));
+    // A preset states the computed range directly; the custom date inputs stay out of the way.
+    expect(document.querySelector('.timeline-range')?.textContent).toBe('2026-11-01 – 2026-11-07');
+    expect(screen.queryByLabelText('表示開始日')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '2週間' }));
+    expect(document.querySelector('.timeline-range')?.textContent).toBe('2026-11-01 – 2026-11-14');
+    expect(screen.queryByLabelText('表示終了日')).toBeNull();
+
+    // Switching to a custom range reveals the two date inputs, holding the current range.
+    fireEvent.click(screen.getByRole('button', { name: 'カスタム' }));
     expect(screen.getByLabelText('表示開始日')).toHaveProperty('value', '2026-11-01');
-    expect(screen.getByLabelText('表示終了日')).toHaveProperty('value', '2026-11-07');
-    fireEvent.change(screen.getByLabelText('表示開始日'), { target: { value: '2026-11-05' } });
-    expect(screen.getByLabelText('表示終了日')).toHaveProperty('value', '2026-11-11');
+    expect(screen.getByLabelText('表示終了日')).toHaveProperty('value', '2026-11-14');
     fireEvent.change(screen.getByLabelText('表示終了日'), { target: { value: '2026-11-20' } });
     expect(screen.getByRole('button', { name: 'カスタム' }).getAttribute('aria-pressed')).toBe('true');
     fireEvent.change(screen.getByLabelText('表示開始日'), { target: { value: '' } });
-    expect(screen.getByText(/2026-11-05 – 2026-11-20/)).toBeTruthy();
+    expect(document.querySelector('.timeline-range')).toBeNull();
+    expect(screen.getByText(/2026-11-01 – 2026-11-20/)).toBeTruthy();
     const wheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, altKey: true });
     document.querySelector('.tl-cell-track')?.dispatchEvent(wheel);
     expect(wheel.defaultPrevented).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: '2週間' }));
-    expect(screen.getByLabelText('表示開始日')).toHaveProperty('value', '2026-11-05');
-    expect(screen.getByLabelText('表示終了日')).toHaveProperty('value', '2026-11-18');
+    expect(document.querySelector('.timeline-range')?.textContent).toBe('2026-11-01 – 2026-11-14');
+    expect(screen.queryByLabelText('表示開始日')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '全体を表示' }));
     expect(screen.getByRole('button', { name: 'カスタム' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByLabelText('表示開始日')).toBeTruthy();
     const completed = screen.getByRole('checkbox', { name: '完了した作業も表示' });
     fireEvent.click(completed);
     fireEvent.click(screen.getByRole('button', { name: '表示期間をリセット' }));

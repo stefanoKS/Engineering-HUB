@@ -17,9 +17,10 @@ import type { Actor, Reference, Task, TaskDetail, TaskSummary } from '@eh/contra
 import { api, queryString } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
-import { Badge, EmptyState, ErrorBox, Pagination } from '../components/ui';
+import { Badge, EmptyState, ErrorBox, Menu, Pagination } from '../components/ui';
 import { DeleteEntityDialog } from '../components/DeleteEntityDialog';
 import { DeadlineCell } from '../components/deadline';
+import { TaskStatusBadge, WorkflowHint, taskStatusTone } from '../components/task-status';
 import { ConfirmDialog } from '../components/forms';
 import { TaskForm } from './TaskForm';
 import { MAX_TASK_DEPTH, projectColor } from '@eh/domain';
@@ -33,7 +34,17 @@ type References = {
   subprojects: Reference[];
 };
 
-const DISPLAY_STATUSES = ['IN_PROGRESS', 'OVERDUE', 'DONE'] as const;
+/** Every displayed schedule state a manager can filter by; the server resolves them. */
+const DISPLAY_STATUSES = [
+  'PLANNED',
+  'IN_PROGRESS',
+  'OVERDUE',
+  'START_NOT_SET',
+  'DATES_NOT_SET',
+  'INVALID_DATES',
+  'DONE',
+  'CANCELLED'
+] as const;
 const NAVIGATION_FILTERS = ['workState', 'displayStatus', 'responsibilityId', 'unassigned'] as const;
 type TaskSort = 'dueDate' | 'name' | 'project' | 'owner' | 'status' | 'priority' | 'updated';
 
@@ -58,16 +69,7 @@ export function taskNavigationFilters(search: string): {
 }
 
 export function displayTone(status: TaskSummary['displayStatus']): 'ok' | 'warn' | 'danger' | 'neutral' | 'info' {
-  switch (status) {
-    case 'DONE':
-      return 'ok';
-    case 'OVERDUE':
-      return 'danger';
-    case 'CANCELLED':
-      return 'neutral';
-    default:
-      return 'info';
-  }
+  return taskStatusTone(status);
 }
 
 export function TasksScreen({
@@ -176,8 +178,25 @@ export function TasksScreen({
           <h2>{t('nav.allWork')}</h2>
           <p className="muted small">{readOnly ? t('allWork.intro') : t('allWork.managerIntro')}</p>
         </div>
-        <div className="filters">
-          <ProjectPicker scope={readOnly ? 'read' : 'manager'} value={projectId} onChange={id => { setProjectId(id); setPage(1); }} />
+        {canManage ? (
+          <button type="button" className="button" onClick={() => setEditing({ mode: 'create' })}>
+            {t('tasks.new')}
+          </button>
+        ) : null}
+      </div>
+
+      <div className="compact-toolbar">
+        <div className="field">
+          <span className="field-label">{t('nav.projects')}</span>
+          <ProjectPicker
+            scope={readOnly ? 'read' : 'manager'}
+            value={projectId}
+            emptyLabel={t('filter.allProjects')}
+            onChange={id => { setProjectId(id); setPage(1); }}
+          />
+        </div>
+        <label className="field">
+          <span className="field-label">{t('filter.responsibility')}</span>
           <select
             value={unassigned ? '__unassigned__' : responsibilityId}
             onChange={(event) => {
@@ -195,6 +214,9 @@ export function TasksScreen({
             ))}
             <option value="__unassigned__">{t('overview.unassigned')}</option>
           </select>
+        </label>
+        <label className="field">
+          <span className="field-label">{t('column.status')}</span>
           <select
             value={workState || displayStatus}
             onChange={(event) => {
@@ -217,33 +239,33 @@ export function TasksScreen({
               </option>
             ))}
           </select>
+        </label>
+        <label className="field grow">
+          <span className="field-label">{t('myWork.filter.task')}</span>
           <input
-            placeholder={t('filter.query')}
+            type="search"
+            aria-label={t('myWork.filter.task')}
+            placeholder={t('myWork.filter.task')}
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
               setPage(1);
             }}
           />
-          {canManage ? (
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={includeInactive}
-                onChange={(event) => {
-                  setIncludeInactive(event.target.checked);
-                  setPage(1);
-                }}
-              />
-              {t('tasks.includeInactive')}
-            </label>
-          ) : null}
-          {canManage ? (
-            <button type="button" className="button" onClick={() => setEditing({ mode: 'create' })}>
-              {t('tasks.new')}
-            </button>
-          ) : null}
-        </div>
+        </label>
+        {canManage ? (
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={includeInactive}
+              onChange={(event) => {
+                setIncludeInactive(event.target.checked);
+                setPage(1);
+              }}
+            />
+            {t('tasks.includeInactive')}
+          </label>
+        ) : null}
       </div>
 
       {editorLoading && <p role="status">{t('state.loading')}</p>}
@@ -255,7 +277,15 @@ export function TasksScreen({
       ) : list.data.items.length === 0 ? (
         <EmptyState />
       ) : (
-        <table className="table">
+        <table className="table task-table">
+          <colgroup>
+            <col />
+            <col className="col-project" />
+            <col className="col-owner" />
+            <col className="col-status" />
+            <col className="col-deadline" />
+            {canManage ? <col className="col-actions" /> : null}
+          </colgroup>
           <thead>
             <tr>
               <th>{sortHeader('name', t('column.name'))}</th>
@@ -431,29 +461,51 @@ function TaskTreeRows(props: TreeProps & { items: TaskSummary[] }): JSX.Element 
                   {task.assigneeNames.length ? <div className="muted small">{task.assigneeNames.join(', ')}</div> : null}
                 </td>
                 <td>
-                  <Badge tone={displayTone(task.displayStatus)}>{t(`taskStatus.${task.displayStatus}`)}</Badge>
+                  <TaskStatusBadge state={task.displayStatus} missing={task.scheduleMissing} showDetail />
+                  <WorkflowHint status={task.status} />
                 </td>
                 <td><DeadlineCell dueDate={task.dueDate} state={task.displayStatus} showLabel={false} /></td>
                 {canManage ? (
                   <td className="project-actions-cell">
                     <div className="actions">
-                      <button type="button" className="link-button" onClick={() => void openEdit(task)}>
+                      <button type="button" className="button secondary row-action" onClick={() => void openEdit(task)}>
                         {t('action.edit')}
                       </button>
                       {!task.container && task.displayStatus !== 'DONE' && task.displayStatus !== 'CANCELLED' ? (
-                        <button type="button" className="link-button" onClick={() => setAction({ kind: 'complete', task })}>
+                        <button type="button" className="button row-action" onClick={() => setAction({ kind: 'complete', task })}>
                           {t('tasks.completeDirect')}
                         </button>
                       ) : null}
                       {actor.role === 'ADMIN' ? (
-                        <>
-                          <button type="button" className="link-button" onClick={() => setAction({ kind: 'override', task })}>
-                            {t('tasks.override')}
-                          </button>
-                          <button type="button" className="link-button danger" onClick={() => void startDelete(task)}>
-                            {t('projects.delete')}
-                          </button>
-                        </>
+                        <Menu label={t('action.more')} className="row-menu">
+                          {(close) => (
+                            <>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="menu-item"
+                                onClick={() => {
+                                  close();
+                                  setAction({ kind: 'override', task });
+                                }}
+                              >
+                                {t('tasks.override')}
+                              </button>
+                              <div className="menu-separator" role="separator" />
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="menu-item danger"
+                                onClick={() => {
+                                  close();
+                                  void startDelete(task);
+                                }}
+                              >
+                                {t('projects.delete')}
+                              </button>
+                            </>
+                          )}
+                        </Menu>
                       ) : null}
                     </div>
                   </td>

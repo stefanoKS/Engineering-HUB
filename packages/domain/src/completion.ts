@@ -96,3 +96,99 @@ export function assertDirectCompletionAllowed(input: { actorRole: string; task: 
   assertCompletableByDecision(input.task);
 }
 
+/**
+ * The workflow status a reopened task returns to.
+ *
+ * No reliable pre-completion status or progress is recorded, so a correction never invents one:
+ * the task becomes open `In Progress` with 0 recorded progress, and the derived display status
+ * (for example 遅延 when the finish date is already in the past) follows from its dates.
+ */
+export const REOPENED_TASK_STATUS = 'In Progress' as const;
+export const REOPENED_PROGRESS_PERCENT = 0;
+
+export type ReopenTaskState = {
+  taskId: string;
+  status: string;
+  container: boolean;
+};
+
+export type ReopenProjectState = {
+  projectId: string;
+  status: string;
+  archived: boolean;
+};
+
+export type ReopenInput = {
+  task: ReopenTaskState;
+  project: ReopenProjectState;
+  reason: string;
+  confirmation: string;
+  actorRole: string;
+  /** The caller's explicit acknowledgement that a Completed parent project reopens too. */
+  reopenProject: boolean;
+};
+
+export type ReopenPlan = {
+  expectedConfirmation: string;
+  /** True when the parent project must change from Completed back to Active in the same write. */
+  projectReopenRequired: boolean;
+};
+
+/**
+ * Validates a corrective reopening before the first mutation.
+ *
+ * Only an ADMIN may reverse a completion, only leaf work qualifies (a container's completion is
+ * derived), the stored status must actually be Done, and the typed phrase is
+ * `REOPEN <taskId>`. A parent project is never silently reactivated: `Completed` requires the
+ * explicit acknowledgement that comes with this operation, while an archived or cancelled
+ * project is refused with an actionable explanation, because that is a separate lifecycle act.
+ */
+export function assertReopenAllowed(input: ReopenInput): ReopenPlan {
+  if (input.actorRole !== 'ADMIN') {
+    throw new DomainError('AUTHORIZATION_DENIED', 'Only an ADMIN may reopen a completed task');
+  }
+  if (!String(input.reason ?? '').trim()) {
+    throw new DomainError('VALIDATION_FAILED', 'A reason is required to reopen a completed task');
+  }
+  if (input.task.container) {
+    throw new DomainError(
+      'CONTAINER_NOT_COMPLETABLE',
+      'A container task is organisation only; reopen its completed leaf work instead'
+    );
+  }
+  if (input.task.status !== 'Done') {
+    throw new DomainError('INVALID_TRANSITION', 'Only a completed task can be reopened', {
+      status: input.task.status
+    });
+  }
+  if (input.project.status === 'Archived' || input.project.archived) {
+    throw new DomainError(
+      'INVALID_TRANSITION',
+      'The parent project is archived; reactivate the project in a separate lifecycle step before reopening this task',
+      { projectId: input.project.projectId, projectStatus: input.project.status }
+    );
+  }
+  if (input.project.status === 'Cancelled') {
+    throw new DomainError(
+      'INVALID_TRANSITION',
+      'The parent project is cancelled; reactivate the project in a separate lifecycle step before reopening this task',
+      { projectId: input.project.projectId, projectStatus: input.project.status }
+    );
+  }
+  const expectedConfirmation = `REOPEN ${input.task.taskId}`;
+  if (String(input.confirmation ?? '').trim() !== expectedConfirmation) {
+    throw new DomainError('CONFIRMATION_REQUIRED', `Type exactly "${expectedConfirmation}" to confirm`, {
+      expected: expectedConfirmation
+    });
+  }
+  const projectReopenRequired = input.project.status === 'Completed';
+  if (projectReopenRequired && input.reopenProject !== true) {
+    throw new DomainError(
+      'CONFIRMATION_REQUIRED',
+      'The parent project is completed; confirm that it becomes active again in the same correction',
+      { expected: expectedConfirmation, projectReopenRequired: true, projectId: input.project.projectId }
+    );
+  }
+  return { expectedConfirmation, projectReopenRequired };
+}
+

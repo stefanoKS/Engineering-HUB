@@ -7,7 +7,7 @@
  * the reviewed completion workflow.
  */
 import type { z } from 'zod';
-import type { CreateTaskBody, PatchTaskBody, Task, TaskDetail } from '@eh/contracts';
+import type { CreateTaskBody, PatchTaskBody, ReopenTaskBody, Task, TaskDetail } from '@eh/contracts';
 import {
   approveAssignment,
   confirmSchedule,
@@ -30,24 +30,28 @@ import {
   setDependencies,
   setEffectiveAssignees,
   taskRecordsForDependencyCheck,
+  updateProject,
   updateTask,
   withdrawPendingCompletionRequests
 } from '@eh/db';
 import {
   DomainError,
   MAX_TASK_DEPTH,
+  REOPENED_PROGRESS_PERCENT,
+  REOPENED_TASK_STATUS,
   applyTaskPlan,
   assertDirectCompletionAllowed,
   assertNoDependencyCycle,
   assertNotDirectCompletion,
   assertOverrideAllowed,
+  assertReopenAllowed,
   assignmentChanged,
   createCalendar,
   requireRole,
   validateTaskParent,
   type Identity
 } from '@eh/domain';
-import { audit, enqueueJob, requireConfirmation, runIdempotent, type ServiceCtx } from './common';
+import { audit, enqueueJob, hashRequest, requireConfirmation, runIdempotent, type ServiceCtx } from './common';
 
 const WRITE_ROLES = 'MANAGER' as const;
 
@@ -650,6 +654,200 @@ export async function overrideComplete(  ctx: ServiceCtx,
     });
     return next;
   });
+}
+
+/* ------------------------------------------------- corrective reopening */
+
+export type ReopenBlockReason =
+  | 'CONTAINER'
+  | 'NOT_COMPLETED'
+  | 'PROJECT_ARCHIVED'
+  | 'PROJECT_CANCELLED';
+
+export type ReopenEligibility = {
+  taskId: string;
+  eligible: boolean;
+  reasons: ReopenBlockReason[];
+  /** The exact phrase the ADMIN must type; it never becomes authority on its own. */
+  confirmationText: string;
+  projectId: string;
+  projectName: string;
+  projectStatus: string;
+  /** True when the parent project is `Completed` and reopens in the same correction. */
+  projectReopenRequired: boolean;
+  completedAt: string | null;
+  /** The approved completion this correction reverses, when one is recorded. */
+  completionRequestId: string | null;
+};
+
+async function latestApprovedCompletion(
+  db: ServiceCtx['db'],
+  taskId: string
+): Promise<{ request_id: string; accepted_completion_at: string | null; decided_at: string | null } | null> {
+  return db.one<{ request_id: string; accepted_completion_at: string | null; decided_at: string | null }>(
+    `SELECT request_id, accepted_completion_at, decided_at
+       FROM task_requests
+      WHERE task_id = $1 AND request_type = 'COMPLETION_REPORT' AND status = 'APPROVED'
+      ORDER BY COALESCE(accepted_completion_at, decided_at) DESC NULLS LAST, submitted_at DESC
+      LIMIT 1`,
+    [taskId]
+  );
+}
+
+/**
+ * The ADMIN-only capability behind "Reopen task / 完了を取り消す".
+ *
+ * The answer never grants authority: `reopenTask` re-reads the task, the project and the revision
+ * inside its own transaction. A missing or failed answer keeps the action unavailable.
+ */
+export async function reopenEligibility(ctx: ServiceCtx, taskId: string): Promise<ReopenEligibility> {
+  requireRole(ctx.identity, 'ADMIN');
+  const task = await getTask(ctx.db, taskId);
+  if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  const project = await getProject(ctx.db, task.projectId);
+  if (!project) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  const children = await countTaskChildren(ctx.db, taskId);
+  const completion = await latestApprovedCompletion(ctx.db, taskId);
+  const reasons: ReopenBlockReason[] = [];
+  if (children > 0) reasons.push('CONTAINER');
+  if (task.status !== 'Done') reasons.push('NOT_COMPLETED');
+  if (project.status === 'Archived' || project.archivedAt) reasons.push('PROJECT_ARCHIVED');
+  if (project.status === 'Cancelled') reasons.push('PROJECT_CANCELLED');
+  return {
+    taskId,
+    eligible: reasons.length === 0,
+    reasons,
+    confirmationText: `REOPEN ${taskId}`,
+    projectId: project.projectId,
+    projectName: project.projectName,
+    projectStatus: project.status,
+    projectReopenRequired: project.status === 'Completed',
+    completedAt: task.completedAt,
+    completionRequestId: completion?.request_id ?? null
+  };
+}
+
+export type ReopenResult = {
+  task: Task;
+  projectStatus: string;
+  projectReopened: boolean;
+  replayed: boolean;
+};
+
+/**
+ * Corrective reopening of an accidentally completed task.
+ *
+ * One transaction reverses the current completion, records one audit event naming the actor, the
+ * task, the reason, the before/after state and the approved completion it reverses, and - only
+ * with the explicit acknowledgement - returns a `Completed` parent project to `Active`. The task
+ * becomes open `In Progress` with 0 recorded progress: no reliable pre-completion value exists, so
+ * nothing is invented. Owner, assignees, dates, dependencies and identity stay untouched, and the
+ * original request, approval and audit rows are never rewritten or deleted.
+ */
+export async function reopenTask(
+  ctx: ServiceCtx,
+  taskId: string,
+  body: z.infer<typeof ReopenTaskBody>
+): Promise<ReopenResult> {
+  requireRole(ctx.identity, 'ADMIN');
+  // A retried delivery of the same operation replays its stored answer before any state check:
+  // after the first success the task revision has moved, and a replay must not look like a stale
+  // edit. A key reused for a different request is refused.
+  const replay = await ctx.db.one<{
+    request_hash: string;
+    status: string;
+    response: { task: Task; projectStatus: string; projectReopened: boolean } | null;
+  }>(
+    "SELECT request_hash, status, response FROM idempotency_keys WHERE scope = 'task.reopen' AND key = $1",
+    [body.idempotencyKey]
+  );
+  if (replay?.status === 'COMPLETED' && replay.response?.task) {
+    if (replay.request_hash !== hashRequest(body)) {
+      throw new DomainError('IDEMPOTENCY_REPLAY', 'This key cannot be reused; check the original operation');
+    }
+    return { ...replay.response, replayed: true };
+  }
+  const task = await getTask(ctx.db, taskId);
+  if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  if (body.revision !== task.revision) {
+    throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved', {
+      expected: body.revision,
+      stored: task.revision
+    });
+  }
+  const project = await getProject(ctx.db, task.projectId);
+  if (!project) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  const children = await countTaskChildren(ctx.db, taskId);
+  assertReopenAllowed({
+    task: { taskId, status: task.status, container: children > 0 },
+    project: { projectId: project.projectId, status: project.status, archived: !!project.archivedAt },
+    reason: body.reason,
+    confirmation: body.confirmation,
+    actorRole: ctx.identity.role,
+    reopenProject: body.reopenProject === true
+  });
+  const completion = await latestApprovedCompletion(ctx.db, taskId);
+  const projectReopen = project.status === 'Completed';
+
+  const result = await runIdempotent(
+    ctx,
+    { scope: 'task.reopen', key: body.idempotencyKey, request: body },
+    async (tx) => {
+      const next = await updateTask(
+        tx,
+        taskId,
+        {
+          status: REOPENED_TASK_STATUS,
+          progressPercent: REOPENED_PROGRESS_PERCENT,
+          completedAt: null
+        },
+        body.revision
+      );
+      if (!next) throw new DomainError('EDIT_CONFLICT', 'The task changed while it was reopened');
+      let projectStatus = project.status;
+      if (projectReopen) {
+        const reopenedProject = await updateProject(tx, project.projectId, { status: 'Active' }, project.revision);
+        if (!reopenedProject) {
+          throw new DomainError('EDIT_CONFLICT', 'The parent project changed while the task was reopened');
+        }
+        projectStatus = reopenedProject.status;
+        await audit(tx, ctx, {
+          entityType: 'PROJECTS',
+          entityId: project.projectId,
+          action: 'PROJECT_REOPENED',
+          previousValue: { status: project.status },
+          newValue: { status: reopenedProject.status, reason: body.reason, reopenedTaskId: taskId }
+        });
+      }
+      await audit(tx, ctx, {
+        entityType: 'TASKS',
+        entityId: taskId,
+        action: 'TASK_REOPENED',
+        previousValue: {
+          status: task.status,
+          progressPercent: task.progressPercent,
+          completedAt: task.completedAt
+        },
+        newValue: {
+          taskId,
+          actorMemberId: ctx.identity.memberId,
+          actorRole: ctx.identity.role,
+          reason: body.reason,
+          status: next.status,
+          progressPercent: next.progressPercent,
+          completedAt: next.completedAt,
+          reversedCompletionRequestId: completion?.request_id ?? null,
+          reversedCompletionDecidedAt: completion?.decided_at ?? null,
+          reversedCompletionAcceptedAt: completion?.accepted_completion_at ?? null,
+          reversedCompletionAt: task.completedAt,
+          projectId: project.projectId,
+          projectReopened: projectReopen
+        }
+      });
+      return { task: next, projectStatus, projectReopened: projectReopen };
+    }
+  );
+  return { ...result.data, replayed: result.replayed };
 }
 
 export type ParentTaskOption = {

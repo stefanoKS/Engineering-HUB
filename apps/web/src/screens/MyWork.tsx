@@ -6,7 +6,7 @@
  * keeps this personal list beside the departmental one; a MEMBER, a MANAGER and an ADMIN report
  * completion here (a VIEWER sees the same list read-only).
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type {
   Actor,
   MemberRequest,
@@ -18,37 +18,19 @@ import type {
 import { api, queryString } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
-import { Badge, DataFreshness, ErrorBox } from '../components/ui';
+import { Badge, DataFreshness, ErrorBox, Menu } from '../components/ui';
 import { DeadlineCell } from '../components/deadline';
-import { MemberSubprojectForm, subprojectPath } from '../components/member-subproject-form';
-import { CompletionReportPanel } from '../components/completion-report';
-import {
-  ConfirmDialog,
-  createIdempotencyKey,
-  RemoteSelect,
-  SelectInput,
-  TextInput,
-  useIdempotencyKey,
-  useSave
-} from '../components/forms';
+import { TaskStatusBadge, WorkflowHint } from '../components/task-status';
+import { MemberSubprojectForm } from '../components/member-subproject-form';
+import { MemberTaskForm } from '../components/member-task-form';
+import { RequestDialog } from '../components/request-dialog';
+import { ConfirmDialog, RemoteSelect, useSave } from '../components/forms';
+import { capabilitiesOf } from '../state/capabilities';
 import { useRouteMemoryState } from '../state/navigation';
 
 const PAGE_SIZE = 25;
 
 type CreationTab = 'none' | 'task' | 'subproject';
-
-function displayTone(status: MyWorkList['items'][number]['displayStatus']): 'ok' | 'warn' | 'danger' | 'neutral' | 'info' {
-  switch (status) {
-    case 'DONE':
-      return 'ok';
-    case 'OVERDUE':
-      return 'danger';
-    case 'CANCELLED':
-      return 'neutral';
-    default:
-      return 'info';
-  }
-}
 
 export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
   const { t } = useI18n();
@@ -64,9 +46,8 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
   const [overdue, setOverdue] = useRouteMemoryState('my-work:overdue', false);
   const [dueThisWeek, setDueThisWeek] = useRouteMemoryState('my-work:due-this-week', false);
   const [awaitingReview, setAwaitingReview] = useRouteMemoryState('my-work:awaiting-review', false);
-  const canCreate = actor.role === 'MEMBER';
-  // Any authenticated MEMBER, MANAGER or ADMIN may report completion for accessible work.
-  const canReport = actor.role !== 'VIEWER';
+  const capabilities = capabilitiesOf(actor);
+  const canCreate = capabilities.canCreateTask;
 
   // A debounced search change resets both sections: a page number from the previous result set
   // never addresses the new one.
@@ -105,6 +86,7 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
   };
 
   const [createTab, setCreateTab] = useState<CreationTab>('none');
+  const [notice, setNotice] = useState<{ tone: 'ok' | 'warning' | 'danger'; text: string } | null>(null);
   const [createdSubproject, setCreatedSubproject] = useState<{
     projectId: string;
     subprojectId: string;
@@ -142,10 +124,20 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
     queryCache.invalidate([keys.myWork, keys.myRequests]);
   };
 
-  // A new subproject changes the hierarchy every screen shows, so the member-visible project
-  // payloads are invalidated as well as the options this form selects from.
+  // A new subproject or task changes the hierarchy every screen shows, so the member-visible
+  // project payloads and the overview aggregates are invalidated as well as the options this
+  // dialog selects from.
   const refreshAfterCreation = (): void => {
-    queryCache.invalidate([keys.myWork, keys.myProjects, keys.myRequests, 'work/projects', 'work/project/']);
+    queryCache.invalidate([
+      keys.myWork,
+      keys.myProjects,
+      keys.myRequests,
+      keys.workOverview,
+      'work/projects',
+      'work/project/',
+      'manager/projects',
+      'manager/overview'
+    ]);
   };
 
   const total = list.data?.activeTotal ?? 0;
@@ -153,17 +145,33 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
   const unfilteredTotal = list.data?.unfilteredActiveTotal ?? total;
   const items = list.data?.items ?? [];
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const canReport = capabilities.canSubmitCompletionRequest || capabilities.canSubmitExtensionRequest;
+  // Only the filters hidden behind the disclosure are counted: a visible search box and the
+  // project selector already describe themselves.
+  const hiddenFilterCount = [overdue, dueThisWeek, awaitingReview].filter(Boolean).length;
+  const activeFilterLabels = [
+    overdue ? t('myWork.filter.overdue') : '',
+    dueThisWeek ? t('myWork.filter.dueThisWeek') : '',
+    awaitingReview ? t('myWork.filter.awaitingReview') : ''
+  ].filter(Boolean);
 
   return (
     <div className="screen stack">
-      <h2>{t('local.myWork')}</h2>
-      <p className="muted small">{canCreate ? t('myWork.intro') : t('myWork.derivedNote')}</p>
-
-      {!canCreate ? (
-        <div className="banner info">
-          <p className="muted small">{canCreate ? t('myWork.memberOnlyCreate') : t('myWork.managerNote')}</p>
-        </div>
-      ) : null}
+      <div className="page-heading">
+        <h2>{t('local.myWork')}</h2>
+        <span className="page-count">{t('myWork.total', { n: total })}</span>
+        <details className="disclosure usage-help">
+          <summary>{t('myWork.help')}</summary>
+          <div className="disclosure-body">
+            <p className="muted small">{canCreate ? t('myWork.intro') : t('myWork.derivedNote')}</p>
+            <p className="muted small">{canCreate ? t('myWork.memberOnlyCreate') : t('myWork.managerNote')}</p>
+            {items.some((item) => item.creationChannel === 'MEMBER') ? (
+              <p className="muted small">{t('myWork.adminApprovalNote')}</p>
+            ) : null}
+            <DataFreshness snapshot={false} />
+          </div>
+        </details>
+      </div>
 
       {requests.data && !requests.data.submissionEnabled && canReport ? (
         <div className="banner warning">
@@ -172,64 +180,39 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
         </div>
       ) : null}
 
-      {canCreate ? (
-        <section className="card stack creation-panel">
-          <div className="segmented" role="group" aria-label={t('myWork.createGroup')}>
-            <button
-              type="button"
-              className={createTab === 'task' ? 'segmented-button active' : 'segmented-button'}
-              aria-pressed={createTab === 'task'}
-              onClick={() => setCreateTab((current) => (current === 'task' ? 'none' : 'task'))}
-            >
-              {t('myWork.newTask')}
-            </button>
-            <button
-              type="button"
-              className={createTab === 'subproject' ? 'segmented-button active' : 'segmented-button'}
-              aria-pressed={createTab === 'subproject'}
-              onClick={() => setCreateTab((current) => (current === 'subproject' ? 'none' : 'subproject'))}
-            >
-              {t('myWork.newSubproject')}
-            </button>
-          </div>
-          {createTab === 'task' ? (
-            <CreateTaskCard
-              projects={projects.data?.items ?? []}
-              loading={projects.loading}
-              initialProjectId={createdSubproject?.projectId ?? ''}
-              initialSubprojectId={createdSubproject?.subprojectId ?? ''}
-              onCreated={() => {
-                refreshAfterCreation();
-              }}
-            />
-          ) : null}
-          {createTab === 'subproject' ? (
-            <MemberSubprojectForm
-              projects={projects.data?.items ?? []}
-              loading={projects.loading}
-              onCreated={(created) => {
-                setCreatedSubproject(created);
-                refreshAfterCreation();
-              }}
-            />
-          ) : null}
-          {createdSubproject ? (
-            <div className="banner ok stack-tight">
-              <span>{t('myWork.subprojectCreated')}</span>
-              <div className="inline-actions">
-                <button
-                  type="button"
-                  className="button secondary"
-                  onClick={() => {
-                    setCreateTab('task');
-                  }}
-                >
-                  {t('myWork.createTaskUnder')}
-                </button>
-              </div>
-            </div>
-          ) : null}
-        </section>
+      {notice ? (
+        <div className={`banner ${notice.tone}`} role={notice.tone === 'danger' ? 'alert' : 'status'}>
+          {notice.text}
+        </div>
+      ) : null}
+
+      {canCreate && createTab === 'task' ? (
+        <MemberTaskForm
+          projects={projects.data?.items ?? []}
+          loading={projects.loading}
+          initialProjectId={createdSubproject?.projectId ?? ''}
+          initialSubprojectId={createdSubproject?.subprojectId ?? ''}
+          onClose={() => setCreateTab('none')}
+          onCreated={() => {
+            setCreateTab('none');
+            setNotice({ tone: 'ok', text: t('myWork.created') });
+            refreshAfterCreation();
+          }}
+        />
+      ) : null}
+
+      {canCreate && createTab === 'subproject' ? (
+        <MemberSubprojectForm
+          projects={projects.data?.items ?? []}
+          loading={projects.loading}
+          onClose={() => setCreateTab('none')}
+          onCreated={(created) => {
+            setCreateTab('none');
+            setCreatedSubproject(created);
+            setNotice({ tone: 'ok', text: t('myWork.subprojectCreated') });
+            refreshAfterCreation();
+          }}
+        />
       ) : null}
 
       <ErrorBox
@@ -242,108 +225,133 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
         }}
       />
 
-      <div className="inline-actions">
-        <span className="muted small">{t('myWork.total', { n: total })}</span>
+      <div className="compact-toolbar my-work-filters" role="group" aria-label={t('myWork.filter.more')}>
+        <label className="field grow">
+          <span className="field-label">{t('myWork.filter.task')}</span>
+          <input
+            type="search"
+            aria-label={t('myWork.filter.task')}
+            value={search}
+            placeholder={t('myWork.filter.task')}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </label>
+        <div className="field">
+          <span className="field-label">{t('myWork.filter.project')}</span>
+          <RemoteSelect
+            value={projectId}
+            optionsKey="my-work:project-filter"
+            onChange={(value) => {
+              setProjectId(value);
+              setPage(1);
+              setCompletedPage(1);
+            }}
+            allowEmpty={t('filter.allProjects')}
+            searchLabel={t('myWork.filter.projectSearch')}
+            selectLabel={t('myWork.filter.project')}
+            load={async ({ query: projectQuery, page: projectPage }) => {
+              const result = await api.get<MyWorkProjectFilter>(
+                '/api/employee/my-work/project-filter' +
+                  queryString({
+                    query: projectQuery,
+                    page: projectPage,
+                    pageSize: 25,
+                    selectedId: projectId
+                  })
+              );
+              return {
+                items: result.items.map((entry) => ({ value: entry.projectId, label: entry.projectName })),
+                total: result.total,
+                page: result.page,
+                totalPages: result.totalPages,
+                selected: result.selected
+                  ? { value: result.selected.projectId, label: result.selected.projectName }
+                  : null
+              };
+            }}
+          />
+        </div>
+        <details className="disclosure">
+          <summary>
+            {hiddenFilterCount > 0
+              ? t('myWork.filter.moreActive', { n: hiddenFilterCount })
+              : t('myWork.filter.more')}
+          </summary>
+          <div className="disclosure-body filters">
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={overdue}
+                onChange={(event) => {
+                  setOverdue(event.target.checked);
+                  setPage(1);
+                  setCompletedPage(1);
+                }}
+              />
+              {t('myWork.filter.overdue')}
+            </label>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={dueThisWeek}
+                onChange={(event) => {
+                  setDueThisWeek(event.target.checked);
+                  setPage(1);
+                  setCompletedPage(1);
+                }}
+              />
+              {t('myWork.filter.dueThisWeek')}
+            </label>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={awaitingReview}
+                onChange={(event) => {
+                  setAwaitingReview(event.target.checked);
+                  setPage(1);
+                  setCompletedPage(1);
+                }}
+              />
+              {t('myWork.filter.awaitingReview')}
+            </label>
+            {filtersActive ? (
+              <button type="button" className="link-button" onClick={resetFilters}>
+                {t('myWork.filter.reset')}
+              </button>
+            ) : null}
+          </div>
+        </details>
+
+        {canCreate ? (
+          <>
+            <button type="button" className="button" onClick={() => setCreateTab('task')}>
+              {t('myWork.newTask')}
+            </button>
+            <button type="button" className="button secondary" onClick={() => setCreateTab('subproject')}>
+              {t('myWork.newSubproject')}
+            </button>
+            {createdSubproject ? (
+              <button type="button" className="link-button" onClick={() => setCreateTab('task')}>
+                {t('myWork.createTaskUnder')}
+              </button>
+            ) : null}
+          </>
+        ) : null}
       </div>
 
-      <section className="card stack my-work-filters" aria-label={t('myWork.filter.reset')}>
-        <div className="field-row">
-          <label className="field">
-            <span className="field-label">{t('myWork.filter.task')}</span>
-            <input
-              type="search"
-              value={search}
-              placeholder={t('myWork.filter.task')}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </label>
-          <div className="field">
-            <span className="field-label">{t('myWork.filter.project')}</span>
-            <RemoteSelect
-              value={projectId}
-              optionsKey="my-work:project-filter"
-              onChange={(value) => {
-                setProjectId(value);
-                setPage(1);
-                setCompletedPage(1);
-              }}
-              allowEmpty={t('filter.all')}
-              searchLabel={t('myWork.filter.projectSearch')}
-              selectLabel={t('myWork.filter.project')}
-              load={async ({ query: projectQuery, page: projectPage }) => {
-                const result = await api.get<MyWorkProjectFilter>(
-                  '/api/employee/my-work/project-filter' +
-                    queryString({
-                      query: projectQuery,
-                      page: projectPage,
-                      pageSize: 25,
-                      selectedId: projectId
-                    })
-                );
-                return {
-                  items: result.items.map((entry) => ({ value: entry.projectId, label: entry.projectName })),
-                  total: result.total,
-                  page: result.page,
-                  totalPages: result.totalPages,
-                  selected: result.selected
-                    ? { value: result.selected.projectId, label: result.selected.projectName }
-                    : null
-                };
-              }}
-            />
-          </div>
-        </div>
-        <div className="filters">
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={overdue}
-              onChange={(event) => {
-                setOverdue(event.target.checked);
-                setPage(1);
-                setCompletedPage(1);
-              }}
-            />
-            {t('myWork.filter.overdue')}
-          </label>
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={dueThisWeek}
-              onChange={(event) => {
-                setDueThisWeek(event.target.checked);
-                setPage(1);
-                setCompletedPage(1);
-              }}
-            />
-            {t('myWork.filter.dueThisWeek')}
-          </label>
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={awaitingReview}
-              onChange={(event) => {
-                setAwaitingReview(event.target.checked);
-                setPage(1);
-                setCompletedPage(1);
-              }}
-            />
-            {t('myWork.filter.awaitingReview')}
-          </label>
-          {filtersActive ? (
-            <button type="button" className="link-button" onClick={resetFilters}>
-              {t('myWork.filter.reset')}
-            </button>
-          ) : null}
-        </div>
-        {filtersActive ? (
-          <p className="muted small">
-            {t('myWork.filter.active')}: {t('myWork.matching', { n: total })} · {t('myWork.allActive', { n: unfilteredTotal })}
-          </p>
-        ) : null}
-      </section>
-
-      <DataFreshness snapshot={false} />
+      {activeFilterLabels.length > 0 ? (
+        <p className="active-filter-summary">
+          <span>{t('myWork.filter.active')}:</span>
+          {activeFilterLabels.map((labelText) => (
+            <span className="filter-chip" key={labelText}>
+              {labelText}
+            </span>
+          ))}
+          <span>
+            {t('myWork.matching', { n: total })} · {t('myWork.allActive', { n: unfilteredTotal })}
+          </span>
+        </p>
+      ) : null}
 
       {list.loading && !list.data ? <p className="muted">{t('myWork.loading')}</p> : null}
 
@@ -353,20 +361,17 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
         </p>
       ) : null}
 
-      {items.some((item) => item.creationChannel === 'MEMBER') ? (
-        <p className="muted small">{t('myWork.adminApprovalNote')}</p>
-      ) : null}
-
       <div className="my-work-list" aria-label={t('local.myWork')}>
       {items.map((item) => (
         <WorkRow
           key={`${item.taskId}:${item.revision}`}
           item={item}
-          canReport={canReport}
-          reporterName={actor.name}
-          canManage={actor.role === 'ADMIN' || actor.role === 'MANAGER'}
+          canReportCompletion={capabilities.canSubmitCompletionRequest}
+          canRequestExtension={capabilities.canSubmitExtensionRequest}
+          canManage={capabilities.canEdit}
           submissionEnabled={requests.data?.submissionEnabled ?? false}
           onChanged={refreshAll}
+          onStatus={(status) => setNotice(status)}
         />
       ))}
       </div>
@@ -400,11 +405,12 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
                 <WorkRow
                   key={`${item.taskId}:${item.revision}`}
                   item={item}
-                  canReport={false}
-                  reporterName={actor.name}
-                  canManage={false}
+                  canReportCompletion={false}
+                  canRequestExtension={false}
+                          canManage={false}
                   submissionEnabled={false}
                   onChanged={refreshAll}
+                  onStatus={(status) => setNotice(status)}
                 />
               ))}
             </div>
@@ -426,234 +432,115 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
   );
 }
 
-function CreateTaskCard({
-  projects,
-  loading,
-  initialProjectId = '',
-  initialSubprojectId = '',
-  onCreated
-}: {
-  projects: MyWorkProjectOptions['items'];
-  loading: boolean;
-  initialProjectId?: string;
-  initialSubprojectId?: string;
-  onCreated: () => void;
-}): JSX.Element {
-  const { t, label } = useI18n();
-  const initialKey = useIdempotencyKey();
-  const [idempotencyKey, setIdempotencyKey] = useState(initialKey);
-  const save = useSave();
-  const [projectId, setProjectId] = useState(initialProjectId);
-  const [subprojectId, setSubprojectId] = useState(initialSubprojectId);
-  const [taskName, setTaskName] = useState('');
-  const [description, setDescription] = useState('');
-  const [plannedStart, setPlannedStart] = useState('');
-  const [deadline, setDeadline] = useState('');
-  const [priority, setPriority] = useState('Medium');
-  const [notice, setNotice] = useState('');
-
-  const current = useMemo(() => projects.find((entry) => entry.projectId === projectId), [projects, projectId]);
-  const subprojects = current?.subprojects ?? [];
-  const valid = !!projectId && taskName.trim().length > 0 && !!deadline && (!plannedStart || plannedStart <= deadline);
-
-  return (
-    <form
-      className="card stack"
-      onSubmit={(event) => {
-        event.preventDefault();
-        setNotice('');
-        void save.run(
-          () =>
-            api.post('/api/employee/my-work', {
-              idempotencyKey,
-              projectId,
-              subprojectId: subprojectId || null,
-              taskName: taskName.trim(),
-              description: description.trim() || undefined,
-              plannedStart: plannedStart || undefined,
-              deadline,
-              priority
-            }),
-          {
-            onSuccess: () => {
-              setNotice(t('myWork.created'));
-              setIdempotencyKey(createIdempotencyKey());
-              setTaskName('');
-              setDescription('');
-              setPlannedStart('');
-              setDeadline('');
-              onCreated();
-            }
-          }
-        );
-      }}
-    >
-      <h3>{t('myWork.newTask')}</h3>
-      <p className="muted small">{t('myWork.ownerNote')}</p>
-      {loading ? <p className="muted">{t('myWork.projectsLoading')}</p> : null}
-      {!loading && projects.length === 0 ? <div className="banner warning">{t('myWork.projectsEmpty')}</div> : null}
-
-      <div className="field-row">
-        <label className="field">
-          <span className="field-label">{t('myWork.project')}</span>
-          <SelectInput
-            value={projectId}
-            onChange={(value) => {
-              setProjectId(value);
-              setSubprojectId('');
-            }}
-            allowEmpty={t('common.unset')}
-            options={projects.map((entry) => ({
-              value: entry.projectId,
-              label: entry.responsibilityName ? entry.projectName + ' / ' + entry.responsibilityName : entry.projectName
-            }))}
-          />
-        </label>
-        <label className="field">
-          <span className="field-label">{t('myWork.subproject')}</span>
-          <SelectInput
-            value={subprojectId}
-            onChange={setSubprojectId}
-            allowEmpty={t('myWork.subprojectNone')}
-            options={subprojects.map((entry) => ({
-              value: entry.subprojectId,
-              label: subprojectPath(subprojects, entry.subprojectId)
-            }))}
-          />
-        </label>
-      </div>
-
-      <label className="field">
-        <span className="field-label">{t('myWork.taskName')}</span>
-        <TextInput value={taskName} onChange={setTaskName} required />
-      </label>
-
-      <label className="field">
-        <span className="field-label">{t('myWork.description')}</span>
-        <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} />
-      </label>
-
-      <div className="field-row">
-        <label className="field">
-          <span className="field-label">{t('schedule.start')}</span>
-          <TextInput type="date" value={plannedStart} onChange={setPlannedStart} />
-        </label>
-        <label className="field">
-          <span className="field-label">{t('schedule.finish')}</span>
-          <TextInput type="date" value={deadline} onChange={setDeadline} required />
-        </label>
-        <label className="field">
-          <span className="field-label">{t('myWork.priority')}</span>
-          <SelectInput
-            value={priority}
-            onChange={setPriority}
-            options={['Low', 'Medium', 'High', 'Critical'].map((value) => ({ value, label: label('priority', value) }))}
-          />
-        </label>
-      </div>
-      <p className="muted small">{t('schedule.explanation')}</p>
-      <p className="muted small">{t('tasks.noDurationNote')}</p>
-
-      <ErrorBox error={save.error} onRetry={onCreated} />
-      {notice ? <div className="banner ok">{notice}</div> : null}
-
-      <div className="inline-actions">
-        <button type="submit" className="button" disabled={!valid || save.state === 'saving'}>
-          {save.state === 'saving' ? t('state.saving') : t('myWork.create')}
-        </button>
-      </div>
-    </form>
-  );
-}
-
 function WorkRow({
   item,
-  canReport,
-  reporterName,
+  canReportCompletion,
+  canRequestExtension,
   canManage,
   submissionEnabled,
-  onChanged
+  onChanged,
+  onStatus
 }: {
   item: MyWorkList['items'][number];
-  canReport: boolean;
-  reporterName: string;
+  canReportCompletion: boolean;
+  canRequestExtension: boolean;
   canManage: boolean;
   submissionEnabled: boolean;
   onChanged: () => void;
+  onStatus: (status: { tone: 'ok' | 'warning' | 'danger'; text: string }) => void;
 }): JSX.Element {
   const { t, label } = useI18n();
-  const [reporting, setReporting] = useState(false);
+  const [requestType, setRequestType] = useState<'DEADLINE_CHANGE' | 'COMPLETION_REPORT' | null>(null);
   const [completing, setCompleting] = useState(false);
   const save = useSave();
 
   const finished = ['DONE', 'CANCELLED'].includes(item.displayStatus);
-  const locked = finished || item.container;
+  // A finished or container task never offers a request: the server refuses one, so the control
+  // would only promise an action that cannot exist. Extension eligibility stays separate from
+  // completion eligibility and is still re-checked on the server at submission.
+  const requestable = !finished && !item.container && !item.pendingRequest;
+  const blockedReasons: string[] = [];
+  if (item.pendingRequest) blockedReasons.push(t('report.blocked.pending'));
+  if (!submissionEnabled) blockedReasons.push(t('report.blocked.disabled'));
   const review = reviewKey(item.reviewState);
-  const reportBlocked: string[] = [];
-  if (canReport) {
-    if (item.container) reportBlocked.push(t('report.blocked.container'));
-    if (item.displayStatus === 'DONE') reportBlocked.push(t('report.blocked.done'));
-    if (item.displayStatus === 'CANCELLED') reportBlocked.push(t('report.blocked.cancelled'));
-    if (item.pendingRequest) reportBlocked.push(t('report.blocked.pending'));
-    if (!submissionEnabled) reportBlocked.push(t('report.blocked.disabled'));
-  }
+  const canReport = canReportCompletion || canRequestExtension;
+  // Only the additional request belongs behind その他: the primary action and the OPEN link stay put.
+  const showMore = canRequestExtension && requestable;
 
   return (
     <article className="my-work-row">
       <div className="my-work-row-title">
-      <h3>
-        <a href={`#/task/${item.taskId}`}>{item.taskName}</a>
-      </h3>
-      <p className="my-work-row-meta muted small">
-        <a href={`#/project/${item.projectId}`}>{item.projectName}</a>
-        {item.subprojectName ? ` / ${item.subprojectName}` : ''} · {label('priority', item.priority)}
-      </p>
+        <h3>
+          <a href={`#/task/${item.taskId}`}>{item.taskName}</a>
+        </h3>
+        <p className="my-work-row-meta muted small">
+          <a href={`#/project/${item.projectId}`}>{item.projectName}</a>
+          {item.subprojectName ? ` / ${item.subprojectName}` : ''} · {label('priority', item.priority)}
+        </p>
       </div>
       <div className="my-work-row-status">
-      <span className="row-status-line">
-        <Badge tone={displayTone(item.displayStatus)}>{t(`taskStatus.${item.displayStatus}`)}</Badge>
-        {item.pendingRequest ? <Badge tone="warn">{t('myWork.pendingBadge')}</Badge> : null}
-      </span>
-      {canReport ? <Badge tone={review.tone}>{t(review.label)}</Badge> : null}
+        <span className="row-status-line">
+          <TaskStatusBadge state={item.displayStatus} missing={item.scheduleMissing} showDetail />
+          <WorkflowHint status={item.status} />
+          {item.pendingRequest && item.reviewState !== 'PENDING' ? (
+            <Badge tone="warn">{t('myWork.pendingBadge')}</Badge>
+          ) : null}
+        </span>
+        {/* A neutral "no request" badge adds noise; only a real review state is stated. */}
+        {canReport && item.reviewState !== 'NONE' ? <Badge tone={review.tone}>{t(review.label)}</Badge> : null}
       </div>
       <div className="my-work-row-due">
-        <DeadlineCell dueDate={item.dueDate} state={item.displayStatus} completedOn={item.completedAt} />
+        <DeadlineCell dueDate={item.dueDate} state={item.displayStatus} completedOn={item.completedAt} showStateBadge={false} />
       </div>
 
       <div className="my-work-row-actions">
-      {canReport ? (
-          <button
-            type="button"
-            className="button secondary"
-            disabled={reportBlocked.length > 0}
-            onClick={() => setReporting(true)}
-          >
+        {canReportCompletion && requestable ? (
+          <button type="button" className="button" onClick={() => setRequestType('COMPLETION_REPORT')}>
             {t('myWork.reportCompletion')}
           </button>
-      ) : null}
-      {canManage ? (
-        <>
-          <a className="button secondary" href={`#/task/${item.taskId}`}>{t('action.open')}</a>
-          {!locked ? (
-            <button type="button" className="button" onClick={() => setCompleting(true)}>
-              {t('tasks.completeDirect')}
-            </button>
-          ) : null}
-        </>
-      ) : (
-          <a className="button secondary" href={`#/task/${item.taskId}`}>{t('action.open')}</a>
-      )}
+        ) : null}
+        {canManage && !finished && !item.container ? (
+          <button
+            type="button"
+            className={canReportCompletion && requestable ? 'button secondary' : 'button'}
+            onClick={() => setCompleting(true)}
+          >
+            {t('tasks.completeDirect')}
+          </button>
+        ) : null}
+        <a className="button secondary" href={`#/task/${item.taskId}`}>{t('action.open')}</a>
+        {showMore ? (
+          <Menu label={t('action.more')} className="row-menu">
+            {(close) => (
+              <button
+                type="button"
+                role="menuitem"
+                className="menu-item"
+                onClick={() => {
+                  close();
+                  setRequestType('DEADLINE_CHANGE');
+                }}
+              >
+                {t('request.action.deadline')}
+              </button>
+            )}
+          </Menu>
+        ) : null}
+        {finished ? <span className="muted small">{t('myWork.noRequestForFinished')}</span> : null}
       </div>
-      <ErrorBox error={save.error} onRetry={onChanged} />
-      {canReport && reportBlocked.length > 0 ? (
+
+      {canReport && requestable && blockedReasons.length > 0 ? (
         <div className="validation-summary" role="status">
           <ul>
-            {reportBlocked.map((reason) => (
+            {blockedReasons.map((reason) => (
               <li key={reason}>{reason}</li>
             ))}
           </ul>
         </div>
-      ) : null}      {completing ? (
+      ) : null}
+      <ErrorBox error={save.error} onRetry={onChanged} />
+
+      {completing ? (
         <ConfirmDialog
           title={t('tasks.completeDirectTitle')}
           message={t('tasks.completeDirectBody')}
@@ -669,7 +556,15 @@ function WorkRow({
               {
                 onSuccess: () => {
                   setCompleting(false);
-                  queryCache.invalidate([keys.myWork, keys.tasks, keys.taskIndex, keys.overview, keys.task(item.taskId), keys.project(item.projectId), keys.timeline]);
+                  queryCache.invalidate([
+                    keys.myWork,
+                    keys.tasks,
+                    keys.taskIndex,
+                    keys.overview,
+                    keys.task(item.taskId),
+                    keys.project(item.projectId),
+                    keys.timeline
+                  ]);
                   onChanged();
                 }
               }
@@ -678,16 +573,19 @@ function WorkRow({
         />
       ) : null}
 
-      {reporting ? (
-        <CompletionReportPanel
+      {requestType ? (
+        <RequestDialog
+          key={`${item.taskId}:${requestType}`}
           taskId={item.taskId}
-          blockedReasons={reportBlocked}
-          reporterName={reporterName}
-          onDismiss={() => {
-            setReporting(false);
-            onChanged();
-          }}
-          onSubmitted={onChanged}
+          taskName={item.taskName}
+          projectName={item.projectName}
+          subprojectName={item.subprojectName || undefined}
+          currentDeadline={item.dueDate}
+          requestType={requestType}
+          submissionEnabled={submissionEnabled}
+          blockedReasons={blockedReasons}
+          onClose={() => setRequestType(null)}
+          onResult={(status) => onStatus(status)}
         />
       ) : null}
     </article>

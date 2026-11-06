@@ -1,5 +1,62 @@
 # Changelog
 
+## V2 member creation, shared presentation, ADMIN reopening and request dialogs — 2026-11-05
+
+A MEMBER files a project, a subproject and a task from the project screens; the manager and member
+project lists and overviews now share one presentation built from separate authorized reads; an
+ADMIN can reverse an accidental completion with a reason and a typed confirmation; and completion
+and extension requests open as accessible modal dialogs. No migration, schema column, Script
+Property, background job or stored row is added.
+
+- `POST /api/employee/projects` and `GET /api/employee/references` are member-only. The body is
+  strict, the owner is the verified session, the project starts `Active` with `INTERNAL` visibility,
+  the responsibility must be active, the creation is audited and an idempotency key is never
+  replayed into a second project.
+- `POST /api/employee/subprojects` and `POST /api/employee/my-work` are reused from the project
+  screens in dialogs; member subprojects stay flat and the nested-subproject path stays manager-only.
+- `GET /api/work/projects` accepts `unassigned`, `schedule`, `sort` and `direction` and returns
+  `groupTotals`; `WorkProject` gains `responsibilityId` and `overdueTaskCount`. The new
+  `GET /api/work/overview` answers one authorized snapshot (`WorkOverview`) with `TaskScope` counts,
+  overdue/upcoming lists and responsibility cards, resolved before aggregation and top-N cuts.
+- `components/project-table.tsx`, `components/overview-sections.tsx` and `state/capabilities.ts`
+  replace role-specific copies. `canManage` is no longer a shortcut: creation, edit, archive, delete,
+  reopen and the two request capabilities are separate flags, and the server re-checks each role.
+- `GET /api/manager/tasks/:id/reopen-eligibility` and `POST /api/manager/tasks/:id/reopen` are
+  ADMIN-only. One transaction reverses the current completion (`In Progress`, 0 %, no completion
+  timestamp), optionally returns a `Completed` parent project to `Active`, writes `TASK_REOPENED`
+  (and `PROJECT_REOPENED`), keeps the original request/approval/audit rows, refuses an archived or
+  cancelled parent, and replays a repeated idempotency key instead of applying a second effect.
+- One `RequestDialog` serves completion and extension requests from My Work and task detail: the
+  background is inert, the task, project, subproject and current deadline are named, the body
+  scrolls, Escape/Cancel close it, focus is restored, the draft stays in memory, a duplicate cannot
+  be sent twice and an unobservable outcome stays explicitly unknown. Finished and container tasks
+  are not offered a request, and the reason is still explained.
+
+## V2 one task schedule display status — 2026-11-05
+
+The workload breakdown printed the stored `tasks.status` while its Deadline column printed the
+derived state, so one row could read "Not started" or "Assigned" next to a derived deadline state,
+and the shared rule itself ignored the planned start. One canonical, date-aware calculation now
+serves every screen. No migration, column, Script Property, background job or stored row changes.
+
+- `taskScheduleStatus` in `packages/domain/src/task-status.ts` is the only rule. Precedence: stored
+  `Done`, stored `Cancelled`, an unusable interval, late, planned, in progress, start not set,
+  no dates. The start day is in progress, the finish day is still in progress, and late begins the
+  day after the finish; a missing start still becomes late after the finish.
+- `DisplayTaskStatus` gains `PLANNED`, `START_NOT_SET`, `DATES_NOT_SET` and `INVALID_DATES`
+  alongside `IN_PROGRESS`, `OVERDUE` (labelled 遅延 / Late), `DONE` and `CANCELLED`, and every
+  task-shaped DTO carries an optional `scheduleMissing` detail (`NONE`/`START`/`FINISH`/`BOTH`).
+- The workload Status and Deadline columns, all-work list, project hierarchy, task detail, overview,
+  timeline, member profile and employee snapshot read the same state through `TaskStatusBadge`.
+  The stored workflow value stays stored and is shown as a labelled secondary detail
+  (`ワークフロー状態（保存値）`, and a hint for `Blocked`/`On Hold`).
+- `displayStatus` filtering accepts the new values and still resolves in PostgreSQL before
+  pagination. `TaskScope` counting is unchanged: open work includes planned and undated work, done
+  and cancelled work is never overdue, containers are not extra work and a shared task counts once.
+- A compact deadline column no longer repeats the schedule badge, a reversed interval is a warning
+  tone instead of a red current-overdue badge, and the application shell invalidates the
+  date-dependent reads when the Tokyo day boundary passes.
+
 ## V2 responsibility area removal and retired-area visibility — 2026-11-04
 
 Schema 11 adds an additive migration (`0011_responsibility_deletions.sql`) that extends the

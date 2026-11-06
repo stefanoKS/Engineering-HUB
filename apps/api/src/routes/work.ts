@@ -7,10 +7,17 @@
  */
 import { z } from 'zod';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { TaskListQuery } from '@eh/contracts';
+import { ProjectListQuery, TaskListQuery, WorkOverviewQuery } from '@eh/contracts';
 import { actorOf, ok, type AppDependencies } from '../http';
 import { sendError } from '../errors';
-import { listActiveWork, listWorkProjects, readOnlyProjectDetail, readOnlyTaskDetail, type WorkCtx } from '../services/work';
+import {
+  listActiveWork,
+  listWorkProjects,
+  readOnlyProjectDetail,
+  readOnlyTaskDetail,
+  workOverview,
+  type WorkCtx
+} from '../services/work';
 import { timelineBranch, timelineProjects } from '../services/timeline';
 import { readCtx } from '../services/views';
 
@@ -25,11 +32,19 @@ function ctx(request: FastifyRequest): WorkCtx {
   };
 }
 
-const ProjectQuery = z.object({
-  query: z.string().trim().max(200).optional(),
-  responsibilityId: z.string().trim().max(64).optional(),
-  page: z.coerce.number().int().min(1).max(10000).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(25)
+/**
+ * The read-only project list takes the same filters, sort and paging as the manager list; the
+ * server resolves each of them inside the authorized scope before a page is cut.
+ */
+const ProjectQuery = ProjectListQuery.pick({
+  responsibilityId: true,
+  unassigned: true,
+  schedule: true,
+  query: true,
+  page: true,
+  pageSize: true,
+  sort: true,
+  direction: true
 });
 
 const IdParams = z.object({ id: z.string().min(1).max(64) });
@@ -77,6 +92,26 @@ export function registerWorkRoutes(app: FastifyInstance, _deps: AppDependencies)
     try {
       const { id } = IdParams.parse(request.params ?? {});
       return ok(reply, request, await readOnlyProjectDetail(ctx(request), id));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  /**
+   * The member overview: the same authorized scope as the lists, resolved before every aggregate
+   * and top-N cut. A manager may read it too, but the management overview stays its own endpoint.
+   */
+  app.get('/api/work/overview', async (request, reply) => {
+    try {
+      const query = WorkOverviewQuery.parse(request.query ?? {});
+      return ok(
+        reply,
+        request,
+        await workOverview(ctx(request), {
+          responsibilityId: query.responsibilityId,
+          upcomingDays: query.upcomingDays
+        })
+      );
     } catch (error) {
       return sendError(reply, request.state, error);
     }

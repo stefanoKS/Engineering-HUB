@@ -35,7 +35,7 @@ import {
   canRequestDeadlineChange,
   canSeeRestrictedWork,
   createCalendar,
-  displayTaskStatus,
+  taskScheduleStatus,
   effectiveEmailMode,
   evaluateStaleness,
   planDecision,
@@ -224,25 +224,33 @@ export async function employeeSnapshot(ctx: ServiceCtx) {
     submissionEnabled,
     submissionClosedMessage: submissionEnabled ? '' : '現在、依頼の受付は停止しています',
     stale: false,
-    tasks: rows.map((row) => ({
-      taskId: row.task_id,
-      taskName: row.task_name,
-      projectId: row.project_id,
-      projectName: row.project_name,
-      responsibilityName: row.responsibility_name ?? '',
-      status: row.status,
-      displayStatus: displayTaskStatus({ status: row.status, dueDate: row.due_date }),
-      dueDate: row.due_date,
-      plannedStart: row.planned_start,
-      ownerName: row.owner_name ?? '',
-      assigneeNames: row.assignee_names ?? [],
-      container: row.container,
-      progressPercent: row.progress_percent,
-      reviewState: row.review_state,
-      completedAt: row.completed_at,
-      pendingRequest: row.pending_request,
-      projectAccent: row.responsibility_color ?? ''
-    }))
+    tasks: rows.map((row) => {
+      const schedule = taskScheduleStatus({
+        status: row.status,
+        plannedStart: row.planned_start,
+        dueDate: row.due_date
+      });
+      return {
+        taskId: row.task_id,
+        taskName: row.task_name,
+        projectId: row.project_id,
+        projectName: row.project_name,
+        responsibilityName: row.responsibility_name ?? '',
+        status: row.status,
+        displayStatus: schedule.state,
+        scheduleMissing: schedule.missing,
+        dueDate: row.due_date,
+        plannedStart: row.planned_start,
+        ownerName: row.owner_name ?? '',
+        assigneeNames: row.assignee_names ?? [],
+        container: row.container,
+        progressPercent: row.progress_percent,
+        reviewState: row.review_state,
+        completedAt: row.completed_at,
+        pendingRequest: row.pending_request,
+        projectAccent: row.responsibility_color ?? ''
+      };
+    })
   };
 }
 

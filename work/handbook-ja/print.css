@@ -1,0 +1,339 @@
+﻿@page {
+  size: A4;
+  margin: 15mm;
+}
+
+html {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+body {
+  margin: 0;
+  font-family: "Yu Gothic", "YuGothic", "Meiryo", "Noto Sans JP", sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.5;
+  color: #172033;
+}
+
+h1 {
+  font-size: 18pt;
+  line-height: 1.35;
+  margin: 0 0 4mm;
+  padding-bottom: 2mm;
+  border-bottom: 2px solid #ad1535;
+  color: #ad1535;
+  break-after: avoid;
+  break-inside: avoid;
+}
+
+h2 {
+  font-size: 14pt;
+  line-height: 1.35;
+  margin: 4mm 0 2.5mm;
+  padding-bottom: 1.5mm;
+  border-bottom: 1px solid #dce2e8;
+  break-after: avoid;
+}
+
+h3 {
+  font-size: 11.5pt;
+  line-height: 1.35;
+  margin: 3.5mm 0 1.5mm;
+  break-after: avoid;
+}
+
+h4 {
+  font-size: 11pt;
+  margin: 4mm 0 1.5mm;
+  break-after: avoid;
+}
+
+p,
+li {
+  orphans: 3;
+  widows: 3;
+}
+
+p {
+  margin: 1.5mm 0;
+}
+
+li {
+  margin: 0.6mm 0;
+}
+
+ul,
+ol {
+  margin: 1.5mm 0 2mm;
+  padding-left: 6mm;
+}
+
+li {
+  margin: 1mm 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 9pt;
+  line-height: 1.45;
+  margin: 2.5mm 0 3mm;
+}
+
+th,
+td {
+  border: 1px solid #dce2e8;
+  padding: 1.8mm 2.2mm;
+  vertical-align: top;
+  text-align: left;
+}
+
+th {
+  background: #f6f7f9;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+tr {
+  break-inside: avoid;
+}
+
+/* 各章の「目的・開始画面・事前条件」表 */
+table.lesson {
+  font-size: 9pt;
+  background: #fbf8f9;
+}
+
+table.lesson th {
+  width: 24mm;
+  background: #f4e6ea;
+  color: #7d1026;
+  border-color: #e7cdd4;
+}
+
+table.lesson td {
+  border-color: #e7cdd4;
+}
+
+figure {
+  margin: 2.5mm 0 2.5mm;
+  break-inside: avoid;
+}
+
+figure img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  max-height: 92mm;
+  height: auto;
+  margin: 0 auto;
+  border: 1px solid #dce2e8;
+  box-sizing: border-box;
+}
+
+figure img.narrow {
+  width: 50mm;
+  margin: 0 auto;
+}
+
+figure img.portrait {
+  max-height: 112mm;
+}
+
+/* 縦長のダイアログ写真は、手順の横に置いて紙面を有効に使う */
+figure.side {
+  float: right;
+  width: 82mm;
+  margin: 0 0 3mm 6mm;
+  break-inside: avoid;
+}
+
+figure.side img {
+  width: 100%;
+  max-height: none;
+}
+
+figure.side2 {
+  width: 104mm;
+}
+
+figure.side figcaption {
+  text-align: left;
+  font-size: 8pt;
+}
+
+figure img.small {
+  width: 55%;
+  margin: 0 auto;
+}
+
+figcaption {
+  margin-top: 1.8mm;
+  font-size: 8.5pt;
+  line-height: 1.45;
+  color: #4a5566;
+  text-align: center;
+}
+
+blockquote {
+  margin: 2mm 0;
+  padding: 1.5mm 3.5mm;
+  border-left: 3px solid #ad1535;
+  background: #fdf6f8;
+  break-inside: avoid;
+}
+
+blockquote p {
+  margin: 1mm 0;
+}
+
+blockquote strong {
+  color: #7d1026;
+}
+
+/* 制作メモ（配布前に解消する箇所） */
+p.shot-missing {
+  margin: 3mm 0;
+  padding: 2.5mm 3mm;
+  border: 1px dashed #ad1535;
+  background: #fdf6f8;
+  font-size: 9pt;
+  color: #7d1026;
+}
+
+.page-break {
+  break-before: page;
+  page-break-before: always;
+}
+
+/* 部の見出し（ページを分けない） */
+p.part-label {
+  margin: 0 0 1mm;
+  font-size: 8.5pt;
+  letter-spacing: 0.08em;
+  color: #ad1535;
+  font-weight: 700;
+  break-after: avoid;
+}
+
+/* 表紙 */
+h1.cover-title {
+  margin: 55mm 0 2mm;
+  font-size: 30pt;
+  letter-spacing: 0.04em;
+  border: 0;
+  padding: 0;
+}
+
+h2.cover-sub {
+  margin: 0;
+  font-size: 13pt;
+  font-weight: 600;
+  color: #172033;
+  border: 0;
+}
+
+h1.qs-title {
+  margin: 0;
+  padding-top: 5mm;
+  font-size: 22pt;
+  border: 0;
+  border-top: 5px solid #ad1535;
+}
+
+h2.qs-sub {
+  margin: 1mm 0 0;
+  font-size: 13pt;
+  color: #172033;
+  border: 0;
+}
+
+p.cover-foot {
+  margin-top: 48mm;
+  padding-top: 3mm;
+  border-top: 1px solid #dce2e8;
+  font-size: 9pt;
+  color: #4a5566;
+}
+
+.cover-meta {
+  margin-top: 8mm;
+  font-size: 10.5pt;
+  color: #4a5566;
+}
+
+/* クイックスタートの見出し帯 */
+.cover-meta {
+  margin: 3mm 0 5mm;
+  font-size: 9.5pt;
+  color: #4a5566;
+}
+
+@media print {
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  img {
+    image-rendering: auto;
+  }
+}
+
+
+/* ?????????2?????????????????? */
+body.qs table {
+  font-size: 8.5pt;
+  margin: 2mm 0 2.5mm;
+}
+
+body.qs th,
+body.qs td {
+  padding: 1.4mm 2mm;
+}
+
+body.qs h3 {
+  margin: 3mm 0 1mm;
+  font-size: 11pt;
+}
+
+body.qs figure {
+  margin: 2mm 0;
+}
+
+body.qs figcaption {
+  font-size: 8pt;
+  margin-top: 1.2mm;
+}
+
+body.qs blockquote {
+  margin: 1.5mm 0;
+  padding: 1.2mm 3mm;
+}
+
+/* ?????????????????????? */
+body.review {
+  font-size: 9.4pt;
+  line-height: 1.38;
+}
+
+body.review h2 {
+  font-size: 12.5pt;
+  margin: 3mm 0 1.5mm;
+}
+
+body.review table {
+  font-size: 8.3pt;
+  margin: 2mm 0 2.5mm;
+}
+
+body.review th,
+body.review td {
+  padding: 1.2mm 1.8mm;
+}
+
+body.review blockquote {
+  margin: 1.5mm 0;
+  padding: 1.2mm 3mm;
+}

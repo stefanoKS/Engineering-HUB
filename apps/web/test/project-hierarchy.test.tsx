@@ -220,6 +220,8 @@ describe('project hierarchy tree', () => {
           hierarchy={hierarchyFixture()}
           canManage={canManage}
           canDelete={canDelete}
+          canCreateTask={canManage}
+          canCreateSubproject={canManage}
           includeInactive={false}
           onToggleInactive={() => undefined}
           onNewTask={() => undefined}
@@ -247,6 +249,8 @@ describe('project hierarchy tree', () => {
           hierarchy={hierarchyFixture()}
           canManage
           canDelete
+          canCreateTask
+          canCreateSubproject
           includeInactive={false}
           onToggleInactive={() => undefined}
           onNewTask={() => undefined}
@@ -266,6 +270,8 @@ describe('project hierarchy tree', () => {
           hierarchy={hierarchyFixture()}
           canManage
           canDelete
+          canCreateTask
+          canCreateSubproject
           includeInactive={false}
           onToggleInactive={() => undefined}
           onNewTask={() => undefined}
@@ -298,6 +304,8 @@ describe('project hierarchy tree', () => {
           hierarchy={buildProjectHierarchy({ subprojects: [], tasks: [], includeInactive: false })}
           canManage
           canDelete
+          canCreateTask
+          canCreateSubproject
           includeInactive={false}
           onToggleInactive={() => undefined}
           onNewTask={() => undefined}
@@ -565,12 +573,18 @@ describe('project detail roles', () => {
   });
 
   it('renders MEMBER and VIEWER a read-only hierarchy without actions', async () => {
-    for (const actor of [MEMBER_ACTOR, VIEWER_ACTOR]) {
+    for (const [actor, canCreate] of [
+      [MEMBER_ACTOR, true],
+      [VIEWER_ACTOR, false]
+    ] as const) {
       stubManagerApi();
       const view = render(<I18nProvider><ProjectDetailScreen actor={actor as never} projectId="PRJ-A" readOnly /></I18nProvider>);
       expect(await screen.findByText('Area A work')).toBeTruthy();
       expect(screen.queryAllByRole('button', { name: /を削除/ })).toHaveLength(0);
-      expect(screen.queryAllByRole('button', { name: '新規タスク' })).toHaveLength(0);
+      // A MEMBER files new work here; a VIEWER stays read-only.
+      const createButtons = screen.queryAllByRole('button', { name: '新規タスク' });
+      if (canCreate) expect(createButtons.length).toBeGreaterThan(0);
+      else expect(createButtons).toHaveLength(0);
       expect(screen.queryAllByRole('button', { name: '編集' })).toHaveLength(0);
       view.unmount();
       queryCache.clear();

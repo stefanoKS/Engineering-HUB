@@ -11,7 +11,7 @@
  * utilisation value is computed here, because the report measures tasks, not time.
  */
 import type { DisplayTaskStatus, TaskStatus } from '@eh/contracts';
-import { displayTaskStatus } from '@eh/domain';
+import { taskScheduleStatus } from '@eh/domain';
 import type { Queryable } from '../pool';
 
 type Db = Queryable;
@@ -361,6 +361,7 @@ export async function workloadTaskPage(
     task_name: string;
     status: string;
     due_date: string | null;
+    planned_start: string | null;
     completed_date: string | null;
     revision: number;
     project_id: string;
@@ -377,6 +378,7 @@ export async function workloadTaskPage(
          FROM scope s
         WHERE ${where})
      SELECT t.task_id, t.task_name, t.status, t.due_date::text AS due_date,
+            t.planned_start::text AS planned_start,
             f.completed_date::text AS completed_date, t.revision,
             p.project_id, p.project_name, sp.subproject_name,
             (SELECT coalesce(array_agg(m.name ORDER BY m.name), ARRAY[]::text[])
@@ -394,22 +396,26 @@ export async function workloadTaskPage(
   );
   const total = rows[0]?.total ?? (input.page > 1 ? await workloadTaskTotal(db, filters, input) : 0);
   return {
-    items: rows.map((row) => ({
-      taskId: row.task_id,
-      taskName: row.task_name,
-      projectId: row.project_id,
-      projectName: row.project_name,
-      subprojectName: row.subproject_name,
-      status: row.status as TaskStatus,
-      displayStatus: displayTaskStatus(
-        { status: row.status, dueDate: row.due_date },
+    items: rows.map((row) => {
+      const schedule = taskScheduleStatus(
+        { status: row.status, plannedStart: row.planned_start, dueDate: row.due_date },
         filters.today
-      ),
-      dueDate: row.due_date,
-      completedDate: row.completed_date,
-      assigneeNames: row.assignee_names ?? [],
-      revision: row.revision
-    })),
+      );
+      return {
+        taskId: row.task_id,
+        taskName: row.task_name,
+        projectId: row.project_id,
+        projectName: row.project_name,
+        subprojectName: row.subproject_name,
+        status: row.status as TaskStatus,
+        displayStatus: schedule.state,
+        scheduleMissing: schedule.missing,
+        dueDate: row.due_date,
+        completedDate: row.completed_date,
+        assigneeNames: row.assignee_names ?? [],
+        revision: row.revision
+      };
+    }),
     total,
     page: input.page,
     pageSize: input.pageSize,

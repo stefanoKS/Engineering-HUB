@@ -165,9 +165,35 @@ describe('supplied branding assets', () => {
     };
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url: string) =>
-        url.startsWith('/api/session') ? configResponse(session) : configResponse({})
-      )
+      vi.fn(async (url: string) => {
+        if (url.startsWith('/api/session')) return configResponse(session);
+        // The landing overview reads its own projection; the header assertions never depend on it,
+        // but a malformed payload must not unmount the shell mid-test.
+        if (url.includes('/api/manager/overview')) {
+          return configResponse({
+            scope: { responsibilityId: '', unassigned: false, label: '' },
+            counts: {
+              workItems: 0,
+              containers: 0,
+              activeWork: 0,
+              openWork: 0,
+              overdueWork: 0,
+              completedWork: 0,
+              cancelledWork: 0
+            },
+            upcomingWindow: { days: 7, from: '2026-11-05', to: '2026-11-11' },
+            overdue: [],
+            overdueTotal: 0,
+            upcoming: [],
+            upcomingTotal: 0,
+            responsibilities: [],
+            projects: [],
+            pendingRequests: [],
+            generatedAt: '2026-11-05T00:00:00.000Z'
+          });
+        }
+        return configResponse({});
+      })
     );
     render(
       <I18nProvider>
@@ -179,7 +205,11 @@ describe('supplied branding assets', () => {
     expect(logo.className).toBe('design-team-logo');
     expect(screen.queryByRole('img', { name: '広島化成' })).toBeNull();
     expect(screen.getByRole('button', { name: 'English' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'サインアウト' })).toBeTruthy();
+    // Sign-out lives inside the account menu, not in the header row.
+    expect(screen.queryByRole('button', { name: 'サインアウト' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /管理者/ }));
+    expect(await screen.findByRole('menuitem', { name: 'サインアウト' })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'パスワード変更' })).toBeTruthy();
   });
 });
 

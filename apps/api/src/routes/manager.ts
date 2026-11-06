@@ -31,6 +31,7 @@ import {
   PublishBody,
   ReconcileBody,
   RemoveBody,
+  ReopenTaskBody,
   SaveMemberBody,
   SaveResponsibilityBody,
   TaskListQuery,
@@ -86,6 +87,8 @@ import {
   overrideComplete,
   parentTaskOptions,
   patchTask,
+  reopenEligibility,
+  reopenTask,
   taskDetail
 } from '../services/tasks';
 import {
@@ -425,6 +428,24 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
       const body = OverrideCompleteBody.parse(request.body ?? {});
       const { id } = request.params as { id: string };
       return ok(reply, request, { task: await overrideComplete(serviceCtx(request), id, body) });
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  /**
+   * Corrective reopening is an ADMIN capability; both routes re-check the verified role, and the
+   * command re-reads the task, the project and the revision inside its own transaction.
+   */
+  read('/api/manager/tasks/:id/reopen-eligibility', async (request) =>
+    reopenEligibility(serviceCtx(request), (request.params as { id: string }).id)
+  );
+
+  app.post('/api/manager/tasks/:id/reopen', async (request, reply) => {
+    try {
+      const body = ReopenTaskBody.parse(request.body ?? {});
+      const { id } = request.params as { id: string };
+      return ok(reply, request, await reopenTask(serviceCtx(request), id, body));
     } catch (error) {
       return sendError(reply, request.state, error);
     }

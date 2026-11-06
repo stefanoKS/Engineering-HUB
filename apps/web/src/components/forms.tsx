@@ -391,6 +391,10 @@ export function RemoteSelect({
 export function BlockedReasons({ reasons }: { reasons: string[] }): JSX.Element {
   const { t } = useI18n();
   if (reasons.length === 0) return <span />;
+  // An untouched editor has nothing to submit. That is a neutral state, not a refusal, so it is
+  // stated quietly instead of under the "cannot be submitted" heading.
+  const onlyNoChanges = reasons.length === 1 && reasons[0] === t('form.noChanges');
+  if (onlyNoChanges) return <p className="muted small">{t('form.noChanges')}</p>;
   return (
     <div className="validation-summary" role="status">
       <strong>{t('form.blockedReasons')}</strong>

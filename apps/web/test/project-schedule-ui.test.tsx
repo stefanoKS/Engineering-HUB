@@ -126,7 +126,7 @@ describe('project list presentation', () => {
       </I18nProvider>
     );
     await screen.findByText('Alpha');
-    const filter = document.querySelectorAll('.filters select')[1] as HTMLSelectElement;
+    const filter = document.querySelectorAll('.compact-toolbar select')[1] as HTMLSelectElement;
     fireEvent.change(filter, { target: { value: 'LATE' } });
     await waitFor(() => expect(calls.some((url) => url.includes('schedule=LATE'))).toBe(true));
   });

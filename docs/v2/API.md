@@ -1,5 +1,78 @@
 # V2 HTTP API
 
+## Member creation, shared presentation, ADMIN reopening and request dialogs — 2026-11-05
+
+Member creation now reaches the project screens, both roles share one presentation built from
+separate authorized reads, and a corrective reopening exists for accidentally completed work.
+Every route re-checks the verified role; no capability flag from the browser is authority.
+
+### Member creation
+
+| Method | Route | Role | Body |
+|---|---|---|---|
+| `POST` | `/api/employee/projects` | MEMBER | `CreateMyProjectBody` |
+| `GET` | `/api/employee/references` | MEMBER | — |
+| `POST` | `/api/employee/subprojects` | MEMBER | `CreateMySubprojectBody` (unchanged, flat: a parent is refused) |
+| `POST` | `/api/employee/my-work` | MEMBER | `CreateMyTaskBody` (unchanged) |
+
+`CreateMyProjectBody` is `{ idempotencyKey, projectName, description?, responsibilityId, priority?,
+plannedStart?, committedDeadline?, acknowledgeNonWorking? }` and is strict, so a browser-supplied
+`projectOwnerId`, `status`, `dashboardVisibility`, `role` or any other field is a `VALIDATION_FAILED`
+(400) instead of being ignored. The server sets the owner to the verified session, the lifecycle to
+`Active` and the visibility to `INTERNAL`, requires an active responsibility
+(`RESPONSIBILITY_REQUIRED`), audits `PROJECT_CREATED` with `creationChannel: "MEMBER"`, and replays a
+repeated idempotency key instead of creating a second project.
+
+`GET /api/employee/references` answers `{ projectCreationEnabled, responsibilities: [{ responsibilityId, name }] }`
+for active responsibilities only. It exists so a member form never receives the manager bootstrap.
+
+### Shared presentation, separate data
+
+- `GET /api/work/projects` now takes `unassigned`, `schedule`, `sort` and `direction` in addition to
+  `query`, `responsibilityId`, `page` and `pageSize`, all resolved server-side before the page is cut,
+  and returns `groupTotals: [{ responsibilityId, total }]` for the authorized scope.
+- `WorkProject` adds `responsibilityId` (the grouping key; `null` is 未分類) and `overdueTaskCount`.
+  It still carries no `nextAction`, `dashboardSummary`, `notificationEnabled` or effort field.
+- `GET /api/work/overview?responsibilityId&upcomingDays=7|14|30` answers a `WorkOverview`:
+  `scope`, `counts` (`ScopeCounts`), `upcomingWindow`, `overdue[10]`, `overdueTotal`, `upcoming[20]`,
+  `upcomingTotal`, `responsibilities` (label, colour, status, project count, open/overdue/completed
+  and containers), `options` (the readable responsibilities for the filter) and `generatedAt`. The
+  visibility policy (only `INTERNAL`, non-archived projects and subproject branches) is applied
+  before every aggregate, list and top-N cut, and the responsibility filter is applied to the cards
+  as well. A manager may read it, but the management overview stays `/api/manager/overview`.
+
+### ADMIN corrective reopening
+
+| Method | Route | Role |
+|---|---|---|
+| `GET` | `/api/manager/tasks/:id/reopen-eligibility` | ADMIN |
+| `POST` | `/api/manager/tasks/:id/reopen` | ADMIN |
+
+`ReopenEligibility` answers `{ taskId, eligible, reasons, confirmationText, projectId, projectName,
+projectStatus, projectReopenRequired, completedAt, completionRequestId }`; `reasons` may contain
+`CONTAINER`, `NOT_COMPLETED`, `PROJECT_ARCHIVED` or `PROJECT_CANCELLED`, and `confirmationText` is
+`REOPEN <taskId>`. The capability answer never grants authority.
+
+`POST …/reopen` takes `ReopenTaskBody`:
+`{ idempotencyKey, revision, reason, confirmation, reopenProject? }`. In one transaction it:
+
+- requires ADMIN (`AUTHORIZATION_DENIED` for MANAGER, MEMBER and VIEWER),
+- refuses a stale `revision` (`EDIT_CONFLICT`), a non-`Done` task and a container
+  (`INVALID_TRANSITION` / `CONTAINER_NOT_COMPLETABLE`), and an archived or cancelled parent project
+  (`INVALID_TRANSITION`, with the reason stated),
+- requires the exact phrase (`CONFIRMATION_REQUIRED`) and a reason,
+- writes `status = "In Progress"`, `progress_percent = 0`, `completed_at = null` — no historical
+  progress is invented,
+- with `reopenProject: true` only, and only when the parent is `Completed`, writes the project back
+  to `Active` in the same transaction and audits `PROJECT_REOPENED`,
+- audits one `TASK_REOPENED` row with the actor, task, reason, before/after state and the approved
+  completion request it reverses,
+- replays the stored answer for a repeated idempotency key (so a retried delivery cannot repeat the
+  effect) and leaves the original request, approval and audit rows untouched.
+
+The task then accepts a genuinely new `COMPLETION_REPORT`; an old decided request still answers
+`DUPLICATE_DECISION` and is never applied twice.
+
 ## Derived project schedule status and deadline display state — 2026-11-05
 
 `Project`, `ProjectSummary`, `Subproject`, `WorkProject`, `WorkSubproject`,
@@ -22,12 +95,31 @@ audit or a migration can still read the lifecycle fact.
 | `GET /api/manager/projects`, `GET /api/work/projects`, `GET /api/work/timeline`, `GET /api/work/projects/:id` | Every project and folder row carries `schedule` | List, card, detail, timeline and the read-only explorer show one derived badge |
 | `PATCH /api/manager/projects/:id` | `status` may only move to `Completed` or `Cancelled`, or from `Cancelled` back to `Active`, and requires `confirmStatusChange: true`. `Planned`, `Active` and `On Hold` are refused with `INVALID_TRANSITION` (409); archive keeps its own confirmed action | The schedule states are derived, so an ordinary edit must not write a lifecycle guess |
 | `POST /api/manager/projects` | An omitted `status` defaults to `Active`; any explicit status other than `Active` or `Planned` is refused. An omitted `dashboardVisibility` defaults to `INTERNAL` (V2 policy change); an explicit `RESTRICTED` is respected | A new project starts as ordinary work, and a terminal state must go through its workflow |
-| `GET /api/manager/reports/workload/tasks` | `WorkloadTaskRow` gains a required `displayStatus` (`IN_PROGRESS`, `OVERDUE`, `DONE`, `CANCELLED`) alongside the stored `status` | A completed or cancelled row must never be presented from the date alone |
+| `GET /api/manager/reports/workload/tasks` | `WorkloadTaskRow` carries `displayStatus` alongside the stored `status`, plus the optional `scheduleMissing` detail | A completed or cancelled row must never be presented from the date alone |
 
-`displayStatus` uses the one canonical `displayTaskStatus` rule (done wins, cancelled is never
-current, otherwise a deadline strictly before today is overdue). The workload drill-down scope
-still excludes cancelled work and container tasks, and its overdue figures still count open leaf
-work only.
+`displayStatus` uses the one canonical `taskScheduleStatus` rule (done, cancelled, an unusable
+interval, late, planned, in progress, start not set, no dates). Every task-shaped DTO -
+`Task`, `TaskSummary`, `WorkloadTaskRow`, `MyWorkItem`, `TimelineTaskRow`, `EmployeeTask` - carries
+it from the same domain call, together with the `scheduleMissing` detail (`NONE`, `START`, `FINISH`,
+`BOTH`). The workload drill-down scope still excludes cancelled work and container tasks, and its
+overdue figures still count open leaf work only.
+
+## One task schedule display status — 2026-11-05
+
+| Endpoint | Change | Why |
+| --- | --- | --- |
+| `GET /api/manager/tasks`, `GET /api/work/tasks` | `displayStatus` accepts the full set `PLANNED`, `IN_PROGRESS`, `OVERDUE`, `START_NOT_SET`, `DATES_NOT_SET`, `INVALID_DATES`, `DONE`, `CANCELLED`. Existing values keep their meaning; the new ones are additive | The filter must offer every state the badge can show |
+| `GET /api/manager/tasks`, `GET /api/work/tasks`, `GET /api/manager/tasks/:id`, `GET /api/work/tasks/:id` | `TaskSummary` and `Task` carry `displayStatus` and the optional `scheduleMissing` | A list row and a detail page describe the same task identically |
+| `GET /api/employee/my-work`, `GET /api/employee/snapshot`, `GET /api/work/timeline` | `MyWorkItem`, `EmployeeTask` and `TimelineTaskRow` use the same enum and detail | One rule for managers and employees |
+| `GET /api/manager/overview`, `GET /api/manager/reports/workload*` | Unchanged figures; the rows they return carry the same state | Counting stays `TaskScope`; only the presentation is unified |
+
+`displayStatus` is derived, never accepted from a browser, and never written. Each filter branch
+mirrors the precedence of `taskScheduleStatus` and resolves in PostgreSQL before `LIMIT`/`OFFSET`,
+so `total` and the rows on the page always describe the same scope. The one deliberate overlap is
+a reversed interval whose finish has already passed: it is listed as `INVALID_DATES` and keeps its
+place in the canonical overdue accounting, so the warning never conceals overdue work.
+`workState=OPEN` still means every eligible open leaf task, which includes planned and undated work;
+"open" is not a synonym for "currently in progress".
 
 ## Flat timeline display schedules — 2026-11-05
 
@@ -116,10 +208,14 @@ before the limit.
 
 `GET /api/manager/tasks` and the signed-in read-only `GET /api/work/tasks` accept the existing
 responsibility filters plus `workState=OPEN`. OPEN is unfinished active leaf work and includes
-overdue work. `displayStatus=OVERDUE` returns that subset due before today;
-`displayStatus=DONE` is completed leaf history and does not include Cancelled or archived work.
-With `tree=true`, `matchedTotal` counts matching work units while `items`/`total` may also contain
-ancestor containers needed for navigation.
+overdue, planned and undated work. `displayStatus=OVERDUE` returns the canonically overdue subset
+(finish before today); a reversed interval is listed there *and* under `displayStatus=INVALID_DATES`,
+so the warning never removes a row from the deadline accounting; `displayStatus=PLANNED` the work
+whose start is still ahead; `displayStatus=START_NOT_SET`, `DATES_NOT_SET` and `INVALID_DATES` the
+documented schedule gaps; `displayStatus=IN_PROGRESS` the work that has started and is not past its
+finish; `displayStatus=DONE` is completed leaf history and does not include Cancelled or archived
+work. With `tree=true`, `matchedTotal` counts matching work units while `items`/`total` may also
+contain ancestor containers needed for navigation.
 
 ## Date-based workload report (2026-11-04)
 
@@ -415,7 +511,7 @@ or a stored status; the only completion path is the reviewed request below.
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| GET | `/api/work/tasks` | Server-paged active work. `projectId`, `subprojectId`, `responsibilityId`, `unassigned`, `status`, `displayStatus` (`IN_PROGRESS`/`OVERDUE`/`DONE`/`CANCELLED`), `ownerMemberId`, `query`, `containerOnly`, `overdueOnly`, `includeInactive`, `tree`, `treeParentId`, paging and sorting |
+| GET | `/api/work/tasks` | Server-paged active work. `projectId`, `subprojectId`, `responsibilityId`, `unassigned`, `status`, `displayStatus` (`PLANNED`/`IN_PROGRESS`/`OVERDUE`/`START_NOT_SET`/`DATES_NOT_SET`/`INVALID_DATES`/`DONE`/`CANCELLED`), `ownerMemberId`, `query`, `containerOnly`, `overdueOnly`, `includeInactive`, `tree`, `treeParentId`, paging and sorting |
 | GET | `/api/work/tasks/:id` | Task detail for MEMBER/VIEWER: an allowlisted record plus the display-only `context` (project name and subproject chain, root first), assignees and children |
 | GET | `/api/work/projects` | Member project explorer. `query` (project name only), `responsibilityId`, `page`, `pageSize`; each item carries `description` and the `TaskScope` counts `activeTaskCount`/`completedTaskCount`, and the page carries the `responsibilities` that group at least one readable project |
 | GET | `/api/work/projects/:id` | Read-only project detail: allowlisted record (with `description` and the two counts), rollup, subprojects (with `description` and the stored `parentSubprojectId`) and the tasks of the visible branches |

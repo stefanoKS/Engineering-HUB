@@ -6,8 +6,8 @@
  * explicit archived/cancelled history view is a manager capability. A guessed identifier answers
  * `404`, so a refused reader cannot even learn that a RESTRICTED record exists.
  */
-import type { TaskDetail, WorkProjectDetail, WorkProjectList } from '@eh/contracts';
-import type { TaskListQuery } from '@eh/contracts';
+import type { TaskDetail, WorkOverview, WorkProjectDetail, WorkProjectList } from '@eh/contracts';
+import type { ProjectListQuery, TaskListQuery } from '@eh/contracts';
 import {
   getProject,
   getSubproject,
@@ -177,6 +177,7 @@ export async function readOnlyTaskDetail(ctx: ServiceCtx, taskId: string): Promi
       ownerName: task.ownerName,
       status: task.status,
       displayStatus: task.displayStatus,
+      scheduleMissing: task.scheduleMissing,
       priority: task.priority,
       plannedStart: null,
       dueDate: task.dueDate,
@@ -221,11 +222,22 @@ export async function readOnlyTaskDetail(ctx: ServiceCtx, taskId: string): Promi
  *
  * MEMBER and VIEWER see only `INTERNAL`, non-archived projects; the projection omits internal
  * notes, notification settings and the dashboard summary. Open and completed counts come from the
- * one `TaskScope` pass, so a card never counts a raw task row or a container.
+ * one `TaskScope` pass, so a card never counts a raw task row or a container. The filters, the
+ * sort and the paging are resolved on the server before a page is cut, and a grouped heading
+ * carries the real authorized total instead of the visible page size.
  */
 export async function listWorkProjects(
   ctx: WorkCtx,
-  input: { query?: string; responsibilityId?: string; page: number; pageSize?: number }
+  input: {
+    query?: string;
+    responsibilityId?: string;
+    unassigned?: boolean;
+    schedule?: NonNullable<z.infer<typeof ProjectListQuery>['schedule']>;
+    sort?: NonNullable<z.infer<typeof ProjectListQuery>['sort']>;
+    direction?: 'asc' | 'desc';
+    page: number;
+    pageSize?: number;
+  }
 ): Promise<WorkProjectList> {
   requireRole(ctx.identity, 'VIEWER');
   const manager = canSeeRestrictedWork(ctx.identity);
@@ -237,10 +249,12 @@ export async function listWorkProjects(
         query: input.query,
         queryProjectNameOnly: true,
         responsibilityId: input.responsibilityId,
+        unassigned: input.unassigned === true,
+        schedule: input.schedule,
         internalOnly: !manager,
         includeArchived: manager ? undefined : false,
-        sort: 'name',
-        direction: 'asc'
+        sort: input.sort ?? 'name',
+        direction: input.direction ?? 'asc'
       },
       input.page,
       pageSize,
@@ -255,6 +269,7 @@ export async function listWorkProjects(
       projectId: project.projectId,
       projectName: project.projectName,
       description: project.description,
+      responsibilityId: project.responsibilityId,
       responsibilityName: project.responsibilityName,
       projectOwnerName: project.projectOwnerName,
       status: project.status,
@@ -264,13 +279,176 @@ export async function listWorkProjects(
       progressPercent: project.progressPercent,
       health: project.health,
       activeTaskCount: counts.get(project.projectId)?.openWork ?? 0,
+      overdueTaskCount: counts.get(project.projectId)?.overdueWork ?? 0,
       completedTaskCount: counts.get(project.projectId)?.completedWork ?? 0
     })),
     responsibilities,
+    groupTotals: page.groupTotals.map((total) => ({
+      responsibilityId: total.responsibilityId,
+      total: total.total
+    })),
     total: page.total,
     page: input.page,
     pageSize,
     totalPages: Math.ceil(page.total / pageSize)
+  };
+}
+
+function isoAddDays(iso: string, days: number): string {
+  const date = new Date(`${iso}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * The member overview: one authorized snapshot of the work a MEMBER or VIEWER may read.
+ *
+ * The visibility policy and the responsibility filter are applied before every aggregate, list
+ * and top-N cut: only `INTERNAL`, non-archived projects and subproject branches survive. Every
+ * count comes from the same `TaskScope` pass the manager screens use, so leaf work is counted
+ * once, a container is never an extra unit of work, and completed or cancelled work never mixes
+ * into an open or overdue figure. Manager-only decisions, notes and private project fields are
+ * absent from the payload rather than filtered afterwards in the browser.
+ */
+export async function workOverview(
+  ctx: WorkCtx,
+  input: { responsibilityId?: string; upcomingDays: 7 | 14 | 30 }
+): Promise<WorkOverview> {
+  requireRole(ctx.identity, 'VIEWER');
+  const manager = canSeeRestrictedWork(ctx.identity);
+  const [{ dir, scope }, responsibilityOptions] = await Promise.all([
+    taskScope(ctx),
+    listWorkResponsibilityOptions(ctx.db, !manager)
+  ]);
+  const visibleProjectIds = new Set(
+    dir.projects
+      .filter(
+        (project) =>
+          manager ||
+          (canReadProjectVisibility(ctx.identity, project.dashboardVisibility) &&
+            project.status !== 'Archived' &&
+            !project.archivedAt)
+      )
+      .map((project) => project.projectId)
+  );
+  const responsibilityOfProject = new Map<string, string | null>(
+    dir.projects.map((project) => [project.projectId, project.responsibilityId])
+  );
+  const subprojectById = new Map(dir.subprojects.map((entry) => [entry.subprojectId, entry]));
+  const ancestorArchived = (subprojectId: string): boolean => {
+    let current = subprojectById.get(subprojectId);
+    const seen = new Set<string>();
+    let guard = 0;
+    while (current) {
+      if (seen.has(current.subprojectId)) return true;
+      seen.add(current.subprojectId);
+      if (current.status === 'Archived') return true;
+      if (guard++ > 20) return true;
+      current = current.parentSubprojectId ? subprojectById.get(current.parentSubprojectId) : undefined;
+    }
+    return false;
+  };
+  const inScope = (task: { projectId: string; subprojectId: string | null }): boolean => {
+    if (!visibleProjectIds.has(task.projectId)) return false;
+    if (
+      input.responsibilityId &&
+      (responsibilityOfProject.get(task.projectId) ?? null) !== input.responsibilityId
+    ) {
+      return false;
+    }
+    if (task.subprojectId && ancestorArchived(task.subprojectId)) return false;
+    return true;
+  };
+
+  const upcomingTo = isoAddDays(ctx.today, input.upcomingDays - 1);
+  const [upcomingPage, overduePage] = await Promise.all([
+    listTaskSummaries(
+      ctx.db,
+      {
+        responsibilityId: input.responsibilityId,
+        internalOnly: !manager,
+        workState: 'OPEN',
+        dueFrom: ctx.today,
+        dueTo: upcomingTo,
+        sort: 'dueDate',
+        direction: 'asc',
+        today: ctx.today
+      },
+      1,
+      20
+    ),
+    listTaskSummaries(
+      ctx.db,
+      {
+        responsibilityId: input.responsibilityId,
+        internalOnly: !manager,
+        displayStatus: 'OVERDUE',
+        sort: 'dueDate',
+        direction: 'asc',
+        today: ctx.today
+      },
+      1,
+      10
+    )
+  ]);
+
+  const responsibilities: WorkOverview['responsibilities'] = (input.responsibilityId
+    ? responsibilityOptions.filter((option) => option.responsibilityId === input.responsibilityId)
+    : responsibilityOptions
+  )
+    .map((option) => {
+      const projectIds = new Set(
+        [...visibleProjectIds].filter(
+          (projectId) => (responsibilityOfProject.get(projectId) ?? null) === option.responsibilityId
+        )
+      );
+      const inArea = (task: { projectId: string; subprojectId: string | null }): boolean =>
+        inScope(task) && projectIds.has(task.projectId);
+      const areaCounts = scope.counts(inArea, ctx.today);
+      const areaTasks = scope.tasks
+        .filter(inArea)
+        .map((task) => ({
+          taskId: task.taskId,
+          status: task.status,
+          progressPercent: task.progressPercent ?? null,
+          estimatedHours: task.estimatedHours ?? null,
+          parentTaskId: task.parentTaskId
+        }));
+      const source = dir.responsibilities.find(
+        (entry) => entry.responsibilityId === option.responsibilityId
+      );
+      return {
+        responsibilityId: option.responsibilityId,
+        name: option.name,
+        color: source?.color ?? '',
+        status: (source?.status ?? 'Active') as WorkOverview['responsibilities'][number]['status'],
+        projectCount: projectIds.size,
+        openWork: areaCounts.openWork,
+        overdueWork: areaCounts.overdueWork,
+        completedWork: areaCounts.completedWork,
+        containers: areaCounts.containers,
+        progressPercent: rollup(areaTasks).percent
+      };
+    })
+    .filter((card) => card.projectCount > 0)
+    .sort((left, right) => left.name.localeCompare(right.name, 'ja'));
+
+  return {
+    scope: {
+      responsibilityId: input.responsibilityId ?? '',
+      label:
+        responsibilityOptions.find((entry) => entry.responsibilityId === input.responsibilityId)?.name ??
+        ''
+    },
+    counts: scope.counts(inScope, ctx.today),
+    upcomingWindow: { days: input.upcomingDays, from: ctx.today, to: upcomingTo },
+    overdue: overduePage.items,
+    overdueTotal: overduePage.total,
+    upcoming: upcomingPage.items,
+    upcomingTotal: upcomingPage.total,
+    responsibilities,
+    options: responsibilityOptions,
+    generatedAt: new Date().toISOString()
   };
 }
 
@@ -352,6 +530,7 @@ export async function readOnlyProjectDetail(ctx: WorkCtx, projectId: string): Pr
       projectId: project.projectId,
       projectName: project.projectName,
       description: project.description,
+      responsibilityId: project.responsibilityId,
       responsibilityName: project.responsibilityName,
       projectOwnerName: project.projectOwnerName,
       status: project.status,
@@ -361,6 +540,7 @@ export async function readOnlyProjectDetail(ctx: WorkCtx, projectId: string): Pr
       progressPercent: project.progressPercent,
       health: project.health,
       activeTaskCount: counts?.openWork ?? 0,
+      overdueTaskCount: counts?.overdueWork ?? 0,
       completedTaskCount: counts?.completedWork ?? 0
     },
     progress: rollupOf(visibleTasks),

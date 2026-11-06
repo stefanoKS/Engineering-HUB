@@ -132,6 +132,28 @@ class QueryCache {
 
 export const queryCache = new QueryCache();
 
+/**
+ * Reads whose answer depends on the Asia/Tokyo business date.
+ *
+ * A derived schedule badge, an overdue count and a "due today" hint are calculated on the server
+ * from its own date, so a page open across midnight drops these entries instead of showing
+ * yesterday's answer. The list is a prefix set: `manager/projects` also covers one project.
+ */
+export const DATE_DEPENDENT_PREFIXES = [
+  'bootstrap',
+  'manager/overview',
+  'manager/projects',
+  'manager/tasks',
+  'manager/task-index',
+  'manager/members',
+  'manager/workload',
+  'employee/snapshot',
+  'employee/my-work',
+  'work/projects',
+  'work/overview',
+  'work/timeline'
+] as const;
+
 /** Invalidation groups a save uses: narrow by default, never "reload everything". */
 export const keys = {
   bootstrap: 'bootstrap',
@@ -154,8 +176,14 @@ export const keys = {
   employee: 'employee/snapshot',
   myWork: 'employee/my-work',
   myProjects: 'employee/my-work/projects',
+  myProjectForm: 'employee/references',
   myRequests: 'employee/requests/mine',
   reportEligibility: (taskId: string) => `employee/report-eligibility/${taskId}`,
+  reopenEligibility: (taskId: string) => `manager/reopen-eligibility/${taskId}`,
+  /** The read-only project explorer and overview: one authorized scope, shared by member screens. */
+  workProjects: 'work/projects',
+  workOverview: 'work/overview',
+  workProject: (id: string) => `work/project/${id}`,
   /** Prefix of every server-searched option list; a task save invalidates all of them. */
   parentOptions: 'parent-options:',
   /** The read-only timeline: a task or project change dates it, so a save refreshes it. */

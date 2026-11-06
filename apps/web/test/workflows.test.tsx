@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 // jsdom has no native <dialog>; the Modal component needs these two methods to open and close.
 if (typeof HTMLDialogElement !== 'undefined') {
   HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) { this.open = true; };
@@ -8,7 +8,7 @@ if (typeof HTMLDialogElement !== 'undefined') {
 }
 import { I18nProvider } from '../src/i18n';
 import { TaskForm } from '../src/screens/TaskForm';
-import { RequestForm } from '../src/screens/Overview';
+import { RequestDialog } from '../src/components/request-dialog';
 import { TasksScreen } from '../src/screens/Tasks';
 import { MyWorkScreen } from '../src/screens/MyWork';
 import { ProjectPicker } from '../src/components/ProjectPicker';
@@ -58,16 +58,34 @@ describe('workflow recovery', () => {
     expect(screen.queryByText('Wrong area')).toBeNull();
     await waitFor(() => expect(fetcher.mock.calls.some(([url]) => url.includes('subprojectId='))).toBe(true));
   });
-  it('retains request text while an uncertain submission is being recovered', () => {
-    const onSubmit = vi.fn(async () => undefined);
-    const form = (submission: 'idle' | 'unknown') => <I18nProvider><RequestForm taskId="TSK-A" requestType="COMPLETION_REPORT" submission={submission} onCancel={() => undefined} onSubmit={onSubmit} /></I18nProvider>;
-    const view = render(form('idle'));
-    const fields = screen.getAllByRole('textbox');
-    fireEvent.change(fields[0]!, { target: { value: 'Work completed; evidence checked.' } });
-    view.rerender(form('unknown'));
-    expect((fields[0] as HTMLTextAreaElement).value).toBe('Work completed; evidence checked.');
-    fireEvent.click(screen.getByText('再試行'));
-    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ completionNote: 'Work completed; evidence checked.' }));
+  it('keeps an unsent completion draft in the dialog and never retries an unknown outcome', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError('connection lost');
+    }));
+    const onResult = vi.fn();
+    render(
+      <I18nProvider>
+        <RequestDialog
+          taskId="TSK-A"
+          taskName="Alpha task"
+          projectName="Alpha"
+          subprojectName="Phase 1"
+          currentDeadline="2026-05-01"
+          requestType="COMPLETION_REPORT"
+          submissionEnabled
+          onClose={() => undefined}
+          onResult={onResult}
+        />
+      </I18nProvider>
+    );
+    const note = screen.getByLabelText('完了メモ（任意）');
+    fireEvent.change(note, { target: { value: 'Work completed; evidence checked.' } });
+    fireEvent.click(screen.getByRole('button', { name: '申請を送信' }));
+    await waitFor(() => expect(onResult).toHaveBeenCalledWith(expect.objectContaining({ tone: 'warning' })));
+    // The draft survives the uncertain outcome, and the dialog itself offers no automatic retry.
+    expect((screen.getByLabelText('完了メモ（任意）') as HTMLTextAreaElement).value).toBe('Work completed; evidence checked.');
+    expect(screen.queryByRole('button', { name: '申請を送信' })).toBeNull();
+    expect(screen.getByText(/送信結果不明/)).toBeTruthy();
   });
   it('offers named colour buttons with an explicit selected state', () => {
     const change = vi.fn();
@@ -112,14 +130,16 @@ describe('member self-service work', () => {
     vi.stubGlobal('crypto', {}); // Plain HTTP LAN may not expose randomUUID.
     const calls = stubWork({ submissionEnabled: true });
     render(<I18nProvider><MyWorkScreen actor={MEMBER_ACTOR} /></I18nProvider>);
-    // Creation lives in a collapsible panel, so the form opens explicitly and only one at a time.
+    // Creation opens a dialog over the list; the form never sits below the page content.
     fireEvent.click(await screen.findByRole('button', { name: '新規タスク' }));
-    expect(await screen.findByText('Alpha / Area')).toBeTruthy();
+    const dialog = document.querySelector('dialog.modal') as HTMLElement;
+    expect(dialog).toBeTruthy();
+    expect(within(dialog).getByText('Alpha / Area')).toBeTruthy();
 
-    fireEvent.change(screen.getAllByRole('combobox')[0]!, { target: { value: 'PRJ-A' } });
-    fireEvent.change(screen.getByLabelText('タスク名'), { target: { value: '配線図の更新' } });
-    fireEvent.change(screen.getByLabelText('終了日'), { target: { value: '2026-05-01' } });
-    fireEvent.click(screen.getByRole('button', { name: 'タスクを作成' }));
+    fireEvent.change(within(dialog).getAllByRole('combobox')[0]!, { target: { value: 'PRJ-A' } });
+    fireEvent.change(within(dialog).getByLabelText('タスク名'), { target: { value: '配線図の更新' } });
+    fireEvent.change(within(dialog).getByLabelText('終了日'), { target: { value: '2026-05-01' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'タスクを作成' }));
 
     await waitFor(() => expect(calls.some((call) => call.method === 'POST')).toBe(true));
     const posted = JSON.parse(calls.find((call) => call.method === 'POST')!.body!) as Record<string, unknown>;
@@ -128,9 +148,13 @@ describe('member self-service work', () => {
     expect(posted).not.toHaveProperty('assigneeIds');
     expect(posted).not.toHaveProperty('status');
     expect(await screen.findByText(/タスクを作成しました/)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('タスク名'), { target: { value: 'Second task' } });
-    fireEvent.change(screen.getByLabelText('終了日'), { target: { value: '2026-05-04' } });
-    fireEvent.click(screen.getByRole('button', { name: 'タスクを作成' }));
+    // The dialog closes on success; a second task starts a new operation with a new key.
+    fireEvent.click(screen.getByRole('button', { name: '新規タスク' }));
+    const secondDialog = document.querySelector('dialog.modal') as HTMLElement;
+    fireEvent.change(within(secondDialog).getAllByRole('combobox')[0]!, { target: { value: 'PRJ-A' } });
+    fireEvent.change(within(secondDialog).getByLabelText('タスク名'), { target: { value: 'Second task' } });
+    fireEvent.change(within(secondDialog).getByLabelText('終了日'), { target: { value: '2026-05-04' } });
+    fireEvent.click(within(secondDialog).getByRole('button', { name: 'タスクを作成' }));
     await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toHaveLength(2));
     const second = JSON.parse(calls.filter(call => call.method === 'POST')[1]!.body!);
     expect(second.idempotencyKey).not.toBe(posted.idempotencyKey);
@@ -147,9 +171,9 @@ describe('member self-service work', () => {
     render(<I18nProvider><MyWorkScreen actor={MEMBER_ACTOR} /></I18nProvider>);
     await screen.findByText('Report work');
     fireEvent.click(screen.getByRole('button',{name:'完了報告'}));
-    const note=screen.getAllByRole('textbox').at(-1)!;
+    const note=screen.getByLabelText('完了メモ（任意）');
     fireEvent.change(note,{target:{value:'Checked the result'}});
-    fireEvent.click(screen.getByRole('button',{name:'報告を送信'}));
+    fireEvent.click(screen.getByRole('button',{name:'申請を送信'}));
     await waitFor(()=>expect(calls.some(call=>call.url.endsWith('/api/employee/requests')&&call.method==='POST')).toBe(true));
     const posted=JSON.parse(calls.find(call=>call.url.endsWith('/api/employee/requests')&&call.method==='POST')!.body!);
     expect(posted).toMatchObject({taskId:'TSK-REPORT',requestType:'COMPLETION_REPORT',completionNote:'Checked the result'});
@@ -188,7 +212,8 @@ describe('member self-service work', () => {
     render(<I18nProvider><MyWorkScreen actor={MEMBER_ACTOR} /></I18nProvider>);
     expect(await screen.findByText('配線確認')).toBeTruthy();
     expect(screen.getAllByText('承認待ち').length).toBeGreaterThan(0);
-    expect((screen.getByRole('button', { name: '完了報告' }) as HTMLButtonElement).disabled).toBe(true);
+    // A pending request means the action is not offered at all, rather than offered and refused.
+    expect(screen.queryByRole('button', { name: '完了報告' })).toBeNull();
   });
 });
 
@@ -417,7 +442,10 @@ describe('collapsible task tree', () => {
       </I18nProvider>
     );
     await screen.findByText('Mistaken task');
-    fireEvent.click(screen.getByRole('button', { name: '削除' }));
+    // Removal is an exceptional action: it lives behind その他, separated and in the danger tone.
+    const removeRow = screen.getByText('Mistaken task').closest('tr') as HTMLElement;
+    fireEvent.click(within(removeRow).getByRole('button', { name: 'その他' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: '削除' }));
     fireEvent.click(await screen.findByRole('button', { name: '削除する' }));
     await waitFor(() => {
       expect(fetcher.mock.calls.some(([url, init]) =>

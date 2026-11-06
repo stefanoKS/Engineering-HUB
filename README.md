@@ -16,9 +16,11 @@ underneath; click again to collapse the branch. Only an ADMIN can permanently re
 empty task or subproject: the control always runs the deletion preflight first, which refuses any
 record that still owns work, history or a publication. Members create their own work and submit
 completion reports; managers approve those reports or mark authorized work done directly. Task state
-is derived (進行中 / 期限超過 / 完了) from the deadline and completion, skill grades are letters A–D, and
-one searchable picker assigns several employees at once. Backups are encrypted locally first, with an
-optional Google Drive copy. Mail, Calendar and publication remain optional and off by default.
+is derived from the plan dates and today (予定 / 進行中 / 遅延, plus 開始日未設定 / 日程未設定 for an
+incomplete plan), so a stored "Not started" or "Assigned" value never decides the badge; skill grades
+are letters A–D, and one searchable picker assigns several employees at once. Backups are encrypted
+locally first, with an optional Google Drive copy. Mail, Calendar and publication remain optional and
+off by default.
 
 The read-only timeline fits the selected inclusive date range to the chart width. Choose 7 days,
 2 weeks, 1 month or Custom; Reset dates returns to the current Tokyo month without clearing filters.
@@ -139,8 +141,9 @@ The display is simplified, but stored history is never rewritten:
 
 * Skill levels stay integers (0 = not assessed, 1–4). The screens show A/B/C/D and 未評価 only.
 * Task status keeps its historical vocabulary (Not Started, Assigned, In Progress, Blocked,
-  On Hold, Done, Cancelled). 進行中 / 期限超過 / 完了 is derived at read time in Asia/Tokyo, so no
-  scheduled job changes a row.
+  On Hold, Done, Cancelled). One date-aware schedule state is derived at read time in Asia/Tokyo -
+  予定 / 進行中 / 遅延, with 開始日未設定 / 日程未設定 / 日程データ要確認 when the plan is incomplete or
+  reversed - so no scheduled job changes a row. The stored value stays visible as workflow history.
 * Planned duration, estimated hours, actual hours and progress percentages remain stored for old
   records. They are simply no longer asked for on the task form and are never cleared by an
   ordinary edit.

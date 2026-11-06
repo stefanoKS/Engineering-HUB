@@ -82,6 +82,20 @@ async function deadlineGate(
   assertWarningsAcknowledged(warnings, acknowledge === true);
 }
 
+/**
+ * The deadline warning gate for member self-service creation.
+ *
+ * A non-working deadline is never moved automatically: the caller must acknowledge the warning,
+ * exactly as the manager project form does.
+ */
+export async function assertProjectDeadlineWarnings(
+  ctx: ServiceCtx,
+  deadline: string | null | undefined,
+  acknowledge: boolean | undefined
+): Promise<void> {
+  await deadlineGate(ctx, deadline, undefined, acknowledge);
+}
+
 export async function createProject(
   ctx: ServiceCtx,
   body: z.infer<typeof CreateProjectBody>

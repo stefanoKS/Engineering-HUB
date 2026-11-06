@@ -38,7 +38,9 @@ export function deadlineStateOf(schedule: ProjectScheduleDisplay | undefined): D
 
 /**
  * Precedence: done wins over overdue, cancelled and archived work is never current, otherwise the
- * authoritative state decides, and only an open record falls back to the calendar comparison.
+ * authoritative state decides. An unusable interval is a warning, never a red "overdue" badge, and
+ * a state that is not overdue only ever uses the calendar for the due-today hint. The primary
+ * schedule badge always stays authoritative: this hint never renames it.
  */
 export function deadlineTone(
   dueDate: string | null | undefined,
@@ -49,6 +51,7 @@ export function deadlineTone(
   if (state === 'CANCELLED' || state === 'ARCHIVED') return 'cancelled';
   if (!dueDate) return 'none';
   if (state === 'OVERDUE') return 'overdue';
+  if (state === 'INVALID_DATES') return 'open';
   if (dueDate < today) return 'overdue';
   if (dueDate === today) return 'today';
   return 'open';
@@ -74,6 +77,7 @@ export function DeadlineCell({
   state,
   completedOn,
   showLabel = true,
+  showStateBadge = showLabel,
   size = 'normal'
 }: {
   dueDate: string | null | undefined;
@@ -82,6 +86,13 @@ export function DeadlineCell({
   /** The recorded completion date, used only for the separate "completed late" label. */
   completedOn?: string | null;
   showLabel?: boolean;
+  /**
+   * Whether this region states the overdue state itself. A compact deadline column
+   * (`showLabel={false}`) sits beside the schedule badge and never repeats it, so the default
+   * follows `showLabel`; a row that shows the badge elsewhere passes `false` explicitly. The
+   * due-today hint and the separate "completed late" label are independent of this prop.
+   */
+  showStateBadge?: boolean;
   size?: 'normal' | 'large';
 }): JSX.Element {
   const { t } = useI18n();
@@ -91,7 +102,7 @@ export function DeadlineCell({
     <span className={`deadline deadline-${tone} deadline-size-${size}`}>
       {showLabel ? <span className="deadline-label">{t('deadline.label')}</span> : null}
       <span className="deadline-value">{dueDate ?? t('common.unset')}</span>
-      {tone === 'overdue' ? <Badge tone="danger">{t('taskStatus.OVERDUE')}</Badge> : null}
+      {tone === 'overdue' && showStateBadge ? <Badge tone="danger">{t('taskStatus.OVERDUE')}</Badge> : null}
       {tone === 'today' ? <Badge tone="warn">{t('deadline.todayBadge')}</Badge> : null}
       {late ? <Badge tone="neutral">{t('deadline.completedLate')}</Badge> : null}
     </span>

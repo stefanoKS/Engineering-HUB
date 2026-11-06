@@ -18,7 +18,7 @@ import {
   TaskSummary
 } from './dto';
 import { Id, IsoDate, IsoTimestamp, Revision, paged } from './common';
-import { Priority, ProjectStatus, RequestType, SubmissionBlockReason, TaskStatus } from './enums';
+import { Priority, ProjectStatus, RequestType, ResponsibilityStatus, ScheduleMissingPart, SubmissionBlockReason, TaskStatus } from './enums';
 
 export const ScopeCounts = z.object({
   workItems: z.number().int().min(0),
@@ -269,9 +269,12 @@ export const WorkloadTaskRow = z.object({
   status: TaskStatus,
   /**
    * The canonical display state. A report row carries it so a completed or cancelled task is
-   * never presented as overdue just because its stored deadline has passed.
+   * never presented as overdue just because its stored deadline has passed, and a planned or
+   * undated open task is never presented as already in progress.
    */
   displayStatus: DisplayTaskStatus,
+  /** Which plan boundary the display state had to state as missing; a detail, not a state. */
+  scheduleMissing: ScheduleMissingPart.optional(),
   dueDate: IsoDate.nullable(),
   completedDate: IsoDate.nullable(),
   assigneeNames: z.array(z.string()),
@@ -411,7 +414,8 @@ export const EmployeeTask = z.object({
   projectName: z.string(),
   responsibilityName: z.string(),
   status: TaskStatus,
-  displayStatus: z.enum(['IN_PROGRESS', 'OVERDUE', 'DONE', 'CANCELLED']),
+  displayStatus: DisplayTaskStatus,
+  scheduleMissing: ScheduleMissingPart.optional(),
   dueDate: IsoDate.nullable(),
   plannedStart: IsoDate.nullable(),
   ownerName: z.string(),
@@ -453,7 +457,8 @@ export const MyWorkItem = z.object({
   projectName: z.string(),
   subprojectName: z.string(),
   status: TaskStatus,
-  displayStatus: z.enum(['IN_PROGRESS', 'OVERDUE', 'DONE', 'CANCELLED']),
+  displayStatus: DisplayTaskStatus,
+  scheduleMissing: ScheduleMissingPart.optional(),
   priority: z.string(),
   dueDate: IsoDate.nullable(),
   progressPercent: z.number().nullable(),
@@ -538,6 +543,19 @@ export const MyWorkProjectOptions = z.object({
   taskCreationEnabled: z.boolean()
 });
 export type MyWorkProjectOptions = z.infer<typeof MyWorkProjectOptions>;
+
+/**
+ * The narrow options a MEMBER needs to file a new project.
+ *
+ * Only the identity and the label of each active responsibility are published: no owner, no
+ * description, no project count and no archived area. A member never receives a manager reference
+ * payload to fill this form.
+ */
+export const MyWorkProjectFormOptions = z.object({
+  projectCreationEnabled: z.boolean(),
+  responsibilities: z.array(z.object({ responsibilityId: z.string(), name: z.string() }))
+});
+export type MyWorkProjectFormOptions = z.infer<typeof MyWorkProjectFormOptions>;
 
 /**
  * A member's own request receipt. It carries state only: never a manager note, a reviewer
@@ -628,6 +646,8 @@ export const WorkProject = z.object({
   projectId: z.string(),
   projectName: z.string(),
   description: z.string(),
+  /** Grouping key; `null` means the documented unassigned (未分類) scope. */
+  responsibilityId: z.string().nullable(),
   responsibilityName: z.string(),
   projectOwnerName: z.string(),
   status: ProjectStatus,
@@ -639,6 +659,8 @@ export const WorkProject = z.object({
   health: z.string(),
   /** Open leaf work in active work; a container task is never counted. */
   activeTaskCount: z.number().int().min(0),
+  /** Open leaf work whose finish date is before the business date. */
+  overdueTaskCount: z.number().int().min(0),
   /** Completed leaf work, reported separately and never mixed into the open figure. */
   completedTaskCount: z.number().int().min(0)
 });
@@ -654,6 +676,11 @@ export const WorkProjectList = z.object({
   items: z.array(WorkProject),
   /** The responsibilities that group at least one readable project, for the member filter. */
   responsibilities: z.array(WorkResponsibilityOption),
+  /**
+   * The number of readable projects per responsibility across the whole authorized scope, so a
+   * grouped heading states its real total and never the size of the visible page.
+   */
+  groupTotals: z.array(z.object({ responsibilityId: z.string().nullable(), total: z.number().int().min(0) })).optional(),
   total: z.number().int().min(0),
   page: z.number().int().min(1),
   pageSize: z.number().int().min(1),
@@ -692,6 +719,87 @@ export const WorkTaskPage = z.object({
   totalPages: z.number().int().min(0)
 });
 export type WorkTaskPage = z.infer<typeof WorkTaskPage>;
+
+/**
+ * One responsibility summary in the member overview.
+ *
+ * Only the label, colour, counts and derived progress are published; a responsibility owner and
+ * description are manager data and stay out of the member response.
+ */
+export const WorkResponsibilityCard = z.object({
+  responsibilityId: z.string(),
+  name: z.string(),
+  color: z.string(),
+  status: ResponsibilityStatus,
+  projectCount: z.number().int().min(0),
+  openWork: z.number().int().min(0),
+  overdueWork: z.number().int().min(0),
+  completedWork: z.number().int().min(0),
+  containers: z.number().int().min(0),
+  progressPercent: z.number().min(0).max(100).nullable()
+});
+export type WorkResponsibilityCard = z.infer<typeof WorkResponsibilityCard>;
+
+/**
+ * The member overview.
+ *
+ * One authorized snapshot of the department work a MEMBER or VIEWER may read: only `INTERNAL`,
+ * non-archived projects, resolved before aggregation, paging and any top-N cut. Every count comes
+ * from one `TaskScope` pass, so leaf work is counted once, containers are reported separately and
+ * completed work never mixes into an open or overdue figure. There is no manager decision, note
+ * or private project field in this payload.
+ */
+export const WorkOverview = z.object({
+  scope: z.object({ responsibilityId: z.string(), label: z.string() }),
+  counts: ScopeCounts,
+  upcomingWindow: z.object({
+    days: z.union([z.literal(7), z.literal(14), z.literal(30)]),
+    from: IsoDate,
+    to: IsoDate
+  }),
+  overdue: z.array(TaskSummary),
+  overdueTotal: z.number().int().min(0),
+  upcoming: z.array(TaskSummary),
+  upcomingTotal: z.number().int().min(0),
+  responsibilities: z.array(WorkResponsibilityCard),
+  /** The readable responsibilities, for the filter of this screen. */
+  options: z.array(WorkResponsibilityOption),
+  generatedAt: IsoTimestamp
+});
+export type WorkOverview = z.infer<typeof WorkOverview>;
+
+export const WorkOverviewQuery = z
+  .object({
+    responsibilityId: Id.optional(),
+    upcomingDays: z.coerce
+      .number()
+      .pipe(z.union([z.literal(7), z.literal(14), z.literal(30)]))
+      .default(7)
+  })
+  .strict();
+export type WorkOverviewQuery = z.infer<typeof WorkOverviewQuery>;
+
+/**
+ * The ADMIN-only capability behind "Reopen task / 完了を取り消す".
+ *
+ * The answer never grants authority: the command re-reads the task, the project and the revision
+ * inside its own transaction. A missing or failed answer keeps the action unavailable.
+ */
+export const ReopenEligibility = z.object({
+  taskId: z.string(),
+  eligible: z.boolean(),
+  reasons: z.array(
+    z.enum(['CONTAINER', 'NOT_COMPLETED', 'PROJECT_ARCHIVED', 'PROJECT_CANCELLED'])
+  ),
+  confirmationText: z.string(),
+  projectId: z.string(),
+  projectName: z.string(),
+  projectStatus: z.string(),
+  projectReopenRequired: z.boolean(),
+  completedAt: IsoTimestamp.nullable(),
+  completionRequestId: z.string().nullable()
+});
+export type ReopenEligibility = z.infer<typeof ReopenEligibility>;
 
 /**
  * Read-only timeline projection.
@@ -783,7 +891,8 @@ export const TimelineTaskRow = z.object({
   parentTaskId: z.string().nullable(),
   taskName: z.string(),
   status: TaskStatus,
-  displayStatus: z.enum(['IN_PROGRESS', 'OVERDUE', 'DONE', 'CANCELLED']),
+  displayStatus: DisplayTaskStatus,
+  scheduleMissing: ScheduleMissingPart.optional(),
   plannedStart: IsoDate.nullable(),
   dueDate: IsoDate.nullable(),
   completedAt: IsoTimestamp.nullable(),

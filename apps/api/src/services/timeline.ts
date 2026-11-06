@@ -32,9 +32,9 @@ import {
   DomainError,
   canIncludeArchivedWork,
   canSeeRestrictedWork,
-  displayTaskStatus,
   projectScheduleStatus,
-  requireRole
+  requireRole,
+  taskScheduleStatus
 } from '@eh/domain';
 import { taskScope } from './views';
 import type { WorkCtx } from './work';
@@ -460,6 +460,10 @@ export async function timelineBranch(
     const schedule = allChildrenOf.get(task.taskId)?.length
       ? derivedSchedule(rangeOfTask(task.taskId))
       : explicitSchedule(task.plannedStart, task.dueDate);
+    const display = taskScheduleStatus(
+      { status: task.status, plannedStart: task.plannedStart, dueDate: task.dueDate },
+      ctx.today
+    );
     return {
     taskId: task.taskId,
     projectId: task.projectId,
@@ -467,7 +471,8 @@ export async function timelineBranch(
     parentTaskId: task.parentTaskId,
     taskName: task.taskName,
     status: task.status,
-    displayStatus: displayTaskStatus({ status: task.status, dueDate: task.dueDate }, ctx.today),
+    displayStatus: display.state,
+    scheduleMissing: display.missing,
     plannedStart: task.plannedStart,
     dueDate: task.dueDate,
     completedAt: completedAt.get(task.taskId) ?? null,

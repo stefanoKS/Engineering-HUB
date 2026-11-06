@@ -1,5 +1,148 @@
 # V2 Architecture
 
+## Application shell, readable palette and first-screen productivity — 2026-11-06
+
+**One shell, two navigation surfaces.** `App.tsx` renders a 64 px header (brand, language switch, one
+account menu) and a 216 px grouped sidebar on a CSS grid; below 1100 px the sidebar is replaced by a
+drawer, and `useDesktopNavigation` reads the same breakpoint the stylesheet uses so a window never
+receives both. Sign-out and password change are menu items, not header buttons. The drawer closes on
+navigation, on Escape and on a backdrop press, and returns focus to the button that opened it. The
+route is still the single source of truth: `hashchange` drives the active entry, deep links, the Back
+control and the scroll position, and the existing role filter decides which destinations exist.
+
+**One disclosure contract.** `components/ui.tsx` exports `Menu`, a trigger plus a popup that is
+removed while closed, closes on Escape (returning focus to the trigger) and on an outside press.
+Task, project and personal rows use it for exceptional actions only — delete, administrator
+correction, reopening, an extension request — so the primary action and Edit stay visible. A
+destructive entry always sits below a `.menu-separator` with the danger tone.
+
+**Palette and scale come from tokens.** `:root` defines the reading surface (`#F6F7F9`), text,
+decorative and input borders, the burgundy primary (`#AD1535`), the ordinary link (`#245EA8`), the
+danger, warning and success tones, a control height of 40 px and a 4/8/12/16/24/32 spacing scale. A
+project identity colour still comes from `shared/project-colors.js` through `projectColor`, so a
+project keeps its hue across navigation, filtering and sorting, and a status tone is never a project
+colour. Primary buttons are filled burgundy, secondary buttons are neutral outlines, and ordinary
+links are blue.
+
+**My Work is a first screen, not a form.** The title, the total, the help disclosure and the freshness
+note share one heading row; the search box and the project selector stay visible while the three
+less-used filters sit behind a `絞り込み` disclosure that counts them and repeats the applied ones as
+chips when closed. Explanatory paragraphs moved into `使い方`, state-specific warnings (submission
+closed, a refused request) stay in the flow, and each row shows the task, its project context, the
+derived status, the deadline and the primary action. `MyWorkList` items carry no assignee array, so a
+personal row names the project path instead of inventing an assignment it was not given.
+
+**Lists, detail and timeline.** Filter controls carry visible labels and the project selector offers
+すべてのプロジェクト rather than 未設定; the task table uses a fixed column layout so the name takes the
+remaining width and the owner, status, deadline and action columns keep one alignment.
+`ProjectDetail` leads with one identity line and a five-field summary strip, puts the hierarchy
+directly underneath, and keeps the schedule explanation and an empty description as compact
+disclosures or one-line notes. A task detail collapses an empty deadline history and confirmation list
+into a closed one-line disclosure, and the editor shows the selected assignees first with the stored
+primary owner marked 主担当 and the searchable roster behind 担当者を追加. The timeline keeps one filter
+row and one date row, and the two date inputs appear only in Custom mode while a preset states the
+computed range.
+
+**Nothing behind this change is new.** No endpoint, contract, migration, schema, counting rule,
+authorization check or confirmation flow changed. The report that lists deadlines and task counts only
+is now labelled 担当・期限レポート; its units and calculations are untouched.
+
+## Member creation, shared presentation and corrective reopening — 2026-11-05
+
+**Two data scopes, one presentation.** The manager list reads `/api/manager/projects` and the member
+screen reads `/api/work/projects`; both map their row into the same `ProjectRowView` and render one
+`ProjectTable` (identity colour, responsibility grouping, schedule badge, deadline cell, progress,
+open/overdue counts, sortable headings, paging). `components/overview-sections.tsx` does the same for
+the overview: KPI cards, overdue and upcoming work tables, responsibility cards and the empty state
+are shared, while the manager page keeps its pending-request section and the member page keeps a
+personal link. The browser never receives a manager payload and hides it, and no shared component
+fetches anything itself.
+
+**Capabilities are separate flags, not one `canManage`.** `state/capabilities.ts` derives
+`canCreateProject`, `canCreateSubproject`, `canCreateTask`, `canEdit`, `canArchive`, `canDelete`,
+`canReopenTask`, `canSubmitCompletionRequest` and `canSubmitExtensionRequest` from the role. A
+MEMBER is add-only: it may file a project, a subproject and a task through the member endpoints, and
+never edit, archive, delete or reopen a record — including one it created. A VIEWER gains nothing.
+The manager screens compose `canCreateTask || canEdit` so their existing creation paths stay intact.
+Every flag only decides what is rendered; the server re-checks the role on each command.
+
+**Member creation is a narrow command.** `createMyProject` mirrors `createMySubproject`: the owner
+is the verified session, the lifecycle is `Active`, the visibility is `INTERNAL`, the responsibility
+must be active, the schema is strict, and one idempotency key produces one project. The same
+`assertTaskPlacement` and `planTaskDeadline` rules validate a member task, so the hierarchy, cycle and
+depth policies are not duplicated. Member subprojects stay flat: the server refuses a parent, and the
+dialog no longer offers one.
+
+**One authorized overview snapshot.** `workOverview` applies the visibility policy and the
+responsibility filter to a `TaskScope` pass before counting, listing or cutting a top-10/top-20 list,
+so a container is never counted as work, completed and cancelled work are reported separately, and an
+archived branch contributes nothing. The member payload carries no private project field.
+
+**A reopen is one corrective transaction.** `reopenTask` validates the role, revision, lifecycle,
+container status, parent project, typed phrase and reason before mutating, then reverses the current
+completion, optionally returns a `Completed` parent to `Active`, and writes exactly one
+`TASK_REOPENED` audit row plus one `PROJECT_REOPENED` row when the parent changed. The status becomes
+`In Progress` and the progress `0`, because no reliable pre-completion value exists; the derived
+display status (for example late) follows from the stored dates. The original request, approval and
+audit rows are never rewritten, and a repeated idempotency key replays the stored answer.
+
+**Requests are dialogs.** One `RequestDialog` shell (built on the existing native `<dialog>` `Modal`)
+serves completion and extension requests from My Work and task detail. The background is inert, the
+title names the task, project, subproject and current deadline, the body scrolls, the footer stays
+reachable, Escape and Cancel close it, and focus returns to the invoking control. The draft stays in
+component memory, the submission is non-blocking, a duplicate cannot be sent twice, and an
+unobservable outcome is reported as unknown without being retried. Finished and container tasks are
+not offered a request at all, while the reason is still explained.
+
+## One task schedule display status — 2026-11-05
+
+**One calculation, every screen.** `taskScheduleStatus` in `packages/domain/src/task-status.ts` is
+the only place that turns a task's plan into a displayed status. It reports `DONE`, `CANCELLED`,
+`INVALID_DATES`, `OVERDUE` (遅延 / Late), `PLANNED` (予定), `IN_PROGRESS` (進行中),
+`START_NOT_SET`, `DATES_NOT_SET`, plus which plan boundary is missing (`NONE`, `START`, `FINISH`,
+`BOTH`). Precedence is: stored `Done`, stored `Cancelled`, an unusable interval, late, planned, in
+progress, start not set, and finally no dates at all.
+
+Boundaries are explicit and date-only: the start day is already in progress, the finish day is
+still in progress, and late begins the day after the finish. A same-day task is planned before
+that day, in progress on it and late after it. A missing start never prevents a task from becoming
+late after its finish, and a missing finish is stated as a detail line rather than becoming a fake
+deadline. The business date is always the Asia/Tokyo calendar date.
+
+**Schedule state versus workflow state.** The stored `tasks.status` value is a workflow fact
+(assignment, blocking, completion) and is never rewritten by the passage of time. It is shown as a
+secondary detail - `WorkflowHint` for `Blocked`/`On Hold`, and the explicitly labelled
+"ワークフロー状態（保存値）" row in the technical section of the task detail. A legacy `Not Started`
+or `Assigned` value is never presented as the primary schedule badge, and no column, migration,
+background job or audit row is added by this rule.
+
+**The contract carries the state and the detail.** `DisplayTaskStatus` in `packages/contracts` is
+the one enum (`DONE`, `CANCELLED`, `INVALID_DATES`, `OVERDUE`, `PLANNED`, `IN_PROGRESS`,
+`START_NOT_SET`, `DATES_NOT_SET`). `Task`, `TaskSummary`, `WorkloadTaskRow`, `MyWorkItem`,
+`TimelineTaskRow` and `EmployeeTask` carry `displayStatus` plus an optional `scheduleMissing`
+detail. Every server that builds one of them calls `taskScheduleStatus` with the row's
+`planned_start` and `due_date`, so the manager list, the task detail, the project hierarchy, the
+overview, the timeline, the workload drill-down and the employee snapshot cannot disagree.
+`TaskStatusBadge` and `DeadlineCell` are the only presentation, and a compact deadline column
+(`showLabel={false}`) sits beside the status badge without repeating it.
+
+**Filtering matches the badge.** `TaskListQuery.displayStatus` accepts the same eight values and is
+resolved in PostgreSQL before pagination; each branch mirrors the precedence above, so a filtered
+page describes the whole scope and cannot disagree with the badge it prints. The existing values
+keep their meaning and the new ones are additive. Sorting by `status` is unchanged.
+
+**Counting is unchanged.** `TaskScope` stays the only counting rule: open work is every eligible
+open leaf task, which includes planned and undated work; done and cancelled work is reported
+separately and never as overdue; a container is not extra work; a shared task counts once. "Open"
+is therefore never a synonym for "currently in progress". The overdue predicate (`dueDate < today`)
+is independent of the display precedence, so a task with a reversed interval is warned about as
+`INVALID_DATES` while the deadline accounting still sees it - the warning never conceals it.
+
+**Date-dependent display.** `useBusinessDate` re-reads the Tokyo date at the next Tokyo midnight
+and on page focus; `useBusinessDateRefresh` in the application shell then invalidates
+`DATE_DEPENDENT_PREFIXES`, so a tab left open overnight re-reads the server's date-derived answers
+instead of keeping yesterday's badge. Nothing polls and nothing is written.
+
 ## Derived project status, deadline precedence and timeline bar geometry — 2026-11-05
 
 **One derived status, one lifecycle.** `projectScheduleStatus` in `packages/domain` is the only
@@ -31,9 +174,10 @@ client, and an omitted field on a later patch preserves the stored value.
 
 **Deadline precedence.** `DeadlineCell` requires an explicit state. It paints done first, then
 cancelled/archived, then the authoritative overdue state, and only an open record falls back to the
-Tokyo date comparison. A completion after the deadline gets its own "completed late" label. The
-workload drill-down therefore returns `displayStatus` next to the stored `status`, so a report row
-cannot be rendered from a date alone.
+Tokyo date comparison. A reversed interval is a warning tone, never a red current-overdue badge. A
+completion after the deadline gets its own "completed late" label. The workload drill-down therefore
+returns `displayStatus` next to the stored `status`, so a report row cannot be rendered from a date
+alone.
 
 **Timeline bars.** `TIMELINE_BAR` in `apps/web/src/components/timeline-dates.ts` is the single
 geometry source: 12 CSS px height for every bar, a 3 px *horizontal* width for a deadline-only or

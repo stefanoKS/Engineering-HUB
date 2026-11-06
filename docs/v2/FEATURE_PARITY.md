@@ -1,5 +1,26 @@
 # V1 → V2 Feature Parity
 
+## Member creation, shared presentation and corrective reopening — 2026-11-05
+
+| Capability | V1 (Apps Script) | V2 now |
+|---|---|---|
+| A MEMBER files a project | manager-only creation | `POST /api/employee/projects`: owner = session, `Active`, `INTERNAL`, active responsibility, audited, idempotent |
+| A MEMBER files a task / subproject | member self-service | unchanged endpoints, now offered from the project screens in a dialog |
+| A MEMBER edits, archives, deletes or reopens a record | manager/ADMIN only | unchanged: MEMBER add-only, VIEWER read-only |
+| Project list presentation | role-specific page | one `ProjectTable` for both roles, from role-specific authorized reads |
+| Overview | employee card wall beside the manager overview | one shared presentation: KPI cards, overdue/upcoming lists, responsibility cards; personal counts stay separate |
+| Request submission | inline form below the content | one accessible modal with the task, project, subproject and current deadline, non-blocking submission and unknown-outcome handling |
+| Reopening an accidentally completed task | no inverse operation | `POST /api/manager/tasks/:id/reopen` (ADMIN): reason, typed confirmation, one corrective audit event, optional atomic parent project reopening, history retained |
+
+Documented differences and limitations:
+- A member-created project has no category, summary or notification controls, because those are
+  manager decisions; the server sets the visibility to `INTERNAL` and the owner to the creator.
+- A member subproject stays flat; nested subprojects remain a manager capability.
+- Reopening sets the task to `In Progress` with 0 progress: no reliable pre-completion progress is
+  recorded, so none is invented. The derived late state follows from the stored finish date.
+- Reopening never reactivates an archived or cancelled parent project; that remains a separate
+  lifecycle action.
+
 ## Local LAN update — 2026-11-02
 
 [LOCAL_LAN.md](LOCAL_LAN.md) specifies the employee-ID/password mode, schema 7, optional email, first-login change, administrator reset, employee-owned progress editing, Windows launcher, durable local backup and optional Shared Drive upload. It supersedes Google-only or Linux-only assumptions below for this mode. [Verification record](LOCAL_LAN_ACCEPTANCE.md).
@@ -60,6 +81,7 @@ Treat every remaining **PASS** below as "implemented and covered by the named lo
 | Phase back-planning | `Planning.schedulePhases` | ADMIN, MANAGER | Bounded dependencies, DRAFT propagation; `domain.test` | `planning.ts`, `project_phases` | PRESERVED | PASS |
 | Progress rollup | `Progress.rollup`, `Progress.refresh` | — | Known estimate weight, unknown fallback 1, cancelled excluded, containers excluded; `domain.test` | `packages/domain/src/progress.ts`, `views.ts` | Recalculated from tasks | PASS |
 | Task scope counting | `TaskScope.gs` | — | One policy for cards, KPIs, reports; container/archived exclusion; `domain.test` | `packages/domain/src/scope.ts` | — | PASS |
+| Derived task schedule status | `Client.html` "status" cell (stored value) | — | One date-aware rule (`PLANNED`/`IN_PROGRESS`/`OVERDUE`/`START_NOT_SET`/`DATES_NOT_SET`/`INVALID_DATES`/`DONE`/`CANCELLED`) plus the missing-boundary detail, used by every list, detail, timeline, report and employee DTO; the stored workflow value stays stored and is labelled as such; `task-schedule-status.test`, `task-schedule-display.test`, `task-schedule-ui.test.tsx` | `packages/domain/src/task-status.ts`, `components/task-status.tsx` | No migration; no stored row rewritten | PASS |
 | Eligibility (archive-aware) | `Eligibility.gs` | — | Whole ancestor chain, bounded walk; `domain.test`, `db` integration | `eligibility.ts` | — | PASS |
 | Dashboard/overview | `ManagerWeb` `overview`, `Client.html` | MANAGER | Bounded scope, upcoming window, area cards, pending requests; `api.test` bootstrap/overview | `screens/Overview.tsx`, `buildOverview` | — | PASS |
 | Workload report | `ManagerWeb` `member`, `Planning.workloadData` | MANAGER | Date-based task counts for day/week/month/year/custom, per-member table, paginated drilldown, no hours or utilisation; `Workload.tsx`, `workloadReport` | `services/workload.ts`, `repo/reports.ts` | — | PASS |

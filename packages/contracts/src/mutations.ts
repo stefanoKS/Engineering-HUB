@@ -17,6 +17,7 @@ import {
   Role,
   TaskStatus
 } from './enums';
+import { DisplayTaskStatus } from './dto';
 import { Confirm, Id, IdempotencyKey, IsoDate, NullableIsoDate, Revision } from './common';
 
 const Text = (max: number) => z.string().max(max);
@@ -121,6 +122,27 @@ export const CreateSubprojectBody = z
     deadline: NullableIsoDate.optional(),
     estimatedHours: z.number().min(0).max(1000000).nullable().optional(),
     nextAction: Text(500).optional()
+  })
+  .strict();
+
+/**
+ * Member self-service project creation.
+ *
+ * A MEMBER files a project immediately, without a manager approval. Everything a manager may
+ * decide stays server-side: the owner is the verified session, the status is `Active`, the
+ * visibility is `INTERNAL`, and the browser cannot supply an owner, a role, a status, progress,
+ * a visibility or an approval. The responsibility is required and validated as active.
+ */
+export const CreateMyProjectBody = z
+  .object({
+    idempotencyKey: IdempotencyKey,
+    projectName: Text(200).min(1),
+    description: Text(5000).optional(),
+    responsibilityId: Id,
+    priority: Priority.optional(),
+    plannedStart: NullableIsoDate.optional(),
+    committedDeadline: NullableIsoDate.optional(),
+    acknowledgeNonWorking: z.boolean().optional()
   })
   .strict();
 
@@ -247,6 +269,23 @@ export const OverrideCompleteBody = z
     revision: Revision,
     reason: Text(1000).min(1),
     confirmation: z.string().min(1).max(200)
+  })
+  .strict();
+
+/**
+ * An ADMIN corrective reopening of an accidentally completed task.
+ *
+ * The completion is reversed as a new corrective event: the original request, approval and audit
+ * evidence stay untouched. `reopenProject` is the caller's explicit acknowledgement that a
+ * `Completed` parent project becomes `Active` again in the same operation.
+ */
+export const ReopenTaskBody = z
+  .object({
+    idempotencyKey: IdempotencyKey,
+    revision: Revision,
+    reason: Text(1000).min(1),
+    confirmation: z.string().min(1).max(200),
+    reopenProject: z.boolean().optional()
   })
   .strict();
 
@@ -436,8 +475,12 @@ export const TaskListQuery = z
     status: TaskStatus.optional(),
     /** All unfinished leaf work in the active project/subproject scope, including overdue work. */
     workState: z.literal('OPEN').optional(),
-    /** Filter by the derived, user-facing state (進行中 / 期限超過 / 完了 / 取消). */
-    displayStatus: z.enum(['IN_PROGRESS', 'OVERDUE', 'DONE', 'CANCELLED']).optional(),
+    /**
+     * Filter by the derived, user-facing schedule state (予定 / 進行中 / 遅延 / 完了 / 取消 and the
+     * documented missing-date states). Resolved on the server before paging; the existing values
+     * keep their meaning and the new values are additive.
+     */
+    displayStatus: DisplayTaskStatus.optional(),
     ownerMemberId: Id.optional(),
     query: z.string().trim().max(200).optional(),
     containerOnly: z.coerce.boolean().default(false),

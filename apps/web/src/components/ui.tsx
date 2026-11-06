@@ -1,5 +1,5 @@
 /** Shared presentational components. All stored text is rendered through React, never as HTML. */
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { projectColorVars } from '@eh/domain';
 import { LANGUAGES, useI18n } from '../i18n';
 import type { Language } from '@eh/i18n';
@@ -29,6 +29,87 @@ export function LanguageSwitch({
         </span>
       ))}
     </span>
+  );
+}
+
+const MENU_ITEMS = 'button:not([disabled]), a[href], [role="menuitem"]';
+
+/**
+ * A disclosure menu: one trigger, one popup, one keyboard contract.
+ *
+ * Escape closes it and returns focus to the trigger; an activation outside it closes it without
+ * stealing focus. The popup is removed from the DOM while closed, so a closed menu never leaves
+ * an unreachable control in the tab order.
+ */
+export function Menu({
+  label,
+  className = '',
+  align = 'end',
+  onOpenChange,
+  children
+}: {
+  label: ReactNode;
+  className?: string;
+  align?: 'start' | 'end';
+  onOpenChange?: (open: boolean) => void;
+  children: (close: () => void) => ReactNode;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
+
+  const close = useCallback((returnFocus = false) => {
+    setOpen(false);
+    onOpenChange?.(false);
+    if (returnFocus) triggerRef.current?.focus();
+  }, [onOpenChange]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      close(true);
+    };
+    const onPointerDown = (event: MouseEvent): void => {
+      if (!rootRef.current?.contains(event.target as Node)) close(false);
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    document.addEventListener('mousedown', onPointerDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      document.removeEventListener('mousedown', onPointerDown);
+    };
+  }, [open, close]);
+
+  return (
+    <div className={`menu ${align === 'end' ? 'menu-end' : 'menu-start'} ${className}`.trim()} ref={rootRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        className="menu-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => {
+          const next = !open;
+          setOpen(next);
+          onOpenChange?.(next);
+          if (next) {
+            window.requestAnimationFrame(() => {
+              popupRef.current?.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
+            });
+          }
+        }}
+      >
+        {label}
+      </button>
+      {open ? (
+        <div className="menu-popup" role="menu" ref={popupRef}>
+          {children(() => close(true))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -88,14 +169,16 @@ export function ProjectAccent({
 export function Section({
   title,
   actions,
-  children
+  children,
+  className = ''
 }: {
   title: string;
   actions?: ReactNode;
   children: ReactNode;
+  className?: string;
 }): JSX.Element {
   return (
-    <section className="card">
+    <section className={`card ${className}`.trim()}>
       <header className="card-header">
         <h2>{title}</h2>
         <div className="card-actions">{actions}</div>

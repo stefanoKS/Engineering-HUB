@@ -10,7 +10,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
-import { Database, insertProject, insertSubproject } from '@eh/db';
+import { Database, insertProject, insertResponsibility, insertSubproject } from '@eh/db';
 import { buildApp } from '../src/app';
 import { loadConfig } from '../src/config';
 import { NullInboxSource } from '../src/inbox';
@@ -45,6 +45,8 @@ beforeEach(async () => {
   await insertProject(db, { projectName: 'Beta', status: 'Active', dashboardVisibility: 'INTERNAL' }, 'PRJ-B');
   await insertProject(db, { projectName: 'Old', status: 'Active', dashboardVisibility: 'INTERNAL' }, 'PRJ-OLD');
   await db.query("UPDATE projects SET status = 'Archived', archived_at = now() WHERE project_id = 'PRJ-OLD'");
+  await insertResponsibility(db, { name: '設計' }, 'RSP-ACTIVE');
+  await insertResponsibility(db, { name: '廃止領域', status: 'Retired' }, 'RSP-RETIRED');
   app = await buildApp({
     db,
     inbox: new NullInboxSource(),
@@ -309,5 +311,125 @@ describe('creation authorization', () => {
     expect(direct.statusCode, direct.body).toBe(403);
     const stored = await db.one<{ status: string }>('SELECT status FROM tasks WHERE task_id = $1', [taskId]);
     expect(stored?.status).toBe('Not Started');
+  });
+});
+
+describe('member project creation', () => {
+  function createProject(headers: Record<string, string>, payload: Record<string, unknown>) {
+    return app.inject({ method: 'POST', url: '/api/employee/projects', headers, payload });
+  }
+
+  it('creates an Active INTERNAL project owned by the verified member', async () => {
+    const member = await login('0010');
+    const response = await createProject(member, {
+      idempotencyKey: 'member-project-1',
+      projectName: '新規試作プロジェクト',
+      responsibilityId: 'RSP-ACTIVE',
+      priority: 'High',
+      committedDeadline: '2026-12-20'
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    const created = (response.json() as {
+      data: { project: { projectId: string; projectOwnerId: string; status: string; dashboardVisibility: string }; replayed: boolean };
+    }).data;
+    expect(created.replayed).toBe(false);
+    expect(created.project.projectOwnerId).toBe('MEM-A');
+    expect(created.project.status).toBe('Active');
+    expect(created.project.dashboardVisibility).toBe('INTERNAL');
+
+    const audited = await db.one<{ actor_member_id: string; new_value: { creationChannel: string } }>(
+      "SELECT actor_member_id, new_value FROM audit_log WHERE action = 'PROJECT_CREATED' AND entity_id = $1",
+      [created.project.projectId]
+    );
+    expect(audited?.actor_member_id).toBe('MEM-A');
+    expect(audited?.new_value.creationChannel).toBe('MEMBER');
+
+    // No approval request is created for a creation.
+    const requests = await db.one<{ count: string }>(
+      "SELECT count(*)::text AS count FROM task_requests WHERE task_id LIKE 'PRJ-%'"
+    );
+    expect(Number(requests?.count ?? 0)).toBe(0);
+  });
+
+  it('refuses a browser-supplied owner, role, status or visibility', async () => {
+    const member = await login('0010');
+    for (const forged of [
+      { projectOwnerId: 'MEM-B' },
+      { status: 'Completed' },
+      { dashboardVisibility: 'RESTRICTED' },
+      { role: 'ADMIN' }
+    ]) {
+      const response = await createProject(member, {
+        idempotencyKey: `forged-${Object.keys(forged)[0]}`,
+        projectName: 'Forged project',
+        responsibilityId: 'RSP-ACTIVE',
+        ...forged
+      });
+      expect(response.statusCode, `${JSON.stringify(forged)}: ${response.body}`).toBe(400);
+      expect((response.json() as { error: { code: string } }).error.code).toBe('VALIDATION_FAILED');
+    }
+    const rows = await db.one<{ count: string }>(
+      "SELECT count(*)::text AS count FROM projects WHERE project_name = 'Forged project'"
+    );
+    expect(Number(rows?.count ?? 0)).toBe(0);
+  });
+
+  it('replays an identical request and never creates two projects', async () => {
+    const member = await login('0010');
+    const payload = {
+      idempotencyKey: 'member-project-replay',
+      projectName: 'Replay project',
+      responsibilityId: 'RSP-ACTIVE'
+    };
+    const first = await createProject(member, payload);
+    expect(first.statusCode, first.body).toBe(200);
+    const second = await createProject(member, payload);
+    expect(second.statusCode, second.body).toBe(200);
+    expect((second.json() as { data: { replayed: boolean } }).data.replayed).toBe(true);
+    const rows = await db.one<{ count: string }>(
+      "SELECT count(*)::text AS count FROM projects WHERE project_name = 'Replay project'"
+    );
+    expect(Number(rows?.count ?? 0)).toBe(1);
+  });
+
+  it('requires an active responsibility', async () => {
+    const member = await login('0010');
+    const retired = await createProject(member, {
+      idempotencyKey: 'member-project-retired',
+      projectName: 'Retired area project',
+      responsibilityId: 'RSP-RETIRED'
+    });
+    expect(retired.statusCode, retired.body).toBe(400);
+    expect((retired.json() as { error: { code: string } }).error.code).toBe('RESPONSIBILITY_REQUIRED');
+
+    const missing = await createProject(member, {
+      idempotencyKey: 'member-project-missing',
+      projectName: 'Missing area project'
+    });
+    expect(missing.statusCode, missing.body).toBe(400);
+  });
+
+  it('keeps the endpoint closed to a manager, an administrator and a viewer', async () => {
+    for (const employeeId of ['0002', '0001', '0020']) {
+      const headers = await login(employeeId);
+      const response = await createProject(headers, {
+        idempotencyKey: `member-project-denied-${employeeId}`,
+        projectName: 'Denied project',
+        responsibilityId: 'RSP-ACTIVE'
+      });
+      expect(response.statusCode, `${employeeId}: ${response.body}`).toBe(403);
+      expect((response.json() as { error: { code: string } }).error.code).toBe('AUTHORIZATION_DENIED');
+    }
+  });
+
+  it('exposes only active responsibilities to the member project form', async () => {
+    const member = await login('0010');
+    const response = await app.inject({ method: 'GET', url: '/api/employee/references', headers: member });
+    expect(response.statusCode, response.body).toBe(200);
+    const body = response.json() as { data: { projectCreationEnabled: boolean; responsibilities: { responsibilityId: string; name: string }[] } };
+    expect(body.data.projectCreationEnabled).toBe(true);
+    expect(body.data.responsibilities.map((entry) => entry.responsibilityId)).toEqual(['RSP-ACTIVE']);
+    // The narrow payload carries no owner, description or project count.
+    expect(Object.keys(body.data.responsibilities[0]!).sort()).toEqual(['name', 'responsibilityId']);
   });
 });

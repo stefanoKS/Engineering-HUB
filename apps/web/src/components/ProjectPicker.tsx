@@ -14,7 +14,7 @@ type Page = { items: Option[]; total: number; totalPages: number };
  * the read-only screens use `/api/work/projects`, which returns only the projects the documented
  * visibility policy allows the reader to see.
  */
-export function ProjectPicker({ value, onChange, disabled = false, scope = 'manager' }: { value: string; onChange: (id: string) => void; disabled?: boolean; scope?: 'manager' | 'read' }): JSX.Element {
+export function ProjectPicker({ value, onChange, disabled = false, scope = 'manager', emptyLabel }: { value: string; onChange: (id: string) => void; disabled?: boolean; scope?: 'manager' | 'read'; emptyLabel?: string }): JSX.Element {
   const { t } = useI18n();
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
@@ -35,7 +35,7 @@ export function ProjectPicker({ value, onChange, disabled = false, scope = 'mana
   return <div className="project-picker stack">
     {!disabled && <input aria-label={t('picker.search')} placeholder={t('picker.search')} value={search} onChange={e => setSearch(e.target.value)} />}
     <select aria-label={t('nav.projects')} disabled={disabled} value={value} onChange={e => onChange(e.target.value)}>
-      <option value="">{t('common.unset')}</option>
+      <option value="">{emptyLabel ?? t('common.unset')}</option>
       {value && !options.some(p => p.projectId === value) && (
         <option value={value}>
           {selected.data?.record ? selected.data.record.projectName : value}

@@ -8,16 +8,28 @@
  * granted all of that at once.
  */
 import type { z } from 'zod';
-import type { CreateMySubprojectBody, CreateMyTaskBody, MyWorkList, MyWorkProjectFilter, MyWorkProjectOptions, Subproject } from '@eh/contracts';
-import { getProject, insertSubproject, insertTask, getTask } from '@eh/db';
+import type {
+  CreateMyProjectBody,
+  CreateMySubprojectBody,
+  CreateMyTaskBody,
+  MyWorkList,
+  MyWorkProjectFilter,
+  MyWorkProjectFormOptions,
+  MyWorkProjectOptions,
+  Project,
+  Subproject
+} from '@eh/contracts';
+import { getProject, insertProject, insertSubproject, insertTask, getTask } from '@eh/db';
 import {
   DomainError,
   businessDate,
+  canCreateOwnProject,
   canCreateOwnTask,
-  displayTaskStatus,
-  requireRole
+  requireRole,
+  taskScheduleStatus
 } from '@eh/domain';
 import { audit, enqueueJob, hashRequest, runIdempotent, type ServiceCtx } from './common';
+import { assertProjectDeadlineWarnings, ensureActiveResponsibility } from './projects';
 import { assertTaskPlacement, planTaskDeadline } from './tasks';
 
 const PAGE_SIZE = 25;
@@ -32,6 +44,7 @@ type MyWorkRow = {
   status: string;
   priority: string;
   due_date: string | null;
+  planned_start: string | null;
   progress_percent: number | null;
   actual_hours: number | null;
   creation_channel: 'LEGACY' | 'MANAGER' | 'MEMBER' | null;
@@ -47,7 +60,7 @@ type MyWorkRow = {
 const MY_WORK_SELECT = `
   SELECT t.task_id, t.task_name, t.project_id, p.project_name,
          s.subproject_name,
-         t.status, t.priority, t.due_date, t.progress_percent, t.actual_hours,
+         t.status, t.priority, t.due_date, t.planned_start, t.progress_percent, t.actual_hours,
          t.creation_channel, t.completed_at, t.revision,
          EXISTS (SELECT 1 FROM tasks c WHERE c.parent_task_id = t.task_id AND c.deleted_at IS NULL) AS container,
          EXISTS (SELECT 1 FROM task_requests rp
@@ -196,27 +209,35 @@ export async function listMyWork(
     activeTotal: Number(activeTotal?.count ?? 0),
     completedTotal: Number(completedTotal?.count ?? 0),
     unfilteredActiveTotal: Number(unfiltered?.count ?? 0),
-    items: rows.map((row) => ({
-      container: row.container,
-      taskId: row.task_id,
-      taskName: row.task_name,
-      projectId: row.project_id,
-      projectName: row.project_name,
-      subprojectName: row.subproject_name ?? '',
-      status: row.status as MyWorkList['items'][number]['status'],
-      displayStatus: displayTaskStatus({ status: row.status, dueDate: row.due_date }),
-      priority: row.priority,
-      dueDate: row.due_date,
-      progressPercent: row.progress_percent,
-      actualHours: row.actual_hours,
-      reviewState: reviewStateOf(row),
-      lastRequestStatus: row.last_request_status ?? '',
-      lastRequestType: row.last_request_type ?? '',
-      pendingRequest: row.pending_request,
-      creationChannel: row.creation_channel ?? 'LEGACY',
-      completedAt: row.completed_at,
-      revision: row.revision
-    }))
+    items: rows.map((row) => {
+      const schedule = taskScheduleStatus({
+        status: row.status,
+        plannedStart: row.planned_start,
+        dueDate: row.due_date
+      });
+      return {
+        container: row.container,
+        taskId: row.task_id,
+        taskName: row.task_name,
+        projectId: row.project_id,
+        projectName: row.project_name,
+        subprojectName: row.subproject_name ?? '',
+        status: row.status as MyWorkList['items'][number]['status'],
+        displayStatus: schedule.state,
+        scheduleMissing: schedule.missing,
+        priority: row.priority,
+        dueDate: row.due_date,
+        progressPercent: row.progress_percent,
+        actualHours: row.actual_hours,
+        reviewState: reviewStateOf(row),
+        lastRequestStatus: row.last_request_status ?? '',
+        lastRequestType: row.last_request_type ?? '',
+        pendingRequest: row.pending_request,
+        creationChannel: row.creation_channel ?? 'LEGACY',
+        completedAt: row.completed_at,
+        revision: row.revision
+      };
+    })
   };
 }
 
@@ -284,6 +305,29 @@ export async function listMyWorkProjectFilter(
     pageSize,
     totalPages: Math.max(1, Math.ceil(total / pageSize)),
     selected: selected ? map(selected) : null
+  };
+}
+
+/**
+ * The responsibilities a MEMBER may choose when filing a new project.
+ *
+ * Only active responsibilities are eligible, and only their identity and label leave the server.
+ * A manager reference payload is never reused for a member form.
+ */
+export async function myWorkProjectFormOptions(ctx: ServiceCtx): Promise<MyWorkProjectFormOptions> {
+  if (!canCreateOwnProject(ctx.identity)) {
+    throw new DomainError('AUTHORIZATION_DENIED', 'Only a MEMBER files a project through self-service');
+  }
+  const rows = await ctx.db.many<{ responsibility_id: string; name: string }>(
+    `SELECT responsibility_id, name
+       FROM responsibilities
+      WHERE status = 'Active'
+      ORDER BY name, responsibility_id
+      LIMIT 500`
+  );
+  return {
+    projectCreationEnabled: true,
+    responsibilities: rows.map((row) => ({ responsibilityId: row.responsibility_id, name: row.name }))
   };
 }
 
@@ -438,6 +482,67 @@ export async function createMyTask(
     }
   );
   return { taskId: result.data.taskId, replayed: result.replayed };
+}
+
+/**
+ * Creates one project filed by the verified member.
+ *
+ * A MEMBER creates new work from the project screens; creation is not an approval step. The owner
+ * is the verified session, the lifecycle starts `Active`, the visibility is `INTERNAL` and the
+ * responsibility must be active. A retried idempotency key returns the project it created instead
+ * of a duplicate, and the audit row names the member creation channel.
+ */
+export async function createMyProject(
+  ctx: ServiceCtx,
+  body: z.infer<typeof CreateMyProjectBody>
+): Promise<{ project: Project; replayed: boolean }> {
+  requireRole(ctx.identity, 'MEMBER');
+  if (!canCreateOwnProject(ctx.identity)) {
+    throw new DomainError('AUTHORIZATION_DENIED', 'Member self-service creation is limited to the MEMBER role');
+  }
+  const projectName = body.projectName.trim();
+  if (!projectName) throw new DomainError('VALIDATION_FAILED', 'A project name is required');
+  await ensureActiveResponsibility(ctx, body.responsibilityId);
+  if (body.plannedStart && body.committedDeadline && body.plannedStart > body.committedDeadline) {
+    throw new DomainError('VALIDATION_FAILED', 'Start date must be on or before finish date');
+  }
+  await assertProjectDeadlineWarnings(ctx, body.committedDeadline, body.acknowledgeNonWorking);
+
+  const result = await runIdempotent(
+    ctx,
+    { scope: `employee.project.create:${ctx.identity.memberId}`, key: body.idempotencyKey, request: body },
+    async (tx) => {
+      const project = await insertProject(tx, {
+        projectName,
+        description: body.description ?? '',
+        responsibilityId: body.responsibilityId,
+        projectOwnerId: ctx.identity.memberId,
+        status: 'Active',
+        priority: body.priority ?? 'Medium',
+        plannedStart: body.plannedStart ?? null,
+        committedDeadline: body.committedDeadline ?? null,
+        originalDeadline: body.committedDeadline ?? null,
+        // The authorized V2 default for new work; a member never supplies a visibility.
+        dashboardVisibility: 'INTERNAL'
+      });
+      await audit(tx, ctx, {
+        entityType: 'PROJECTS',
+        entityId: project.projectId,
+        action: 'PROJECT_CREATED',
+        newValue: {
+          projectId: project.projectId,
+          projectName: project.projectName,
+          responsibilityId: project.responsibilityId,
+          projectOwnerId: project.projectOwnerId,
+          status: project.status,
+          dashboardVisibility: project.dashboardVisibility,
+          creationChannel: 'MEMBER'
+        }
+      });
+      return project;
+    }
+  );
+  return { project: result.data, replayed: result.replayed };
 }
 
 /**

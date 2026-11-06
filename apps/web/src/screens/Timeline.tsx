@@ -7,6 +7,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   Actor,
+  DisplayTaskStatus,
+  ScheduleMissingPart,
   TimelineProjectBranch,
   TimelineProjectPage,
   TimelineProjectRow,
@@ -22,6 +24,7 @@ import { useI18n } from '../i18n';
 import { ErrorBox } from '../components/ui';
 import { RemoteSelect } from '../components/forms';
 import { ScheduleBadge } from '../components/project-schedule';
+import { TaskStatusBadge } from '../components/task-status';
 import { useRouteMemoryState } from '../state/navigation';
 import {
   axisTicks,
@@ -61,7 +64,8 @@ type Row = {
   status: string;
   /** Derived schedule badge for a project or subproject row; a task uses its display status. */
   schedule?: ProjectScheduleDisplay;
-  displayStatus?: string;
+  displayStatus?: DisplayTaskStatus;
+  scheduleMissing?: ScheduleMissingPart;
   taskId?: string;
   projectId: string;
   parentKey?: string;
@@ -147,6 +151,7 @@ function taskRowOf(row: TimelineTaskRow): Row {
     container: row.container,
     status: row.status,
     displayStatus: row.displayStatus,
+    scheduleMissing: row.scheduleMissing,
     taskId: row.taskId,
     projectId: row.projectId,
     expandable: false,
@@ -403,7 +408,7 @@ export function TimelineScreen({
       <p className="muted small">{t('timeline.intro')}</p>
 
       <section className="card stack timeline-controls" aria-label={t('timeline.title')}>
-        <div className="field-row">
+        <div className="compact-toolbar">
           <div className="field">
             <span className="field-label">{t('timeline.scope.project')}</span>
             <RemoteSelect
@@ -475,43 +480,6 @@ export function TimelineScreen({
               ))}
             </select>
           </label>
-        </div>
-
-        <div className="inline-actions" role="group" aria-label={t('timeline.period')}>
-          {(['week', 'fortnight', 'month', 'custom'] as const).map((value) => (
-            <button key={value} type="button" className="button secondary" aria-pressed={preset === value} onClick={() => selectPreset(value)}>
-              {t(`timeline.preset.${value}`)}
-            </button>
-          ))}
-        </div>
-        <div className="field-row timeline-nav">
-          <label className="field">
-            <span className="field-label">{t('timeline.displayStart')}</span>
-            <input type="date" value={draftStart} onChange={(event) => {
-              const start = event.target.value;
-              setDraftStart(start);
-              const finish = preset === 'custom' ? draftFinish : presetFinish(start, preset);
-              if (finish) applyDates(start, finish);
-            }} />
-          </label>
-          <label className="field">
-            <span className="field-label">{t('timeline.displayFinish')}</span>
-            <input type="date" value={draftFinish} onChange={(event) => { setPreset('custom'); setDraftFinish(event.target.value); applyDates(draftStart, event.target.value); }} />
-          </label>
-          <div className="inline-actions">
-            <button type="button" className="button secondary" onClick={() => {
-              const month = calendarMonthWindow();
-              setPreset('custom');
-              applyDates(month.from, month.to);
-            }}>
-              {t('timeline.resetDates')}
-            </button>
-            <button type="button" className="button secondary" disabled={!fitBounds} onClick={fit}>
-              {t('timeline.fit')}
-            </button>
-          </div>
-          {!datesValid ? <p className="field-hint error-help">{t('timeline.invalidDates')}</p> : null}
-          <p className="field-hint">{t('timeline.dateHint')}</p>
           <label className="checkbox">
             <input
               type="checkbox"
@@ -527,11 +495,60 @@ export function TimelineScreen({
           ) : null}
         </div>
 
+        {/* One compact date row: a relative preset, the resulting range and, only for a custom
+            range, the two date inputs. The range itself is never changed by this screen. */}
+        <div className="compact-toolbar timeline-nav">
+          <div className="segmented" role="group" aria-label={t('timeline.period')}>
+            {(['week', 'fortnight', 'month', 'custom'] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                className={preset === value ? 'segmented-button active' : 'segmented-button'}
+                aria-pressed={preset === value}
+                onClick={() => selectPreset(value)}
+              >
+                {t(`timeline.preset.${value}`)}
+              </button>
+            ))}
+          </div>
+          {preset === 'custom' ? (
+            <>
+              <label className="field">
+                <span className="field-label">{t('timeline.displayStart')}</span>
+                <input type="date" value={draftStart} onChange={(event) => {
+                  const start = event.target.value;
+                  setDraftStart(start);
+                  const finish = preset === 'custom' ? draftFinish : presetFinish(start, preset);
+                  if (finish) applyDates(start, finish);
+                }} />
+              </label>
+              <label className="field">
+                <span className="field-label">{t('timeline.displayFinish')}</span>
+                <input type="date" value={draftFinish} onChange={(event) => { setPreset('custom'); setDraftFinish(event.target.value); applyDates(draftStart, event.target.value); }} />
+              </label>
+            </>
+          ) : (
+            <span className="timeline-range muted small">{`${window.from} – ${window.to}`}</span>
+          )}
+          <button type="button" className="button secondary" onClick={() => {
+            const month = calendarMonthWindow();
+            setPreset('custom');
+            applyDates(month.from, month.to);
+          }}>
+            {t('timeline.resetDates')}
+          </button>
+          <button type="button" className="button secondary" disabled={!fitBounds} onClick={fit}>
+            {t('timeline.fit')}
+          </button>
+          {!datesValid ? <p className="field-hint error-help">{t('timeline.invalidDates')}</p> : null}
+        </div>
+
         <p className="muted small">
           {`${window.from} – ${window.to}`}
           {' · '}{t('timeline.taskTotal', { n: rows.length })}
           {filtersActive ? ` · ${t('timeline.filter.active')}` : ''}
           {outsideCount > 0 ? ` · ${t('timeline.more', { n: outsideCount })}` : ''}
+          {' · '}{t('timeline.dateHint')}
         </p>
       </section>
 
@@ -705,7 +722,7 @@ export function TimelineScreen({
                 <td className="muted small">
                   {row.kind === 'TASK'
                     ? row.displayStatus
-                      ? t(`taskStatus.${row.displayStatus}`)
+                      ? <TaskStatusBadge state={row.displayStatus} missing={row.scheduleMissing} />
                       : row.status
                     : <ScheduleBadge schedule={row.schedule} />}
                 </td>
@@ -868,7 +885,9 @@ function TimelineRow({
             <dt>{t('column.status')}</dt>
             <dd>
               {row.kind === 'TASK' ? (
-                row.displayStatus ? t(`taskStatus.${row.displayStatus}`) : row.status
+                row.displayStatus
+                  ? <TaskStatusBadge state={row.displayStatus} missing={row.scheduleMissing} showDetail />
+                  : row.status
               ) : (
                 <ScheduleBadge schedule={row.schedule} showDetail />
               )}

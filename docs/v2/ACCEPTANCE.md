@@ -1,5 +1,82 @@
 # V2 Acceptance Record
 
+## Member creation, shared presentation, ADMIN reopening and request dialogs — 2026-11-05
+
+**Scope.** A MEMBER can file a project, a subproject and a task from the project screens; both roles
+render one project table and one overview presentation from their own authorized reads; an ADMIN can
+reopen an accidentally completed leaf task with a reason and a typed confirmation; completion and
+extension requests open as accessible modal dialogs. No migration, schema column, Script Property,
+background job or stored row is added, and no notification, Calendar, publication or deployment
+becomes active.
+
+### Gate results (actual, this machine)
+
+| Gate | Result | Evidence |
+|---|---|---|
+| `npm run lint` | PASS | `lint:v1` (42 manager files, 3 dashboard files) and `lint:v2` (eslint over apps/packages/tools) completed with no findings. |
+| `npm run typecheck` | PASS | contracts, db, domain, i18n, benchmark, migration, api and web all compiled. |
+| `npm test` | PASS | 48 test files, 541 tests passed, 1 skipped. The new suites are `apps/api/test/reopen.test.ts` (10), `apps/api/test/work-overview.test.ts` (5) and the extended member-creation suite (11), plus the updated web suites. |
+| `npm run validate` | PASS | V1 source validation (42 manager files, 3 dashboard files, 989 translation keys), V2 validation (194 files, i18n parity, no HTML sink, no private browser persistence, no `SELECT *`) and the deployment templates. |
+| `npm run build` | PASS | Built API, worker, migration CLI and the web bundle. |
+| `npm run smoke:prod` | PASS | Built migration CLI applied schema 11, `/healthz` and `/readyz` answered, the fixture authenticated, an authorized read and mutation succeeded, the worker completed an outbox job and the API stopped on the shutdown signal. |
+| Local browser verification (ADMIN, MANAGER, MEMBER, VIEWER) | PASS | `work/verify-v2-ui.mjs` against an isolated embedded PostgreSQL fixture and the built artifacts: 12 recorded PASS lines, screenshots in `work/screenshots/`. |
+
+### Browser evidence (local, isolated fixture — not a live Workspace run)
+
+| Screenshot (`work/screenshots/`) | Proves |
+|---|---|
+| `member-overview-ja.png`, `member-overview-en.png` | The member overview is the shared KPI + overdue/upcoming + responsibility presentation, states the authorized scope and shows personal counts separately, in both languages. |
+| `member-projects-ja.png`, `member-project-dialog-ja.png`, `member-project-created-ja.png` | The member project list uses the shared table with no edit/delete column; "New project" opens a dialog over the page, creates the project and keeps the list context. |
+| `member-task-dialog-ja.png` | The contextual "New task" inside a subproject folder shows the destination and focuses the task name. |
+| `member-completion-dialog-ja.png`, `member-completion-received-ja.png` | A completion request is filed from a modal and the durable receipt appears on the page. |
+| `member-extension-dialog-ja.png`, `member-extension-dialog-mobile-ja.png` | The extension dialog identifies the deadline and fits a 390×844 viewport without horizontal scrolling. |
+| `viewer-project-detail-ja.png` | A VIEWER sees the shared presentation with no creation, edit or delete control. |
+| `manager-projects-ja.png`, `manager-task-detail-ja.png` | A MANAGER keeps the management table and never receives the reopening action. |
+| `admin-task-completed-ja.png`, `admin-reopen-dialog-ja.png`, `admin-task-reopened-ja.png` | The ADMIN reopening dialog states the reversal, the retained history and the resulting state; after confirmation the task is `In Progress` with 0% and the action is gone. |
+
+Database evidence captured by the same run: exactly one `TASK_REOPENED` audit row, the task at
+`In Progress` / `0.00` / `completed_at = null`, and the original approved request still `APPROVED`.
+
+### What this record does not prove
+
+- **Not live Workspace verification.** `docs/PRODUCTION_READINESS.md` stays **NOT APPROVED FOR
+  PRODUCTION** until recorded Google Workspace evidence exists.
+- **No operational data was migrated or modified.** Schema 11 is unchanged; the fixture database was
+  created and destroyed by the verification run.
+- **The in-dialog language switch is not exercised in the browser**, because a native modal correctly
+  makes the header inert. The draft is component state, so a language change outside the dialog
+  leaves it intact; this is covered by component behaviour rather than a live switch.
+- **Manager Overview pending-request section** and the manager decision workflow are unchanged and
+  were not re-verified here.
+- **The previous employee-overview task wall is gone.** Request actions now live on My Work and task
+  detail, so the old per-task receipt cards (and the `eh.receipts` metadata they wrote) are no longer
+  shown on the overview; the durable acknowledgement appears as a page status and the request history
+  on My Work still comes from `/api/employee/requests/mine`. No note or reason is written to browser
+  storage.
+- No notification, Calendar or publication activation happened; nothing was deployed.
+
+## One task schedule display status — 2026-11-05
+
+The workload breakdown printed the stored `tasks.status` while its Deadline column printed the
+derived `displayStatus`, so one row could read "Not started" or "Assigned" next to a derived
+deadline state, and the shared rule itself ignored the planned start. One canonical, date-aware
+calculation (`taskScheduleStatus`) now serves the manager list, task detail, project hierarchy,
+overview, timeline, workload drill-down and employee snapshot, with the missing plan boundary
+carried as a separate detail. The stored workflow value stays stored, is never rewritten by time,
+and is shown as a labelled secondary detail.
+
+| Gate | Result |
+| --- | --- |
+| Domain rule regression (`packages/domain/test/task-schedule-status.test.ts`) | PASS locally — 11 tests: before/on/between/on-finish/after, same-day, finish-only, start-only, neither date, reversed interval, done with a past finish and without a completion timestamp, cancelled, legacy Assigned/Not Started, Tokyo midnight from a UTC instant |
+| Existing derived-status and skill-grade suite | PASS locally — 11 tests (expectations updated to the canonical rule) |
+| API boundary (`apps/api/test/task-schedule-display.test.ts`) | PASS locally — 6 tests against a real PostgreSQL: DTO state and `scheduleMissing`, terminal precedence, filter-before-paging with the scope total, open-work scope including planned and undated work, the reversed-interval warning coexisting with the canonical overdue accounting, workload drilldown state and private-field allowlist, overview counts excluding done/cancelled from overdue |
+| UI (`apps/web/test/task-schedule-ui.test.tsx`) | PASS locally — 8 tests: Status and Deadline columns agree, a stored Not Started/Blocked value never overrides the badge, the same task reads the same on task detail, done never carries a current late badge, reversed interval is a warning tone, Japanese and English labels, due-today hint, and the Tokyo-midnight refresh invalidating the date-dependent reads |
+| `npm run test:v2` | PASS locally — 46 files, 520 passed, 1 skipped (the backup test that needs `pg_dump`) |
+| `npm run typecheck`, `npm run lint`, `npm run validate`, `npm run build` | PASS locally; V2 validation checked 186 files, V1 validation checked 42 manager files, 3 dashboard files and 989 translation keys |
+| Real browser check (disposable embedded PostgreSQL + `dev:api` + `dev:web`) | PASS — the workload breakdown showed 完了 / 遅延 / 進行中 / 開始日未設定 for the five scenarios, all-work showed 予定 for an `Assigned` row and 開始日未設定 for a `Not Started` row, task detail showed 予定 with ワークフロー状態（保存値）= 割当済, and the English switch showed Done / Late / In progress / Start not set. Synthetic records only; the fixture script, servers and database were removed afterwards. |
+| Deployment, production data, migrations, mail/Calendar/publication | NOT_RUN — nothing was deployed, no operational row was rewritten, and no migration was added |
+| Production readiness | **NOT APPROVED FOR PRODUCTION** until recorded live Workspace evidence exists |
+
 ## Flat folder timeline correction — 2026-11-05
 
 | Gate | Result |
@@ -960,3 +1037,45 @@ overdue. The stored project lifecycle was still an editable dropdown whose value
 | Local screenshot review | PASS (local) | Japanese and English captures at 1480 px and 640 px for the project list, project detail/hierarchy, project form and timeline, plus the workload overdue and completed breakdowns. Stored outside the repository; not live Workspace evidence. |
 | Live deployment / Workspace / LAN | NOT_RUN | No deployment, production database, Workspace tenant or live LAN host was touched. |
 | Production approval | **NOT APPROVED** | `docs/PRODUCTION_READINESS.md` is unchanged; no live evidence exists. |
+## UI refresh: application shell, readable palette and first-screen productivity — 2026-11-06
+
+A client-side release of `apps/web` only. No endpoint, request/response contract, database schema,
+migration, counting rule, capability, confirmation flow or publication behaviour changed, and no
+localStorage/sessionStorage/IndexedDB key was added for manager data (the language preference stays the
+only browser key, plus the existing non-sensitive request receipts).
+
+What changed: a 64 px header with one account menu (sign-out and password change moved into it), a
+216 px grouped sidebar (日常業務 / チーム / 管理) that becomes a focus-returning drawer below 1100 px, a
+token-based palette (`#F6F7F9` surface, `#172033` text, `#AD1535` primary, `#245EA8` link) with 40 px
+desktop controls and 44 px touch targets, a compact My Work first screen (title + total + 使い方 on one
+row, visible search, 絞り込み disclosure that repeats the applied filters as chips), a fixed-layout task
+table with visible filter labels and すべてのプロジェクト, an overview that puts open/overdue first and
+history/structure second, a project summary strip with the hierarchy directly beneath it, compact task
+detail metadata with 主担当 marked and exceptional actions behind その他, a task editor whose untouched
+state reads 変更はありません, and a timeline with one filter row and one date row (custom inputs only in
+Custom mode). The deadline/task-count report is labelled 担当・期限レポート; its units did not change.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| `npm ci` | NOT_RUN | No dependency manifest changed; the existing install was used. |
+| `npm run typecheck` | PASS | All V2 workspaces compile cleanly, including `@eh/web`. |
+| `npm run lint` | PASS | V1 and V2 ESLint both exit 0. |
+| `npm test` | PASS | V1 776/776; V2 49 files, 550 passed / 1 skipped (new file `apps/web/test/shell-and-disclosures.test.tsx`). |
+| `npm run validate` | PASS | V1 source validation (42 manager files, 3 dashboard files, 989 translation keys), V2 validation (195 files) and the deployment templates. |
+| `npm run build` | PASS | API, web (Vite), worker and migration CLI artifacts built. |
+| Role-based navigation | PASS (local browser + jsdom) | `App.tsx` keeps the previous role filter unchanged (a MEMBER and a VIEWER still see only 概要, 自分の担当タスク, すべてのタスク, プロジェクト and タイムライン, and local account administration stays ADMIN + local only). The ADMIN capture shows the three groups and every destination; `apps/web/test/usability.test.tsx` asserts each manager destination is reachable under its group heading, and `member-explorer.test.tsx` still asserts the MEMBER navigation. |
+| Drawer and menus | PASS (local browser + jsdom) | `apps/web/test/shell-and-disclosures.test.tsx`: the sidebar exists at >=1100 px and not below it, the drawer closes on Escape with focus back on the menu button, navigation closes it, and `Menu` closes on Escape (focus to trigger) and on an outside press. |
+| My Work first task before scrolling | PASS (local browser) | 1366x768 capture: six task rows and their primary actions are visible without scrolling. The heading row carries the title, the total and 使い方; the three less-used filters are behind 絞り込み and their applied values repeat as chips. |
+| No page-level horizontal overflow | PASS (local browser) | Measured `documentElement.scrollWidth === clientWidth` on Overview, My Work, All tasks, Projects, Project detail, Task detail, Task editor, Timeline and the three 390x844 screens. |
+| Timeline/table scroll containment | PASS (local browser) | The timeline chart keeps its own `.tl-scroller`; the task list uses a fixed column layout inside the content column at every reviewed width. |
+| Filters, paging, sorting and totals | PASS | Server paging, filtering, sorting, scope totals and the explicit-filter navigation are unchanged; `apps/web/test/overview.test.tsx`, `usability.test.tsx`, `workload.test.tsx` and `project-schedule-ui.test.tsx` still assert them. |
+| Editor open/dismiss performs no mutation | PASS (local browser) | The task editor capture comes from an unmodified row; no write request is issued while opening or closing it, and the untouched form states 変更はありません with Save disabled. |
+| Language switch preserves state | PASS | Route, filter and dialog state stay in page memory; only the language is written to `localStorage`. |
+| Existing destructive confirmations | PASS (local browser + jsdom) | Delete moved into その他 but keeps its dialog, dependency preflight, ADMIN check and revision handling; `apps/web/test/workflows.test.tsx` opens the menu and still asserts the logical-removal endpoint and the absence of a DELETE call. |
+| Local screenshot review | PASS (local) | Fixture-backed Chromium captures at 1440x900, 1366x768 and 390x844 for Overview, My Work, All tasks, Projects, Project detail, Task detail, Task editor, Timeline and the mobile drawer. Served from the Vite dev server with every `/api/*` answer mocked in memory; no database, no session and no live record was involved. Stored under `work/screenshots/` (local evidence, not committed). |
+| Live deployment / Workspace / LAN | NOT_RUN | Nothing was deployed, migrated, initialized or restarted, and no live account or record was used. |
+| Production approval | **NOT APPROVED** | `docs/PRODUCTION_READINESS.md` is unchanged; no live evidence exists. |
+
+Known limitation: `MyWorkList` items carry no assignee array, so a personal row shows the project path
+("project / subproject · priority") rather than inventing an assignment the payload does not contain.
+Adding assignees would change a response contract, which this release deliberately does not do.
