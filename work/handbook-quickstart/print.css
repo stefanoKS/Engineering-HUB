@@ -1,0 +1,368 @@
+@page {
+  size: A4;
+  margin: 15mm 16mm 16mm;
+}
+
+html {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+body {
+  margin: 0;
+  font-family: "Yu Gothic", "YuGothic", "Meiryo", "Noto Sans JP", sans-serif;
+  font-size: 10pt;
+  line-height: 1.46;
+  color: #172033;
+}
+
+/* ---------- cover ---------- */
+p.kicker {
+  margin: 0 0 2mm;
+  font-size: 10pt;
+  letter-spacing: 0.16em;
+  color: #ad1535;
+  font-weight: 700;
+}
+
+h1.cover-title {
+  margin: 0 0 2.5mm;
+  padding: 0 0 2.5mm;
+  font-size: 17.5pt;
+  line-height: 1.28;
+  color: #ad1535;
+  border: 0;
+  border-bottom: 3px solid #ad1535;
+}
+
+p.cover-sub {
+  margin: 0 0 4mm;
+  font-size: 10pt;
+  color: #4a5566;
+}
+
+p.cover-lead {
+  margin: 0 0 3.5mm;
+  padding: 2.4mm 3.4mm;
+  background: #fdf6f8;
+  border-left: 3px solid #ad1535;
+  font-size: 10.2pt;
+}
+
+/* ---------- headings ---------- */
+h1 {
+  font-size: 17pt;
+  line-height: 1.3;
+  margin: 0 0 3mm;
+  padding-bottom: 2mm;
+  border-bottom: 2px solid #ad1535;
+  color: #ad1535;
+  break-after: avoid;
+}
+
+h2 {
+  font-size: 13.6pt;
+  line-height: 1.3;
+  margin: 0 0 2.4mm;
+  padding-bottom: 1.4mm;
+  border-bottom: 1px solid #dce2e8;
+  break-after: avoid;
+}
+
+h3 {
+  font-size: 11pt;
+  margin: 3mm 0 1.2mm;
+  break-after: avoid;
+}
+
+p,
+li {
+  orphans: 3;
+  widows: 3;
+}
+
+p {
+  margin: 1.2mm 0;
+}
+
+ul,
+ol {
+  margin: 1.6mm 0 2.4mm;
+  padding-left: 5.5mm;
+}
+
+li {
+  margin: 0.7mm 0;
+}
+
+strong {
+  color: #7d1026;
+}
+
+/* ---------- role badge ---------- */
+p.role-badge {
+  display: inline-block;
+  margin: 0 0 1mm;
+  padding: 1mm 3.6mm;
+  border-radius: 999px;
+  font-size: 8.6pt;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  break-after: avoid;
+}
+
+p.role-badge.member {
+  background: #e8f0fa;
+  color: #1f4e79;
+  border: 1px solid #bcd2ea;
+}
+
+p.role-badge.manager {
+  background: #fdf0f3;
+  color: #8c1130;
+  border: 1px solid #e7c3cd;
+}
+
+p.role-badge.both {
+  background: #eef1f4;
+  color: #33404f;
+  border: 1px solid #d5dbe2;
+}
+
+/* ???1?????????????????????? */
+p.step {
+  margin: 0.5mm 0;
+  padding-left: 4.6mm;
+  text-indent: -4.6mm;
+}
+
+/* ---------- procedure header table ---------- */
+table.procedure {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8.8pt;
+  line-height: 1.4;
+  margin: 0 0 2.4mm;
+  background: #fbf8f9;
+  break-inside: avoid;
+}
+
+table.procedure th {
+  width: 25mm;
+  padding: 1.3mm 2mm;
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+  background: #f4e6ea;
+  color: #7d1026;
+  border: 1px solid #e7cdd4;
+  font-size: 8.8pt;
+}
+
+table.procedure td {
+  padding: 1.3mm 2.2mm;
+  border: 1px solid #e7cdd4;
+  vertical-align: top;
+}
+
+/* ---------- generic tables ---------- */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8.6pt;
+  line-height: 1.38;
+  margin: 1.6mm 0 2.2mm;
+}
+
+th,
+td {
+  border: 1px solid #dce2e8;
+  padding: 1.1mm 1.8mm;
+  vertical-align: top;
+  text-align: left;
+}
+
+th {
+  background: #f6f7f9;
+  font-weight: 700;
+}
+
+tr {
+  break-inside: avoid;
+}
+
+/* ---------- figures ---------- */
+figure.shot {
+  margin: 2mm 0 2.4mm;
+  break-inside: avoid;
+}
+
+figure.shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid #c9d1da;
+}
+
+/* ????????????????????? */
+figure.shot.wide img {
+  width: auto;
+  max-width: 100%;
+  max-height: 68mm;
+  margin: 0 auto;
+}
+
+figure.shot.wide.short img {
+  max-height: 46mm;
+}
+
+figure.shot.wide.mid img {
+  width: 78%;
+  max-height: none;
+}
+
+/* ???????????????? */
+figure.shot.narrow {
+  float: right;
+  width: 68mm;
+  margin: 0 0 3mm 5mm;
+}
+
+figure.shot.narrow img {
+  width: 100%;
+}
+
+figure.shot.strip {
+  width: 56%;
+  margin: 2.5mm auto;
+}
+
+figure.shot.crop {
+  float: right;
+  width: 62mm;
+  margin: 0 0 3mm 5mm;
+}
+
+figcaption {
+  margin-top: 1.2mm;
+  font-size: 8.2pt;
+  line-height: 1.45;
+  color: #4a5566;
+}
+
+figure.shot.narrow figcaption,
+figure.shot.strip figcaption,
+figure.shot.crop figcaption {
+  text-align: center;
+  font-size: 7.6pt;
+}
+
+/* ---------- authoring placeholder ---------- */
+.shot-missing {
+  margin: 3mm 0;
+  padding: 3mm 4mm;
+  border: 1.5px dashed #ad1535;
+  background: #fdf6f8;
+  font-size: 8.8pt;
+  color: #7d1026;
+  break-inside: avoid;
+}
+
+.shot-missing p {
+  margin: 0.8mm 0;
+}
+
+.shot-missing .missing-title {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+/* ---------- hierarchy diagram ---------- */
+.hierarchy {
+  margin: 1.8mm 0 2.2mm;
+  padding: 2.2mm;
+  background: #f7f8fa;
+  border: 1px solid #dce2e8;
+  text-align: center;
+  break-inside: avoid;
+}
+
+.hierarchy .level {
+  display: inline-block;
+  padding: 1.2mm 2.6mm;
+  background: #ffffff;
+  border: 1px solid #c9d1da;
+  border-radius: 2mm;
+  font-size: 9pt;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.hierarchy .level .lv {
+  display: block;
+  font-weight: 700;
+  color: #172033;
+}
+
+.hierarchy .level .ex {
+  display: block;
+  margin-top: 0.4mm;
+  color: #4a5566;
+  font-size: 7.6pt;
+}
+
+.hierarchy .level.optional {
+  border-style: dashed;
+}
+
+.hierarchy .level .lv em {
+  margin-left: 1.4mm;
+  padding: 0.1mm 1.2mm;
+  border-radius: 999px;
+  background: #eef1f4;
+  color: #4a5566;
+  font-size: 6.8pt;
+  font-style: normal;
+  font-weight: 400;
+}
+
+.hierarchy .arrow {
+  display: inline-block;
+  margin: 0 1.4mm;
+  font-size: 10pt;
+  color: #8d99a6;
+  vertical-align: middle;
+}
+
+/* ---------- blockquotes ---------- */
+blockquote {
+  margin: 1.8mm 0;
+  padding: 1.4mm 3mm;
+  border-left: 3px solid #ad1535;
+  background: #fdf6f8;
+  break-inside: avoid;
+}
+
+blockquote p {
+  margin: 0.8mm 0;
+}
+
+/* ---------- page break ---------- */
+.page {
+  clear: both;
+  break-before: page;
+  page-break-before: always;
+}
+
+h2,
+h3,
+table {
+  clear: none;
+}
+
+@media print {
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+}
