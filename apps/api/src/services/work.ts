@@ -24,6 +24,7 @@ import {
 } from '@eh/db';
 import {
   DomainError,
+  assertReadableDivision,
   canIncludeArchivedWork,
   canReadProjectVisibility,
   canSeeRestrictedWork,
@@ -33,6 +34,7 @@ import {
 } from '@eh/domain';
 import type { z } from 'zod';
 import type { ServiceCtx } from './common';
+import { requestedDivision } from './divisions';
 import { taskScope, type ReadCtx } from './views';
 
 /** A read context plus the verified identity: one task-scope pass serves the whole request. */
@@ -68,12 +70,14 @@ export async function listActiveWork(
     projectId: query.projectId,
     subprojectId: query.subprojectId,
     responsibilityId: query.responsibilityId,
+    divisionIds: requestedDivision(ctx, query.divisionId),
     unassigned: query.unassigned,
     status: query.status,
     workState: query.workState,
     displayStatus: query.displayStatus,
     today: ctx.today,
     ownerMemberId: query.ownerMemberId,
+    assigneeMemberId: query.assigneeMemberId,
     query: query.query,
     containerOnly: query.containerOnly,
     overdueOnly: query.overdueOnly,
@@ -123,7 +127,11 @@ export async function readOnlyTaskDetail(ctx: ServiceCtx, taskId: string): Promi
   const task = await getTask(ctx.db, taskId);
   if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
   const project = await getProject(ctx.db, task.projectId);
-  if (!project || !projectVisibleToReader(ctx, project)) {
+  if (!project) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  // A division refusal answers exactly like an unknown identifier, so a guessed ID cannot confirm
+  // that work exists outside the caller's divisions.
+  assertReadableDivision(ctx.divisions, project.divisionId);
+  if (!projectVisibleToReader(ctx, project)) {
     throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
   }
   if (!canSeeRestrictedWork(ctx.identity) && task.subprojectId) {
@@ -231,6 +239,7 @@ export async function listWorkProjects(
   input: {
     query?: string;
     responsibilityId?: string;
+    divisionId?: string;
     unassigned?: boolean;
     schedule?: NonNullable<z.infer<typeof ProjectListQuery>['schedule']>;
     sort?: NonNullable<z.infer<typeof ProjectListQuery>['sort']>;
@@ -242,6 +251,7 @@ export async function listWorkProjects(
   requireRole(ctx.identity, 'VIEWER');
   const manager = canSeeRestrictedWork(ctx.identity);
   const pageSize = Math.min(Math.max(input.pageSize ?? WORK_PROJECT_PAGE_SIZE, 1), 100);
+  const divisionFilter = requestedDivision(ctx, input.divisionId);
   const [page, responsibilities, scope] = await Promise.all([
     listProjects(
       ctx.db,
@@ -252,6 +262,7 @@ export async function listWorkProjects(
         unassigned: input.unassigned === true,
         schedule: input.schedule,
         internalOnly: !manager,
+        divisionIds: divisionFilter,
         includeArchived: manager ? undefined : false,
         sort: input.sort ?? 'name',
         direction: input.direction ?? 'asc'
@@ -260,7 +271,7 @@ export async function listWorkProjects(
       pageSize,
       ctx.today
     ),
-    listWorkResponsibilityOptions(ctx.db, !manager),
+    listWorkResponsibilityOptions(ctx.db, !manager, divisionFilter),
     taskScope(ctx).then((loaded) => loaded.scope)
   ]);
   const counts = scope.countsBy((task) => task.projectId, ctx.today);
@@ -269,6 +280,7 @@ export async function listWorkProjects(
       projectId: project.projectId,
       projectName: project.projectName,
       description: project.description,
+      divisionName: project.divisionName,
       responsibilityId: project.responsibilityId,
       responsibilityName: project.responsibilityName,
       projectOwnerName: project.projectOwnerName,
@@ -312,16 +324,19 @@ function isoAddDays(iso: string, days: number): string {
  */
 export async function workOverview(
   ctx: WorkCtx,
-  input: { responsibilityId?: string; upcomingDays: 7 | 14 | 30 }
+  input: { responsibilityId?: string; divisionId?: string; upcomingDays: 7 | 14 | 30 }
 ): Promise<WorkOverview> {
   requireRole(ctx.identity, 'VIEWER');
   const manager = canSeeRestrictedWork(ctx.identity);
+  // Every aggregate, list and top-N cut below is resolved inside this scope.
+  const divisionIds = requestedDivision(ctx, input.divisionId);
   const [{ dir, scope }, responsibilityOptions] = await Promise.all([
     taskScope(ctx),
-    listWorkResponsibilityOptions(ctx.db, !manager)
+    listWorkResponsibilityOptions(ctx.db, !manager, divisionIds)
   ]);
   const visibleProjectIds = new Set(
     dir.projects
+      .filter((project) => !input.divisionId || project.divisionId === input.divisionId)
       .filter(
         (project) =>
           manager ||
@@ -367,6 +382,7 @@ export async function workOverview(
       {
         responsibilityId: input.responsibilityId,
         internalOnly: !manager,
+        divisionIds,
         workState: 'OPEN',
         dueFrom: ctx.today,
         dueTo: upcomingTo,
@@ -382,6 +398,7 @@ export async function workOverview(
       {
         responsibilityId: input.responsibilityId,
         internalOnly: !manager,
+        divisionIds,
         displayStatus: 'OVERDUE',
         sort: 'dueDate',
         direction: 'asc',
@@ -462,7 +479,9 @@ export async function workOverview(
 export async function readOnlyProjectDetail(ctx: WorkCtx, projectId: string): Promise<WorkProjectDetail> {
   requireRole(ctx.identity, 'VIEWER');
   const project = await getProject(ctx.db, projectId);
-  if (!project || !projectVisibleToReader(ctx, project)) {
+  if (!project) throw new DomainError('NOT_FOUND', `Project not found: ${projectId}`);
+  assertReadableDivision(ctx.divisions, project.divisionId);
+  if (!projectVisibleToReader(ctx, project)) {
     throw new DomainError('NOT_FOUND', `Project not found: ${projectId}`);
   }
   const manager = canSeeRestrictedWork(ctx.identity);
@@ -530,6 +549,7 @@ export async function readOnlyProjectDetail(ctx: WorkCtx, projectId: string): Pr
       projectId: project.projectId,
       projectName: project.projectName,
       description: project.description,
+      divisionName: project.divisionName,
       responsibilityId: project.responsibilityId,
       responsibilityName: project.responsibilityName,
       projectOwnerName: project.projectOwnerName,

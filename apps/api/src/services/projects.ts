@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Project and subproject commands.
  *
  * A write is one transaction that also records its audit evidence and any outbox work. The
@@ -9,8 +9,10 @@
 import type { z } from 'zod';
 import type { Project, Subproject } from '@eh/contracts';
 import type { CreateProjectBody, CreateSubprojectBody, PatchProjectBody, PatchSubprojectBody } from '@eh/contracts';
+import type { Transaction } from '@eh/db';
 import {
   archiveProject,
+  getDivision,
   getProject,
   getSubproject,
   insertProject,
@@ -24,15 +26,28 @@ import {
 import {
   DomainError,
   assertDeadlineChangeConfirmed,
+  assertDivisionAcceptsNewWork,
   assertProjectCompletable,
   assertProjectCreationStatus,
   assertProjectLifecycleChange,
   assertWarningsAcknowledged,
+  assertWritableDivision,
   businessDate,
   planningWarnings,
   requireRole
 } from '@eh/domain';
 import { audit, requireConfirmation, runIdempotent, type ServiceCtx } from './common';
+import {
+  assertAssignmentEligibility,
+  authorizeMutation,
+  creatableProject,
+  divisionForWriteOfProject,
+  getDivisionForWrite,
+  lockDivisionMutation,
+  memberCanWorkInDivision,
+  reauthorizeInTransaction,
+  writableProject
+} from './divisions';
 
 const WRITE_ROLES = 'MANAGER' as const;
 
@@ -43,13 +58,40 @@ function assertScheduleOrder(start: string | null | undefined, finish: string | 
 }
 
 export async function ensureActiveResponsibility(ctx: ServiceCtx, responsibilityId: string): Promise<void> {
-  const row = await ctx.db.one<{ status: string; name: string }>(
-    'SELECT status, name FROM responsibilities WHERE responsibility_id = $1',
+  const row = await ctx.db.one<{ status: string; name: string; division_id: string | null }>(
+    'SELECT status, name, division_id FROM responsibilities WHERE responsibility_id = $1',
     [responsibilityId]
   );
   if (!row) throw new DomainError('RESPONSIBILITY_REQUIRED', 'A responsibility is required for a new project');
   if (row.status !== 'Active') {
     throw new DomainError('RESPONSIBILITY_REQUIRED', 'A project must belong to an active responsibility');
+  }
+}
+
+/**
+ * The project's division and its responsibility's division can never disagree.
+ *
+ * A scoped responsibility fixes the division; an unscoped one (the documented unassigned path)
+ * leaves the choice to the administrator who maps the work.
+ */
+export async function responsibilityDivision(ctx: ServiceCtx, responsibilityId: string): Promise<string | null> {
+  const row = await ctx.db.one<{ division_id: string | null }>(
+    'SELECT division_id FROM responsibilities WHERE responsibility_id = $1',
+    [responsibilityId]
+  );
+  return row?.division_id ?? null;
+}
+
+export async function assertProjectDivision(
+  ctx: ServiceCtx,
+  divisionId: string,
+  responsibilityId: string
+): Promise<void> {
+  const responsibility = await responsibilityDivision(ctx, responsibilityId);
+  if (responsibility && responsibility !== divisionId) {
+    throw new DomainError('VALIDATION_FAILED', 'The selected responsibility belongs to another division', {
+      responsibilityDivisionId: responsibility
+    });
   }
 }
 
@@ -102,21 +144,50 @@ export async function createProject(
 ): Promise<{ project: Project; replayed: boolean }> {
   requireRole(ctx.identity, WRITE_ROLES);
   assertProjectCreationStatus(body.status);
+  // The division is the organisational boundary of a new project: it must exist, be active and be
+  // one this manager may write in. A retired division never receives new work.
+  await getDivisionForWrite(ctx, body.divisionId);
   await ensureActiveResponsibility(ctx, body.responsibilityId);
-  if (body.projectOwnerId) await ensureMember(ctx, body.projectOwnerId);
+  await assertProjectDivision(ctx, body.divisionId, body.responsibilityId);
+  if (body.projectOwnerId) await ensureMember(ctx, body.projectOwnerId);  // An owner must belong to the division of the work. The creating manager is the default owner
+  // only when they are eligible; never invent an owner for an ineligible ADMIN or manager.
+  const ownerId =
+    body.projectOwnerId ??
+    ((await memberCanWorkInDivision(ctx, ctx.identity.memberId, body.divisionId))
+      ? ctx.identity.memberId
+      : null);
+  if (ownerId) await assertAssignmentEligibility(ctx, body.divisionId, [ownerId]);
   assertScheduleOrder(body.plannedStart, body.committedDeadline);
   await deadlineGate(ctx, body.committedDeadline, undefined, true);
 
+  // The same check answers a replayed create, so a retry is never answered for an account that
+  // lost the role or the division in the meantime.
+  const authorizeTargetDivision = async (tx: Transaction): Promise<void> => {
+    const fresh = await reauthorizeInTransaction(tx, ctx);
+    requireRole(fresh.identity, WRITE_ROLES);
+    assertWritableDivision(fresh.scope, body.divisionId);
+  };
   const result = await runIdempotent(
     ctx,
     { scope: 'project.create', key: body.idempotencyKey, request: body },
     async (tx) => {
+      // Authoritative re-check inside the write: the actor's authority, the division's lifecycle
+      // state and the owner's membership are re-read before the row is inserted.
+      await lockDivisionMutation(tx);
+      await authorizeTargetDivision(tx);
+      const fresh = await reauthorizeInTransaction(tx, ctx);
+      const division = await getDivision(tx, body.divisionId);
+      if (!division) throw new DomainError('VALIDATION_FAILED', 'Unknown division');
+      assertDivisionAcceptsNewWork(division.status);
+      assertWritableDivision(fresh.scope, division.divisionId);
+      if (ownerId) await assertAssignmentEligibility(ctx, division.divisionId, [ownerId], new Set(), tx);
       const project = await insertProject(tx, {
         projectName: body.projectName,
         description: body.description,
         category: body.category,
+        divisionId: body.divisionId,
         responsibilityId: body.responsibilityId,
-        projectOwnerId: body.projectOwnerId ?? ctx.identity.memberId,
+        projectOwnerId: ownerId,
         // Schedule progress is derived, so a new project starts as an explicit, non-terminal
         // record; only completion, cancellation and archive change the stored lifecycle.
         status: body.status ?? 'Active',
@@ -140,7 +211,8 @@ export async function createProject(
         newValue: project
       });
       return project;
-    }
+    },
+    { authorize: authorizeTargetDivision }
   );
   return { project: result.data, replayed: result.replayed };
 }
@@ -151,8 +223,9 @@ export async function patchProject(
   body: z.infer<typeof PatchProjectBody>
 ): Promise<Project> {
   requireRole(ctx.identity, WRITE_ROLES);
-  const project = await getProject(ctx.db, projectId);
-  if (!project) throw new DomainError('NOT_FOUND', `Project not found: ${projectId}`);
+  // The stored division decides the write authority; a project's division is never moved by an
+  // ordinary edit (that is the separate ADMIN transfer command).
+  const project = await writableProject(ctx, projectId);
   if (body.revision !== project.revision) {
     throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved', {
       expected: body.revision,
@@ -161,8 +234,14 @@ export async function patchProject(
   }
   if (body.responsibilityId !== undefined && body.responsibilityId !== null) {
     await ensureActiveResponsibility(ctx, body.responsibilityId);
+    if (project.divisionId) await assertProjectDivision(ctx, project.divisionId, body.responsibilityId);
   }
-  if (body.projectOwnerId) await ensureMember(ctx, body.projectOwnerId);
+  if (body.projectOwnerId) {
+    await ensureMember(ctx, body.projectOwnerId);
+    if (body.projectOwnerId !== project.projectOwnerId) {
+      await assertAssignmentEligibility(ctx, project.divisionId, [body.projectOwnerId]);
+    }
+  }
   if (body.plannedStart !== undefined || body.committedDeadline !== undefined) {
     assertScheduleOrder(
       body.plannedStart !== undefined ? body.plannedStart : project.plannedStart,
@@ -210,6 +289,23 @@ export async function patchProject(
   if (!Object.keys(changes).length) return project;
 
   const updated = await ctx.db.transaction(async (tx) => {
+    await lockDivisionMutation(tx);
+    const currentDivision = await divisionForWriteOfProject(tx, projectId);
+    await authorizeMutation(tx, ctx, { role: WRITE_ROLES, divisionId: currentDivision.divisionId });
+    if (body.projectOwnerId && body.projectOwnerId !== project.projectOwnerId) {
+      await assertAssignmentEligibility(ctx, currentDivision.divisionId, [body.projectOwnerId], new Set(), tx);
+    }
+    if (body.responsibilityId !== undefined && body.responsibilityId !== null && currentDivision.divisionId) {
+      const responsibility = await tx.one<{ division_id: string | null }>(
+        'SELECT division_id FROM responsibilities WHERE responsibility_id = $1',
+        [body.responsibilityId]
+      );
+      if (responsibility?.division_id && responsibility.division_id !== currentDivision.divisionId) {
+        throw new DomainError('VALIDATION_FAILED', 'The selected responsibility belongs to another division', {
+          responsibilityDivisionId: responsibility.division_id
+        });
+      }
+    }
     const next = await updateProject(tx, projectId, changes, body.revision);
     if (!next) {
       throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
@@ -233,12 +329,16 @@ export async function archiveProjectCommand(
 ): Promise<Project> {
   requireRole(ctx.identity, WRITE_ROLES);
   requireConfirmation(input.confirmed, 'Archiving a project requires explicit confirmation');
-  const project = await getProject(ctx.db, projectId);
-  if (!project) throw new DomainError('NOT_FOUND', `Project not found: ${projectId}`);
+  const project = await writableProject(ctx, projectId);
   if (project.revision !== input.revision) {
     throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
   }
   return ctx.db.transaction(async (tx) => {
+    // Archive is a manager mutation like any other: the role and the project's current division are
+    // re-read through the transaction handle before the row is written.
+    await lockDivisionMutation(tx);
+    const current = await divisionForWriteOfProject(tx, projectId);
+    await authorizeMutation(tx, ctx, { role: WRITE_ROLES, divisionId: current.divisionId });
     const archived = await archiveProject(tx, projectId, input.revision);
     if (!archived) throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
     await audit(tx, ctx, {
@@ -259,18 +359,35 @@ export async function createSubproject(
   body: z.infer<typeof CreateSubprojectBody>
 ): Promise<{ subproject: Subproject; replayed: boolean }> {
   requireRole(ctx.identity, WRITE_ROLES);
-  const project = await getProject(ctx.db, body.projectId);
-  if (!project) throw new DomainError('NOT_FOUND', `Project not found: ${body.projectId}`);
+  // A subproject derives its division from its project; the project must be writable in that
+  // division and must not sit in a retired one - even when no owner is selected.
+  const project = await creatableProject(ctx, body.projectId);
   if (body.parentSubprojectId) {
     throw new DomainError('HIERARCHY_INVALID', 'New subprojects must be direct children of their project');
   }
-  if (body.ownerId) await ensureMember(ctx, body.ownerId);
+  if (body.ownerId) {
+    await ensureMember(ctx, body.ownerId);
+    await assertAssignmentEligibility(ctx, project.divisionId, [body.ownerId]);
+  }
   assertScheduleOrder(body.plannedStart, body.deadline);
 
+  const authorizeParentProject = async (tx: Transaction): Promise<void> => {
+    const fresh = await reauthorizeInTransaction(tx, ctx);
+    requireRole(fresh.identity, WRITE_ROLES);
+    const current = await divisionForWriteOfProject(tx, body.projectId);
+    assertWritableDivision(fresh.scope, current.divisionId);
+  };
   const result = await runIdempotent(
     ctx,
     { scope: 'subproject.create', key: body.idempotencyKey, request: body },
     async (tx) => {
+      await lockDivisionMutation(tx);
+      await authorizeParentProject(tx);
+      const fresh = await reauthorizeInTransaction(tx, ctx);
+      const division = await divisionForWriteOfProject(tx, body.projectId);
+      assertWritableDivision(fresh.scope, division.divisionId);
+      if (division.status !== null) assertDivisionAcceptsNewWork(division.status);
+      if (body.ownerId) await assertAssignmentEligibility(ctx, division.divisionId, [body.ownerId], new Set(), tx);
       const subproject = await insertSubproject(tx, {
         projectId: body.projectId,
         parentSubprojectId: null,
@@ -291,7 +408,8 @@ export async function createSubproject(
         newValue: subproject
       });
       return subproject;
-    }
+    },
+    { authorize: authorizeParentProject }
   );
   return { subproject: result.data, replayed: result.replayed };
 }
@@ -304,10 +422,16 @@ export async function patchSubproject(
   requireRole(ctx.identity, WRITE_ROLES);
   const subproject = await getSubproject(ctx.db, subprojectId);
   if (!subproject) throw new DomainError('NOT_FOUND', `Subproject not found: ${subprojectId}`);
+  const project = await writableProject(ctx, subproject.projectId);
   if (body.revision !== subproject.revision) {
     throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
   }
-  if (body.ownerId) await ensureMember(ctx, body.ownerId);
+  if (body.ownerId) {
+    await ensureMember(ctx, body.ownerId);
+    if (body.ownerId !== subproject.ownerId) {
+      await assertAssignmentEligibility(ctx, project.divisionId, [body.ownerId]);
+    }
+  }
   if (body.parentSubprojectId !== undefined && body.parentSubprojectId !== subproject.parentSubprojectId) {
     throw new DomainError('HIERARCHY_INVALID', 'Subproject nesting is retained only for legacy records');
   }
@@ -318,6 +442,8 @@ export async function patchSubproject(
     );
   }
   if (body.projectId && body.projectId !== subproject.projectId) {
+    // A move must be authorized in both divisions, and the owner must stay eligible there.
+    await writableProject(ctx, body.projectId);
     const children = await listSubprojects(ctx.db, subproject.projectId);
     const hasChildren = children.some((entry) => entry.parentSubprojectId === subprojectId);
     if (hasChildren || body.parentSubprojectId) {
@@ -325,6 +451,10 @@ export async function patchSubproject(
         'HIERARCHY_INVALID',
         'A subproject with descendants or a parent cannot move to another project'
       );
+    }
+    const target = await getProject(ctx.db, body.projectId);
+    if (subproject.ownerId) {
+      await assertAssignmentEligibility(ctx, target?.divisionId ?? null, [subproject.ownerId]);
     }
   }
   assertDeadlineChangeConfirmed(subproject.deadline, body.deadline, body.confirmDeadlineChange === true);
@@ -349,6 +479,26 @@ export async function patchSubproject(
   if (!Object.keys(changes).length) return subproject;
 
   return ctx.db.transaction(async (tx) => {
+    // The target project (when the subproject moves) and the current one are both authorized
+    // inside this transaction, and a retained owner is validated against the destination division.
+    await lockDivisionMutation(tx);
+    const fresh = await reauthorizeInTransaction(tx, ctx);
+    requireRole(fresh.identity, WRITE_ROLES);
+    const currentDivision = await divisionForWriteOfProject(tx, subproject.projectId);
+    assertWritableDivision(fresh.scope, currentDivision.divisionId);
+    let destinationDivisionId = currentDivision.divisionId;
+    if (body.projectId && body.projectId !== subproject.projectId) {
+      const destination = await divisionForWriteOfProject(tx, body.projectId);
+      assertWritableDivision(fresh.scope, destination.divisionId);
+      destinationDivisionId = destination.divisionId;
+    }
+    if (body.ownerId && body.ownerId !== subproject.ownerId) {
+      await assertAssignmentEligibility(ctx, destinationDivisionId, [body.ownerId], new Set(), tx);
+    } else if (subproject.ownerId && destinationDivisionId !== currentDivision.divisionId) {
+      // An unchanged owner is a *new* assignment when the subproject changes project and therefore
+      // division, so it is validated against the destination.
+      await assertAssignmentEligibility(ctx, destinationDivisionId, [subproject.ownerId], new Set(), tx);
+    }
     const next = await updateSubproject(tx, subprojectId, changes, body.revision);
     if (!next) throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
     await audit(tx, ctx, {
@@ -371,10 +521,14 @@ export async function setSubprojectStatus(
   requireConfirmation(input.confirmed, 'Changing a subproject status requires explicit confirmation');
   const subproject = await getSubproject(ctx.db, subprojectId);
   if (!subproject) throw new DomainError('NOT_FOUND', `Subproject not found: ${subprojectId}`);
+  await writableProject(ctx, subproject.projectId);
   if (subproject.revision !== input.revision) {
     throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
   }
   return ctx.db.transaction(async (tx) => {
+    await lockDivisionMutation(tx);
+    const current = await divisionForWriteOfProject(tx, subproject.projectId);
+    await authorizeMutation(tx, ctx, { role: WRITE_ROLES, divisionId: current.divisionId });
     const next = await updateSubproject(tx, subprojectId, { status: input.status }, input.revision);
     if (!next) throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
     await audit(tx, ctx, {

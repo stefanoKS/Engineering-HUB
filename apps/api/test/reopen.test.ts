@@ -15,7 +15,7 @@ import { buildApp } from '../src/app';
 import { loadConfig } from '../src/config';
 import { NullInboxSource } from '../src/inbox';
 import { hashPassword } from '../src/auth/password';
-import { freshDatabase } from '../../../packages/db/test/support/db';
+import { freshDatabase, seedTestDivisions } from '../../../packages/db/test/support/db';
 
 let app: FastifyInstance;
 let db: Database;
@@ -48,6 +48,7 @@ beforeEach(async () => {
     },
     'PRJ-A'
   );
+  await seedTestDivisions(db);
   app = await buildApp({
     db,
     inbox: new NullInboxSource(),

@@ -12,8 +12,8 @@ import { Database, insertMember, insertProject, insertResponsibility, insertSubp
 import { buildApp } from '../src/app';
 import { loadConfig } from '../src/config';
 import { NullInboxSource } from '../src/inbox';
-import { addDays, businessDate } from '@eh/domain';
-import { freshDatabase, requireDatabase } from '../../../packages/db/test/support/db';
+import { addDays, businessDate, divisionScopeOf } from '@eh/domain';
+import { freshDatabase, requireDatabase, seedTestDivisions } from '../../../packages/db/test/support/db';
 
 let app: FastifyInstance;
 let db: Database;
@@ -65,6 +65,7 @@ beforeEach(async () => {
     MAIL_FROM_ADDRESS: 'noreply@example.co.jp',
     SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID: 'sheet-id'
   });
+  await seedTestDivisions(db);
   app = await buildApp({ config, db, inbox: new NullInboxSource(), logger: false });
   await app.ready();
 });
@@ -79,7 +80,14 @@ describe('concurrent administrator changes', () => {
     await insertMember(db, { name: 'Second admin', email: 'second-admin@example.co.jp', role: 'ADMIN' }, 'MEM-ADMIN2');
     const { saveMember } = await import('../src/services/directory');
     const identity = (id: string) => ({ memberId: id, name: 'Admin', email: ADMIN, role: 'ADMIN' as const, active: true, verified: true });
-    const ctx = (id: string) => ({ db, identity: identity(id), correlationId: 'race' });
+    const ctx = (id: string) => ({
+      db,
+      identity: identity(id),
+      correlationId: 'race',
+      // The concurrency test is about the administrator set, not divisions; an ADMIN scope is
+      // unrestricted, exactly as the request layer resolves it for an administrator.
+      divisions: divisionScopeOf(identity(id), [], { knownDivisionIds: [] })
+    });
     const results = await Promise.allSettled([
       saveMember(ctx('MEM-ADMIN'), { memberId: 'MEM-ADMIN2', revision: 1, role: 'MEMBER' }),
       saveMember(ctx('MEM-ADMIN2'), { memberId: 'MEM-ADMIN', revision: 1, role: 'MEMBER' })
@@ -119,7 +127,8 @@ describe('session and CSRF', () => {
       method: 'POST',
       url: '/api/manager/projects',
       headers: { cookie: auth.cookie },
-      payload: { idempotencyKey: 'key-00000001', projectName: 'X', responsibilityId: 'R1' }
+      payload: { idempotencyKey: 'key-00000001', projectName: 'X', divisionId: 'DIV-DEV',
+      responsibilityId: 'R1' }
     });
     expect(withoutCsrf.statusCode).toBe(403);
 
@@ -127,7 +136,8 @@ describe('session and CSRF', () => {
       method: 'POST',
       url: '/api/manager/projects',
       headers: { cookie: auth.cookie, 'x-csrf-token': auth.csrf, origin: 'https://evil.example' },
-      payload: { idempotencyKey: 'key-00000002', projectName: 'X', responsibilityId: 'R1' }
+      payload: { idempotencyKey: 'key-00000002', projectName: 'X', divisionId: 'DIV-DEV',
+      responsibilityId: 'R1' }
     });
     expect(foreignOrigin.statusCode).toBe(403);
     expect(foreignOrigin.json().error.code).toBe('AUTHORIZATION_DENIED');
@@ -234,6 +244,7 @@ describe('project commands', () => {
     const payload = {
       idempotencyKey: 'project-create-1',
       projectName: 'Pump',
+      divisionId: 'DIV-DEV',
       responsibilityId: 'RSP-1'
     };
     const first = await app.inject({
@@ -282,7 +293,8 @@ describe('project commands', () => {
       method: 'POST',
       url: '/api/manager/projects',
       headers: headers(auth, true),
-      payload: { idempotencyKey: 'project-create-2', projectName: 'Pump', responsibilityId: 'RSP-OLD' }
+      payload: { idempotencyKey: 'project-create-2', projectName: 'Pump', divisionId: 'DIV-DEV',
+      responsibilityId: 'RSP-OLD' }
     });
     expect(response.statusCode).toBe(400);
     expect(response.json().error.code).toBe('RESPONSIBILITY_REQUIRED');
@@ -308,7 +320,8 @@ describe('project commands', () => {
       method: 'POST',
       url: '/api/manager/projects',
       headers: headers(auth, true),
-      payload: { idempotencyKey: 'project-create-vis-1', projectName: 'Internal', responsibilityId: 'RSP-V' }
+      payload: { idempotencyKey: 'project-create-vis-1', projectName: 'Internal', divisionId: 'DIV-DEV',
+      responsibilityId: 'RSP-V' }
     });
     expect(internal.statusCode, internal.body).toBe(200);
     const internalProject = (internal.json() as {
@@ -325,6 +338,7 @@ describe('project commands', () => {
       payload: {
         idempotencyKey: 'project-create-vis-2',
         projectName: 'Restricted',
+        divisionId: 'DIV-DEV',
         responsibilityId: 'RSP-V',
         dashboardVisibility: 'RESTRICTED'
       }
@@ -627,7 +641,7 @@ describe('publication gate', () => {
     expect(response.statusCode).not.toBe(200);
   });
 
-  it('publishes only INTERNAL projects and keeps the previous slot on refusal', async () => {
+  it('fails closed at execution while per-division isolation is unsupported, and writes no snapshot', async () => {
     const responsibility = await insertResponsibility(db, { name: 'Area' }, 'RSP-1');
     const internal = await insertProject(
       db,
@@ -648,19 +662,28 @@ describe('publication gate', () => {
       headers: headers(auth, true),
       payload: { confirmed: true }
     });
-    expect(response.statusCode).toBe(200);
-    const body = response.json() as { data: { rows: number; slot: string } };
-    expect(body.data.rows).toBe(1);
-    const slot = await db.one<{ rows: unknown[] }>('SELECT rows FROM published_snapshots WHERE slot = $1', [
-      body.data.slot
-    ]);
-    expect(slot?.rows.length).toBe(1);
+    // The company-wide snapshot cannot scope rows to a reader's division, so the path is blocked
+    // at execution and never only in the UI.
+    expect(response.statusCode, response.body).toBe(503);
+    expect((response.json() as { error: { code: string } }).error.code).toBe('NOT_CONFIGURED');
+    const snapshots = await db.one<{ count: string }>('SELECT count(*)::text AS count FROM published_snapshots');
+    expect(snapshots?.count).toBe('0');
+    // The application's own employee snapshot stays server-scoped and carries only INTERNAL work.
     const employee = await app.inject({
       method: 'GET',
       url: '/api/employee/snapshot',
       headers: headers(await signIn(MEMBER))
     });
     expect((employee.json() as { data: { tasks: unknown[] } }).data.tasks.length).toBe(1);
+  });
+
+  it('reports the unsupported division isolation in the publication status', async () => {
+    const auth = await signIn(ADMIN);
+    const status = await app.inject({ method: 'GET', url: '/api/manager/publication', headers: headers(auth) });
+    expect(status.statusCode, status.body).toBe(200);
+    expect((status.json() as { data: { divisionIsolationSupported: boolean } }).data.divisionIsolationSupported).toBe(
+      false
+    );
   });
 
   it('requires the typed confirmation to enable publication', async () => {

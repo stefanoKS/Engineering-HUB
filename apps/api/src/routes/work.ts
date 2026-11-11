@@ -7,7 +7,9 @@
  */
 import { z } from 'zod';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { ProjectListQuery, TaskListQuery, WorkOverviewQuery } from '@eh/contracts';
+import { Id, ProjectListQuery, TaskListQuery, WorkOverviewQuery } from '@eh/contracts';
+import { listTaskAssigneeOptions } from '@eh/db';
+import { canSeeRestrictedWork, readableDivisionIds, requireRole, scopedDivisionIds } from '@eh/domain';
 import { actorOf, ok, type AppDependencies } from '../http';
 import { sendError } from '../errors';
 import {
@@ -28,7 +30,8 @@ function ctx(request: FastifyRequest): WorkCtx {
     identity: actorOf(request),
     correlationId: request.state.correlationId,
     cache: read.cache,
-    today: read.today
+    today: read.today,
+    divisions: read.divisions
   };
 }
 
@@ -38,6 +41,7 @@ function ctx(request: FastifyRequest): WorkCtx {
  */
 const ProjectQuery = ProjectListQuery.pick({
   responsibilityId: true,
+  divisionId: true,
   unassigned: true,
   schedule: true,
   query: true,
@@ -48,12 +52,20 @@ const ProjectQuery = ProjectListQuery.pick({
 });
 
 const IdParams = z.object({ id: z.string().min(1).max(64) });
+const AssigneeOptionsQuery = z.object({
+  query: z.string().trim().max(200).default(''),
+  memberId: Id.optional(),
+  page: z.coerce.number().int().min(1).max(10000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25)
+}).strict();
 
 /** The timeline reads a whole active scope at once: same allowlist, never a manager projection. */
 const TimelineQuery = z.object({
   projectId: z.string().trim().max(64).optional(),
   subprojectId: z.string().trim().max(64).optional(),
   responsibilityId: z.string().trim().max(64).optional(),
+  /** Narrows the authorized scope; it can never widen it. */
+  divisionId: z.string().trim().max(64).optional(),
   query: z.string().trim().max(200).optional(),
   page: z.coerce.number().int().min(1).max(10000).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
@@ -62,6 +74,28 @@ const TimelineQuery = z.object({
 });
 
 export function registerWorkRoutes(app: FastifyInstance, _deps: AppDependencies): void {
+  app.get('/api/work/task-assignees', async (request, reply) => {
+    try {
+      const identity = requireRole(actorOf(request), 'VIEWER');
+      const query = AssigneeOptionsQuery.parse(request.query ?? {});
+      const manager = canSeeRestrictedWork(identity);
+      // The picker is a filter, not an assignment selector: it is scoped by the divisions the
+      // caller may read, and an employee identifier is returned only to a reader who may already
+      // see one.
+      const result = await listTaskAssigneeOptions(
+        request.state.db,
+        !manager,
+        query.query,
+        query.page,
+        query.pageSize,
+        query.memberId,
+        { divisionIds: readableDivisionIds(request.state.divisions), includeEmployeeId: manager }
+      );
+      return ok(reply, request, { ...result, page: query.page, pageSize: query.pageSize, totalPages: Math.ceil(result.total / query.pageSize) });
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
   app.get('/api/work/tasks', async (request, reply) => {
     try {
       const query = TaskListQuery.parse(request.query ?? {});
@@ -109,6 +143,7 @@ export function registerWorkRoutes(app: FastifyInstance, _deps: AppDependencies)
         request,
         await workOverview(ctx(request), {
           responsibilityId: query.responsibilityId,
+          divisionId: query.divisionId,
           upcomingDays: query.upcomingDays
         })
       );
@@ -124,6 +159,9 @@ export function registerWorkRoutes(app: FastifyInstance, _deps: AppDependencies)
   app.get('/api/work/timeline', async (request, reply) => {
     try {
       const query = TimelineQuery.parse(request.query ?? {});
+      // The same narrowing rule as every other list: refuse an unauthorized division before any
+      // branch or page summary is built.
+      const divisionIds = scopedDivisionIds(request.state.divisions, query.divisionId);
       if (query.projectId) {
         return ok(
           reply,
@@ -139,6 +177,7 @@ export function registerWorkRoutes(app: FastifyInstance, _deps: AppDependencies)
         request,
         await timelineProjects(ctx(request), {
           responsibilityId: query.responsibilityId || undefined,
+          divisionIds,
           query: query.query || undefined,
           page: query.page,
           pageSize: query.pageSize,

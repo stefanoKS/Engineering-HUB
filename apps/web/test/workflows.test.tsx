@@ -429,6 +429,7 @@ describe('collapsible task tree', () => {
       if (url.includes('/api/manager/references')) {
         return response({ responsibilities: [], members: [], skills: [], subprojects: [] });
       }
+      if (url.includes('/api/work/task-assignees')) return response({ items: [], total: 0, page: 1, pageSize: 25, totalPages: 0 });
       if (url.includes('/api/manager/projects')) return response({ items: [], total: 0, totalPages: 1 });
       if (url.includes('/api/manager/tasks')) {
         return response({ items: [task], total: 1, matchedTotal: 1, page: 1, pageSize: 25, totalPages: 1 });

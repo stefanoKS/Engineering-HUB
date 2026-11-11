@@ -7,7 +7,7 @@
  * now, so the answer states that basis instead of pretending to be a historical snapshot.
  */
 import type { WorkloadReport, WorkloadTaskPage } from '@eh/contracts';
-import { businessDate, requireRole, resolveWorkloadPeriod } from '@eh/domain';
+import { businessDate, requireRole, resolveWorkloadPeriod, scopedDivisionIds } from '@eh/domain';
 import {
   workloadBucketCounts,
   workloadEmployeeCounts,
@@ -28,6 +28,8 @@ export type WorkloadReportInput = {
   memberId?: string;
   projectId?: string;
   responsibilityId?: string;
+  /** Narrows the authorized readable scope to one division; never widens it. */
+  divisionId?: string;
   memberQuery?: string;
   sort?: WorkloadEmployeeSort;
   direction?: 'asc' | 'desc';
@@ -41,14 +43,22 @@ export type WorkloadDrilldownInput = WorkloadReportInput & {
   pageSize?: number;
 };
 
-function filtersFor(period: { start: string; end: string }, today: string, input: WorkloadReportInput): WorkloadFilters {
+function filtersFor(
+  period: { start: string; end: string },
+  today: string,
+  input: WorkloadReportInput,
+  ctx: ServiceCtx
+): WorkloadFilters {
   return {
     start: period.start,
     end: period.end,
     today,
     memberId: input.memberId ?? null,
     projectId: input.projectId ?? null,
-    responsibilityId: input.responsibilityId ?? null
+    responsibilityId: input.responsibilityId ?? null,
+    // A report never includes a division the caller may not read; a requested division narrows that
+    // scope before any figure or drilldown is produced.
+    divisionIds: scopedDivisionIds(ctx.divisions, input.divisionId)
   };
 }
 
@@ -56,7 +66,7 @@ export async function workloadReport(ctx: ServiceCtx, input: WorkloadReportInput
   requireRole(ctx.identity, 'MANAGER');
   const today = businessDate();
   const period = resolveWorkloadPeriod({ ...input, today });
-  const filters = filtersFor(period, today, input);
+  const filters = filtersFor(period, today, input, ctx);
   const sort: WorkloadEmployeeSort = input.sort ?? 'overdue';
   const direction = input.direction ?? (sort === 'name' ? 'asc' : 'desc');
   const [summary, buckets, employees] = await Promise.all([
@@ -85,7 +95,7 @@ export async function workloadDrilldown(
   requireRole(ctx.identity, 'MANAGER');
   const today = businessDate();
   const period = resolveWorkloadPeriod({ ...input, today });
-  const filters = filtersFor(period, today, input);
+  const filters = filtersFor(period, today, input, ctx);
   const kind: WorkloadTaskKind = input.kind ?? 'DUE';
   const page = input.page ?? 1;
   const pageSize = input.pageSize ?? 25;

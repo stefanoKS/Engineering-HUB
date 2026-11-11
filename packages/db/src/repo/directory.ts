@@ -10,10 +10,16 @@ import {
   type ResponsibilityRow,
   type SkillRow
 } from '../map';
+import { divisionScopeSql } from './divisions';
 
 const MEMBER_COLUMNS = `m.member_id, m.name, m.email, m.department, m.position, m.active,
   m.manager_id, m.weekly_capacity_hours, m.role, m.created_at, m.updated_at, m.revision,
-  (SELECT a.employee_id FROM local_accounts a WHERE a.member_id = m.member_id) AS employee_id`;
+  m.all_divisions_read,
+  (SELECT a.employee_id FROM local_accounts a WHERE a.member_id = m.member_id) AS employee_id,
+  COALESCE((SELECT jsonb_agg(jsonb_build_object('divisionId', md.division_id, 'accessKind', md.access_kind)
+                             ORDER BY md.division_id)
+              FROM member_divisions md
+             WHERE md.member_id = m.member_id AND md.removed_at IS NULL), '[]'::jsonb) AS division_grants`;
 
 export async function listMembers(
   db: Queryable,
@@ -108,7 +114,7 @@ export type MemberInput = {
   active?: boolean;
   managerId?: string | null;
   weeklyCapacityHours?: number | null;
-  role?: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'VIEWER' | null;
+  role?: 'ADMIN' | 'MANAGER' | 'GENERAL_MANAGER' | 'MEMBER' | 'VIEWER' | null;
 };
 
 export async function insertMember(db: Queryable, input: MemberInput, memberId = newId('MEM')): Promise<Member> {
@@ -179,15 +185,27 @@ export async function activeAdministratorIds(db: Queryable): Promise<string[]> {
   return rows.map((row) => row.member_id);
 }
 
-const RESPONSIBILITY_COLUMNS = `r.responsibility_id, r.name, r.description, r.owner_member_id,
+const RESPONSIBILITY_COLUMNS = `r.responsibility_id, r.name, r.description, r.division_id,
+  d.name AS division_name, r.owner_member_id,
   owner.name AS owner_name, r.status, r.sort_order, r.color_hex, r.retired_at, r.revision,
   r.created_at, r.updated_at`;
 
-export async function listResponsibilities(db: Queryable): Promise<Responsibility[]> {
+export async function listResponsibilities(
+  db: Queryable,
+  options: { divisionIds?: readonly string[] } = {}
+): Promise<Responsibility[]> {
+  const where: string[] = [];
+  const params: unknown[] = [];
+  divisionScopeSql('r.division_id', options.divisionIds, params, where);
+  const filter = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const rows = await db.many<ResponsibilityRow>(
     `SELECT ${RESPONSIBILITY_COLUMNS}
-       FROM responsibilities r LEFT JOIN members owner ON owner.member_id = r.owner_member_id
-      ORDER BY r.status ASC, r.sort_order ASC, r.name ASC`
+       FROM responsibilities r
+       LEFT JOIN divisions d ON d.division_id = r.division_id
+       LEFT JOIN members owner ON owner.member_id = r.owner_member_id
+      ${filter}
+      ORDER BY r.status ASC, r.sort_order ASC, r.name ASC, r.responsibility_id ASC`,
+    params
   );
   const members = await db.many<{
     responsibility_id: string;
@@ -231,6 +249,7 @@ export async function getResponsibility(db: Queryable, id: string): Promise<Resp
 export type ResponsibilityInput = {
   name: string;
   description?: string;
+  divisionId?: string | null;
   ownerMemberId?: string | null;
   status?: 'Active' | 'Retired';
   sortOrder?: number;
@@ -243,12 +262,13 @@ export async function insertResponsibility(
   responsibilityId = newId('RSP')
 ): Promise<Responsibility> {
   await db.query(
-    `INSERT INTO responsibilities (responsibility_id, name, description, owner_member_id, status, sort_order, color_hex)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    `INSERT INTO responsibilities (responsibility_id, name, description, division_id, owner_member_id, status, sort_order, color_hex)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
     [
       responsibilityId,
       input.name,
       input.description ?? '',
+      input.divisionId ?? null,
       input.ownerMemberId ?? null,
       input.status ?? 'Active',
       input.sortOrder ?? 0,
@@ -274,6 +294,7 @@ export async function updateResponsibility(
        status = COALESCE($7, status),
        sort_order = COALESCE($8, sort_order),
        color_hex = CASE WHEN $9::boolean THEN $10 ELSE color_hex END,
+       division_id = CASE WHEN $11::boolean THEN $12 ELSE division_id END,
        retired_at = CASE WHEN $7 = 'Retired' THEN COALESCE(retired_at, now())
                          WHEN $7 = 'Active' THEN NULL ELSE retired_at END,
        revision = revision + 1
@@ -288,7 +309,9 @@ export async function updateResponsibility(
       patch.status ?? null,
       patch.sortOrder ?? null,
       'colorHex' in patch,
-      patch.colorHex ?? null
+      patch.colorHex ?? null,
+      'divisionId' in patch,
+      patch.divisionId ?? null
     ]
   );
   return getResponsibility(db, id);

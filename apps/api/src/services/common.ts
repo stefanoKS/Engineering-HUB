@@ -2,12 +2,17 @@
 import { createHash } from 'node:crypto';
 import type { Database, Transaction } from '@eh/db';
 import { beginIdempotency, completeIdempotency, enqueue, insertAudit } from '@eh/db';
-import { DomainError, type Identity } from '@eh/domain';
+import { DomainError, type DivisionScope, type Identity } from '@eh/domain';
 
 export type ServiceCtx = {
   db: Database;
   identity: Identity;
   correlationId: string;
+  /**
+   * The divisions this request may read and write, resolved from trusted server data before any
+   * command runs. It is never derived from a request field.
+   */
+  divisions: DivisionScope;
 };
 
 export type AuditEntry = {
@@ -46,16 +51,22 @@ export function hashRequest(value: unknown): string {
  * The key row, the record, its audit row and its outbox job commit together, so a retry after a
  * timeout either replays the stored answer or finds the operation still in progress - it never
  * creates a second record.
+ *
+ * `options.authorize` is the access check a *replay* must still pass before the stored answer is
+ * returned: a retry is answered only for an account that may still perform the operation. It never
+ * re-executes the mutation, so at-most-once behaviour is preserved.
  */
 export async function runIdempotent<T>(
   ctx: ServiceCtx,
   input: { scope: string; key: string; request: unknown },
-  produce: (tx: Transaction) => Promise<T>
+  produce: (tx: Transaction) => Promise<T>,
+  options: { authorize?: (tx: Transaction) => Promise<void> } = {}
 ): Promise<{ data: T; replayed: boolean }> {
   const hash = hashRequest(input.request);
   return ctx.db.transaction(async (tx) => {
     const state = await beginIdempotency(tx, input.scope, input.key, hash);
     if (state.kind === 'REPLAY') {
+      if (options.authorize) await options.authorize(tx);
       return { data: state.response as T, replayed: true };
     }
     if (state.kind === 'IN_PROGRESS') {

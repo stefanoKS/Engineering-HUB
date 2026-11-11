@@ -30,7 +30,8 @@ function ctx(request: FastifyRequest): ServiceCtx {
   return {
     db: request.state.db,
     identity: actorOf(request),
-    correlationId: request.state.correlationId
+    correlationId: request.state.correlationId,
+    divisions: request.state.divisions
   };
 }
 

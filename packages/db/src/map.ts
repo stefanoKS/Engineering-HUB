@@ -30,6 +30,8 @@ export type MemberRow = {
   updated_at: string;
   revision: number;
   employee_id?: string | null;
+  all_divisions_read?: boolean | null;
+  division_grants?: { divisionId: string; accessKind: 'WORK' | 'READ' }[] | null;
 };
 
 export function toMember(row: MemberRow): Member {
@@ -44,6 +46,8 @@ export function toMember(row: MemberRow): Member {
     weeklyCapacityHours: row.weekly_capacity_hours,
     role: effectiveRole(row.role),
     employeeId: row.employee_id ?? undefined,
+    divisionGrants: row.division_grants ?? [],
+    allDivisionsRead: row.all_divisions_read === true,
     revision: row.revision,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -54,6 +58,8 @@ export type ResponsibilityRow = {
   responsibility_id: string;
   name: string;
   description: string;
+  division_id: string | null;
+  division_name?: string | null;
   owner_member_id: string | null;
   owner_name: string | null;
   status: 'Active' | 'Retired';
@@ -73,6 +79,8 @@ export function toResponsibility(
     responsibilityId: row.responsibility_id,
     name: row.name,
     description: row.description,
+    divisionId: row.division_id ?? null,
+    divisionName: row.division_name ?? '',
     ownerMemberId: row.owner_member_id,
     ownerName: row.owner_name ?? '',
     status: row.status,
@@ -92,6 +100,8 @@ export type ProjectRow = {
   project_name: string;
   description: string;
   category: string;
+  division_id: string | null;
+  division_name?: string | null;
   responsibility_id: string | null;
   responsibility_name: string | null;
   project_owner_id: string | null;
@@ -122,6 +132,8 @@ export function toProject(row: ProjectRow, today: string = businessDate()): Proj
     projectName: row.project_name,
     description: row.description,
     category: row.category,
+    divisionId: row.division_id ?? null,
+    divisionName: row.division_name ?? '',
     responsibilityId: row.responsibility_id,
     responsibilityName: row.responsibility_name ?? '',
     projectOwnerId: row.project_owner_id,

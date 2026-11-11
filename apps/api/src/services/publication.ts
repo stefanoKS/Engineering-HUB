@@ -33,6 +33,14 @@ import type { AppConfig } from '../config';
 
 export const PUBLISHER_VERSION = '2.0.0';
 
+/**
+ * The shared-dashboard snapshot has no per-viewer identity, so it cannot enforce division
+ * isolation. Until a reviewed isolation design exists, publication fails closed at execution - not
+ * only in the UI - so a division-restricted project can never reach the company-wide workbook.
+ * Previously published snapshots are a separate rollout concern and are not revoked here.
+ */
+const DIVISION_ISOLATION_SUPPORTED = false;
+
 export async function publicationStatus(ctx: ServiceCtx, config: AppConfig): Promise<PublicationStatus> {
   requireRole(ctx.identity, 'MANAGER');
   const settings = await getSettings(ctx.db);
@@ -46,7 +54,8 @@ export async function publicationStatus(ctx: ServiceCtx, config: AppConfig): Pro
     rows: meta?.row_counts ?? {},
     hash: meta?.hash ?? '',
     activeSlot: meta?.active_slot ?? 'NONE',
-    destinationConfigured: config.snapshotDestinationConfigured
+    destinationConfigured: config.snapshotDestinationConfigured,
+    divisionIsolationSupported: DIVISION_ISOLATION_SUPPORTED
   };
 }
 
@@ -71,7 +80,8 @@ export async function collectPublishedRows(ctx: ServiceCtx): Promise<PublishSour
     completedAt: row.completed_at,
     progressPercent: row.progress_percent,
     pendingRequest: row.pending_request,
-    projectVisibility: row.dashboard_visibility
+    projectVisibility: row.dashboard_visibility,
+    projectDivisionId: row.project_division_id
   }));
 }
 function hashRows(rows: unknown[]): string {
@@ -81,6 +91,14 @@ function hashRows(rows: unknown[]): string {
 export async function publishNow(ctx: ServiceCtx, input: { confirmed: true }) {
   requireRole(ctx.identity, 'ADMIN');
   requireConfirmation(input.confirmed, 'Publishing the shared dashboard requires explicit confirmation');
+  if (!DIVISION_ISOLATION_SUPPORTED) {
+    // Fail closed at execution: the company-wide snapshot cannot scope rows to a reader's
+    // divisions, so a division-restricted record must never be written to it.
+    throw new DomainError(
+      'NOT_CONFIGURED',
+      'Shared dashboard publication is blocked: the snapshot cannot enforce per-division isolation yet'
+    );
+  }
   const settings = await getSettings(ctx.db);
   if (!settingFlag(settings, SETTING_KEYS.SHARED_DASHBOARD_PUBLISH_ENABLED, false)) {
     throw new DomainError('INVALID_TRANSITION', 'Shared dashboard publication is disabled');

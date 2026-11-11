@@ -170,6 +170,12 @@ async function seed(client) {
   await client.query("INSERT INTO local_accounts(member_id,employee_id,password_hash,must_change_password) VALUES('MEM-SMOKE-VIEWER','0003',$1,false) ON CONFLICT(member_id) DO UPDATE SET password_hash=EXCLUDED.password_hash,must_change_password=false",[stored]);
  }
  await client.query("INSERT INTO responsibilities(responsibility_id,name,owner_member_id) VALUES('RSP-SMOKE','Smoke area','MEM-SMOKE') ON CONFLICT(responsibility_id) DO NOTHING");
+ // A production artifact smoke run needs one explicit division: the schema seeds none, and a
+ // project cannot be published or created without one.
+ await client.query("INSERT INTO divisions(division_id,name,sort_order) VALUES('DIV-SMOKE','Smoke division',1) ON CONFLICT(division_id) DO NOTHING");
+ await client.query("INSERT INTO member_divisions(relationship_id,member_id,division_id,access_kind,assigned_by) VALUES('MD-SMOKE-ADMIN','MEM-SMOKE','DIV-SMOKE','WORK','smoke') ON CONFLICT DO NOTHING");
+ await client.query("INSERT INTO member_divisions(relationship_id,member_id,division_id,access_kind,assigned_by) VALUES('MD-SMOKE-MANAGER','MEM-SMOKE-MANAGER','DIV-SMOKE','WORK','smoke') ON CONFLICT DO NOTHING");
+ await client.query("UPDATE responsibilities SET division_id='DIV-SMOKE' WHERE responsibility_id='RSP-SMOKE' AND division_id IS NULL");
 }
 
 async function main() {
@@ -267,6 +273,7 @@ async function main() {
       body: JSON.stringify({
         idempotencyKey: 'smoke-project-0001',
         projectName: 'Smoke project',
+        divisionId: 'DIV-SMOKE',
         responsibilityId: 'RSP-SMOKE'
       })
     });

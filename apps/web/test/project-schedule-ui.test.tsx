@@ -13,6 +13,11 @@ import { I18nProvider } from '../src/i18n';
 import { ProjectsScreen } from '../src/screens/Projects';
 import { queryCache } from '../src/state/cache';
 
+if (typeof HTMLDialogElement !== 'undefined') {
+  HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) { this.open = true; };
+  HTMLDialogElement.prototype.close ??= function close(this: HTMLDialogElement) { this.open = false; };
+}
+
 const MANAGER: Actor = {
   memberId: 'MEM-MANAGER',
   name: 'Manager',
@@ -26,6 +31,8 @@ const MANAGER: Actor = {
 const project = (overrides: Partial<ProjectSummary> = {}): ProjectSummary => ({
   projectId: 'PRJ-A',
   projectName: 'Alpha',
+  divisionId: 'DIV-DEV',
+  divisionName: '設計・開発課',
   responsibilityId: 'RSP-1',
   responsibilityName: '設計',
   projectOwnerId: 'MEM-MANAGER',
@@ -116,6 +123,20 @@ describe('project list presentation', () => {
     expect(cell).not.toBeNull();
     expect(cell?.querySelector(':scope > div.actions')).not.toBeNull();
     expect(within(cell as HTMLElement).getByRole('button', { name: '編集' })).toBeTruthy();
+  });
+
+  it('keeps archive behind the accessible menu and preserves its confirmation', async () => {
+    stubApi([project()]);
+    render(<I18nProvider><ProjectsScreen actor={MANAGER} /></I18nProvider>);
+    await screen.findByText('Alpha');
+    const cell = document.querySelector('td.project-actions-cell') as HTMLElement;
+    expect(within(cell).getByRole('button', { name: '編集' })).toBeTruthy();
+    expect(within(cell).queryByRole('menuitem')).toBeNull();
+    fireEvent.click(within(cell).getByRole('button', { name: 'その他' }));
+    expect(within(cell).queryByRole('menuitem', { name: /削除/ })).toBeNull();
+    fireEvent.click(within(cell).getByRole('menuitem', { name: /アーカイブ/ }));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.getByText(/Alpha \/ PRJ-A/)).toBeTruthy();
   });
 
   it('sends the derived schedule filter to the server', async () => {

@@ -361,7 +361,7 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | Method | Path | Query / notes |
 | --- | --- | --- |
 | GET | `/api/manager/bootstrap` | Actor, references, bounded project index, compact task index |
-| GET | `/api/manager/overview` | `responsibilityId`, `unassigned`, `upcomingDays=7|14|30` |
+| GET | `/api/manager/overview` | `responsibilityId`, `unassigned`, `divisionId`, `upcomingDays=7\|14\|30` |
 | GET | `/api/manager/projects` | `responsibilityId`, `unassigned`, `status`, `query`, `page`, `pageSize`, `sort`, `direction` |
 | GET | `/api/manager/projects/:id` | Record, rollup, subprojects with rollup, task summaries, milestones, phases |
 | GET | `/api/manager/subprojects` | `projectId` |
@@ -385,7 +385,7 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | GET | `/api/manager/plan/preview` | `deadline`, `durationValue`, `durationUnit`, `durationBasis` |
 | GET | `/api/manager/deletion/preflight` | `entityType`, `entityId` (ADMIN only) |
 | GET | `/api/admin/responsibilities/:id/delete-preflight` | ADMIN only; eligibility, project/reference counts, blockers, `erasePlan`, `confirmationText` and the current revision |
-| GET | `/api/manager/removal/preflight` | `entityType=TASKS|SUBPROJECTS`, `entityId` (ADMIN only); returns active child/dependency/workflow blockers, the current revision and whether retained task history requires an administrative reason |
+| GET | `/api/manager/removal/preflight` | `entityType=TASKS\|SUBPROJECTS`, `entityId` (ADMIN only); returns active child/dependency/workflow blockers, the current revision and whether retained task history requires an administrative reason |
 
 ### Commands
 
@@ -412,9 +412,9 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | POST | `/api/admin/tasks/:id/purge` | ADMIN advanced permanent erasure: `revision`, `confirmed`, required `reason`, `confirmation: "DELETE <id>"` |
 | POST | `/api/manager/members` | ADMIN for `role`/`active` |
 | PATCH | `/api/manager/members/:id` | `revision` + fields (role/active ADMIN only) |
-| POST | `/api/manager/responsibilities` | `name`, `ownerMemberId`, `additionalMemberIds`, `colorHex`, `sortOrder` |
-| PATCH | `/api/manager/responsibilities/:id` | `revision` + fields |
-| PATCH | `/api/manager/responsibilities/:id/order` | `revision`, `sortOrder` |
+| POST | `/api/manager/responsibilities` | `name`, `divisionId` (nullable; `null` is ADMIN-only), `ownerMemberId`, `additionalMemberIds`, `colorHex`, `sortOrder`, `idempotencyKey?`; the owner and every member must hold an active `WORK` membership in that division |
+| PATCH | `/api/manager/responsibilities/:id` | `revision` + fields (partial patch: an omitted field is never rewritten). A changed owner or a newly added member must be a `WORK` member of the division, an unchanged relationship is preserved, and a division change re-validates every retained relationship |
+| PATCH | `/api/manager/responsibilities/:id/order` | `revision`, `direction: UP\|DOWN`, `expectedNeighborId`; neighbours come from the same status group **and the same division** |
 | POST | `/api/manager/responsibilities/:id/retire` \| `/reactivate` | `revision`, `confirmed`, `reason?` |
 | DELETE | `/api/admin/responsibilities/:id` | ADMIN only, unused areas only: `revision`, `confirmed: true`, `confirmation: "DELETE <id>"`, optional `reason`; writes the tombstone and `RECORD_DELETE_PREPARED`/`RECORD_DELETED` |
 | POST | `/api/manager/skills` | `skillName`, `category`, `description`, `requiredLevel` |
@@ -561,9 +561,9 @@ controls; the server refuses every manager write for MEMBER and VIEWER.
 | Method | Path | Notes |
 | --- | --- | --- |
 | GET | `/healthz` | Liveness |
-| GET | `/readyz` | `200` with the schema version, or `503` `DATABASE_MIGRATION_REQUIRED` when the ledger is older than schema 8 |
+| GET | `/readyz` | `200` with the schema version, or `503` `DATABASE_MIGRATION_REQUIRED` when the ledger is older than the schema this build requires (12) |
 | GET | `/api/version` | Application/API/contract versions |
-| GET | `/api/public-config` | Public, non-secret runtime configuration (no authentication) |
+| GET | `/api/public-config` | Public, non-secret runtime configuration (no authentication, no session, no division scope) |
 
 `/api/public-config` exists so one built web artifact can be deployed to several environments. It
 returns exactly:
@@ -572,7 +572,8 @@ returns exactly:
 {
   "appVersion": "2.0.0",
   "environment": "PRODUCTION",
-  "googleClientId": "…apps.googleusercontent.com",
+  "authMode": "local",
+  "googleClientId": "",
   "authConfigured": true,
   "devSignInEnabled": false
 }
@@ -581,6 +582,12 @@ returns exactly:
 `googleClientId` is public by definition. The endpoint never returns a database URL, a session,
 a service-account value, a spreadsheet identifier or any other secret. `devSignInEnabled` is
 `DEV_AUTH_ENABLED && !production`, so the browser and the server agree.
+
+Neither this endpoint nor `POST /api/session` resolves a session or a division scope, so a stale
+cookie, an expired session, an account with no division grant and a database that still needs its
+migration all reach the sign-in screen. When a build needs a schema the database does not have, an
+undefined table/column/function is reported as `503 DATABASE_MIGRATION_REQUIRED` with a safe
+message (no table, database or connection detail); the detail stays in the sanitized server log.
 
 ## 7. Limits and privacy
 
@@ -617,3 +624,143 @@ The default endpoint without `tree=true` retains its existing flat-list behavior
 Atomicity and authorization are server-side: one transaction per command, an advisory lock on
 role/activation changes, a re-read of the acting administrator's stored role, and an audit row
 (`LOCAL_ACCOUNT_CREATED`, `LOCAL_ACCOUNT_LINKED`, `PASSWORD_RESET`).
+
+## Division (課) endpoints
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/api/manager/divisions` | ADMIN only; every division including retired, with `_revision` |
+| POST | `/api/admin/divisions` | `name`, `sortOrder?` (allocated inside the write when omitted), `idempotencyKey?`; the identifier is generated once and never changes, and a retried request replays instead of inserting a duplicate |
+| PATCH | `/api/admin/divisions/:id` | `revision`, `name?`, `sortOrder?`; a rename keeps every identifier |
+| PATCH | `/api/admin/divisions/:id/order` | `revision`, `direction: UP\|DOWN`, `expectedNeighborId`; writes only the `Sort_Order` values that change inside the division status group |
+| POST | `/api/admin/divisions/:id/retire` / `reactivate` | `revision`, `confirmed: true`, `reason?`; 廃止 / 再有効化, never a deletion |
+| POST | `/api/admin/projects/:id/transfer-division` | `revision`, `divisionId`, `confirmed: true`, `reason?`; takes the division lock first, re-reads the actor, the project revision and the destination, and re-queries the complete assignment set inside the transaction; refuses the whole move when any relationship would become ineligible |
+| GET | `/api/admin/divisions/unmapped` | ADMIN only; `page`, `pageSize` (≤ 50), `includeArchived`, `entityType=ALL\|RESPONSIBILITY\|PROJECT`, `divisionId?`, `responsibilityId?`, `projectId?`; the bounded read model of unmapped work with counts, proposal state, evidence and the backup status |
+| POST | `/api/admin/divisions/mapping/preview` | ADMIN only; the same read model with an explicit selection (`divisionId?`, `responsibilityIds?` ≤ 50, `projectIds?` ≤ 50) |
+| POST | `/api/admin/divisions/mapping/apply` | ADMIN only; `idempotencyKey`, `batch[]` (`entityType`, `entityId`, `divisionId`, `revision`), `confirmed: true`, `confirmation: "MAP <n> RECORD(S)"`, `reason?`; one transaction, projects before responsibilities, refused without a verified backup (`409 MAPPING_BACKUP_REQUIRED`) |
+
+`POST /api/session` and `GET /api/session` additionally answer `divisions`
+(`readable`, `writable`, `allDivisions`, `defaultDivisionId`) so the shell can offer a switch. It is
+a display aid only: every request re-resolves the scope, and a `divisionId` query parameter narrows
+the resolved scope or is refused (`NOT_FOUND`) when it is not authorized.
+
+`POST /api/manager/projects` and `POST /api/employee/projects` require `divisionId`; a project
+cannot be created without an active division, and a scoped responsibility must agree with it
+(`VALIDATION_FAILED`). `PATCH /api/manager/projects/:id` deliberately accepts no division: moving a
+persisted project is the ADMIN transfer command.
+
+### Division repair (2026-11-10)
+
+* `divisionId` is accepted as a narrowing filter by `/api/manager/projects`, `/api/manager/tasks`
+  (list and tree), `/api/manager/overview`, `/api/work/overview`, `/api/work/tasks`,
+  `/api/work/projects`, `/api/work/timeline` and `/api/manager/timeline`. One function,
+  `scopedDivisionIds`, decides it: an unauthorized or unknown identifier answers `404 NOT_FOUND`
+  before paging, totals, aggregates or the tree are built.
+* `GET /api/manager/editor?type=…&id=…` authorizes the entity before returning it: a task or
+  subproject through its project division, a project and a responsibility through their own
+  division, and the member editor only for `ADMIN`. Read access alone is not an edit form
+  (`403 AUTHORIZATION_DENIED` when the division is readable but not writable; `404` when it is not
+  readable).
+* `GET /api/manager/references` adds `divisionId` to each responsibility and `workDivisionIds` /
+  `divisionNames` to each member, so a form can offer only the options eligible for the selected
+  division. The server still re-validates every submitted identifier.
+* `GET /api/manager/subprojects` requires a readable `projectId`, or restricts the list to the
+  caller's readable divisions.
+* `GET /api/manager/members/:id/profile` withholds a former assignment in a division the reader may
+  not see and reports `ownership.previousHidden` instead.
+* `GET /api/manager/publication` adds `divisionIsolationSupported` (`false` in this release) and
+  `POST /api/manager/publication/publish` fails closed with `503 NOT_CONFIGURED` while the
+  company-wide snapshot cannot enforce per-division isolation.
+
+### Division corrections (2026-11-11)
+
+* **Every division-scoped write re-authorizes inside its transaction.** The stored role, activation
+  and division relationships are re-read and the canonical capability re-applied
+  (`authorizeMutation`), so a manager demoted to `MEMBER` or `VIEWER` while keeping a `WORK`
+  membership is refused (`403 AUTHORIZATION_DENIED`) even when the request started with manager
+  authority. This now covers project create/edit/archive, subproject create/edit/move/archive/
+  reactivate, task create/edit, assignment approval, schedule confirmation, direct completion,
+  ADMIN override, reopening, request submission/decision, responsibility create/edit/reorder/
+  lifecycle, division administration/transfer and member/account routes.
+* **The lock order is `member-divisions` then `members:role-and-activation`** for every one of those
+  paths, and no path takes the pair in the reverse order.
+* **A retired division stays readable history.** `GET /api/session` answers a retired division in
+  `readable` for a caller who may already read it (retained relationship or documented oversight)
+  and never in `writable`; a retained grant survives an unrelated `PATCH /api/manager/members/:id`,
+  while a new grant in a retired division answers `409 INVALID_TRANSITION`.
+* **Ordering is deterministic.** A division or responsibility move accepts
+  `direction` + `expectedNeighborId`, refuses a stale `revision` (`409 EDIT_CONFLICT`) and a foreign
+  neighbour, and writes only the rows whose `Sort_Order` changes.
+* **Overview reads carry the switch.** `divisionId` is part of the request and of the client cache
+  key for both `/api/manager/overview` and `/api/work/overview`.
+* `PATCH /api/manager/members/:id` treats `WORK → READ` as a membership removal: a downgrade with
+  active work is refused `409 DIVISION_MEMBERSHIP_BLOCKED` with `details.blocked[].reason`
+  `DOWNGRADE` (removal: `REMOVAL`). Revoking a `READ` grant is never blocked by existing work.
+
+### Unmapped work mapping (2026-11-11)
+
+Unmapped work (a blank `PROJECTS.division_id` / `RESPONSIBILITIES.division_id`) is readable by
+`ADMIN` only, so the remediation is three ADMIN routes rather than a spreadsheet edit:
+
+* **Read model.** `GET /api/admin/divisions/unmapped` and `POST /api/admin/divisions/mapping/preview`
+  answer `counts` (responsibilities, projects, archived responsibilities, archived projects, tasks,
+  subprojects), `items`, `page`, `pageSize`, `total`, `totalPages`, `selection`, `divisions`,
+  `backup`, `batchLimit` (100) and `generatedAt`. Each item carries its `state`
+  (`SUGGESTED`/`AMBIGUOUS`/`CONFLICT`/`UNRESOLVED`), the `rule` that produced it
+  (`EXPLICIT`/`RESPONSIBILITY`/`COMMON_MEMBERSHIP`/`NONE`), `candidates`,
+  `proposedDivisionId`, `blockers`, `unresolved`, `linkedProjects`, `revision` and `assignments`
+  (active with `eligible`, and historical with `historical: true`). The read is bounded and
+  paginated; it never loads the table.
+* **Proposal order.** explicit target (A) → the area's division (B) → the intersection of the active
+  assignees' `WORK` divisions (C). An explicit target never bypasses eligibility; a historical
+  (inactive or removed) assignment is evidence and never a blocker.
+* **Apply.** `POST /api/admin/divisions/mapping/apply` requires the exact phrase
+  `MAP <n> RECORD` / `MAP <n> RECORDS` for the submitted batch size, a verified `backup_log` row
+  newer than 24 hours (`409 MAPPING_BACKUP_REQUIRED` otherwise), the revision the screen displayed
+  (`409 EDIT_CONFLICT`), and a record that is still unmapped (`409 INVALID_TRANSITION`). A
+  responsibility target validates its whole area scope before the write. Projects are written before
+  responsibilities, because `eh_check_responsibility_division` compares a scoped area against its
+  projects. One bad record commits nothing.
+* **Audit.** `PROJECT_DIVISION_MAPPED` and `RESPONSIBILITY_DIVISION_MAPPED` per mapped record, and
+  `DIVISION_MAPPING_APPLIED` once per batch with the batch identifier, the reason, the backup and the
+  actor. A repeated `idempotencyKey` returns the stored answer after the ADMIN re-check.
+* **Visibility is automatic and account-based.** Dividing the work is the whole authorization: the
+  members who already hold that division see it, a manager scoped elsewhere does not, and nothing is
+  granted. Unmapped work stays invisible to every non-ADMIN, including an all-division manager.
+
+## Record-level write availability — 2026-11-11
+
+`GET /api/manager/tasks`, `GET /api/manager/tasks/:id`, `GET /api/manager/projects` and
+`GET /api/manager/projects/:id` now return an allowlisted boolean `canWrite` on each record (and on
+the detail payload). It is derived on the server from the caller's resolved division scope through
+`canWriteDivision(scope, project.divisionId)` before paging - never from a request parameter and
+never from the shell's selected division.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `TaskSummary.canWrite` | `boolean?` | Whether *this* task may be written by the caller, resolved through its project's division. Absent on a read-only projection (`/api/work/*`, the employee snapshot). |
+| `ProjectSummary.canWrite` | `boolean?` | The same for a project record. |
+| `TaskDetail.canWrite` / `ProjectDetail.canWrite` | `boolean?` | The same for one record. |
+
+The flag is a **presentation aid**, and the contract says so: every command still calls
+`assertWritableDivision` inside its transaction, so a forged flag grants nothing. `ADMIN` gets `true`
+for unmapped work because `canWriteDivision` is true for the remediation view; a `MANAGER` with
+`READ` access in a division gets `false` there while the record stays readable.
+
+The lookup costs no extra query per row: the division of every project comes from the request-local
+directory read that the page already performs (`taskScope` → `directory`, memoised per request).
+
+## Deadline window filter — 2026-11-11
+
+`TaskListQuery` accepts `dueFrom` and `dueTo` (inclusive `IsoDate` bounds). They are applied in
+`taskWhere` before paging and before every total, so an overview drilldown ("next 7 days") answers
+the same question the card counted instead of filtering an already-fetched page in the browser. The
+bounds are compared with the stored `due_date`; the derived schedule state stays the server's
+business and is untouched.
+
+## Request queue synchronisation — 2026-11-11
+
+`POST /api/manager/requests/sync` is unchanged in shape; the client now sends the selected
+`divisionId` on both the page-entry import and the manual control, and reads
+`imported.configured/imported/failed` to decide between success, partial import, not configured and
+failure. Only `imported > 0` triggers a re-read of the affected queue and derived views.

@@ -25,14 +25,36 @@ const REQUEST_SELECT = `
                     WHERE t.task_id = task_requests.task_id), '') AS subproject_name
     FROM task_requests`;
 
-export async function listRequests(db: Db, includeDecided: boolean, page = 1, pageSize = 25): Promise<TaskRequest[]> {
+export async function listRequests(
+  db: Db,
+  includeDecided: boolean,
+  page = 1,
+  pageSize = 25,
+  options: { divisionIds?: readonly string[] } = {}
+): Promise<TaskRequest[]> {
+  // A request belongs to the division of its task's project. `undefined` is the administrative
+  // unrestricted scope; an empty list matches nothing.
+  const where: string[] = ["($1::boolean OR status IN ('PENDING','PROCESSING','STALE'))"];
+  const params: unknown[] = [includeDecided];
+  if (options.divisionIds !== undefined) {
+    const ids = [...new Set(options.divisionIds)];
+    if (!ids.length) {
+      where.push('false');
+    } else {
+      params.push(ids);
+      where.push(
+       `EXISTS (SELECT 1 FROM tasks t JOIN projects p ON p.project_id = t.project_id
+                 WHERE t.task_id = task_requests.task_id AND p.division_id = ANY($${params.length}::text[]))`
+      );
+    }
+  }
   const rows = await db.many<RequestRow>(
     `${REQUEST_SELECT}
-      WHERE ($1::boolean OR status IN ('PENDING','PROCESSING','STALE'))
+      WHERE ${where.join(' AND ')}
       ORDER BY CASE status WHEN 'PENDING' THEN 0 WHEN 'PROCESSING' THEN 1 WHEN 'STALE' THEN 2 ELSE 3 END,
                submitted_at DESC, request_id DESC
-      LIMIT $2 OFFSET $3`,
-    [includeDecided, pageSize, (page - 1) * pageSize]
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, pageSize, (page - 1) * pageSize]
   );
   return rows.map(toRequest);
 }

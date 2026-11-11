@@ -20,6 +20,8 @@ import { addDays, businessDate, resolveWorkloadPeriod, shiftAnchor, startOfWorkW
 import { api, queryString } from '../api/client';
 import { keys, useQuery } from '../state/cache';
 import { useRouteMemoryState } from '../state/navigation';
+import { useDivisionScope } from '../state/division';
+import { useDivisionTransition } from '../state/scope';
 import { useI18n } from '../i18n';
 import { ErrorBox, Pagination, Section } from '../components/ui';
 import { DeadlineCell } from '../components/deadline';
@@ -84,6 +86,17 @@ export function WorkloadScreen({ actor }: { actor: Actor }): JSX.Element {
   const [memberQuery, setMemberQuery] = useState('');
   const [drill, setDrill] = useState<Drill | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  // The report follows the shell's division switch; the drilldown inherits the same base.
+  const division = useDivisionScope();
+  const divisionId = division.selected ?? undefined;
+  // A scope change closes a drilldown and drops the member/project/area filters, whose
+  // compatibility with the new scope is not known here. The period, granularity and sort survive.
+  useDivisionTransition(() => {
+    setDrill(null);
+    setExpanded(null);
+    setSearch('');
+    setFilters((current) => ({ ...current, memberId: '', projectId: '', responsibilityId: '' }));
+  });
 
   useEffect(() => {
     const timer = setTimeout(() => setMemberQuery(search.trim()), 300);
@@ -118,11 +131,13 @@ export function WorkloadScreen({ actor }: { actor: Actor }): JSX.Element {
       memberId: filters.memberId,
       projectId: filters.projectId,
       responsibilityId: filters.responsibilityId,
+      // The report follows the shell's division switch, and the drilldown inherits the same base.
+      divisionId: divisionId,
       memberQuery,
       sort: filters.sort,
       direction: filters.ascending ? 'asc' : 'desc'
     }),
-    [view, filters, memberQuery]
+    [view, filters, memberQuery, divisionId]
   );
 
   const key = `${keys.workload}${queryString(baseParams)}`;

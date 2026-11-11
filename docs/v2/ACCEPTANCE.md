@@ -1,5 +1,111 @@
 # V2 Acceptance Record
 
+## Division write-path corrections and V2 branding — 2026-11-11
+
+**Local implementation and verification only.** No operational database was migrated, initialized,
+mapped or reset; nothing was deployed, restarted, committed or pushed; no outbound service (mail,
+Calendar, publication) was activated; and no account or authentication setting was changed.
+
+Scope: the remaining division-management corrections (responsibility assignment, transfer reload,
+transaction-time authorization for every listed mutation, responsibility reordering, retired-division
+reads and retained grants, the overview switch, division creation/ordering) and the request to show
+`シゴトモ` / `SHIGOTOMO` as the V2 product name. Schema 12, the employee contract, the migrations and
+the project colours are unchanged, and **no new migration is required**.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| V2 branding, Japanese and English | PASS | `apps/web/test/branding.test.tsx` (4 tests): header `<h1>` and navigation `aria-label` read `シゴトモ`, `document.title` follows the language, a language switch keeps the same screen mounted and changes the title to `SHIGOTOMO`, the sign-in `<h1>` uses the brand while `companyLogo.png` keeps its own `alt`, and a division stored as `設計・開発課` still renders as `設計・開発課` beside the brand. |
+| Dictionary parity kept, brand separated | PASS | `apps/web/test/ui.test.tsx` asserts `APP_NAME === '設計・開発課 管理'` (the generated V1 dictionary), `brandName('ja') === 'シゴトモ'` and `APP_BRAND.ja !== APP_NAME`, so regenerating `packages/i18n/src/dictionary.json` cannot silently revert the brand. |
+| Responsibility assignment follows the division | PASS | `apps/api/test/division-writes.test.ts`: foreign owner at creation refused (`DIVISION_MEMBERSHIP_REQUIRED`) with no row written; a forged foreign additional member on an edit refused and the stored set unchanged; read-only access refused as an assignee; an inactive retained member and an unchanged owner preserved on an unrelated edit; the primary-owner change stays ADMIN-only (`403` for a manager, accepted for an ADMIN); a division change re-validates retained assignments and leaves the division and owner unchanged on refusal; an unmapped area refused to a manager (`DIVISION_REQUIRED`); a retired division refused (`INVALID_TRANSITION`). |
+| Responsibility reordering stays in one division | PASS | Same file: a foreign-division neighbour with the same sort order is never mutated (row and revision byte-identical), a foreign `expectedNeighborId` is `409 EDIT_CONFLICT`, the boundary is refused, equal sort orders are separated deterministically, and a stale revision is `409`. |
+| Transfer reloads the assignment set (real interleaving) | PASS | Same file: the request is observed queued on `pg_advisory_xact_lock(hashtext('member-divisions'))`, a DEV-only owner is committed on the holder connection, and the transfer then refuses `DIVISION_MEMBERSHIP_REQUIRED` with the project division and the new assignment unchanged. A separate case transfers `PRJ-FREE` from `DIV-DEV` to a **different** division `DIV-ENG` and asserts the audit row. |
+| Transaction-time authorization | PASS | Same file: `MANAGER → MEMBER` and `MANAGER → VIEWER` while the `WORK` membership remains → `403` and no row; actor deactivation → `403`; assignment approval and project archive refused after a demotion with no audit row written; a demotion and a membership removal performed through `PATCH /api/manager/members/:id` (the real service path) make the next write `403`. |
+| Division creation and ordering | PASS | Same file: three creations receive distinct sort orders and reorder correctly; a repeated creation replays instead of inserting a duplicate (`count = 1`); equal sort orders are separated without touching the retired row; a stale revision is `409`; the active/retired boundary is `409 INVALID_TRANSITION` and the retired row keeps its order and revision. |
+| Retired divisions and retained grants | PASS | Same file: a retained grant to a retired division survives an unrelated member edit, a *new* grant there is `409`, a retained manager sees the retired division's project in the list, the detail and the overview total, a manager without the grant gets `404` on the detail, and new work there is refused. |
+| False coverage corrected | PASS | `apps/api/test/division-concurrency.test.ts`: the "read-grant revocation" case now removes a stored `READ` row (and asserts it is stamped, not deleted) instead of adding one; the "successful transfer" case now moves a project between two different divisions and asserts the new `division_id`. |
+| Overview follows the division switch | PASS | `apps/web/test/overview-division.test.tsx` (4 tests): the aggregate request carries no division, selecting `DIV-DEV`/`DIV-ENG` changes the cards and the drilldown hash, "all readable divisions" restores the aggregate, a responsibility outside the new division is cleared, only readable divisions are requested, and a late answer from an older selection does not repaint. |
+| Requests and workload follow the switch | PASS | `apps/api/test/division-writes.test.ts`: a single-division manager gets `404` for `/api/manager/reports/workload?divisionId=<foreign>`, the aggregate counts its own task, a dual-division manager narrows to the other division and counts only that division's task, the drilldown refuses a foreign division the same way, and `/api/manager/requests?divisionId=<foreign>` is `404` while the readable division answers `200` with `total: 0`. The client sends the selection in `Requests.tsx` (queue plus the one page-entry import) and in the workload base parameters. |
+| A replayed create is authorized again | PASS | Same file (service level, with a stale request identity as a real request carries): the first create is `replayed: false`, the identical replay is `replayed: true` with the same task id, and after a role demotion the same replay is refused `AUTHORIZATION_DENIED` with exactly one task row. `runIdempotent` runs the `authorize` guard before returning a stored answer and never re-executes the mutation. |
+| `npm run lint:v2` | PASS | ESLint clean for `apps`, `packages`, `tools` after removing three unused bindings. |
+| `npm run typecheck` | PASS | All V2 workspaces compile cleanly. |
+| `npm run validate` | PASS | V1: 42 manager files, 3 dashboard files, both manifests, 989 translation keys. V2: 215 files (3 new files included). Deploy: compose, proxy, tunnel, images, CI, env. |
+| V2 full test suite | PASS | `npx vitest run` against a real isolated PostgreSQL 18: 60 files, 675 passed, 1 skipped (baseline before this work: 57 files, 635 passed, 1 skipped). |
+| `npm run build` | PASS | API, worker and migration CLI bundled, including the internal `@eh/*` workspaces. |
+| `npm run smoke:prod` | PASS | Isolated PostgreSQL, migration CLI applied 0001–0012 (schema 12), `/healthz`, `/readyz` schema 12, development fixture session, authorized read and mutation, worker job completed, clean shutdown. |
+| `npm run test:v1` | FAIL (pre-existing) | 775/776. `tests/v1_6_1-counting.test.js` "no open work item is overdue yet" fails because its fixture hard-codes `Due_Date: '2026-11-10'` and today is `2026-11-11`. `tests/`, `src/`, `dashboard-app/` and `shared/` are unmodified by this release (`git status` clean for them) and the test file was last changed 2026-10-28, so this is a date-rollover failure in the V1 suite, **not** a regression of this work. It was left untouched rather than edited to make the gate green. |
+| Markdown tables and UTF-8 | PASS | A pipe-count check over `DIVISIONS.md`, `ARCHITECTURE.md`, `API.md`, `SECURITY.md`, `OPERATIONS.md`, `ACCEPTANCE.md`, `AGENTS.md` and `.github/copilot-instructions.md` reports 0 malformed tables after escaping the literal pipes in the API and acceptance rows. Japanese text (`課`, `廃止`, `再有効化`, `次長`, `シゴトモ`) is stored as UTF-8. |
+| Rendered inspection (desktop and narrow layouts, keyboard focus) | NOT_RUN | No browser was opened by this run. The client behaviour above is asserted through jsdom component tests; real layout, focus order and screenshots were not captured and are not claimed. |
+| Live Workspace / operational database verification | NOT_RUN | The operational database was deliberately left untouched (it was already migrated). No live evidence exists for this release. |
+
+`docs/PRODUCTION_READINESS.md` stays **NOT APPROVED FOR PRODUCTION**.
+
+## Division upgrade repair: sign-in, scope bypasses, transactional checks — 2026-11-10
+
+**Local implementation and verification only.** No operational database was migrated, nothing was
+deployed or committed, and no outbound service (mail, Calendar, publication) was activated.
+
+**Verified root cause of the sign-in failure.** The LAN installation's `/readyz` answers
+`503 DATABASE_MIGRATION_REQUIRED` with `schemaVersion: 11` while the running build requires 12, and
+the request hook resolved a division scope for `/api/public-config`. The public endpoint therefore
+failed for any request carrying a session cookie, and the sign-in screen reported
+`サインイン設定を読み込めませんでした` with Google instructions even on a local-mode deployment. This
+was a readiness/migration failure surfacing as an authentication failure, not a credential problem.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Root cause identified from the running installation | PASS | `curl http://127.0.0.1:8050/readyz` → `503 {"code":"DATABASE_MIGRATION_REQUIRED","schemaVersion":11,"requiredSchemaVersion":12}`; `/healthz` 200; `/api/public-config` 200 without a cookie. No operational row, secret or setting was read or changed. |
+| Sign-in configuration regression (real PostgreSQL) | PASS | `apps/api/test/sign-in.test.ts`: 7 cases — public configuration without a session, with a stale cookie, for an authenticated reader with no division grant, sign-in with a stale cookie, foreign-origin refusal, schema-behind readiness (503 while `/api/public-config` stays 200 and no cookie is issued), google-mode contract. |
+| Manager query-scope bypasses | PASS | New cases in `apps/api/test/divisions.test.ts`: a foreign `divisionId` refused as `NOT_FOUND` on projects, tasks, tree, search, overview and work reads; unknown id indistinguishable; dual-division narrowing still works; ADMIN keeps the unrestricted filter. |
+| Generic editor bypass | PASS | Same file: foreign task/project/subproject/responsibility → `404`; read-only division → `403`; member editor → `403` for a manager; detail endpoints cannot bypass. |
+| WORK → READ treated as removal; retired-division creation | PASS | `division-concurrency.test.ts`: downgrade blocked with `reason: 'DOWNGRADE'`, plain read-grant revocation not blocked; unassigned creation in a retired division refused `409`. |
+| Membership/history scoping | PASS | Member profile withholds a former assignment in another division and reports `ownership.previousHidden: 1`; ADMIN still sees it. |
+| Deterministic concurrency (barrier, not sleep) | PASS | `apps/api/test/division-concurrency.test.ts`: 10 cases; a request observed queued on `pg_advisory_xact_lock(hashtext('member-divisions'))`, the conflicting change committed, then the request refused; no invalid assignment or unauthorized write persisted. |
+| Publication fails closed | PASS | `apps/api/test/api.test.ts`: `publishNow` → `503 NOT_CONFIGURED`, no `published_snapshots` row written, employee snapshot still server-scoped; `publicationStatus.divisionIsolationSupported === false`. |
+| Domain policy | PASS | `packages/domain/test/divisions.test.ts` (9 tests): `overseeAll` yields the mapped-division list (never `undefined`), ADMIN may remediate unmapped work, `scopedDivisionIds` refuses an unauthorized/empty case. |
+| Client behaviour | PASS | `apps/web/test/division-ui.test.tsx` (7 tests) and `apps/web/test/ui.test.tsx`: division-scoped areas/owners, submit blocked without a concrete division, employee form in local mode, Google wording in google mode, readiness message with retry, no Google fallback on a failed load. |
+| Lint / typecheck / validation / build | PASS | `npm run lint`, `npm run typecheck`, `npm run validate` (V1 42 files + 989 keys, V2 212 files, deploy templates), `npm run build`. |
+| Full test suite (`REQUIRE_DATABASE=1 npm test`) | PASS | V1 776/776; V2 57 files, 635 passed, 1 skipped, against a real isolated PostgreSQL 18. |
+| Production artifact smoke | PASS | `npm run smoke:prod`: migration CLI applied 0001–0012 (schema 12), API `/healthz` + `/readyz`, session, authorized read and mutation, worker job, clean shutdown. |
+| Rendered inspection (local, isolated) | PASS | Focused Playwright run against the built bundle and two API instances (local + google) on an isolated database: 20/20 checks, 10 screenshots at 1440 and 390 px in Japanese and English, no horizontal overflow, keyboard focus reaching the division control, division-scoped options, assignee roster limited to the division and unmapped work refused. |
+| Full `npm run test:browser` script | BLOCKED (pre-existing drift) | The script now reaches the manager journey and the responsibility area checks (previously blocked by a narrow-viewport header overflow, fixed here) but still drives a removed `View in timeline` entry point and fails there. The affected screens were verified by the focused rendered run above instead; the script was not weakened. |
+| Operational database migration | NOT_RUN (not authorized) | The LAN database remains schema 11. The exact read-only inspection and the backup → migrate → verify → map procedure are recorded in `docs/v2/MIGRATION.md` §9.1 and `docs/v2/OPERATIONS.md`. |
+| Deployment / commit / push / outbound activation | NOT_RUN | Nothing was deployed, committed or pushed; mail, Calendar and publication stay inactive. |
+
+## Task assignee filtering — 2026-11-10
+
+**BLOCKED / not accepted end to end.** The filter, bounded role-scoped references, hierarchy
+context and screen control are implemented, but their real PostgreSQL integration and full release
+checks have not been verified. The earlier project-grouping entry below is historical.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Focused mock/unit tests | PASS | `vitest run packages/db/test/task-assignee-filter.test.ts apps/web/test/task-assignee-filter.test.tsx apps/web/test/workflows.test.tsx`, with `TEST_DATABASE_URL` set to an unused dummy URL to avoid migration setup: 21 tests. SQL shape, contract, list and branch parameters, navigation, stale response, invalid response and language covered; mocks do not prove PostgreSQL behavior. |
+| Web, domain and contract suites | PASS | The same no-migration setup ran 31 files and 281 tests; a subsequent focused run included the final added invalid-response test. |
+| V1 tests | PASS | `npm run test:v1`: 776 passed. |
+| Lint, typecheck, validation, build | PASS | `npm run lint`, `npm run typecheck`, `npm run validate` and `npm run build` passed locally. |
+| Mocked Chromium inspection | PASS with limits | Synthetic intercepted API responses: desktop and 390px selector placement, keyboard selection, two IDs, nested branch requests, language switch and clearing. This is not a real database, a screenshot, or live Workspace verification; real filtering and paging totals were not proven. |
+| PostgreSQL filter and role integration | BLOCKED | Added integration coverage in `apps/api/test/roles-and-work.test.ts`, but `vitest.setup.ts` and `freshDatabase()` execute `runMigrations`; the request explicitly prohibits migration execution. No external or production database was accessed. |
+| Full `npm test` and production smoke | BLOCKED | Both execute migrations on their database fixture (`vitest.setup.ts` / `scripts/production-smoke.mjs`). No database suite is represented as passing. |
+| Live deployment / Workspace | NOT_RUN | No deployment or production access. Production readiness remains NOT APPROVED. |
+
+## Project grouping (partial task-filter request) — 2026-11-10
+
+**BLOCKED / incomplete overall.** This local change covers project grouping only. The requested
+assignee filter, its role-safe reference projection, nested matching counts and its regression
+coverage are not implemented. Do not treat this record as acceptance of the full request.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Project grouping and archive menu tests | PASS | `project-grouping.test.tsx` and `project-schedule-ui.test.tsx`: 7 tests passed locally. |
+| Full tests | PASS | `REQUIRE_DATABASE=1 npm test`: V2 50 files, 553 passed, 1 skipped; V1 suite passed. The final grouping sort adjustment was covered by the focused rerun. |
+| Lint, typecheck, validation, build | PASS | `npm run lint`, `npm run typecheck`, `npm run validate` and `npm run build`; final web sort adjustment additionally passed V2 lint and web build. |
+| Production artifact smoke | PASS | `npm run smoke:prod` against isolated local PostgreSQL, not a deployment. |
+| Small local benchmark | PASS | Three in-process samples on 20 projects / 200 tasks; manager project p50 6.87 ms and p95 7.41 ms. Not a live latency measurement or a large-data gate. |
+| Desktop/narrow rendered browser inspection | NOT_RUN | No isolated UI fixture inspection was completed for this change. |
+| Complete requested action, bilingual and keyboard regression matrix | NOT_RUN | Focused component tests do not establish every requested interaction or viewport. |
+| Task assignee filtering and requested regressions | NOT_RUN | Feature not implemented. |
+| Live deployment and Workspace | NOT_RUN | No deployment or production access. Production readiness remains NOT APPROVED. |
+
 ## Member creation, shared presentation, ADMIN reopening and request dialogs — 2026-11-05
 
 **Scope.** A MEMBER can file a project, a subproject and a task from the project screens; both roles
@@ -962,7 +1068,7 @@ Schema **8**, published employee contract 1.6 and all historical migrations rema
 | All Work actions | PASS (local) | Everyday rows retain Edit and eligible Mark Done; assignment approval, schedule confirmation and ADMIN correction remain in Task Detail’s Advanced section. The approval command continues to write its audit record and assignment notification job; schedule confirmation remains its own audited command. |
 | All Work sorting | PASS (local) | `TaskListQuery` allows due date, name, project, owner, derived status, priority and update time; repository applies allowlisted SQL order before pagination, with Tokyo overdue derivation, nulls last and task-ID tie-breaker. Tree children receive the same sort query. |
 | Project sorting and grouping | PASS (local) | `ProjectListQuery` permits deadline, name, responsibility, owner, status, priority and update time; repository sorts before pagination with nulls last and project-ID tie-breaker. The API returns matching responsibility totals; the UI groups the bounded page, preserves collapse state, displays complete group totals and marks groups that continue on another page. A selected responsibility or Unassigned filter is flat. |
-| My Assigned Work sections | PASS (local) | Session-scoped endpoint accepts `section=active|completed`; separate bounded queries and counts prevent completed work from hiding active work. Active rows sort nearest deadline first; Done rows sort newest completion first, with null timestamps deterministic. Cancelled work remains excluded. |
+| My Assigned Work sections | PASS (local) | Session-scoped endpoint accepts `section=active\|completed`; separate bounded queries and counts prevent completed work from hiding active work. Active rows sort nearest deadline first; Done rows sort newest completion first, with null timestamps deterministic. Cancelled work remains excluded. |
 | Compact personal rows | PASS (local) | Personal tasks use responsive grid rows with project/subproject subtitle, compact status and actions; completed rows stay collapsed until requested. No manager browser persistence was added. |
 | `npm ci` | PASS | Lockfile dependencies restored after a transient native PostgreSQL DLL lock. |
 | `npm run typecheck` | PASS | All V2 workspaces compile cleanly after the release changes. |
@@ -1079,3 +1185,160 @@ Custom mode). The deadline/task-count report is labelled 担当・期限レポ�
 Known limitation: `MyWorkList` items carry no assignee array, so a personal row shows the project path
 ("project / subproject · priority") rather than inventing an assignment the payload does not contain.
 Adding assignees would change a response contract, which this release deliberately does not do.
+
+## Divisions (課), membership scope and same-division assignment - 2026-11-10
+
+What changed: administrator-managed divisions with a stable identifier, a member/division
+relationship (`WORK` membership / `READ` additional access), one canonical division per project and
+per area, an explicit read-only oversight role (`GENERAL_MANAGER` / 次長), server-side scope on every
+list, total, search, tree, report, request queue, employee snapshot and publication source, and
+same-division assignment validation. The design, the role matrix, the mapping procedure and the
+route inventory are in [DIVISIONS.md](./DIVISIONS.md); the contributor rules are AGENTS.md 174-184.
+
+This narrows one earlier statement: a `MANAGER` no longer manages the whole department, only its own
+divisions plus any division granted as additional read access. `ADMIN` keeps the department-wide
+administrative view.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| `npm ci` | NOT_RUN | No dependency manifest changed; the existing install was used. |
+| `npm run lint` | PASS | `eslint src dashboard-app shared scripts tests` and `eslint apps packages tools` both exit 0. |
+| `npm run typecheck` | PASS | All V2 workspaces compile cleanly (contracts, domain, db, api, web, worker, tools). |
+| `npm test` | PASS | V1 suite unchanged; V2 55 files, 600 passed / 1 skipped against a real PostgreSQL 18 instance. |
+| `npm run validate` | PASS | V1 source validation (42 manager files, 3 dashboard files, 989 keys), V2 validation (210 files) and the deployment templates. |
+| `npm run build` | PASS | API, web (Vite), worker and migration CLI artifacts built. |
+| `npm run smoke:prod` | PASS | Isolated PostgreSQL; 12 migrations applied (schema 12); health, readiness, authenticated read, project creation with an explicit division, list read-through, worker job and shutdown all pass. |
+| Migration `0012_divisions` | PASS (local) | Additive only: two tables, two nullable columns, one flag, the extended role check, two consistency triggers and indexes. Applied locally and in `smoke:prod`; the applied checksums are unchanged. No division is seeded and no default is set by the migration. |
+| Authorization (14 required cases) | PASS | `apps/api/test/divisions.test.ts`: single/dual-division manager, read-only access cannot write, oversight cannot mutate, VIEWER read-only, MEMBER keeps only member capabilities, INTERNAL does not bypass the division, empty membership fails closed, unknown role fails closed, a revoked membership refuses the next request, totals/search/tree respect the scope, member history does not leak current foreign work. |
+| Assignment (15 required cases) | PASS | Same-division owner and additional assignee accepted; cross-division owner, additional assignee and project owner refused; a mixed set commits nothing; read access and the ADMIN/oversight role alone never qualify; a dual-division member qualifies in both; a removed membership cannot receive a new assignment; an unrelated edit preserves the historical assignment; the assignment version bumps, the approval clears and `TASK_REASSIGNED` is audited; a blocked membership removal answers `DIVISION_MEMBERSHIP_BLOCKED`. |
+| Migration constraints (6 required cases) | PASS | Existing identifiers and operational rows preserved; unmapped work stays `NULL` and ADMIN-only; a mismatched area/project is refused by trigger; applied migrations unchanged; the unique active relationship and the access-kind check are enforced; a project cannot be created without a division through the API. |
+| Client behaviour | PASS (jsdom) | `apps/web/test/task-assignee-filter.test.tsx`: no raw `MEM-` identifier in a label, the identifier stays the option value, duplicate names are told apart by division. `apps/web/test/division-ui.test.tsx`: one readable division renders as a name, the switch offers only readable divisions, no readable division is stated plainly, the oversight role gets no write capability. `apps/web/test/ui.test.tsx`: the authenticated header uses `/branding/industrialName.png` with the matching alternative text. |
+| Header image | PASS (source + jsdom) | `industrialName.png` (2172x724, the same aspect ratio as the previous lockup) is rendered with `object-fit: contain`, a 64/46 px height and a 360/240 px width cap, so it is never stretched or cropped; the sign-in logo is unchanged. |
+| Desktop and narrow-screen layout | NOT_RUN | No browser capture was taken for this release; the layout assertions are jsdom only and the CSS keeps the existing breakpoints. |
+| Live Workspace / production database | NOT_RUN | No deployment, migration, initialization, trigger install or mail/Calendar activation was performed. |
+| Shared-dashboard division isolation | BLOCKED | The V1 snapshot workbook is a company-wide `INTERNAL` allowlist with no per-viewer identity; per-division isolation needs a separate release. Publication stays OFF by default, requires ADMIN plus the exact phrase, skips unmapped work and publishes no membership or private field. See [DIVISIONS.md](./DIVISIONS.md) §8. |
+| Production approval | **NOT APPROVED** | `docs/PRODUCTION_READINESS.md` is unchanged; no live evidence exists. |
+
+## Unmapped work mapping and account-based visibility - 2026-11-11
+
+What changed: an ADMIN-only read model, preview and reviewed apply for legacy work that carries no
+division (`apps/api/src/services/division-mapping.ts`, `packages/db/src/repo/division-mapping.ts`,
+`packages/contracts/src/mapping.ts`), the 未分類の割り当て panel in 課の管理, an ADMIN overview hint,
+and new-work division defaults that never turn a read-only shell selection into a creation default.
+No migration, table, column, trigger or lock was added; the write reuses the existing division lock,
+the transaction-time re-authorization, the idempotent replay and the audit helper. Division 課
+therefore remains schema 12. Design, rules and the operator procedure are in
+[DIVISIONS.md](./DIVISIONS.md) §12, [API.md](./API.md), [SECURITY.md](./SECURITY.md) §17 and
+[OPERATIONS.md](./OPERATIONS.md).
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| `npm ci` | NOT_RUN | No dependency manifest changed; the existing install was used. |
+| `npm run lint` | PASS | `eslint src dashboard-app shared scripts tests` and `eslint apps packages tools --ext .ts,.tsx` both exit 0. |
+| `npm run typecheck` | PASS | Every V2 workspace compiles cleanly (contracts, domain, db, api, web, worker, benchmark, migration). |
+| `npm run test:v2` | PASS | 62 files, 708 passed / 1 skipped, real PostgreSQL 18 (`apps/api/test/division-mapping.test.ts` 22, `apps/web/test/division-mapping-ui.test.tsx` 8, `apps/web/test/overview-division.test.tsx` 8 including 4 new banner cases). |
+| `npm run validate` | PASS | V1 source validation (42 manager files, 3 dashboard files, 989 keys), V2 validation (221 files) and the deployment templates. |
+| `npm run build` | PASS | API, web (Vite), worker and migration CLI artifacts built. |
+| `npm run smoke:prod` | PASS | Isolated PostgreSQL; 12 migrations applied (schema 12); health, readiness, authenticated read, project creation with an explicit division, list read-through, worker job and shutdown all pass. |
+| `npm run test:v1` | 775/776 (pre-existing) | The single failure is `tests/v1_6_1-counting.test.js` "a container task is never an extra unit of work in an area card", caused by its fixed fixture date being in the past for the current business date. The file and every V1 source file are unchanged by this release; the failure is recorded, not silenced. |
+| Migration | NONE NEEDED | The release adds no schema object. `0012_divisions` is unchanged and its applied checksum is untouched; no operational database was opened, migrated or mapped. |
+| Preview correctness | PASS | `apps/api/test/division-mapping.test.ts`: counts and the archived split, one proposal per record with its rule, linked projects of an area, the retained historical assignment, and the pure rule table (explicit wins, area division wins over membership, contradictions are `CONFLICT`, no evidence is `UNRESOLVED`). |
+| Authorization | PASS | Non-ADMIN preview refused, non-ADMIN apply refused, and a role demotion that commits while the apply waits for the `member-divisions` lock still refuses (`403 AUTHORIZATION_DENIED`, nothing written). |
+| Automatic visibility | PASS | The end-to-end case proves the mapping rule: unmapped work is invisible to a DEV-scoped manager **and** to an all-division manager, visible to ADMIN, and visible to the DEV manager immediately after the apply with no new grant and no new session; narrowing the same manager to ENG still excludes it. |
+| Atomicity and review binding | PASS | A stale revision, an already mapped record, an ineligible active assignee, a responsibility whose projects disagree, a wrong phrase and a duplicate entity each refuse the whole batch with no row written; the batch limit of 100 is enforced; a replayed idempotency key applies once and returns the stored answer after the ADMIN re-check. |
+| Backup gate | PASS | Without a `backup_log` row (`result = 'OK'`, checksum, younger than 24 h) the apply answers `409 MAPPING_BACKUP_REQUIRED` and writes nothing; the panel shows the same status instead of enabling the button. |
+| Audit | PASS | `PROJECT_DIVISION_MAPPED`, `RESPONSIBILITY_DIVISION_MAPPED` and `DIVISION_MAPPING_APPLIED` rows are asserted, and the mapped rows keep their identifiers, owners and assignments. |
+| Client behaviour (jsdom) | PASS | The panel is read-only until the exact phrase, sends the reviewed IDs and revisions, keeps the selection across a language switch, distinguishes a successful empty answer from a failed read, and shows the ADMIN overview hint for a positive count only. |
+| Desktop and narrow-screen browser check | NOT_RUN | No browser was opened for this release; the jsdom rendering is not a browser verification. |
+| Live deployment / Workspace / LAN | NOT_RUN | Nothing was deployed, migrated, initialized or restarted, no trigger was installed, no mail or Calendar was activated and no operational record was mapped. |
+| Production approval | **NOT APPROVED** | `docs/PRODUCTION_READINESS.md` is unchanged; no live evidence exists. |
+
+Known limitation carried over: `npm run test:v1` reports 775/776 with
+`tests/v1_6_1-counting.test.js` "a container task is never an extra unit of work in an area card"
+failing on its fixed fixture date (the fixture's due date is in the past for the current business
+date). The file is unchanged by this release, no V1 source was touched, and the failure is recorded
+rather than silenced.
+
+## V2 interface stabilization: capability, scope, requests and async state - 2026-11-11
+
+An incremental stabilization release of the V2 web and API applications. No migration, table,
+column, Script Property, trigger or lock was added; schema 12 and employee contract 1.6 are
+unchanged. Nothing was deployed, initialized, migrated or activated, and no operational record was
+read or written outside the disposable test database.
+
+What changed:
+
+- **Record-level write availability.** `TaskSummary`, `ProjectSummary`, `TaskDetail` and
+  `ProjectDetail` carry an allowlisted `canWrite`, resolved on the server through
+  `canWriteDivision` before paging. The list screens offer a write action only when the role and the
+  record scope agree, and show a localized "閲覧のみ" marker otherwise. Creation requires a concrete
+  writable destination; an unloaded division scope is treated as unknown, not empty.
+- **One scope-transition policy.** `state/scope.ts` restarts a list at page 1 and clears selections,
+  expansion, project focus and drilldowns that belonged to the previous division, while keeping the
+  sort order and the search text. The project-focused timeline clears an incompatible selection
+  instead of showing division-A work under a division-B label.
+- **Complete request review context.** The review summary renders the task and project context, the
+  type, the current and requested deadline (or the completion note), the requester's reason and
+  explanation, the request state, the specific stale reason, and the decision details of a decided
+  request - as text, with line breaks preserved.
+- **One request-synchronisation path.** Page entry and the manual control share one implementation:
+  the selected scope is sent, a concurrent submission is refused synchronously, the busy state is
+  shown, and success, partial import, not configured and failure are distinguished. A failure keeps
+  the queue visible, and only `imported > 0` re-reads anything.
+- **Submission tracking independent of the dialog.** `state/submissions.ts` owns the client request
+  id, the state machine and the outcome. Closing the form no longer silences a delayed
+  acknowledgement, an unobservable answer stays `UNKNOWN` and is never retried, and a definite
+  refusal stays distinguishable. The shell reports an outcome that the form could not.
+- **Mutation completion independent of the editor.** `state/mutation.ts` applies a write's cache
+  effect inside the session, so a dialog closing mid-flight cannot suppress the refresh, and a
+  result from an ended session has no effect.
+- **Debounced, IME-aware search** shared by All Work, Projects and My Work.
+- **Honest freshness and read states.** The query cache exposes `loading`, `refreshing`,
+  `updatedAt` and `stale`; a mounted key keeps its payload while it refetches, a background failure
+  is shown as older data plus a warning, and "最終更新 HH:mm (Tokyo)" never claims live data.
+- **Drilldowns keep the question.** The overview's upcoming card links to the task list with the
+  same scope *and* the same deadline window, through new validated `dueFrom`/`dueTo` list fields
+  applied before paging and totals. A pending-request link names the request and opens it.
+- **Keyboard and layout corrections.** The drawer takes focus, contains Tab, closes on Escape,
+  returns focus and drops its state on resize; menus implement ArrowUp/ArrowDown/Home/End/Escape;
+  sortable headers carry `aria-sort`; the task table has one canonical width rule and moves
+  secondary row actions into the row menu.
+- **One route table** (`APP_ROUTES`) shared by the renderer, the role guard and the Back behaviour;
+  route memory is cleared on sign-out and a late write from an ended session is ignored.
+- **Tokyo-time display formatting** for instants, with date-only values never shifted.
+
+Behaviour that was already correct and is now covered by a test rather than changed: the single
+automatic import per page entry, the revision-checked decision, the idempotency identity of a
+request, the cache's superseded-read ownership, and the "no silent zero" rule for a failed total.
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| `npm ci` | NOT_RUN | No dependency manifest changed; the existing install was used. |
+| `npm run lint` | PASS | `lint:v1` and `lint:v2` both exit 0 (8 introduced errors were fixed; none suppressed). |
+| `npm run typecheck` | PASS | Every workspace compiles (contracts, domain, db, i18n, api, web, worker, benchmark, migration). |
+| `npm run test:v2` | PASS | 68 files, 753 passed / 1 skipped, real PostgreSQL 18. New: `format.test.ts` (8), `search.test.tsx` (3), `query-state.test.tsx` (10), `capability-and-scope.test.tsx` (6), `submissions.test.tsx` (5), `request-sync.test.tsx` (8, including conflict recovery), and 4 `canWrite` cases in `apps/api/test/divisions.test.ts`. |
+| `npm run test:v1` | 775/776 (pre-existing) | The single failure is `tests/v1_6_1-counting.test.js` "a container task is never an extra unit of work in an area card": its fixed fixture due date (2026-11-10) is in the past for the 2026-11-11 business date. Identical to the baseline before this release; no V1 file was touched and the failure is recorded, not silenced. |
+| `npm run validate` | PASS | V1 source (42 manager files, 3 dashboard files, 989 keys), V2 (235 files) and the deployment templates. |
+| `npm run build` | PASS | API, web (Vite), worker and migration CLI artifacts built. |
+| `npm run smoke:prod` | NOT_RUN | No production artifact was started for this release; the build gate above covers compilation only. |
+| `WORK` vs `READ` action availability | PASS | `apps/web/test/capability-and-scope.test.tsx` (task and project, ADMIN unmapped) and `apps/api/test/divisions.test.ts` (a manager with WORK in one division and READ in another sees `canWrite` per record; the write is still refused). |
+| Division change with page/selection | PASS | Same file: page 2 plus a project selection, then a division change - the next request has neither, and the superseded scope answer never paints. |
+| Review context | PASS | `apps/web/test/request-sync.test.tsx`: reason, explanation, stale reason and decision details, with a Tokyo timestamp (2026-10-01T09:00Z shown as 2026-10-01 18:00). |
+| Manual sync busy/partial/not-configured/failure | PASS | Same file: 5 cases including "partial import is never reported as success" and "the queue stays visible on failure". |
+| Submit, close dialog, delayed success | PASS | `apps/web/test/submissions.test.tsx`: the notice appears after the form closed and exactly one POST was sent. |
+| Submit, navigate, unknown outcome | PASS | Same file: `UNKNOWN` is kept, a repeat with the same identity is not re-sent, and a refusal is `REFUSED`. |
+| Save, close editor, cache refresh | PASS (behaviour) | `apps/web/test/submissions.test.tsx`: `commitMutation` applies the effect with no observer and performs none after the session ended; `TaskForm` now routes its save through it, so the invalidation no longer depends on the form being mounted. A form-level integration case was NOT_RUN. |
+| Sign-out during a pending write | PASS | `apps/web/test/submissions.test.tsx` (session epoch) and `apps/web/test/query-state.test.tsx` (cache cleared, private payload not restored). |
+| Debounced Japanese IME search | PASS | `apps/web/test/search.test.tsx`: no intermediate query while composing, one applied query after `compositionEnd`. |
+| Initial error vs background error | PASS | `apps/web/test/query-state.test.tsx`: Retry on an initial failure, data plus warning on a background failure, no permanent loading line. |
+| Overview drilldown filters and totals | PARTIAL | The window and scope are carried into the list and applied by the server (`dueFrom`/`dueTo` before paging and totals); the browser-level comparison of a card figure against the drilldown total was NOT_RUN. |
+| Keyboard drawer/menu | PASS (menu) / NOT_RUN (drawer) | Menu arrows/Home/End/Escape/wrap and focus return are tested; the drawer's focus containment and inert background are implemented but only covered by the existing jsdom shell tests. |
+| Timestamp timezone boundary | PASS | `apps/web/test/format.test.ts`: 2026-11-10T16:30Z renders as 2026-11-11 01:30, and a date-only value never shifts. |
+| Long content / zoom / narrow layout | NOT_RUN | No browser was opened. The width rules and wrapping are structural changes, not measured ones. |
+| Browser smoke (1366px, 125-150% zoom, JA/EN) | NOT_RUN | `scripts/browser-smoke.mjs` was inspected but not run: it targets an isolated stack, and no browser verification is claimed. |
+| Live Workspace / deployment | NOT_RUN | Nothing was deployed, migrated, initialized, activated or read from an operational system. |
+| Production approval | **NOT APPROVED** | `docs/PRODUCTION_READINESS.md` is unchanged; no live evidence exists. |
+
+Conventions introduced here are recorded in [UI_CONVENTIONS.md](./UI_CONVENTIONS.md); the API
+surface in [API.md](./API.md), the client-state model in [ARCHITECTURE.md](./ARCHITECTURE.md) and
+the flag's security properties in [SECURITY.md](./SECURITY.md) §18.

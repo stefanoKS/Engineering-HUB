@@ -5,6 +5,7 @@ import type { Queryable } from '../pool';
 import { newId } from '../ids';
 import { toTask, type TaskRow } from '../map';
 import { updateWithRevision } from './patch';
+import { divisionScopeSql, memberDivisionNames } from './divisions';
 
 type Db = Queryable;
 
@@ -131,6 +132,7 @@ export type TaskFilters = {
   displayStatus?: DisplayTaskStatus;
   today?: string;
   ownerMemberId?: string;
+  assigneeMemberId?: string;
   query?: string;
   containerOnly?: boolean;
   overdueOnly?: boolean;
@@ -138,8 +140,15 @@ export type TaskFilters = {
   includeInactive?: boolean;
   /** Completed work is an explicit history filter, never part of the default active list. */
   includeCompleted?: boolean;
+  includeCancelled?: boolean;
   /** Visibility policy: only `INTERNAL` projects are employee-visible. */
   internalOnly?: boolean;
+  /**
+   * The caller's authorized divisions, resolved before paging. `undefined` is unrestricted (the
+   * ADMIN remediation view), an empty list matches nothing, and a project with a blank division is
+   * never matched by a restricted list.
+   */
+  divisionIds?: readonly string[];
   sort?: 'dueDate' | 'priority' | 'name' | 'project' | 'owner' | 'status' | 'updated';
   direction?: 'asc' | 'desc';
   dueFrom?: string;
@@ -274,6 +283,14 @@ function taskWhere(filters: TaskFilters): { where: string; params: unknown[] } {
     params.push(filters.ownerMemberId);
     where.push(`t.owner_member_id = $${params.length}`);
   }
+  if (filters.assigneeMemberId) {
+    params.push(filters.assigneeMemberId);
+    where.push(`(t.owner_member_id = $${params.length} OR EXISTS (
+      SELECT 1 FROM task_assignees assignment
+       WHERE assignment.task_id = t.task_id AND assignment.member_id = $${params.length}
+         AND assignment.removed_at IS NULL
+    ))`);
+  }
   if (filters.query) {
     params.push(`%${filters.query.toLowerCase()}%`);
     where.push(`lower(t.task_name) LIKE $${params.length}`);
@@ -287,7 +304,7 @@ function taskWhere(filters: TaskFilters): { where: string; params: unknown[] } {
     );
   }
   if (filters.includeInactive !== true) {
-    if (!cancelledRequested) where.push("t.status <> 'Cancelled'");
+    if (!cancelledRequested && !filters.includeCancelled) where.push("t.status <> 'Cancelled'");
     where.push("p.status <> 'Archived' AND p.archived_at IS NULL");
     where.push(activeSubprojectChain);
   }
@@ -302,6 +319,7 @@ function taskWhere(filters: TaskFilters): { where: string; params: unknown[] } {
   if (filters.internalOnly === true) {
     where.push("p.dashboard_visibility = 'INTERNAL'");
   }
+  divisionScopeSql('p.division_id', filters.divisionIds, params, where);
   return { where: `WHERE ${where.join(' AND ')}`, params };
 }
 
@@ -332,13 +350,14 @@ export async function listTaskTreeSummaries(
 ): Promise<{ items: TaskSummary[]; total: number; matchedTotal: number }> {
   const { where, params } = taskWhere(filters);
   const cte = `WITH RECURSIVE matching AS (
-    SELECT t.task_id, t.parent_task_id FROM tasks t JOIN projects p ON p.project_id=t.project_id ${where}
+    SELECT t.task_id, t.parent_task_id, t.project_id, t.subproject_id FROM tasks t JOIN projects p ON p.project_id=t.project_id ${where}
   ), ancestors AS (
-    SELECT task_id, parent_task_id, 1 AS levels FROM matching
+    SELECT task_id, parent_task_id, project_id, subproject_id, 1 AS levels FROM matching
     UNION ALL
-    SELECT p.task_id, p.parent_task_id, a.levels+1 FROM ancestors a
+    SELECT p.task_id, p.parent_task_id, p.project_id, p.subproject_id, a.levels+1 FROM ancestors a
       JOIN tasks p ON p.task_id=a.parent_task_id
-      WHERE p.deleted_at IS NULL AND a.levels < ${MAX_TASK_DEPTH}
+      WHERE p.deleted_at IS NULL AND p.project_id = a.project_id
+        AND p.subproject_id IS NOT DISTINCT FROM a.subproject_id AND a.levels < ${MAX_TASK_DEPTH}
   )`;
   const branch = `WHERE t.deleted_at IS NULL AND t.parent_task_id IS NOT DISTINCT FROM $${params.length+1}::text
     AND EXISTS (SELECT 1 FROM ancestors a WHERE a.task_id=t.task_id)`;
@@ -348,21 +367,96 @@ export async function listTaskTreeSummaries(
   );
   const order = SUMMARY_SORTS[filters.sort ?? 'dueDate'];
   const direction = filters.direction === 'desc' ? 'DESC' : 'ASC';
-  const rows = await db.many<TaskSummaryRow>(
-    `${cte} ${SUMMARY_SELECT} ${branch} ORDER BY ${order} ${direction} NULLS LAST, t.task_id
+  const rows = await db.many<TaskSummaryRow & { context_only: boolean }>(
+    `${cte} ${SUMMARY_SELECT.replace('SELECT t.task_id', 'SELECT NOT EXISTS (SELECT 1 FROM matching m WHERE m.task_id = t.task_id) AS context_only, t.task_id')}
+      ${branch} ORDER BY ${order} ${direction} NULLS LAST, t.task_id
       LIMIT $${values.length+1} OFFSET $${values.length+2}`, [...values,pageSize,(page-1)*pageSize]
   );
-  return {items:rows.map(row=>toTaskSummary(row, filters.today)),total:Number(total?.count??0),matchedTotal:Number(total?.matched??0)};
+  return {items:rows.map(row=>({ ...toTaskSummary(row, filters.today), contextOnly: row.context_only })),total:Number(total?.count??0),matchedTotal:Number(total?.matched??0)};
+}
+
+/** Only members assigned within the caller's readable task scope, in bounded pages. */
+export async function listTaskAssigneeOptions(
+  db: Db,
+  internalOnly: boolean,
+  query: string,
+  page: number,
+  pageSize: number,
+  memberId?: string,
+  options: { divisionIds?: readonly string[]; includeEmployeeId?: boolean } = {}
+): Promise<{
+  items: { memberId: string; name: string; active: boolean; divisionNames: string[]; employeeId?: string }[];
+  total: number;
+}> {
+  const { where, params } = taskWhere({
+    internalOnly,
+    includeCompleted: true,
+    includeCancelled: true,
+    includeInactive: !internalOnly,
+    divisionIds: options.divisionIds
+  });
+  params.push(`%${query.toLowerCase()}%`);
+  const searchParam = params.length;
+  if (memberId) params.push(memberId);
+  const cte = `WITH eligible AS (
+    SELECT t.task_id, t.owner_member_id FROM tasks t JOIN projects p ON p.project_id = t.project_id ${where}
+  ), assigned AS (
+    SELECT owner_member_id AS member_id FROM eligible WHERE owner_member_id IS NOT NULL
+    UNION
+    SELECT a.member_id FROM task_assignees a JOIN eligible e ON e.task_id = a.task_id WHERE a.removed_at IS NULL
+  ), options AS (
+    SELECT m.member_id, m.name, m.active,
+           ${options.includeEmployeeId ? '(SELECT a.employee_id FROM local_accounts a WHERE a.member_id = m.member_id)' : 'NULL::text'} AS employee_id
+      FROM assigned a JOIN members m ON m.member_id = a.member_id
+     WHERE (lower(m.name) LIKE $${searchParam} OR lower(m.member_id) LIKE $${searchParam})
+       ${memberId ? `AND m.member_id = $${params.length}` : ''}
+  )`;
+  const total = await db.one<{ count: string }>(`${cte} SELECT count(*)::text AS count FROM options`, params);
+  const rows = await db.many<{
+    member_id: string;
+    name: string;
+    active: boolean;
+    employee_id: string | null;
+  }>(
+    `${cte} SELECT member_id, name, active, employee_id FROM options ORDER BY lower(name), member_id
+     LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, pageSize, (page - 1) * pageSize]
+  );
+  // Division display names disambiguate two people who share a display name. One bounded read.
+  const names = await memberDivisionNames(
+    db,
+    rows.map((row) => row.member_id)
+  );
+  return {
+    items: rows.map((row) => ({
+      memberId: row.member_id,
+      name: row.name,
+      active: row.active,
+      divisionNames: names.get(row.member_id) ?? [],
+      ...(row.employee_id ? { employeeId: row.employee_id } : {})
+    })),
+    total: Number(total?.count ?? 0)
+  };
 }
 
 /** Bounded root-task search, used where a full task table must never reach the browser. */
-export async function searchTasks(db: Db, query: string, limit = 20): Promise<TaskSummary[]> {
+export async function searchTasks(
+  db: Db,
+  query: string,
+  limit = 20,
+  divisionIds?: readonly string[]
+): Promise<TaskSummary[]> {
+  const where: string[] = ['t.deleted_at IS NULL'];
+  const params: unknown[] = [`%${query.toLowerCase()}%`];
+  where.push('lower(t.task_name) LIKE $1');
+  divisionScopeSql('p.division_id', divisionIds, params, where);
+  params.push(limit);
   const rows = await db.many<TaskSummaryRow>(
     `${SUMMARY_SELECT}
-      WHERE t.deleted_at IS NULL AND lower(t.task_name) LIKE $1
+      WHERE ${where.join(' AND ')}
       ORDER BY lower(t.task_name) ASC, t.task_id ASC
-      LIMIT $2`,
-    [`%${query.toLowerCase()}%`, limit]
+      LIMIT $${params.length}`,
+    params
   );
   return rows.map((row) => toTaskSummary(row));
 }
@@ -401,7 +495,11 @@ export async function listDueWindowSummaries(
   return rows.map((row) => toTaskSummary(row));
 }
 
-export async function listAllTasksForScope(db: Db, limit = 20000): Promise<
+export async function listAllTasksForScope(
+  db: Db,
+  limit = 20000,
+  divisionIds?: readonly string[]
+): Promise<
   {
     taskId: string;
     projectId: string;
@@ -415,6 +513,12 @@ export async function listAllTasksForScope(db: Db, limit = 20000): Promise<
     progressPercent: number | null;
   }[]
 > {
+  // The scope aggregate must never see a division the caller may not read, so the project join
+  // carries the same resolved filter the lists use.
+  const where: string[] = ['t.deleted_at IS NULL'];
+  const params: unknown[] = [];
+  divisionScopeSql('p.division_id', divisionIds, params, where);
+  params.push(limit);
   const rows = await db.many<{
     task_id: string;
     project_id: string;
@@ -427,10 +531,11 @@ export async function listAllTasksForScope(db: Db, limit = 20000): Promise<
     actual_hours: number | null;
     progress_percent: number | null;
   }>(
-    `SELECT task_id, project_id, subproject_id, parent_task_id, status, due_date, planned_start,
-            estimated_hours, actual_hours, progress_percent
-       FROM tasks WHERE deleted_at IS NULL ORDER BY task_id LIMIT $1`,
-    [limit]
+    `SELECT t.task_id, t.project_id, t.subproject_id, t.parent_task_id, t.status, t.due_date,
+            t.planned_start, t.estimated_hours, t.actual_hours, t.progress_percent
+       FROM tasks t JOIN projects p ON p.project_id = t.project_id
+      WHERE ${where.join(' AND ')} ORDER BY t.task_id LIMIT $${params.length}`,
+    params
   );
   return rows.map((row) => ({
     taskId: row.task_id,
@@ -473,31 +578,66 @@ export async function listChildSummaries(db: Db, taskId: string): Promise<TaskSu
   return rows.map((row) => toTaskSummary(row));
 }
 
-/** Current work (owner or active additional assignee) and former assignments, attributed by ID. */
+/**
+ * Current work (owner or active additional assignee) and former assignments, attributed by ID.
+ *
+ * Both lists are authorized by the caller's division scope. Former assignments stay visible as
+ * history, but a relationship in a division the caller may not read is withheld and only counted,
+ * so a member profile never becomes a way to read another division's current task detail.
+ */
 export async function listTaskSummariesForMember(
   db: Db,
-  memberId: string
-): Promise<{ current: TaskSummary[]; previous: TaskSummary[] }> {
+  memberId: string,
+  options: { currentDivisionIds?: readonly string[] } = {}
+): Promise<{ current: TaskSummary[]; previous: TaskSummary[]; previousHidden: number }> {
+  const where: string[] = [
+    't.deleted_at IS NULL',
+    `(t.owner_member_id = $1 OR EXISTS (
+          SELECT 1 FROM task_assignees ta
+           WHERE ta.task_id = t.task_id AND ta.member_id = $1 AND ta.removed_at IS NULL))`
+  ];
+  const params: unknown[] = [memberId];
+  divisionScopeSql('p.division_id', options.currentDivisionIds, params, where);
   const currentRows = await db.many<TaskSummaryRow>(
     `${SUMMARY_SELECT}
-      WHERE t.deleted_at IS NULL
-        AND (t.owner_member_id = $1 OR EXISTS (
-          SELECT 1 FROM task_assignees ta
-           WHERE ta.task_id = t.task_id AND ta.member_id = $1 AND ta.removed_at IS NULL))
+      WHERE ${where.join(' AND ')}
       ORDER BY t.due_date NULLS LAST, t.task_id
       LIMIT 200`,
-    [memberId]
+    params
   );
+  const previousWhere: string[] = [
+    't.deleted_at IS NULL',
+    `EXISTS (
+        SELECT 1 FROM task_assignees ta
+         WHERE ta.task_id = t.task_id AND ta.member_id = $1 AND ta.removed_at IS NOT NULL)`
+  ];
+  const previousParams: unknown[] = [memberId];
+  divisionScopeSql('p.division_id', options.currentDivisionIds, previousParams, previousWhere);
   const previousRows = await db.many<TaskSummaryRow>(
     `${SUMMARY_SELECT}
-      WHERE t.deleted_at IS NULL AND EXISTS (
-        SELECT 1 FROM task_assignees ta
-         WHERE ta.task_id = t.task_id AND ta.member_id = $1 AND ta.removed_at IS NOT NULL)
+      WHERE ${previousWhere.join(' AND ')}
       ORDER BY t.due_date NULLS LAST, t.task_id
       LIMIT 200`,
-    [memberId]
+    previousParams
   );
-  return { current: currentRows.map((row) => toTaskSummary(row)), previous: previousRows.map((row) => toTaskSummary(row)) };
+  let previousHidden = 0;
+  if (options.currentDivisionIds !== undefined) {
+    const scope = [...new Set(options.currentDivisionIds)];
+    const hidden = await db.one<{ count: string }>(
+      `SELECT count(*)::text AS count FROM tasks t JOIN projects p ON p.project_id = t.project_id
+        WHERE t.deleted_at IS NULL
+          AND EXISTS (SELECT 1 FROM task_assignees ta
+                       WHERE ta.task_id = t.task_id AND ta.member_id = $1 AND ta.removed_at IS NOT NULL)
+          AND ${scope.length ? '(p.division_id IS NULL OR NOT (p.division_id = ANY($2::text[])))' : 'true'}`,
+      scope.length ? [memberId, scope] : [memberId]
+    );
+    previousHidden = Number(hidden?.count ?? 0);
+  }
+  return {
+    current: currentRows.map((row) => toTaskSummary(row)),
+    previous: previousRows.map((row) => toTaskSummary(row)),
+    previousHidden
+  };
 }
 
 export async function getTask(db: Db, taskId: string): Promise<Task | null> {
@@ -513,10 +653,17 @@ export async function getTaskIncludingDeleted(db: Db, taskId: string): Promise<T
 
 export async function compactTaskIndex(
   db: Db,
-  limit = 2000
+  limit = 2000,
+  divisionIds?: readonly string[]
 ): Promise<{ entries: { taskId: string; taskName: string; projectId: string; status: string; parentTaskId: string | null; dueDate: string | null; revision: number }[]; total: number }> {
+  const where: string[] = ['t.deleted_at IS NULL'];
+  const params: unknown[] = [];
+  divisionScopeSql('p.division_id', divisionIds, params, where);
+  params.push(limit);
   const total = await db.one<{ count: string }>(
-    'SELECT count(*)::text AS count FROM tasks WHERE deleted_at IS NULL'
+    `SELECT count(*)::text AS count FROM tasks t JOIN projects p ON p.project_id = t.project_id
+      WHERE ${where.join(' AND ')}`,
+    params.slice(0, -1)
   );
   const rows = await db.many<{
     task_id: string;
@@ -527,10 +674,11 @@ export async function compactTaskIndex(
     due_date: string | null;
     revision: number;
   }>(
-    `SELECT task_id, task_name, project_id, status, parent_task_id, due_date, revision
-       FROM tasks WHERE deleted_at IS NULL
-      ORDER BY project_id, lower(task_name) LIMIT $1`,
-    [limit]
+    `SELECT t.task_id, t.task_name, t.project_id, t.status, t.parent_task_id, t.due_date, t.revision
+       FROM tasks t JOIN projects p ON p.project_id = t.project_id
+      WHERE ${where.join(' AND ')}
+      ORDER BY t.project_id, lower(t.task_name) LIMIT $${params.length}`,
+    params
   );
   return {
     entries: rows.map((row) => ({

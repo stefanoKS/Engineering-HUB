@@ -668,12 +668,14 @@ export function ProjectDetailScreen({
   );
   const capabilities = capabilitiesOf(actor);
   // Creation and management are separate capabilities: a MEMBER files new work from this page but
-  // never edits, archives, deletes or changes the lifecycle of an existing record.
-  const canManage = !readOnly && capabilities.canEdit;
-  const canDelete = !readOnly && capabilities.canDelete;
-  // Managers create through their own forms; a MEMBER creates through the member endpoints.
-  const canCreateTask = capabilities.canCreateTask || canManage;
-  const canCreateSubproject = capabilities.canCreateSubproject || canManage;
+  // never edits, archives, deletes or changes the lifecycle of an existing record. Management is
+  // additionally resolved per record: this project's division must allow a write for this account.
+  const recordWritable = (detail.data as { canWrite?: boolean } | undefined)?.canWrite !== false;
+  const canManage = !readOnly && capabilities.canEdit && recordWritable;
+  const canDelete = !readOnly && capabilities.canDelete && recordWritable;
+  // A destination is required for creation: the account must be able to write in this division.
+  const canCreateTask = (capabilities.canCreateTask || canManage) && recordWritable;
+  const canCreateSubproject = (capabilities.canCreateSubproject || canManage) && recordWritable;
   const [memberTaskSubproject, setMemberTaskSubproject] = useState<string | null | undefined>(undefined);
   const [memberSubproject, setMemberSubproject] = useState(false);
   const [editProject, setEditProject] = useState(false);

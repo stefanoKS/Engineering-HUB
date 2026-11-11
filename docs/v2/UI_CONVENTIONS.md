@@ -1,0 +1,120 @@
+# V2 interface conventions
+
+This document records the conventions the **V2** application (`apps/web`) follows today. It is
+deliberately separate from the historical V1 guidance in the repository root
+(`docs/UI_LOCALIZATION.md`, `ARCHITECTURE.md`, the V1 gate files): V1 is an Apps Script application
+that is still deployed and must not be modernised from these notes, and V2 is the PostgreSQL
+application under `apps/` and `packages/`.
+
+If a rule here and a V1 rule disagree, the V1 rule still governs V1 code and this rule governs V2
+code. Nothing here renames a stored value, an identifier or an enum.
+
+## 1. Branding and language
+
+- The product name is `シゴトモ` / `SHIGOTOMO` (`packages/i18n`, `brandName`). It is a brand, never a
+  division: a division stored as `設計・開発課` is rendered exactly as stored.
+- Japanese is the default. The `日本語 | English` switch stays available on every screen and keeps
+  the route, the filters, the selected record and an open editor's input.
+- Only display labels are translated. Stored text, identifiers and enum values never are.
+- The language preference is the only browser-persisted preference (`localStorage`), together with
+  the non-sensitive request receipt metadata the rules allow.
+
+## 2. Query state
+
+Every server read is presented through one of four mutually exclusive states, never a blend:
+
+| State | Presentation |
+| --- | --- |
+| First read pending | one `role="status"` line, no skeleton of imagined data |
+| First read failed | one alert with an explicit Retry; **never** a loading line |
+| Payload shown, refresh pending | the payload plus "更新中…" |
+| Payload shown, refresh failed | the payload plus a warning that the numbers are older |
+
+A cached answer is described as "最終更新 HH:mm (Tokyo)", never as live data. Zero is never
+substituted for a missing or failed total.
+
+Empty states are distinct:
+
+- **no readable scope** - the account may read no division, explained once;
+- **no matches** - records exist for the scope but the active filter matches none, with Clear
+  filters;
+- **no records** - the scope is readable, unfiltered and genuinely empty.
+
+## 3. Action availability
+
+- Capability flags (`state/capabilities.ts`) answer "may this role do this at all".
+- The record's server-computed `canWrite` answers "may it do it here". A write action is offered only
+  when both agree (`canEditRecord`).
+- Creation requires a concrete destination (`hasWritableDestination`), and an *unloaded* division
+  scope is treated as unknown rather than empty.
+- A record the caller may only read shows a "閲覧のみ" marker instead of a disabled-looking editor.
+- These are presentation aids. The server re-checks every command; hiding a control is a usability
+  decision and a forged flag grants nothing.
+
+## 4. Scope transitions
+
+One policy, `state/scope.ts`:
+
+- a division change restarts the list at page 1;
+- selections, expanded branches, project focus and drilldowns that belonged to the previous scope are
+  cleared (their compatibility is not known);
+- independent presentation state - sort order, search text, period, granularity - survives;
+- a slow or failed reference read never clears a selection;
+- every scope value is part of the request **and** the cache key, so a late answer from a previous
+  scope cannot paint.
+
+## 5. Search
+
+`components/search-input.tsx` is the one server-backed search box: visible text separate from the
+applied query, 275 ms debounce, Japanese IME composition respected, a polite "検索しています…" status,
+and the applied query in the cache key. Whole datasets are never loaded to filter locally.
+
+## 6. Dialogs and mutation lifetime
+
+- A mutation's **cache effect** belongs to the session (`state/mutation.ts`); a dialog closing, a
+  route change or an unmount never suppresses it.
+- A mutation's **local state** (save badge, inline error, close action) belongs to the dialog and
+  disappears with it.
+- A request submission is tracked at session level (`state/submissions.ts`); the shell reports the
+  outcome even when the form is gone, and an unobservable outcome stays unknown and is never retried.
+- Only a genuine authorization denial revokes the client. A timeout, a conflict, a validation
+  failure or an ambiguous write keeps the existing safe error handling.
+
+## 7. Keyboard and focus
+
+- Modals use the native `<dialog>` (focus trap, Escape, inert background).
+- The mobile drawer moves focus into itself, contains Tab, closes on Escape, returns focus to its
+  trigger and drops its state when the layout becomes the desktop sidebar.
+- Menus implement `role="menu"` semantics: ArrowUp/ArrowDown wrap across enabled items, Home/End
+  jump to the ends, Escape closes and returns focus, and Tab leaves.
+- Sortable headers carry `aria-sort` on the header cell.
+- Long stored text renders through React as text (`DescriptionText` preserves line breaks). No
+  `innerHTML`, `outerHTML`, `insertAdjacentHTML` or `document.write`.
+
+## 8. Layout and density
+
+- One canonical width rule per table. In the task table the name takes the remaining space, and the
+  project, owner, status, deadline and action columns keep fixed widths that shrink at 1100px and
+  become automatic below 900px.
+- Secondary row actions live in the row's その他 menu; only the primary action stays a button, so the
+  name, deadline and status keep their width.
+- Text wraps (`overflow-wrap: anywhere`) rather than being clipped. Overflow is never hidden to
+  conceal content.
+- No density preference exists. It would need browser evidence, and it would have to stay in memory
+  and keep accessible target sizes.
+
+## 9. Session-owned browser state
+
+- Nothing but the language and non-sensitive request receipts is persisted.
+- Sign-out and a lost session clear the query cache, the division selection, the submission tracker,
+  the route memory and every open form.
+- Route memory (`state/navigation.tsx`) is cleared on sign-out, and a write that belongs to an ended
+  session is ignored.
+
+## 10. Localization of time
+
+- An **instant** (`submittedAt`, `decidedAt`, `updatedAt`) is displayed as an Asia/Tokyo wall-clock
+  value through `state/format.ts`.
+- A **date only** value (`Due_Date`, `plannedStart`) is displayed exactly as stored, so a deadline
+  never shifts by a day because of the browser's timezone.
+- Raw ISO slicing (`string.slice(0, 16)`) is not used for display.

@@ -10,7 +10,7 @@
  */
 import type { ReactNode } from 'react';
 import type { Priority, ProjectScheduleDisplay } from '@eh/contracts';
-import { projectColor } from '@eh/domain';
+import { projectColor, projectTint } from '@eh/domain';
 import { useI18n } from '../i18n';
 import { ProgressBar } from './ui';
 import { DeadlineCell, deadlineStateOf } from './deadline';
@@ -63,7 +63,7 @@ const UNASSIGNED_GROUP = '__unassigned__';
 export function ProjectTable(props: ProjectTableProps): JSX.Element {
   const { t } = useI18n();
   const { items, showActions } = props;
-  const columns = showActions ? 6 : 5;
+  const columns = (showActions ? 6 : 5) - (props.grouped ? 1 : 0);
   const groups = props.grouped
     ? Array.from(
         items.reduce((map, project) => {
@@ -78,9 +78,8 @@ export function ProjectTable(props: ProjectTableProps): JSX.Element {
         }, new Map<string, { name: string; items: ProjectRowView[] }>())
       )
     : [];
-  const totalOf = (groupKey: string, displayed: number): number =>
-    props.groupTotals?.find((total) => (total.responsibilityId ?? UNASSIGNED_GROUP) === groupKey)?.total ??
-    displayed;
+  const totalOf = (groupKey: string): number | undefined =>
+    props.groupTotals?.find((total) => (total.responsibilityId ?? UNASSIGNED_GROUP) === groupKey)?.total;
 
   const row = (project: ProjectRowView): JSX.Element => (
     <tr key={project.projectId} style={{ ['--project-accent' as string]: projectColor(project.projectId) }}>
@@ -89,7 +88,7 @@ export function ProjectTable(props: ProjectTableProps): JSX.Element {
         <a href={`#/project/${project.projectId}`}>{project.projectName}</a>
         {project.nextAction ? <div className="muted small">{project.nextAction}</div> : null}
       </td>
-      <td>{project.responsibilityName || t('overview.unassigned')}</td>
+      {!props.grouped ? <td>{project.responsibilityName || t('overview.unassigned')}</td> : null}
       <td>
         <ScheduleBadge schedule={project.schedule} />
       </td>
@@ -116,8 +115,9 @@ export function ProjectTable(props: ProjectTableProps): JSX.Element {
         <tr>
           <th>
             <SortHeader label={t('column.name')} sortKey="name" current={props.sort} direction={props.direction} onSort={props.onSort} />
+            {props.grouped ? <span className="project-group-sort"><SortHeader label={t('projects.responsibility')} sortKey="responsibility" current={props.sort} direction={props.direction} onSort={props.onSort} /></span> : null}
           </th>
-          <th>
+          {!props.grouped ? <th>
             <SortHeader
               label={t('projects.responsibility')}
               sortKey="responsibility"
@@ -125,7 +125,7 @@ export function ProjectTable(props: ProjectTableProps): JSX.Element {
               direction={props.direction}
               onSort={props.onSort}
             />
-          </th>
+          </th> : null}
           <th>
             <SortHeader label={t('column.status')} sortKey="schedule" current={props.sort} direction={props.direction} onSort={props.onSort} />
           </th>
@@ -143,27 +143,34 @@ export function ProjectTable(props: ProjectTableProps): JSX.Element {
         </tr>
       </thead>
       {groups.length
-        ? groups.map(([groupKey, group]) => (
+        ? groups.map(([groupKey, group]) => {
+          const total = totalOf(groupKey);
+          return (
             <tbody key={groupKey}>
-              <tr className="project-group-heading">
+              <tr className="project-group-heading" style={groupKey === UNASSIGNED_GROUP ? undefined : {
+                ['--area-accent' as string]: projectColor(`responsibility:${groupKey}`),
+                ['--area-tint' as string]: projectTint(`responsibility:${groupKey}`)
+              }}>
                 <th colSpan={columns}>
                   <button
                     type="button"
-                    className="link-button"
+                    className="project-group-toggle"
                     aria-expanded={!props.collapsedGroups.has(groupKey)}
                     onClick={() => props.onToggleGroup(groupKey)}
                   >
-                    {props.collapsedGroups.has(groupKey) ? '▸' : '▾'} {group.name} (
-                    {totalOf(groupKey, group.items.length)})
+                    <span aria-hidden="true">{props.collapsedGroups.has(groupKey) ? '▸' : '▾'}</span>
+                    <span>{group.name}</span>
+                    {total !== undefined ? <span className="project-group-count">{t('projects.groupCount', { n: total })}</span> : null}
                   </button>
-                  {totalOf(groupKey, group.items.length) > group.items.length ? (
+                  {total !== undefined && total > group.items.length ? (
                     <span className="muted small">{t('projects.groupContinues')}</span>
                   ) : null}
                 </th>
               </tr>
               {props.collapsedGroups.has(groupKey) ? null : group.items.map(row)}
             </tbody>
-          ))
+          );
+        })
         : (
             <tbody>{items.map(row)}</tbody>
           )}

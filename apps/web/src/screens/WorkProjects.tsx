@@ -17,9 +17,10 @@ import { EmptyState, ErrorBox, Pagination } from '../components/ui';
 import { SelectInput } from '../components/forms';
 import { ProjectTable, type ProjectRowView, type ProjectSort } from '../components/project-table';
 import { MemberProjectForm } from '../components/member-project-form';
-import { capabilitiesOf } from '../state/capabilities';
+import { capabilitiesOf, hasWritableDestination } from '../state/capabilities';
 import { useRouteMemoryState } from '../state/navigation';
 import { useBusinessDate } from '../state/business-date';
+import { useDivisionScope } from '../state/division';
 
 const PAGE_SIZE = 24;
 const SCHEDULE_STATES = [...PROJECT_SCHEDULE_STATES];
@@ -27,6 +28,11 @@ const SCHEDULE_STATES = [...PROJECT_SCHEDULE_STATES];
 export function WorkProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
   const { t } = useI18n();
   const capabilities = capabilitiesOf(actor);
+  const divisionScope = useDivisionScope();
+  const { selected: selectedDivision } = divisionScope;
+  // A new project needs a destination the account may write in. The form itself resolves the
+  // offered responsibilities, so this gate only avoids promising an action that cannot exist.
+  const canCreateProject = capabilities.canCreateProject && hasWritableDestination(divisionScope);
   // Search, responsibility, sort and page survive navigation away and back, exactly like the
   // manager list. A filter is never persisted in the browser.
   const [query, setQuery] = useRouteMemoryState('explore:query', '');
@@ -44,7 +50,7 @@ export function WorkProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
   const [notice, setNotice] = useState<{ projectId: string; projectName: string } | null>(null);
 
   const today = useBusinessDate();
-  const key = `${keys.workProjects}${queryString({ query, responsibilityId, unassigned, schedule, sort, direction, page })}:${today}`;
+  const key = `${keys.workProjects}${queryString({ query, responsibilityId, unassigned, schedule, sort, direction, page, divisionId: selectedDivision ?? undefined })}:${today}`;
   const list = useQuery<WorkProjectList>(key, () =>
     api.get<WorkProjectList>(
       `/api/work/projects${queryString({
@@ -55,14 +61,15 @@ export function WorkProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
         sort,
         direction,
         page,
-        pageSize: PAGE_SIZE
+        pageSize: PAGE_SIZE,
+        divisionId: selectedDivision ?? undefined
       })}`
     )
   );
   const formOptions = useQuery<MyWorkProjectFormOptions>(keys.myProjectForm, () =>
-    capabilities.canCreateProject
+    canCreateProject
       ? api.get<MyWorkProjectFormOptions>('/api/employee/references')
-      : Promise.resolve({ projectCreationEnabled: false, responsibilities: [] })
+      : Promise.resolve({ projectCreationEnabled: false, responsibilities: [], divisions: [] })
   );
 
   const setSortOrder = (next: ProjectSort): void => {
@@ -144,7 +151,7 @@ export function WorkProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
               setPage(1);
             }}
           />
-          {capabilities.canCreateProject ? (
+          {canCreateProject ? (
             <button type="button" className="button" onClick={() => setCreating(true)}>
               {t('projects.new')}
             </button>

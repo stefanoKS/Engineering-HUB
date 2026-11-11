@@ -66,7 +66,11 @@
 
 ## V1.3 mandatory rules
 
-35. Keep the user-visible application name exactly `設計・開発課 管理`. Never rename internal identifiers (worksheets, functions, Script Properties, migration history, public APIs) for branding.
+35. Keep the V1 application's user-visible name exactly `設計・開発課 管理`. The **V2** application
+    (apps/ + packages/) is branded `シゴトモ` (ja) / `SHIGOTOMO` (en); see rule 195. Branding is a
+    product name only: never rename internal identifiers (worksheets, functions, Script Properties,
+    migration history, public APIs, package names, environment variables) for branding, and never
+    rename a division record because the product name changed.
 36. Deadline + required duration are the primary task schedule inputs; the planned start is derived. Duration is a schedule length, never labour hours, and `Estimated_Hours` is never derived from it.
 37. Never add workload-overlap validation, duration-based capacity limits, automatic reassignment or conflict blocking. The manager decides whether a deadline and duration are feasible, and overlapping assignments must remain possible.
 38. A committed deadline is never changed silently. A non-working deadline raises a warning and requires explicit acknowledgement; it is not moved automatically.
@@ -462,3 +466,156 @@ The rules above stay in force for the V1 Apps Script project (`src/`, `dashboard
      the top-level Caddy site block, the tunnel example and the container build definitions. A
      static pass is not a live deployment.
 
+
+## V2 division rules (responsibility-centred account, 2026-11-10)
+
+These rules narrow one earlier statement: a `MANAGER` no longer manages the whole department. A
+`MANAGER` manages work inside the divisions (課) where they hold a `WORK` membership. Additional
+`READ` access from an `ADMIN` grants observation only - never a creation, an edit, an approval or an
+assignment. Rule 68's "department-wide" wording applies to `ADMIN` and to the administrative view
+only; every other rule stands unchanged.
+
+174. **A division is administrator-managed data, never a source enum.** `DIVISIONS` carries a
+     stable `division_id`, a name, an active/retired status, a sort order and a revision. Renaming
+     keeps every identifier; retiring (廃止) and reactivating (再有効化) never delete a row, a
+     project, a task or a history entry.
+175. **Role, membership and visibility stay separate.** `ROLE` decides what an account may do.
+     `WORK` membership decides where it may create, manage, approve and be assigned. `READ`
+     access decides where it may only observe. Membership implies reading, and additional read
+     access never grants a creation, an edit, an approval or an assignment.
+176. **One division policy enforces every path.** `packages/domain/src/divisions.ts` is the only
+     place that answers "may this account read/write this division?". It is applied before
+     paging, totals, top-N cuts, search suggestions, hierarchy projection, reports, exports and the
+     employee snapshot. A client-supplied `divisionId` narrows the resolved scope and is refused
+     when it is not authorized; an empty authorisation set is never global access. The separate
+     company-wide publication source is not a per-viewer read and fails closed (rule 193).
+177. **Work has one canonical division.** `PROJECTS.division_id` holds it; a task or subproject
+     derives it through its project and never stores a second editable value. A scoped
+     `RESPONSIBILITIES.division_id` must agree with every project of that area, enforced by a
+     database trigger. `TASKS.Owner_Member_ID`, the additional assignees, the subproject owner and
+     the responsibility owner/members are all assignment relationships, never division grants.
+178. **Assignment needs membership, not a role.** A person may be newly assigned only when they
+     are active and hold a `WORK` membership in the work's division. `ADMIN` status,
+     `GENERAL_MANAGER` oversight and additional read access never qualify anybody. A mixed
+     valid/invalid selection is one failed operation; nothing is partially saved, and an existing
+     relationship survives a later deactivation.
+179. **`GENERAL_MANAGER` (次長) is read-only oversight.** It sits BELOW `MEMBER` in
+     `ROLE_ORDER` so no comparison can grant it a write. It may read every division (or an
+     ADMIN-selected list), including restricted work, but it never creates, edits, approves,
+     archives, deletes, reopens, manages accounts or activates notifications, and it never receives
+     private HR, credential or settings data. Unknown or blank roles fail closed.
+180. **Membership removal is a preflighted soft change.** Removing a membership with unresolved
+     active work in that division is refused with a summary; nothing is silently unassigned, moved,
+     deleted or archived. The relationship row is stamped, never deleted, and a re-added member
+     reactivates it. Only an `ADMIN` changes membership or oversight, and every change is audited.
+181. **Unmapped work fails closed.** A project whose division is blank is readable and editable by
+     `ADMIN` only, so it can be mapped deliberately. The reviewed mapping for existing projects,
+     areas, members and assignments is an explicit input; nothing is inferred from a name, a free
+     text department, a role, an owner or a task assignment, and no historical row is silently put
+     into the first division. A retired division accepts no new project, subproject or task even
+     when the request carries no assignee, and publication is refused entirely while the snapshot
+     cannot enforce division isolation.
+182. **Division transfer and retirement are explicit.** Ordinary project editing never exposes a
+     persisted division. An `ADMIN` transfer validates the responsibility, every owner, assignee
+     and subproject owner, refuses the whole move when an assignment would become ineligible, and
+     records the previous and new division. A retired division accepts no new work or assignment
+     and keeps its history readable.
+183. **The employee snapshot is scoped on the server.** `/api/employee/snapshot` returns the
+     `INTERNAL` work of the divisions the caller may read; it is never a company-wide payload
+     filtered in the browser. The separate V1 shared-dashboard workbook remains a company-wide,
+     allowlisted `INTERNAL` publication; per-division isolation of that workbook is BLOCKED in
+     this release and is documented as such rather than claimed.
+184. **Record evidence.** Behavioural changes update `docs/v2/DIVISIONS.md` and the operating docs,
+     and record PASS, FAIL, BLOCKED or NOT_RUN in `docs/v2/ACCEPTANCE.md`. Keep
+     `docs/PRODUCTION_READINESS.md` **NOT APPROVED FOR PRODUCTION** until recorded live
+     Workspace evidence exists.
+
+## V2 division repair rules (2026-11-10)
+
+These rules record the corrective work on the division release. They narrow nothing above; they
+make the earlier division rules actually true for every path.
+
+185. **Sign-in configuration is session-independent.** `GET /api/public-config` and
+     `POST /api/session` never resolve a session or a division scope. A stale cookie, an expired
+     session, an account with no grant and a database that still needs its migration must all reach
+     the sign-in screen. A failed configuration load never implies an authentication mode, and the
+     sign-in call issues no cookie when its payload cannot be built.
+186. **A missing schema is one readiness failure.** An undefined table, column or function is
+     `503 DATABASE_MIGRATION_REQUIRED` with safe wording and a sanitized server log line. Never
+     present it as a credential problem, never switch `AUTH_MODE` to make a screen load, and never
+     migrate automatically.
+187. **One narrowing mechanism.** `scopedDivisionIds(scope, requestedDivisionId)` in
+     `packages/domain/src/divisions.ts` is the only place a client-supplied `divisionId` narrows a
+     query, and it runs before paging, totals, top-N cuts, tree projection and aggregation. A route
+     never builds `[divisionId]` itself, and an unauthorized or unknown identifier is `NOT_FOUND`.
+188. **`overseeAll` is not `manageAll`.** Only `ADMIN` gets the unrestricted SQL filter; an
+     all-division `GENERAL_MANAGER` reads every *mapped* division and never unmapped work.
+     `canWriteDivision(scope, null)` is true for `ADMIN` alone, which is what makes the remediation
+     of unmapped work possible.
+189. **The generic editor authorizes the entity.** `/api/manager/editor` resolves the record and
+     then authorizes its division (task/subproject through the project; project and responsibility
+     directly) and requires edit capability, not read access. The member editor is `ADMIN` only.
+     No editor, detail or reference endpoint may return a record its division boundary forbids.
+190. **Every division-scoped write re-checks inside its transaction.** Re-read the acting member
+     (role, activation, relationships), the project's current division and its lifecycle state, and
+     every newly added assignee's membership through the transaction handle, under the
+     `member-divisions` advisory lock, which is taken first and is the only division lock. A check
+     made before the transaction is a pre-check, never the authorization.
+191. **Membership changes compare the access kind.** `WORK -> READ` is a membership removal and runs
+     the active-work blocker (`reason: 'DOWNGRADE'`); `READ -> absent` is only a read revocation and
+     never blocks. Removal stays soft and no work is silently unassigned, transferred or archived.
+192. **History is authorized, never erased.** A former assignment in a division the reader may not
+     see is withheld and counted (`ownership.previousHidden`), never described.
+193. **The company-wide snapshot fails closed.** While the V1 shared-dashboard snapshot cannot scope
+     rows to a reader's divisions, `publishNow` refuses at execution with `NOT_CONFIGURED` (not only
+     in the UI) and `publicationStatus.divisionIsolationSupported` is `false`. A previously
+     published snapshot is not revoked by that refusal and must be handled as a separate, explicit
+     rollout decision.
+194. **Record evidence.** Update `docs/v2/DIVISIONS.md`, `SECURITY.md`, `ARCHITECTURE.md`, `API.md`,
+     `MIGRATION.md`, `OPERATIONS.md` and `docs/v2/ACCEPTANCE.md`, keep earlier gate records
+     unchanged, and keep `docs/PRODUCTION_READINESS.md` **NOT APPROVED FOR PRODUCTION**.
+
+## V2 division and branding corrections (2026-11-11)
+
+These rules record the corrective release described in `docs/v2/DIVISIONS.md` §11. They narrow
+nothing above; they make rules 174-194 true for the paths that still bypassed them.
+
+195. **The V2 product name is a brand, not a division.** The authenticated header, the sign-in title,
+     the browser document title and the accessible application name read `シゴトモ` (ja) or
+     `SHIGOTOMO` (en), and the language switch updates all of them without losing the route, the
+     filters, an open editor or a selection. A division named `設計・開発課` (or any other) is stored
+     data and is rendered exactly as stored. Branding never renames a table, an identifier, a
+     package, an API, an environment variable, a migration, a stored role or historical audit text,
+     and the V1 application keeps its own name until it is separately retired.
+196. **Two advisory locks, one order.** `lockDivisionMutation` acquires `member-divisions` and then
+     `members:role-and-activation`, and every division-scoped write, membership change, role change,
+     activation change and account mutation takes exactly that order. No path acquires the pair in
+     the opposite order, so the protocol cannot deadlock. A lock taken after a mutation, or a lock
+     acquired in the reverse order, is a defect.
+197. **The role is re-read, not remembered.** A transaction-time authorization re-reads the actor's
+     stored role and activation *and* its division relationships, then re-applies the canonical role
+     capability. A `MEMBER` or `VIEWER` that still holds a `WORK` membership never passes a manager
+     mutation after a downgrade, and a division membership is never an action capability.
+198. **A responsibility assignment follows the division.** A new or changed owner and every newly
+     added member must be an active `WORK` member of the area's division; a division change
+     re-validates every retained relationship against the destination; an unchanged relationship
+     survives a later deactivation and is never removed by an unrelated edit. Unmapped areas are
+     ADMIN remediation only, and a manager never creates or edits one to bypass the rule.
+199. **Ordering is scoped and deterministic.** Division ordering is the active/retired group, the
+     stored sort order, the name and the identifier, computed once in `listDivisions`; responsibility
+     ordering is the same status group *and the same division*. A move reads its neighbours from that
+     one order, refuses a foreign neighbour, never writes a row in another division, separates equal
+     sort orders without rewriting unchanged rows, and bumps the revision of every row it writes.
+     A new division receives the next free sort order inside its group.
+200. **Retired divisions are read, never written.** A retired division stays readable for history to
+     every account that may already read it (a retained `WORK`/`READ` relationship or documented
+     oversight), and it is never offered as a new-work destination. A retained grant survives an
+     unrelated member edit; a *new* grant in a retired division is refused. Unmapped work stays
+     invisible to oversight.
+201. **The overview follows the switch.** Both overview variants send the selected division with their
+     request, key their cache entry with it, clear an incompatible responsibility selection and carry
+     it into the open/overdue/upcoming drilldowns, so the cards, the lists and a drilldown always
+     describe the same scope; a late answer for an older selection can neither paint nor be joined.
+202. **Record evidence.** Update `docs/v2/DIVISIONS.md`, `ARCHITECTURE.md`, `API.md`, `SECURITY.md`,
+     `OPERATIONS.md`, `docs/v2/ACCEPTANCE.md` and the branding documentation, keep earlier gate
+     records unchanged, and keep `docs/PRODUCTION_READINESS.md` **NOT APPROVED FOR PRODUCTION**.

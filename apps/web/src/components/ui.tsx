@@ -1,5 +1,5 @@
 /** Shared presentational components. All stored text is rendered through React, never as HTML. */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { projectColorVars } from '@eh/domain';
 import { LANGUAGES, useI18n } from '../i18n';
 import type { Language } from '@eh/i18n';
@@ -32,14 +32,16 @@ export function LanguageSwitch({
   );
 }
 
-const MENU_ITEMS = 'button:not([disabled]), a[href], [role="menuitem"]';
+const MENU_ITEMS = 'button:not([disabled]), a[href], [role="menuitem"]:not([disabled])';
 
 /**
  * A disclosure menu: one trigger, one popup, one keyboard contract.
  *
  * Escape closes it and returns focus to the trigger; an activation outside it closes it without
- * stealing focus. The popup is removed from the DOM while closed, so a closed menu never leaves
- * an unreachable control in the tab order.
+ * stealing focus. ArrowDown/ArrowUp move between the enabled items, Home/End jump to the first and
+ * last one, and the keys wrap at both ends - the behaviour a `role="menu"` popup implies. The popup
+ * is removed from the DOM while closed, so a closed menu never leaves an unreachable control in the
+ * tab order.
  */
 export function Menu({
   label,
@@ -83,6 +85,29 @@ export function Menu({
     };
   }, [open, close]);
 
+  const items = (): HTMLElement[] =>
+    popupRef.current
+      ? [...popupRef.current.querySelectorAll<HTMLElement>(MENU_ITEMS)].filter(
+          (element) => !element.hasAttribute('disabled') && element.getAttribute('aria-disabled') !== 'true'
+        )
+      : [];
+
+  const onPopupKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    const all = items();
+    if (all.length === 0) return;
+    const active = document.activeElement;
+    const index = all.findIndex((element) => element === active);
+    const focusAt = (next: number): void => {
+      event.preventDefault();
+      all[(next + all.length) % all.length]!.focus();
+    };
+    if (event.key === 'ArrowDown') focusAt(index < 0 ? 0 : index + 1);
+    else if (event.key === 'ArrowUp') focusAt(index < 0 ? all.length - 1 : index - 1);
+    else if (event.key === 'Home') focusAt(0);
+    else if (event.key === 'End') focusAt(all.length - 1);
+    else if (event.key === 'Tab') close(false);
+  };
+
   return (
     <div className={`menu ${align === 'end' ? 'menu-end' : 'menu-start'} ${className}`.trim()} ref={rootRef}>
       <button
@@ -101,11 +126,21 @@ export function Menu({
             });
           }
         }}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            setOpen(true);
+            onOpenChange?.(true);
+            window.requestAnimationFrame(() => {
+              popupRef.current?.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
+            });
+          }
+        }}
       >
         {label}
       </button>
       {open ? (
-        <div className="menu-popup" role="menu" ref={popupRef}>
+        <div className="menu-popup" role="menu" ref={popupRef} onKeyDown={onPopupKeyDown}>
           {children(() => close(true))}
         </div>
       ) : null}
@@ -113,8 +148,7 @@ export function Menu({
   );
 }
 
-export function Badge({
-  children,
+export function Badge({  children,
   tone = 'neutral'
 }: {
   children: ReactNode;

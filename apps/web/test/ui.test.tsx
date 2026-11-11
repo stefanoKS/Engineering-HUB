@@ -7,7 +7,7 @@ import { LanguageSwitch } from '../src/components/ui';
 import { LoginScreen } from '../src/screens/Login';
 import { App } from '../src/App';
 import { AssigneePicker } from '../src/components/AssigneePicker';
-import { APP_NAME, dictionarySize, t } from '@eh/i18n';
+import { APP_BRAND, APP_NAME, brandName, dictionarySize, t } from '@eh/i18n';
 import { formatSkillGrade } from '@eh/domain';
 
 function configResponse(config: Record<string, unknown>): Response {
@@ -52,8 +52,12 @@ describe('localization', () => {
   it('reuses the V1 dictionary with full ja/en parity', () => {
     expect(dictionarySize('ja')).toBeGreaterThan(900);
     expect(dictionarySize('ja')).toBe(dictionarySize('en'));
+    // The generated dictionary keeps the V1 product name; the V2 brand is a separate value.
     expect(APP_NAME).toBe('設計・開発課 管理');
     expect(t('ja', 'app.name')).toBe(APP_NAME);
+    expect(brandName('ja')).toBe('シゴトモ');
+    expect(brandName('en')).toBe('SHIGOTOMO');
+    expect(APP_BRAND.ja).not.toBe(APP_NAME);
   });
 
   it('returns the key for a missing entry instead of a silent blank', () => {
@@ -116,7 +120,96 @@ describe('sign-in configuration', () => {
         <LoginScreen notice="" onSignedIn={() => undefined} />
       </I18nProvider>
     );
-    expect(await screen.findByText(/サインイン設定を読み込めませんでした/)).toBeTruthy();
+    expect(await screen.findByText(/サインイン設定の応答が不正でした/)).toBeTruthy();
+    // A failed load never falls back to Google instructions: the mode is unknown, not "google".
+    expect(screen.queryByText('会社の Google アカウントでサインインしてください。')).toBeNull();
+  });
+
+  it('shows the employee-ID form in local mode and the Google wording in google mode', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        configResponse({
+          appVersion: '2.0.0',
+          environment: 'PRODUCTION',
+          authMode: 'local',
+          googleClientId: '',
+          authConfigured: true,
+          devSignInEnabled: false
+        })
+      )
+    );
+    const local = render(
+      <I18nProvider>
+        <LoginScreen notice="" onSignedIn={() => undefined} />
+      </I18nProvider>
+    );
+    expect(await screen.findByText('社員番号とパスワードでログインしてください。')).toBeTruthy();
+    expect(await screen.findByLabelText('社員番号')).toBeTruthy();
+    expect(screen.queryByText('会社の Google アカウントでサインインしてください。')).toBeNull();
+    local.unmount();
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        configResponse({
+          appVersion: '2.0.0',
+          environment: 'PRODUCTION',
+          authMode: 'google',
+          googleClientId: 'public-client-id.apps.googleusercontent.com',
+          authConfigured: true,
+          devSignInEnabled: false
+        })
+      )
+    );
+    render(
+      <I18nProvider>
+        <LoginScreen notice="" onSignedIn={() => undefined} />
+      </I18nProvider>
+    );
+    expect(await screen.findByText('会社の Google アカウントでサインインしてください。')).toBeTruthy();
+    expect(screen.queryByLabelText('社員番号')).toBeNull();
+  });
+
+  it('names a database readiness failure instead of a credential problem, and offers a retry', async () => {
+    let attempts = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        attempts += 1;
+        if (attempts === 1) {
+          return new Response(
+            JSON.stringify({
+              ok: false,
+              error: {
+                code: 'DATABASE_MIGRATION_REQUIRED',
+                message: 'The database schema does not match this build.',
+                retryable: false,
+                correlationId: 'c-1'
+              }
+            }),
+            { status: 503, headers: { 'content-type': 'application/json' } }
+          );
+        }
+        return configResponse({
+          appVersion: '2.0.0',
+          environment: 'PRODUCTION',
+          authMode: 'local',
+          googleClientId: '',
+          authConfigured: true,
+          devSignInEnabled: false
+        });
+      })
+    );
+    render(
+      <I18nProvider>
+        <LoginScreen notice="" onSignedIn={() => undefined} />
+      </I18nProvider>
+    );
+    expect(await screen.findByText(/データベースのスキーマがこのビルドと一致していません/)).toBeTruthy();
+    expect(screen.queryByText('会社の Google アカウントでサインインしてください。')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '再試行' }));
+    expect(await screen.findByLabelText('社員番号')).toBeTruthy();
   });
 });
 
@@ -148,8 +241,7 @@ describe('supplied branding assets', () => {
     expect(logo.compareDocumentPosition(signIn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('shows the department logo in the authenticated header instead of the company logo', async () => {
-    const session = {
+  it('shows the department logo in the authenticated header instead of the company logo', async () => {    const session = {
       actor: {
         memberId: 'MEM-ADMIN',
         name: '管理者',
@@ -200,9 +292,9 @@ describe('supplied branding assets', () => {
         <App />
       </I18nProvider>
     );
-    const logo = (await screen.findByRole('img', { name: '広島化成 製品設計課' })) as HTMLImageElement;
-    expect(logo.getAttribute('src')).toBe('/branding/designTeam.png');
-    expect(logo.className).toBe('design-team-logo');
+    const logo = (await screen.findByRole('img', { name: '広島化成 工業用品 業務管理' })) as HTMLImageElement;
+    expect(logo.getAttribute('src')).toBe('/branding/industrialName.png');
+    expect(logo.className).toBe('industrial-logo');
     expect(screen.queryByRole('img', { name: '広島化成' })).toBeNull();
     expect(screen.getByRole('button', { name: 'English' })).toBeTruthy();
     // Sign-out lives inside the account menu, not in the header row.

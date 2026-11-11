@@ -4,13 +4,14 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { DomainError, requireRole, type Identity, type RoleName } from '@eh/domain';
+import { DomainError, EMPTY_DIVISION_SCOPE, requireRole, type DivisionScope, type Identity, type RoleName } from '@eh/domain';
 import type { Database } from '@eh/db';
 import { Database as DatabaseContext } from '@eh/db';
 import type { AppConfig } from './config';
 import type { AuthService, SessionContext } from './auth/auth';
 import type { InboxSource } from './inbox';
 import { failure, success, type RequestContext } from './errors';
+import { loadScope } from './services/divisions';
 
 export type AppDependencies = {
   config: AppConfig;
@@ -25,6 +26,11 @@ export type RequestState = RequestContext & {
   db: Database;
   /** Execution-local read cache: one query per table per request, never shared across users. */
   cache: Map<string, Promise<unknown>>;
+  /**
+   * The divisions this request may read and write, resolved from the verified identity before any
+   * route runs. It starts empty, so a request that never resolves a session fails closed.
+   */
+  divisions: DivisionScope;
 };
 
 declare module 'fastify' {
@@ -34,6 +40,17 @@ declare module 'fastify' {
 }
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * Endpoints that must answer without resolving a session or a division scope.
+ *
+ * Sign-in configuration and the sign-in call itself cannot depend on an existing session: a stale
+ * cookie, an expired session or a database that still needs its reviewed migration must never stop
+ * the sign-in screen from loading, and those endpoints need no division at all.
+ */
+function isSessionIndependentPath(path: string, method: string): boolean {
+  return path === '/api/public-config' || (path === '/api/session' && method === 'POST');
+}
 
 export function fingerprint(value: string): string {
   return createHash('sha256').update(value).digest('hex');
@@ -52,16 +69,24 @@ export function registerContext(app: FastifyInstance, deps: AppDependencies): vo
       dbCalls: db.counter,
       session: null,
       db,
-      cache: new Map()
+      cache: new Map(),
+      divisions: EMPTY_DIVISION_SCOPE
     };
     void request.id;
   });
 
   app.addHook('preHandler', async (request) => {
-    request.state.session = await deps.auth.resolve(request);
+    const path = request.url.split('?')[0] ?? '';
+    if (!isSessionIndependentPath(path, request.method)) {
+      request.state.session = await deps.auth.resolve(request);
+      // Resolve the division scope once, from trusted server data, for every authenticated API
+      // request. A signed-out request keeps the empty scope and therefore fails closed.
+      if (request.state.session && path.startsWith('/api/')) {
+        request.state.divisions = await loadScope(request.state.db, request.state.session.identity);
+      }
+    }
 
-    const path = request.url.split('?')[0];
-    if (request.state.session?.mustChangePassword && path?.startsWith('/api/') && !['/api/session','/api/account/password','/api/public-config'].includes(path)) throw new DomainError('AUTHORIZATION_DENIED','Change your temporary password before accessing work data');
+    if (request.state.session?.mustChangePassword && path.startsWith('/api/') && !['/api/session','/api/account/password','/api/public-config'].includes(path)) throw new DomainError('AUTHORIZATION_DENIED','Change your temporary password before accessing work data');
     if (SAFE_METHODS.has(request.method)) return;
     const origin = String(request.headers.origin ?? '');
     if (origin && ![deps.config.publicOrigin,...deps.config.allowedOrigins].includes(origin)) throw new DomainError('AUTHORIZATION_DENIED','This origin is not allowed');

@@ -3,6 +3,7 @@ export * from './common';
 export * from './dto';
 export * from './views';
 export * from './mutations';
+export * from './mapping';
 export * from './published';
 
 export const API_VERSION = '2.0.0';

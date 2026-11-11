@@ -4,25 +4,37 @@
  * Identity is created from a verified sign-in only. A role, actor, owner or confirmation value
  * that arrives from the browser is data, never authority. Ownership is accountability: it never
  * gates a manager write, and additional membership never grants a manager capability.
+ *
+ * `GENERAL_MANAGER` (次長) is deliberately NOT ordered above `MANAGER`: it sits below `MEMBER` in
+ * the numeric order, because a cross-division read-only oversight role must never inherit a write
+ * capability by comparison. Functions that need the oversight behaviour test the role explicitly.
  */
 import { DomainError, fail } from './errors';
 import { effectiveRole } from './taxonomy';
 
-export const ROLE_ORDER = { VIEWER: 0, MEMBER: 1, MANAGER: 2, ADMIN: 3 } as const;
+export const ROLE_ORDER = { VIEWER: 0, GENERAL_MANAGER: 1, MEMBER: 2, MANAGER: 3, ADMIN: 4 } as const;
 export type RoleName = keyof typeof ROLE_ORDER;
+
+export type Role = 'ADMIN' | 'MANAGER' | 'GENERAL_MANAGER' | 'MEMBER' | 'VIEWER';
 
 export type Identity = {
   memberId: string;
   name: string;
   email: string;
-  role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'VIEWER';
+  role: Role;
   active: boolean;
   verified: boolean;
 };
 
+/** An unknown role value ranks below every known role, so an unexpected value fails closed. */
+function rankOf(role: string | null | undefined): number {
+  const rank = ROLE_ORDER[role as RoleName];
+  return typeof rank === 'number' ? rank : -1;
+}
+
 export function atLeast(identity: Identity | null, minimum: RoleName): boolean {
   if (!identity || !identity.verified || !identity.active) return false;
-  return ROLE_ORDER[identity.role] >= ROLE_ORDER[minimum];
+  return rankOf(identity.role) >= ROLE_ORDER[minimum];
 }
 
 export function requireRole(identity: Identity | null, minimum: RoleName): Identity {
@@ -32,7 +44,7 @@ export function requireRole(identity: Identity | null, minimum: RoleName): Ident
   if (!identity.active) {
     throw new DomainError('AUTHORIZATION_DENIED', 'A verified active member account is required');
   }
-  if (ROLE_ORDER[identity.role] < ROLE_ORDER[minimum]) {
+  if (rankOf(identity.role) < rankOf(minimum)) {
     throw new DomainError('AUTHORIZATION_DENIED', `Insufficient role: ${minimum} required`);
   }
   return identity;
@@ -44,6 +56,11 @@ export function isAdmin(identity: Identity | null): boolean {
 
 export function isManager(identity: Identity | null): boolean {
   return !!identity && identity.active && (identity.role === 'ADMIN' || identity.role === 'MANAGER');
+}
+
+/** Cross-division read-only oversight (次長). Never a manager capability. */
+export function isGeneralManager(identity: Identity | null): boolean {
+  return !!identity && identity.verified && identity.active && identity.role === 'GENERAL_MANAGER';
 }
 
 /**
@@ -125,19 +142,44 @@ export function canViewWork(identity: Identity | null): boolean {
   return !!identity && identity.verified && identity.active;
 }
 
+/** Only an ADMIN maintains divisions, memberships and additional visibility. */
+export function canAdministerDivisions(identity: Identity | null): boolean {
+  return isAdmin(identity);
+}
+
+/** Moving existing work between divisions is one explicit ADMIN act, never ordinary editing. */
+export function canTransferProjectDivision(identity: Identity | null): boolean {
+  return isAdmin(identity);
+}
+
+/**
+ * The role capability behind a division-scoped write. The division membership check is a second,
+ * independent gate: this function says *what* the role may do, `DivisionScope` says *where*.
+ *
+ * A GENERAL_MANAGER is excluded here by design, because read-only oversight must never inherit a
+ * manager write through role comparison.
+ */
+export function canManageWorkRecords(identity: Identity | null): boolean {
+  return isManager(identity);
+}
+
 /**
  * The documented visibility policy for the shared work lists.
  *
  * Only a project marked `INTERNAL` is employee-visible; `RESTRICTED` and archived work stays
  * manager-visible. A blank or unknown value is RESTRICTED. Reading is still separate from
  * editing: a manager capability is never implied by being able to see a task.
+ *
+ * `GENERAL_MANAGER` oversees the managerial work picture read-only within its authorized
+ * divisions, so it may read restricted work there. It never receives a write capability and the
+ * publication of a RESTRICTED project stays exactly as restricted as before.
  */
 export function canSeeRestrictedWork(identity: Identity | null): boolean {
   return (
     !!identity &&
     identity.verified &&
     identity.active &&
-    (identity.role === 'ADMIN' || identity.role === 'MANAGER')
+    (identity.role === 'ADMIN' || identity.role === 'MANAGER' || identity.role === 'GENERAL_MANAGER')
   );
 }
 
@@ -182,7 +224,9 @@ export function requirePrimaryOwnerChange(identity: Identity | null): Identity {
  */
 export function visibleTaskScope(identity: Identity): 'ALL' | 'OWN' | 'NONE' {
   if (!identity.active || !identity.verified) return 'NONE';
-  if (identity.role === 'ADMIN' || identity.role === 'MANAGER') return 'ALL';
+  if (identity.role === 'ADMIN' || identity.role === 'MANAGER' || identity.role === 'GENERAL_MANAGER') {
+    return 'ALL';
+  }
   return 'OWN';
 }
 
@@ -237,7 +281,7 @@ export type DirectoryEntry = {
   memberId: string;
   name: string;
   active: boolean;
-  role: 'ADMIN' | 'MANAGER' | 'MEMBER' | 'VIEWER';
+  role: Role;
   email?: string;
   department?: string;
   position?: string;
@@ -253,8 +297,7 @@ export function projectMemberDirectory(identity: Identity, member: MemberRecord)
     role: effectiveRole(member.role)
   };
   const manager = identity.role === 'ADMIN' || identity.role === 'MANAGER';
-  const self = member.memberId === identity.memberId;
-  if (manager) {
+  const self = member.memberId === identity.memberId;  if (manager) {
     base.email = member.email;
     base.department = member.department;
     base.position = member.position;

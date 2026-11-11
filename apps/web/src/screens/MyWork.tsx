@@ -6,7 +6,7 @@
  * keeps this personal list beside the departmental one; a MEMBER, a MANAGER and an ADMIN report
  * completion here (a VIEWER sees the same list read-only).
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type {
   Actor,
   MemberRequest,
@@ -26,6 +26,7 @@ import { MemberTaskForm } from '../components/member-task-form';
 import { RequestDialog } from '../components/request-dialog';
 import { ConfirmDialog, RemoteSelect, useSave } from '../components/forms';
 import { capabilitiesOf } from '../state/capabilities';
+import { DebouncedSearchInput } from '../components/search-input';
 import { useRouteMemoryState } from '../state/navigation';
 
 const PAGE_SIZE = 25;
@@ -40,8 +41,9 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
   // Filters live in route memory only: a filter is never persisted in the browser.
   // The visible input starts from the remembered applied query, so returning from a task detail
   // restores the search box instead of clearing the results it describes.
+  // The visible search text is separate from the applied query; a settled change resets both
+  // sections, because a page number from the previous result set never addresses the new one.
   const [query, setQuery] = useRouteMemoryState('my-work:query', '');
-  const [search, setSearch] = useState(query);
   const [projectId, setProjectId] = useRouteMemoryState('my-work:project', '');
   const [overdue, setOverdue] = useRouteMemoryState('my-work:overdue', false);
   const [dueThisWeek, setDueThisWeek] = useRouteMemoryState('my-work:due-this-week', false);
@@ -49,17 +51,6 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
   const capabilities = capabilitiesOf(actor);
   const canCreate = capabilities.canCreateTask;
 
-  // A debounced search change resets both sections: a page number from the previous result set
-  // never addresses the new one.
-  useEffect(() => {
-    if (search === query) return undefined;
-    const timer = setTimeout(() => {
-      setQuery(search);
-      setPage(1);
-      setCompletedPage(1);
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [search, query, setQuery, setPage, setCompletedPage]);
 
   const filterParams = {
     query: query || undefined,
@@ -75,7 +66,7 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
     .join('&');
   const filtersActive = !!filterQuery;
   const resetFilters = (): void => {
-    setSearch('');
+    // Clearing the applied query also clears the visible box, because the input is seeded from it.
     setQuery('');
     setProjectId('');
     setOverdue(false);
@@ -226,16 +217,16 @@ export function MyWorkScreen({ actor }: { actor: Actor }): JSX.Element {
       />
 
       <div className="compact-toolbar my-work-filters" role="group" aria-label={t('myWork.filter.more')}>
-        <label className="field grow">
-          <span className="field-label">{t('myWork.filter.task')}</span>
-          <input
-            type="search"
-            aria-label={t('myWork.filter.task')}
-            value={search}
-            placeholder={t('myWork.filter.task')}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-        </label>
+        <DebouncedSearchInput
+          className="grow"
+          value={query}
+          label={t('myWork.filter.task')}
+          onApplied={(applied) => {
+            setQuery(applied);
+            setPage(1);
+            setCompletedPage(1);
+          }}
+        />
         <div className="field">
           <span className="field-label">{t('myWork.filter.project')}</span>
           <RemoteSelect

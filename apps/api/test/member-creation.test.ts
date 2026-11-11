@@ -15,7 +15,7 @@ import { buildApp } from '../src/app';
 import { loadConfig } from '../src/config';
 import { NullInboxSource } from '../src/inbox';
 import { hashPassword } from '../src/auth/password';
-import { freshDatabase } from '../../../packages/db/test/support/db';
+import { freshDatabase, seedTestDivisions } from '../../../packages/db/test/support/db';
 
 let app: FastifyInstance;
 let db: Database;
@@ -47,6 +47,7 @@ beforeEach(async () => {
   await db.query("UPDATE projects SET status = 'Archived', archived_at = now() WHERE project_id = 'PRJ-OLD'");
   await insertResponsibility(db, { name: '設計' }, 'RSP-ACTIVE');
   await insertResponsibility(db, { name: '廃止領域', status: 'Retired' }, 'RSP-RETIRED');
+  await seedTestDivisions(db);
   app = await buildApp({
     db,
     inbox: new NullInboxSource(),
@@ -285,6 +286,7 @@ describe('creation authorization', () => {
       payload: {
         idempotencyKey: 'member-project',
         projectName: 'Member project',
+        divisionId: 'DIV-DEV',
         responsibilityId: 'RSP-1'
       }
     });
@@ -324,6 +326,7 @@ describe('member project creation', () => {
     const response = await createProject(member, {
       idempotencyKey: 'member-project-1',
       projectName: '新規試作プロジェクト',
+      divisionId: 'DIV-DEV',
       responsibilityId: 'RSP-ACTIVE',
       priority: 'High',
       committedDeadline: '2026-12-20'
@@ -362,6 +365,7 @@ describe('member project creation', () => {
       const response = await createProject(member, {
         idempotencyKey: `forged-${Object.keys(forged)[0]}`,
         projectName: 'Forged project',
+        divisionId: 'DIV-DEV',
         responsibilityId: 'RSP-ACTIVE',
         ...forged
       });
@@ -379,6 +383,7 @@ describe('member project creation', () => {
     const payload = {
       idempotencyKey: 'member-project-replay',
       projectName: 'Replay project',
+      divisionId: 'DIV-DEV',
       responsibilityId: 'RSP-ACTIVE'
     };
     const first = await createProject(member, payload);
@@ -397,6 +402,7 @@ describe('member project creation', () => {
     const retired = await createProject(member, {
       idempotencyKey: 'member-project-retired',
       projectName: 'Retired area project',
+      divisionId: 'DIV-DEV',
       responsibilityId: 'RSP-RETIRED'
     });
     expect(retired.statusCode, retired.body).toBe(400);
@@ -415,7 +421,8 @@ describe('member project creation', () => {
       const response = await createProject(headers, {
         idempotencyKey: `member-project-denied-${employeeId}`,
         projectName: 'Denied project',
-        responsibilityId: 'RSP-ACTIVE'
+        divisionId: 'DIV-DEV',
+      responsibilityId: 'RSP-ACTIVE'
       });
       expect(response.statusCode, `${employeeId}: ${response.body}`).toBe(403);
       expect((response.json() as { error: { code: string } }).error.code).toBe('AUTHORIZATION_DENIED');
@@ -429,7 +436,8 @@ describe('member project creation', () => {
     const body = response.json() as { data: { projectCreationEnabled: boolean; responsibilities: { responsibilityId: string; name: string }[] } };
     expect(body.data.projectCreationEnabled).toBe(true);
     expect(body.data.responsibilities.map((entry) => entry.responsibilityId)).toEqual(['RSP-ACTIVE']);
-    // The narrow payload carries no owner, description or project count.
-    expect(Object.keys(body.data.responsibilities[0]!).sort()).toEqual(['name', 'responsibilityId']);
+    // The narrow payload carries no owner, description or project count; the division identifier is
+    // the one addition, so the form can offer only the areas of the selected division.
+    expect(Object.keys(body.data.responsibilities[0]!).sort()).toEqual(['divisionId', 'name', 'responsibilityId']);
   });
 });

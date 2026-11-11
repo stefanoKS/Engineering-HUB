@@ -45,7 +45,9 @@ This is a Google Apps Script application backed by Google Sheets. Treat code, sp
 
 Follow `/AGENTS.md` rules 35–48 in addition to the rules above.
 
-- The user-visible name is exactly `設計・開発課 管理`; internal identifiers stay unchanged.
+- The V1 application's user-visible name is exactly `設計・開発課 管理`; internal identifiers stay
+  unchanged. The V2 application (`apps/`, `packages/`) is branded `シゴトモ` / `SHIGOTOMO`, and a
+  division named `設計・開発課` is stored data that branding never renames (V2 rules 195–202).
 - Deadline + required duration drive the schedule; duration is never converted to labour hours.
 - No workload-overlap validation, capacity limit, automatic reassignment or conflict blocking.
 - Only `src/Notifications.gs` sends mail; request notifications default to OFF.

@@ -4,9 +4,27 @@
  */
 import { z } from 'zod';
 
-export const ROLES = ['ADMIN', 'MANAGER', 'MEMBER', 'VIEWER'] as const;
+/**
+ * The stored role values. `GENERAL_MANAGER` (次長) is a read-only oversight role: it is never a
+ * stronger MANAGER and never orders above ADMIN. The domain module holds the explicit capability
+ * table, so a numeric ordering can never grant a write by accident.
+ */
+export const ROLES = ['ADMIN', 'MANAGER', 'GENERAL_MANAGER', 'MEMBER', 'VIEWER'] as const;
 export const Role = z.enum(ROLES);
 export type Role = z.infer<typeof Role>;
+
+/** Organisational areas (課). Retiring a division is a status change, never a deletion. */
+export const DIVISION_STATUSES = ['Active', 'Retired'] as const;
+export const DivisionStatus = z.enum(DIVISION_STATUSES);
+export type DivisionStatus = z.infer<typeof DivisionStatus>;
+
+/**
+ * A member/division relationship is either membership (`WORK`, assignment eligible and able to
+ * act per role) or additional read-only access (`READ`). Membership implies read access.
+ */
+export const DIVISION_ACCESS_KINDS = ['WORK', 'READ'] as const;
+export const DivisionAccessKind = z.enum(DIVISION_ACCESS_KINDS);
+export type DivisionAccessKind = z.infer<typeof DivisionAccessKind>;
 
 export const PROJECT_STATUSES = [
   'Planned',

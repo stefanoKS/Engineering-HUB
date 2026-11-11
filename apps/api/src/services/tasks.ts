@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Task commands and the task detail read model.
  *
  * A task save is a partial patch: only the fields the manager addressed are written. A material
@@ -34,6 +34,7 @@ import {
   updateTask,
   withdrawPendingCompletionRequests
 } from '@eh/db';
+import type { Transaction } from '@eh/db';
 import {
   DomainError,
   MAX_TASK_DEPTH,
@@ -41,10 +42,13 @@ import {
   REOPENED_TASK_STATUS,
   applyTaskPlan,
   assertDirectCompletionAllowed,
+  assertDivisionAcceptsNewWork,
   assertNoDependencyCycle,
   assertNotDirectCompletion,
   assertOverrideAllowed,
+  assertReadableDivision,
   assertReopenAllowed,
+  assertWritableDivision,
   assignmentChanged,
   createCalendar,
   requireRole,
@@ -52,6 +56,14 @@ import {
   type Identity
 } from '@eh/domain';
 import { audit, enqueueJob, hashRequest, requireConfirmation, runIdempotent, type ServiceCtx } from './common';
+import {
+  assertAssignmentEligibility,
+  creatableProject,
+  divisionForWriteOfProject,
+  lockDivisionMutation,
+  reauthorizeInTransaction,
+  writableTask
+} from './divisions';
 
 const WRITE_ROLES = 'MANAGER' as const;
 
@@ -199,8 +211,9 @@ export async function createTask(
   body: z.infer<typeof CreateTaskBody>
 ): Promise<{ task: Task; replayed: boolean }> {
   requireRole(ctx.identity, WRITE_ROLES);
-  const project = await getProject(ctx.db, body.projectId);
-  if (!project) throw new DomainError('NOT_FOUND', `Project not found: ${body.projectId}`);
+  // The division is derived from the project and is never supplied by the browser. Creation also
+  // refuses a retired division, even when no assignee is selected.
+  const project = await creatableProject(ctx, body.projectId);
   if (body.status === 'Done') {
     throw new DomainError('INVALID_TRANSITION', 'Done is written only by the reviewed completion workflow');
   }
@@ -219,6 +232,12 @@ export async function createTask(
         : [],
     body.ownerMemberId ?? null
   );
+  // Every newly assigned person must belong to the division of the work. A mixed selection is one
+  // failed operation: nothing is partially saved.
+  await assertAssignmentEligibility(ctx, project.divisionId, [
+    assignment.ownerMemberId,
+    ...assignment.assigneeIds
+  ].filter((id): id is string => !!id));
   const plan = await planTaskDeadline(ctx, {
     deadline: body.deadline,
     durationValue: body.plannedDurationValue,
@@ -228,10 +247,32 @@ export async function createTask(
   const plannedStart = body.plannedStart ?? plan.plannedStart;
   assertScheduleOrder(plannedStart, body.deadline);
 
+  const authorizeTaskProject = async (tx: Transaction): Promise<void> => {
+    const fresh = await reauthorizeInTransaction(tx, ctx);
+    requireRole(fresh.identity, WRITE_ROLES);
+    const current = await divisionForWriteOfProject(tx, body.projectId);
+    assertWritableDivision(fresh.scope, current.divisionId);
+  };
   const result = await runIdempotent(
     ctx,
     { scope: 'task.create', key: body.idempotencyKey, request: body },
     async (tx) => {
+      // The authoritative re-check: the actor's authority, the project's current division and every
+      // assignee's membership are re-read inside the write, under the membership lock, so a
+      // concurrent membership removal or division retirement cannot slip between check and insert.
+      await lockDivisionMutation(tx);
+      await authorizeTaskProject(tx);
+      const fresh = await reauthorizeInTransaction(tx, ctx);
+      const division = await divisionForWriteOfProject(tx, body.projectId);
+      assertWritableDivision(fresh.scope, division.divisionId);
+      if (division.status !== null) assertDivisionAcceptsNewWork(division.status);
+      await assertAssignmentEligibility(
+        ctx,
+        division.divisionId,
+        [assignment.ownerMemberId, ...assignment.assigneeIds].filter((id): id is string => !!id),
+        new Set(),
+        tx
+      );
       const task = await insertTask(tx, {
         projectId: body.projectId,
         subprojectId: body.subprojectId ?? null,
@@ -287,15 +328,16 @@ export async function createTask(
         });
       }
       return task;
-    }
+    },
+    { authorize: authorizeTaskProject }
   );
   return { task: result.data, replayed: result.replayed };
 }
 
 export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<typeof PatchTaskBody>): Promise<Task> {
   requireRole(ctx.identity, WRITE_ROLES);
-  const task = await getTask(ctx.db, taskId);
-  if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  // Both the task's current division and the project must authorize the write.
+  const { task, project } = await writableTask(ctx, taskId);
   if (body.revision !== task.revision) {
     throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved', {
       expected: body.revision,
@@ -334,6 +376,14 @@ export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<t
     [nextShape.ownerMemberId, ...nextShape.assigneeIds].filter(
       (id): id is string => !!id && !alreadyAssigned.has(id)
     )
+  );
+  // A newly added or changed assignment must belong to the division of the work. Historical
+  // relationships are preserved untouched, exactly as the activity rule already required.
+  await assertAssignmentEligibility(
+    ctx,
+    project.divisionId,
+    [nextShape.ownerMemberId, ...nextShape.assigneeIds].filter((id): id is string => !!id),
+    alreadyAssigned
   );
 
   const deadlineChanged = body.deadline !== undefined && (body.deadline ?? '') !== (task.dueDate ?? '');
@@ -423,6 +473,21 @@ export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<t
   }
 
   const updated = await ctx.db.transaction(async (tx) => {
+    // Re-read the actor, the task's current division and every newly added assignee's membership
+    // inside the write, under the shared membership lock. An access change committed after this
+    // request started therefore cannot be bypassed by a write that was already in flight.
+    await lockDivisionMutation(tx);
+    const fresh = await reauthorizeInTransaction(tx, ctx);
+    requireRole(fresh.identity, WRITE_ROLES);
+    const currentDivision = await divisionForWriteOfProject(tx, task.projectId);
+    assertWritableDivision(fresh.scope, currentDivision.divisionId);
+    await assertAssignmentEligibility(
+      ctx,
+      currentDivision.divisionId,
+      [nextShape.ownerMemberId, ...nextShape.assigneeIds].filter((id): id is string => !!id),
+      alreadyAssigned,
+      tx
+    );
     const next = await updateTask(tx, taskId, changes, body.revision);
     if (!next) throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
     if (body.assigneeIds !== undefined || body.ownerMemberId !== undefined) {
@@ -476,12 +541,18 @@ export async function approveAssignmentCommand(
 ): Promise<Task> {
   requireRole(ctx.identity, WRITE_ROLES);
   requireConfirmation(input.confirmed, 'Approving an assignment requires explicit confirmation');
-  const task = await getTask(ctx.db, taskId);
-  if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  const { task } = await writableTask(ctx, taskId);
   if (task.revision !== input.revision) {
     throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
   }
   return ctx.db.transaction(async (tx) => {
+    // Approval is a manager mutation: the role and the task's current division are re-read inside
+    // the write, so a revocation that happened while the request waited is honoured.
+    await lockDivisionMutation(tx);
+    const fresh = await reauthorizeInTransaction(tx, ctx);
+    requireRole(fresh.identity, WRITE_ROLES);
+    const current = await divisionForWriteOfProject(tx, task.projectId);
+    assertWritableDivision(fresh.scope, current.divisionId);
     const next = await approveAssignment(tx, taskId, input.revision);
     if (!next) throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
     await audit(tx, ctx, {
@@ -509,12 +580,16 @@ export async function confirmScheduleCommand(
 ): Promise<Task> {
   requireRole(ctx.identity, WRITE_ROLES);
   requireConfirmation(input.confirmed, 'Confirming a schedule requires explicit confirmation');
-  const task = await getTask(ctx.db, taskId);
-  if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  const { task } = await writableTask(ctx, taskId);
   if (task.revision !== input.revision) {
     throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
   }
   return ctx.db.transaction(async (tx) => {
+    await lockDivisionMutation(tx);
+    const fresh = await reauthorizeInTransaction(tx, ctx);
+    requireRole(fresh.identity, WRITE_ROLES);
+    const current = await divisionForWriteOfProject(tx, task.projectId);
+    assertWritableDivision(fresh.scope, current.divisionId);
     await confirmSchedule(tx, taskId, {
       plannedStart: task.plannedStart,
       dueDate: task.dueDate,
@@ -547,8 +622,7 @@ export async function completeTaskDirectly(
 ): Promise<Task> {
   requireRole(ctx.identity, WRITE_ROLES);
   requireConfirmation(input.confirmed, 'Completing a task requires explicit confirmation');
-  const task = await getTask(ctx.db, taskId);
-  if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  const { task } = await writableTask(ctx, taskId);
   if (task.revision !== input.revision) {
     throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved', {
       expected: input.revision,
@@ -567,6 +641,11 @@ export async function completeTaskDirectly(
   });
   const completedAt = new Date().toISOString();
   return ctx.db.transaction(async (tx) => {
+    await lockDivisionMutation(tx);
+    const fresh = await reauthorizeInTransaction(tx, ctx);
+    requireRole(fresh.identity, WRITE_ROLES);
+    const current = await divisionForWriteOfProject(tx, task.projectId);
+    assertWritableDivision(fresh.scope, current.divisionId);
     const next = await updateTask(
       tx,
       taskId,
@@ -620,8 +699,7 @@ export async function overrideComplete(  ctx: ServiceCtx,
   input: { revision: number; reason: string; confirmation: string }
 ): Promise<Task> {
   requireRole(ctx.identity, 'ADMIN');
-  const task = await getTask(ctx.db, taskId);
-  if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  const { task } = await writableTask(ctx, taskId);
   const children = await countTaskChildren(ctx.db, taskId);
   assertOverrideAllowed({
     task: {
@@ -638,6 +716,11 @@ export async function overrideComplete(  ctx: ServiceCtx,
     throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
   }
   return ctx.db.transaction(async (tx) => {
+    await lockDivisionMutation(tx);
+    const fresh = await reauthorizeInTransaction(tx, ctx);
+    requireRole(fresh.identity, 'ADMIN');
+    const current = await divisionForWriteOfProject(tx, task.projectId);
+    assertWritableDivision(fresh.scope, current.divisionId);
     const next = await updateTask(
       tx,
       taskId,
@@ -695,17 +778,14 @@ async function latestApprovedCompletion(
 }
 
 /**
- * The ADMIN-only capability behind "Reopen task / 完了を取り消す".
+ * The ADMIN-only capability behind "Reopen task / 完亁E��取り消す".
  *
  * The answer never grants authority: `reopenTask` re-reads the task, the project and the revision
  * inside its own transaction. A missing or failed answer keeps the action unavailable.
  */
 export async function reopenEligibility(ctx: ServiceCtx, taskId: string): Promise<ReopenEligibility> {
   requireRole(ctx.identity, 'ADMIN');
-  const task = await getTask(ctx.db, taskId);
-  if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
-  const project = await getProject(ctx.db, task.projectId);
-  if (!project) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  const { task, project } = await writableTask(ctx, taskId);
   const children = await countTaskChildren(ctx.db, taskId);
   const completion = await latestApprovedCompletion(ctx.db, taskId);
   const reasons: ReopenBlockReason[] = [];
@@ -767,16 +847,13 @@ export async function reopenTask(
     }
     return { ...replay.response, replayed: true };
   }
-  const task = await getTask(ctx.db, taskId);
-  if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  const { task, project } = await writableTask(ctx, taskId);
   if (body.revision !== task.revision) {
     throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved', {
       expected: body.revision,
       stored: task.revision
     });
   }
-  const project = await getProject(ctx.db, task.projectId);
-  if (!project) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
   const children = await countTaskChildren(ctx.db, taskId);
   assertReopenAllowed({
     task: { taskId, status: task.status, container: children > 0 },
@@ -789,10 +866,19 @@ export async function reopenTask(
   const completion = await latestApprovedCompletion(ctx.db, taskId);
   const projectReopen = project.status === 'Completed';
 
+  // The access check a replayed reopening must still pass.
+  const authorizeReopen = async (tx: Transaction): Promise<void> => {
+    const fresh = await reauthorizeInTransaction(tx, ctx);
+    requireRole(fresh.identity, 'ADMIN');
+    const current = await divisionForWriteOfProject(tx, project.projectId);
+    assertWritableDivision(fresh.scope, current.divisionId);
+  };
   const result = await runIdempotent(
     ctx,
     { scope: 'task.reopen', key: body.idempotencyKey, request: body },
     async (tx) => {
+      await lockDivisionMutation(tx);
+      await authorizeReopen(tx);
       const next = await updateTask(
         tx,
         taskId,
@@ -845,7 +931,8 @@ export async function reopenTask(
         }
       });
       return { task: next, projectStatus, projectReopened: projectReopen };
-    }
+    },
+    { authorize: authorizeReopen }
   );
   return { ...result.data, replayed: result.replayed };
 }
@@ -882,6 +969,10 @@ export async function parentTaskOptions(
 ): Promise<{ items: ParentTaskOption[]; total: number; page: number; pageSize: number; totalPages: number; selected: ParentTaskOption | null }> {
   requireRole(ctx.identity, WRITE_ROLES);
   const pageSize = Math.min(Math.max(input.pageSize ?? 25, 1), 100);
+  // The picker may only offer parents in a project this manager may write in.
+  const project = await getProject(ctx.db, input.projectId);
+  if (!project) throw new DomainError('NOT_FOUND', `Project not found: ${input.projectId}`);
+  assertWritableDivision(ctx.divisions, project.divisionId);
   const summaries = await listTaskSummariesForProject(ctx.db, input.projectId);
   const byId = new Map(summaries.map((summary) => [summary.taskId, summary]));
 
@@ -941,6 +1032,10 @@ export async function parentTaskOptions(
 export async function taskDetail(ctx: ServiceCtx, taskId: string): Promise<TaskDetail> {
   const task = await getTask(ctx.db, taskId);
   if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  // A manager detail read respects the same division boundary as every list.
+  const project = await getProject(ctx.db, task.projectId);
+  if (!project) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  assertReadableDivision(ctx.divisions, project.divisionId);
   const [assignees, confirmations, deadlineHistory, children, context, depthRow] = await Promise.all([
     listTaskAssignees(ctx.db, taskId),
     listScheduleConfirmations(ctx.db, taskId),

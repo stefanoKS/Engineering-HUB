@@ -14,6 +14,19 @@ export const DEFAULT_LANGUAGE: Language = 'ja';
 export const STORAGE_KEY = 'eh.lang';
 export const APP_NAME = (dictionary.ja as Record<string, string>)['app.name'] ?? '設計・開発課 管理';
 
+/**
+ * The V2 application brand.
+ *
+ * It is deliberately separate from the generated dictionary, which is produced from the V1 source
+ * and keeps the V1 product name. The brand is a product name only: a division named `設計・開発課`
+ * (or any other) stays organisational data and is never renamed by branding.
+ */
+export const APP_BRAND: Record<Language, string> = { ja: 'シゴトモ', en: 'SHIGOTOMO' };
+
+export function brandName(language: Language): string {
+  return APP_BRAND[language] ?? APP_BRAND.ja;
+}
+
 type Dictionary = Record<string, string>;
 
 const DICTS: Record<Language, Dictionary> = {

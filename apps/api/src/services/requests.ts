@@ -29,12 +29,16 @@ import {
   applyTaskPlan,
   assertCompletableByDecision,
   assertCompletionDecisionRole,
+  assertReadableDivision,
   assertReportable,
+  assertWritableDivision,
   canReadProjectVisibility,
   canReportCompletion,
   canRequestDeadlineChange,
   canSeeRestrictedWork,
   createCalendar,
+  readableDivisionIds,
+  scopedDivisionIds,
   taskScheduleStatus,
   effectiveEmailMode,
   evaluateStaleness,
@@ -46,6 +50,7 @@ import {
   submissionRefusal,
   submissionSnapshot,
   validateSubmission,
+  type Identity,
   type SubmissionAssessment,
   type SubmissionBlockReason,
   type TaskSnapshot
@@ -53,6 +58,8 @@ import {
 import { audit, enqueueJob, requireConfirmation, requireTypedConfirmation, runIdempotent, type ServiceCtx } from './common';
 import type { InboxSource } from '../inbox';
 import { newId } from '@eh/db';
+import { lockDivisionMutation, reauthorizeInTransaction } from './divisions';
+import type { Transaction } from '@eh/db';
 
 export type ImportResult = {
   attempted: boolean;
@@ -149,10 +156,17 @@ export async function importRequests(ctx: ServiceCtx, inbox: InboxSource): Promi
   return { attempted: true, configured: true, imported, duplicates, failed, message };
 }
 
+/** The SQL predicate for one request-scope; paired with the parameters below. */
+function requestDivisionFilter(divisionIds: string[] | undefined): string {
+  if (divisionIds === undefined) return '';
+  if (!divisionIds.length) return 'AND false';
+  return 'AND EXISTS (SELECT 1 FROM tasks t JOIN projects p ON p.project_id = t.project_id WHERE t.task_id = rq.task_id AND p.division_id = ANY($2::text[]))';
+}
+
 export async function queue(
   ctx: ServiceCtx,
   inbox: InboxSource,
-  input: { includeDecided: boolean; import: boolean; page?: number; pageSize?: number }
+  input: { includeDecided: boolean; import: boolean; divisionId?: string; page?: number; pageSize?: number }
 ): Promise<{ items: TaskRequest[]; total: number; page: number; pageSize: number; totalPages: number; imported: ImportResult }> {
   requireRole(ctx.identity, 'MANAGER');
   const imported = input.import
@@ -161,11 +175,21 @@ export async function queue(
   const pageSize = input.pageSize ?? 25;
   return ctx.db.transaction(async tx => {
     await tx.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
-    const count = await tx.one<{ total: string }>("SELECT count(*)::text AS total FROM task_requests WHERE ($1::boolean OR status IN ('PENDING','PROCESSING','STALE'))", [input.includeDecided]);
+    // One server-side scope for both the total and the page, so a paged request list can never
+    // total or reach past the caller's divisions. A requested division narrows that scope and is
+    // refused as NOT_FOUND when it is not authorized.
+    const divisionIds = scopedDivisionIds(ctx.divisions, input.divisionId);
+    const filter = requestDivisionFilter(divisionIds);
+    const scopeParams = [input.includeDecided, ...(divisionIds && divisionIds.length ? [divisionIds] : [])];
+    const count = await tx.one<{ total: string }>(
+      `SELECT count(*)::text AS total FROM task_requests rq
+        WHERE ($1::boolean OR rq.status IN ('PENDING','PROCESSING','STALE')) ${filter}`,
+      scopeParams
+    );
     const total = Number(count?.total ?? 0);
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const page = Math.min(input.page ?? 1, totalPages);
-    const items = await listRequests(tx, input.includeDecided, page, pageSize);
+    const items = await listRequests(tx, input.includeDecided, page, pageSize, { divisionIds });
     return { items, total, page, pageSize, totalPages, imported };
   });
 }
@@ -191,6 +215,24 @@ export type EmployeeTaskRow = {
   task_revision: number;
 };
 
+/**
+ * The employee view is a server-side scope, not a browser filter.
+ *
+ * A signed-in person sees the INTERNAL work of the divisions they may read. An account with no
+ * grant therefore sees nothing instead of the whole company portfolio.
+ */
+function employeeDivisionFilter(ctx: ServiceCtx): string {
+  const ids = readableDivisionIds(ctx.divisions);
+  if (ids === undefined) return '';
+  if (!ids.length) return 'AND false';
+  return 'AND p.division_id = ANY($1::text[])';
+}
+
+function employeeDivisionParams(ctx: ServiceCtx): unknown[] {
+  const ids = readableDivisionIds(ctx.divisions);
+  return ids === undefined || !ids.length ? [] : [ids];
+}
+
 /** Employee view: only published (INTERNAL) projects, only allowlisted display fields. */
 export async function employeeSnapshot(ctx: ServiceCtx) {
   const settings = await getSettings(ctx.db);
@@ -215,8 +257,10 @@ export async function employeeSnapshot(ctx: ServiceCtx) {
        LEFT JOIN responsibilities r ON r.responsibility_id = p.responsibility_id
        LEFT JOIN members owner ON owner.member_id = t.owner_member_id
       WHERE t.deleted_at IS NULL AND p.dashboard_visibility = 'INTERNAL' AND p.status <> 'Archived'
+        ${employeeDivisionFilter(ctx)}
       ORDER BY p.project_name, t.due_date NULLS LAST, t.task_id
-      LIMIT 2000`
+      LIMIT 2000`,
+    employeeDivisionParams(ctx)
   );
   return {
     contractVersion: '1.6',
@@ -364,6 +408,7 @@ export async function reportEligibility(
   if (!task) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
   const project = await getProject(ctx.db, task.projectId);
   if (!project) throw new DomainError('NOT_FOUND', `Task not found: ${taskId}`);
+  assertReadableDivision(ctx.divisions, project.divisionId);
   const assessment = await assessSubmission(ctx, task, project, 'COMPLETION_REPORT', submissionEnabled);
   if (!assessment.visible && !canSeeRestrictedWork(ctx.identity)) {
     // An unreadable task answers like an unknown one, so a refusal never confirms that it exists.
@@ -399,6 +444,8 @@ export async function submitRequest(
   if (!project) {
     throw new DomainError('NOT_FOUND', 'Project not found');
   }
+  // A request may only be filed for work the caller may read in their own divisions.
+  assertReadableDivision(ctx.divisions, project.divisionId);
   // A key owned by another person answers as unknown before any eligibility or idempotency work,
   // so a foreign receipt can neither be read nor replayed. A key of my own replays its answer.
   const receipt = await getRequestByInboxId(ctx.db, body.clientRequestId);
@@ -429,10 +476,22 @@ export async function submitRequest(
     reason: body.reason
   });
 
+  // The access check a replayed submission must still pass: the file operation is never repeated,
+  // but the stored receipt is only returned to a reader who may still read the task's division.
+  const authorizeSubmission = async (tx: Transaction): Promise<void> => {
+    const fresh = await reauthorizeInTransaction(tx, ctx);
+    requireRole(fresh.identity, 'VIEWER');
+    const scoped = await tx.one<{ division_id: string | null }>(
+      'SELECT p.division_id FROM tasks t JOIN projects p ON p.project_id = t.project_id WHERE t.task_id = $1',
+      [task.taskId]
+    );
+    assertReadableDivision(fresh.scope, scoped?.division_id ?? null);
+  };
   const result = await runIdempotent(
     ctx,
     { scope: `employee.request:${ctx.identity.memberId}`, key: body.clientRequestId, request: body },
     async (tx) => {
+      await lockDivisionMutation(tx);
       const existing = await getRequestByInboxId(tx, body.clientRequestId);
       if (existing) {
         if (existing.requesterMemberId !== ctx.identity.memberId) {
@@ -447,6 +506,9 @@ export async function submitRequest(
         };
       }
       const snap = submissionSnapshot(snapshot);
+      // The caller's readable divisions are re-read through the transaction handle, so a grant
+      // revoked while the form was open cannot be used to file a request.
+      await authorizeSubmission(tx);
       const created = await insertRequest(tx, {
         requestId: newId('REQ'),
         requestType: body.requestType,
@@ -492,7 +554,8 @@ export async function submitRequest(
         taskId: created.taskId,
         submittedAt: created.submittedAt
       };
-    }
+    },
+    { authorize: authorizeSubmission }
   );
   return result.data;
 }
@@ -505,12 +568,38 @@ export type DecisionResult = {
   dueDate: string | null;
 };
 
+/**
+ * A decision re-reads the division inside the decision transaction.
+ *
+ * A grant removed a moment ago therefore cannot be used by a decision that was already prepared.
+ * It returns the re-read identity, so the caller's role decision (for example the completion
+ * decision role) is taken from the stored row rather than from the session snapshot.
+ */
+async function assertDecidableDivision(
+  tx: Transaction,
+  ctx: ServiceCtx,
+  projectId: string
+): Promise<Identity> {
+  const row = await tx.one<{ division_id: string | null }>('SELECT division_id FROM projects WHERE project_id = $1', [
+    projectId
+  ]);
+  // The actor's current authority is re-read inside the decision transaction; the request-level
+  // scope is only a pre-check.
+  const fresh = await reauthorizeInTransaction(tx, ctx);
+  requireRole(fresh.identity, 'MANAGER');
+  assertWritableDivision(fresh.scope, row?.division_id ?? null);
+  return fresh.identity;
+}
+
 /** A decision is claimed, applied and finalized in one transaction, at most once. */
 export async function decideRequest(ctx: ServiceCtx, body: z.infer<typeof DecisionBody>): Promise<DecisionResult> {
   requireRole(ctx.identity, 'MANAGER');
   requireConfirmation(body.confirmed, 'A decision requires explicit confirmation');
 
   return ctx.db.transaction(async (tx) => {
+    // The decision takes the same lock order as every other division-scoped write before it reads
+    // authority, so a role or membership change cannot land between the check and the claim.
+    await lockDivisionMutation(tx);
     const locked = await lockRequest(tx, body.requestId);
     if (!locked) throw new DomainError('NOT_FOUND', `Request not found: ${body.requestId}`);
     if (locked.revision !== body.revision) {
@@ -525,9 +614,12 @@ export async function decideRequest(ctx: ServiceCtx, body: z.infer<typeof Decisi
     if (!task) {
       throw new DomainError('NOT_FOUND', `Task not found: ${locked.taskId}`);
     }
+    // The decision is a task write: it needs management access in the task's division. The check
+    // runs inside the decision transaction, before the request is claimed.
+    const decider = await assertDecidableDivision(tx, ctx, task.projectId);
     // Refused before the request is claimed, so a refusal never leaves a request PROCESSING.
     if (body.decision === 'APPROVE' && locked.requestType === 'COMPLETION_REPORT') {
-      assertCompletionDecisionRole({ actorRole: ctx.identity.role });
+      assertCompletionDecisionRole({ actorRole: decider.role });
     }
     const claimed = await claimRequest(tx, body.requestId);
     if (!claimed) {

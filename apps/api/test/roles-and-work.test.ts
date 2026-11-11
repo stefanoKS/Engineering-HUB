@@ -14,7 +14,7 @@ import { buildApp } from '../src/app';
 import { loadConfig } from '../src/config';
 import { NullInboxSource } from '../src/inbox';
 import { hashPassword } from '../src/auth/password';
-import { freshDatabase } from '../../../packages/db/test/support/db';
+import { freshDatabase, seedTestDivisions } from '../../../packages/db/test/support/db';
 
 let app: FastifyInstance;
 let db: Database;
@@ -41,6 +41,7 @@ beforeEach(async () => {
     [hash]
   );
   await insertProject(db, { projectName: 'Alpha', status: 'Active', dashboardVisibility: 'INTERNAL' }, 'PRJ-A');
+  await seedTestDivisions(db);
   app = await buildApp({
     db,
     inbox: new NullInboxSource(),
@@ -158,6 +159,61 @@ describe('personal work isolation', () => {
     );
     expect(history.map((row) => row.member_id)).toEqual(['MEM-B']);
     expect(await mine(await login('0010'))).toContain(taskId);
+  });
+});
+
+describe('task-list assignee filtering', () => {
+  it('filters before paging and preserves nested context and the reader visibility boundary', async () => {
+    await db.query("UPDATE members SET name = 'Duplicate' WHERE member_id IN ('MEM-A','MEM-B')");
+    await db.query("UPDATE members SET active = false WHERE member_id = 'MEM-B'");
+    await db.query("INSERT INTO responsibilities(responsibility_id,name) VALUES('FILTER-AREA','Area')");
+    await db.query("UPDATE projects SET responsibility_id='FILTER-AREA' WHERE project_id='PRJ-A'");
+    await db.query("INSERT INTO projects(project_id,project_name,status,dashboard_visibility) VALUES('PRJ-SECRET','Secret','Active','RESTRICTED')");
+    await db.query(`INSERT INTO tasks(task_id,project_id,parent_task_id,task_name,owner_member_id,status,planned_start,due_date) VALUES
+      ('FILTER-P','PRJ-A',NULL,'Parent','MEM-MANAGER','In Progress','2026-01-01','2099-12-31'),
+      ('FILTER-M','PRJ-A','FILTER-P','Middle','MEM-MANAGER','In Progress','2026-01-01','2099-12-31'),
+      ('FILTER-LEAF','PRJ-A','FILTER-M','Needle','MEM-A','In Progress','2026-01-01','2099-12-31'),
+      ('FILTER-OTHER','PRJ-A','FILTER-P','Other','MEM-MANAGER','In Progress','2026-01-01','2099-12-31'),
+      ('FILTER-PRIMARY','PRJ-A',NULL,'Primary','MEM-B','In Progress','2026-01-01','2099-12-31'),
+      ('FILTER-REMOVED','PRJ-A',NULL,'Removed','MEM-A','In Progress','2026-01-01','2099-12-31'),
+      ('FILTER-SECRET','PRJ-SECRET',NULL,'Secret','MEM-STAFF','In Progress','2026-01-01','2099-12-31')`);
+    await db.query(`INSERT INTO task_assignees(assignment_id,task_id,member_id,removed_at) VALUES
+      ('FILTER-AS1','FILTER-LEAF','MEM-B',NULL),
+      ('FILTER-AS2','FILTER-PRIMARY','MEM-A',NULL),
+      ('FILTER-AS3','FILTER-REMOVED','MEM-B',now())`);
+    const viewer = await login('0020');
+    const manager = await login('0002');
+    const get = async (url: string, headers: Record<string, string>) => {
+      const response = await app.inject({ url, headers: { cookie: headers.cookie! } });
+      expect(response.statusCode, response.body).toBe(200);
+      return response.json().data as { items: { taskId: string; contextOnly?: boolean; memberId?: string; name?: string; active?: boolean }[]; total: number; matchedTotal: number };
+    };
+    const base = '/api/work/tasks?tree=true&assigneeMemberId=MEM-B&workState=OPEN&sort=name&pageSize=1';
+    const first = await get(base, viewer);
+    expect(first.total).toBe(2);
+    expect(first.matchedTotal).toBe(2);
+    expect(first.items.map(item => [item.taskId, item.contextOnly])).toEqual([['FILTER-P', true]]);
+    const second = await get(`${base}&page=2`, viewer);
+    expect(second.items.map(item => [item.taskId, item.contextOnly])).toEqual([['FILTER-PRIMARY', false]]);
+    const middle = await get(`${base}&treeParentId=FILTER-P`, viewer);
+    expect(middle.items.map(item => [item.taskId, item.contextOnly])).toEqual([['FILTER-M', true]]);
+    const leaf = await get(`${base}&treeParentId=FILTER-M`, viewer);
+    expect(leaf.items.map(item => [item.taskId, item.contextOnly])).toEqual([['FILTER-LEAF', false]]);
+    const combined = await get('/api/work/tasks?assigneeMemberId=MEM-B&projectId=PRJ-A&responsibilityId=FILTER-AREA&displayStatus=IN_PROGRESS&query=Needle', viewer);
+    expect(combined.items.map(item => item.taskId)).toEqual(['FILTER-LEAF']);
+    const unknown = await get('/api/work/tasks?assigneeMemberId=UNKNOWN', viewer);
+    expect(unknown.total).toBe(0);
+    const options = await get('/api/work/task-assignees?query=Duplicate', viewer);
+    expect(options.items.map(item => [item.memberId, item.name, item.active])).toEqual([
+      ['MEM-A', 'Duplicate', true], ['MEM-B', 'Duplicate', false]
+    ]);
+    // Stable identifiers stay option values; the visible label never carries one, and the division
+    // name plus an employee identifier (for a manager) disambiguate two people who share a name.
+    expect(Object.keys(options.items[0]!).sort()).toEqual(['active', 'divisionNames', 'memberId', 'name']);
+    expect((await get('/api/work/task-assignees?memberId=MEM-STAFF', viewer)).total).toBe(0);
+    expect((await get('/api/work/task-assignees?memberId=MEM-STAFF', manager)).total).toBe(1);
+    expect((await app.inject({ url: '/api/manager/tasks?assigneeMemberId=MEM-B', headers: { cookie: viewer.cookie! } })).statusCode).toBe(403);
+    expect((await app.inject({ url: '/api/work/tasks?assigneeMemberId=A&assigneeMemberId=B', headers: { cookie: viewer.cookie! } })).statusCode).toBe(400);
   });
 });
 
@@ -391,7 +447,7 @@ describe('project visibility policy', () => {
     expect(detail.statusCode, detail.body).toBe(200);
     const record = detail.json().data.record as Record<string, unknown>;
     expect(Object.keys(record).sort()).toEqual(
-      ['activeTaskCount', 'committedDeadline', 'completedTaskCount', 'description', 'health', 'overdueTaskCount', 'priority', 'projectId', 'projectName', 'progressPercent', 'projectOwnerName', 'responsibilityId', 'responsibilityName', 'schedule', 'status'].sort()
+      ['activeTaskCount', 'committedDeadline', 'completedTaskCount', 'description', 'divisionName', 'health', 'overdueTaskCount', 'priority', 'projectId', 'projectName', 'progressPercent', 'projectOwnerName', 'responsibilityId', 'responsibilityName', 'schedule', 'status'].sort()
     );
     expect(detail.body).not.toContain('dashboardSummary');
     expect(detail.body).not.toContain('notificationEnabled');

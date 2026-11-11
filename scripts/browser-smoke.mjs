@@ -41,7 +41,9 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
 
   async function signInAs(identity) {
     // A fresh language state so the Japanese login labels are deterministic; the page must be on
-    // the application origin before localStorage is reachable.
+    // the application origin before localStorage is reachable. The desktop layout is restored so
+    // the sidebar navigation exists: a narrow viewport renders it as a closed drawer.
+    await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto(origin);
     await page.evaluate(() => window.localStorage.clear());
     await page.reload();
@@ -55,6 +57,28 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     }
     await expect(page.locator('.app-nav')).toBeVisible();
     await page.getByRole('button', { name: 'English', exact: true }).click();
+  }
+
+  /**
+   * Sign out through the account menu.
+   *
+   * Sign out lives in the account menu (the header also carries the division and language
+   * switches), so the menu is opened first - the same two steps a person takes.
+   */
+  async function signOut() {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page
+      .getByRole('button', { name: /English|日本語/ })
+      .first()
+      .waitFor();
+    const menu = page.locator('.account-menu .menu-trigger');
+    if (await menu.count()) {
+      await menu.click();
+      await page.getByRole('menuitem', { name: 'Sign out', exact: true }).click();
+    } else {
+      await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+    }
+    await expect(page.locator('.login-card')).toBeVisible();
   }
 
   /**
@@ -537,8 +561,7 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
       await page.getByRole('button',{name:'Save',exact:true}).click();
       await expect(page.getByText('Saved. Deliver the temporary password securely to the employee.')).toBeVisible();
     }
-    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-    await expect(page.locator('.login-card')).toBeVisible();
+    await signOut();
     if(local){
       await page.getByLabel('Employee ID',{exact:true}).fill('0009');
       await page.getByLabel('Password',{exact:true}).fill('1234');
@@ -559,10 +582,8 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     if (roleFixtures) {
       // Each role gets its own real session and read-only journey on the same server.
       for (const [roleName, identity] of Object.entries(roleFixtures.roles)) {
-        const signOut = page.getByRole('button', { name: 'Sign out', exact: true });
-        if (await signOut.count()) {
-          await signOut.click();
-          await expect(page.locator('.login-card')).toBeVisible();
+        if (await page.locator('.account-menu .menu-trigger').count()) {
+          await signOut();
         }
         await signInAs({
           email: identity.email,
@@ -574,8 +595,7 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
         } else {
           await readOnlyJourney(roleName);
         }
-        await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-        await expect(page.locator('.login-card')).toBeVisible();
+        await signOut();
       }
     }
     expect(errors).toEqual([]);

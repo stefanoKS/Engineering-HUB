@@ -6,7 +6,7 @@ import { businessDate } from '@eh/domain';
 import { buildApp } from '../src/app';
 import { loadConfig } from '../src/config';
 import { NullInboxSource } from '../src/inbox';
-import { freshDatabase, requireDatabase } from '../../../packages/db/test/support/db';
+import { freshDatabase, requireDatabase, seedTestDivisions } from '../../../packages/db/test/support/db';
 
 let app: FastifyInstance;
 let db: Database;
@@ -53,6 +53,7 @@ beforeEach(async () => {
     { projectName: 'Unassigned project', status: 'Active', dashboardVisibility: 'INTERNAL' },
     'PRJ-UNASSIGNED'
   );
+  await seedTestDivisions(db);
   app = await buildApp({
     db,
     inbox: new NullInboxSource(),

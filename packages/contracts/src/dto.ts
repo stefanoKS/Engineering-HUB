@@ -8,6 +8,8 @@
 import { z } from 'zod';
 import {
   DashboardVisibility,
+  DivisionAccessKind,
+  DivisionStatus,
   DurationBasis,
   DurationUnit,
   IssueSeverity,
@@ -27,6 +29,40 @@ import {
 } from './enums';
 import { Id, IsoDate, IsoTimestamp, Revision } from './common';
 
+/** One member/division relationship as an administrator edits it. */
+export const DivisionGrant = z.object({
+  divisionId: Id,
+  accessKind: DivisionAccessKind
+});
+export type DivisionGrant = z.infer<typeof DivisionGrant>;
+
+/**
+ * An administrator-managed division (課).
+ *
+ * The identifier is stable and never derived from the name, so renaming a division never rewrites
+ * a project, a task, an audit row or a published identifier.
+ */
+export const Division = z.object({
+  divisionId: Id,
+  name: z.string(),
+  status: DivisionStatus,
+  sortOrder: z.number().int(),
+  retiredAt: IsoTimestamp.nullable(),
+  revision: Revision,
+  createdAt: IsoTimestamp,
+  updatedAt: IsoTimestamp
+});
+export type Division = z.infer<typeof Division>;
+
+/** The narrow reference a selector and a project form read. */
+export const DivisionReference = z.object({
+  divisionId: Id,
+  name: z.string(),
+  status: DivisionStatus,
+  sortOrder: z.number().int().optional()
+});
+export type DivisionReference = z.infer<typeof DivisionReference>;
+
 export const Member = z.object({
   memberId: Id,
   name: z.string(),
@@ -39,6 +75,10 @@ export const Member = z.object({
   role: Role,
   /** The login identifier when a local account exists; never a password or a hash. */
   employeeId: z.string().optional(),
+  /** Active memberships and additional read grants, so the editor shows the stored reality. */
+  divisionGrants: z.array(DivisionGrant).optional(),
+  /** GENERAL_MANAGER oversight of every division, including future ones. */
+  allDivisionsRead: z.boolean().optional(),
   revision: Revision,
   createdAt: IsoTimestamp,
   updatedAt: IsoTimestamp
@@ -51,7 +91,18 @@ export const MemberSummary = z.object({
   active: z.boolean(),
   role: Role,
   /** The login identifier, when a local account exists. Absent for a member without a login. */
-  employeeId: z.string().optional()
+  employeeId: z.string().optional(),
+  /**
+   * Division display names only. They disambiguate two people who share a display name; a member
+   * identifier, an e-mail address and an access kind never appear here.
+   */
+  divisionNames: z.array(z.string()).optional(),
+  /**
+   * Identifiers of the divisions where this person holds a WORK membership, so an assignment
+   * selector can offer only the people eligible for the target work. The server re-validates
+   * every selected identifier; a filtered list is never the authorization.
+   */
+  workDivisionIds: z.array(z.string()).optional()
 });
 export type MemberSummary = z.infer<typeof MemberSummary>;
 
@@ -69,6 +120,9 @@ export const Responsibility = z.object({
   responsibilityId: Id,
   name: z.string(),
   description: z.string(),
+  /** The division this area belongs to; a project in the area can never sit in another one. */
+  divisionId: z.string().nullable(),
+  divisionName: z.string(),
   ownerMemberId: z.string().nullable(),
   ownerName: z.string(),
   status: ResponsibilityStatus,
@@ -114,6 +168,9 @@ export const Project = z.object({
   projectName: z.string(),
   description: z.string(),
   category: z.string(),
+  /** The canonical division of the work. Tasks and subprojects derive it through this project. */
+  divisionId: z.string().nullable(),
+  divisionName: z.string(),
   responsibilityId: z.string().nullable(),
   responsibilityName: z.string(),
   projectOwnerId: z.string().nullable(),
@@ -145,6 +202,8 @@ export type Project = z.infer<typeof Project>;
 export const ProjectSummary = z.object({
   projectId: Id,
   projectName: z.string(),
+  divisionId: z.string().nullable(),
+  divisionName: z.string(),
   responsibilityId: z.string().nullable(),
   responsibilityName: z.string(),
   projectOwnerId: z.string().nullable(),
@@ -161,6 +220,13 @@ export const ProjectSummary = z.object({
   containerCount: z.number().int().min(0),
   openWork: z.number().int().min(0),
   overdueWork: z.number().int().min(0),
+  /**
+   * Server-computed availability of a write on *this* record, resolved from the caller's division
+   * scope before paging. It is a presentation aid for a mixed or all-division list: a manager who
+   * may only read one division must not be offered an edit there. It is never authority - every
+   * command re-checks the scope on the server - and it is absent on a read-only projection.
+   */
+  canWrite: z.boolean().optional(),
   revision: Revision
 });
 export type ProjectSummary = z.infer<typeof ProjectSummary>;
@@ -295,10 +361,18 @@ export const TaskSummary = z.object({
   plannedStart: IsoDate.nullable(),
   progressPercent: z.number().min(0).max(100).nullable(),
   container: z.boolean(),
+  /** Tree rows included only to provide a path to matching descendants. */
+  contextOnly: z.boolean().optional(),
   depth: z.number().int().min(1),
   reviewState: ReviewState,
   overdue: z.boolean(),
   deadlineState: DeadlineState,
+  /**
+   * Server-computed availability of a write on this task, resolved through its project's division
+   * before paging. A presentation aid for a mixed or all-division list, never authority: every
+   * command re-checks the division on the server. Absent on a read-only projection.
+   */
+  canWrite: z.boolean().optional(),
   revision: Revision
 });
 export type TaskSummary = z.infer<typeof TaskSummary>;
@@ -349,7 +423,9 @@ export const TaskDetail = z.object({
   ),
   children: z.array(TaskSummary),
   /** Hierarchy depth of this task (1 = top level), used to explain child-task eligibility. */
-  depth: z.number().int().min(1)
+  depth: z.number().int().min(1),
+  /** Whether this record may be written by the caller; a presentation aid, never authority. */
+  canWrite: z.boolean().optional()
 });
 export type TaskDetail = z.infer<typeof TaskDetail>;
 

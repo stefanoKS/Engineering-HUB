@@ -25,14 +25,20 @@ export type WorkloadFilters = {
   memberId?: string | null;
   projectId?: string | null;
   responsibilityId?: string | null;
+  /**
+   * The caller's authorized divisions. `undefined` is the administrative unrestricted scope; an
+   * empty array counts nothing, so a report can never include an unauthorized division.
+   */
+  divisionIds?: readonly string[];
 };
 
 const OPEN_STATUSES = "('Not Started','Assigned','In Progress','Blocked','On Hold')";
 const WORKING_PROJECT_STATUSES = "('Planned','Active')";
 
 /**
- * Parameters $1 start, $2 end, $3 today, $4 project, $5 responsibility, $6 member are shared by
- * every query in this module; callers must keep that order.
+ * Parameters $1 start, $2 end, $3 today, $4 project, $5 responsibility, $6 member, $7 divisions are
+ * shared by every query in this module; callers must keep that order. A later query may append its
+ * own parameters from $8 onwards.
  */
 const SCOPE_CTE = `
 WITH RECURSIVE sp_chain AS (
@@ -81,6 +87,7 @@ scope AS (
      AND ($5::text IS NULL OR p.responsibility_id = $5)
      AND ($6::text IS NULL OR EXISTS (
        SELECT 1 FROM effective e WHERE e.task_id = t.task_id AND e.member_id = $6))
+     AND ($7::text[] IS NULL OR p.division_id = ANY($7::text[]))
 ),
 /* Types the period parameters for every statement, including one that only buckets by date. */
 period AS (
@@ -94,7 +101,8 @@ function baseParams(filters: WorkloadFilters): unknown[] {
     filters.today,
     filters.projectId ?? null,
     filters.responsibilityId ?? null,
-    filters.memberId ?? null
+    filters.memberId ?? null,
+    filters.divisionIds === undefined ? null : [...new Set(filters.divisionIds)]
   ];
 }
 
@@ -170,7 +178,7 @@ export async function workloadBucketCounts(
   buckets: readonly WorkloadBucketInput[]
 ): Promise<WorkloadBucketRow[]> {
   if (buckets.length === 0) return [];
-  const values = buckets.map((_, index) => `($${index * 3 + 7}::text, $${index * 3 + 8}::date, $${index * 3 + 9}::date)`);
+  const values = buckets.map((_, index) => `($${index * 3 + 8}::text, $${index * 3 + 9}::date, $${index * 3 + 10}::date)`);
   const params = [
     ...baseParams(filters),
     ...buckets.flatMap((bucket) => [bucket.key, bucket.start, bucket.end])
@@ -283,7 +291,7 @@ export async function workloadEmployeeCounts(
        LEFT JOIN agg ON agg.member_id = m.member_id
       WHERE m.active
         AND ($6::text IS NULL OR m.member_id = $6)
-        AND ($7::text IS NULL OR lower(m.name) LIKE $7)
+        AND ($8::text IS NULL OR lower(m.name) LIKE $8)
       ORDER BY ${order}
       LIMIT 500`,
     [...baseParams(filters), options.memberQuery ? `%${options.memberQuery.toLowerCase()}%` : null]
@@ -304,17 +312,17 @@ export type WorkloadTaskKind = 'DUE' | 'COMPLETED' | 'OVERDUE' | 'OVERDUE_IN_PER
 function kindPredicate(kind: WorkloadTaskKind): string {
   switch (kind) {
     case 'COMPLETED':
-      return 's.completed_date BETWEEN $7::date AND $8::date';
+      return 's.completed_date BETWEEN $8::date AND $9::date';
     case 'OVERDUE':
       return `s.status IN ${OPEN_STATUSES} AND s.due_date < $3::date`;
     case 'OVERDUE_IN_PERIOD':
-      return `s.status IN ${OPEN_STATUSES} AND s.due_date BETWEEN $7::date AND $8::date AND s.due_date < $3::date`;
+      return `s.status IN ${OPEN_STATUSES} AND s.due_date BETWEEN $8::date AND $9::date AND s.due_date < $3::date`;
     case 'UNDATED':
       return `s.status IN ${OPEN_STATUSES} AND s.due_date IS NULL`;
     case 'BACKLOG':
-      return `s.status IN ${OPEN_STATUSES} AND s.due_date < $7::date`;
+      return `s.status IN ${OPEN_STATUSES} AND s.due_date < $8::date`;
     default:
-      return 's.due_date BETWEEN $7::date AND $8::date';
+      return 's.due_date BETWEEN $8::date AND $9::date';
   }
 }
 
@@ -372,7 +380,7 @@ export async function workloadTaskPage(
   }>(
     `${SCOPE_CTE},
      /* Types both drilldown bounds even when a kind only uses one of them. */
-     drill_window AS (SELECT $7::date AS report_from, $8::date AS report_to),
+     drill_window AS (SELECT $8::date AS report_from, $9::date AS report_to),
      filtered AS (
        SELECT s.task_id, s.due_date, s.completed_date
          FROM scope s
@@ -391,7 +399,7 @@ export async function workloadTaskPage(
        JOIN projects p ON p.project_id = t.project_id
        LEFT JOIN subprojects sp ON sp.subproject_id = t.subproject_id
       ORDER BY t.due_date ASC NULLS LAST, t.task_id ASC
-      LIMIT $9 OFFSET $10`,
+      LIMIT $10 OFFSET $11`,
     params
   );
   const total = rows[0]?.total ?? (input.page > 1 ? await workloadTaskTotal(db, filters, input) : 0);
@@ -431,7 +439,7 @@ async function workloadTaskTotal(
 ): Promise<number> {
   const row = await db.one<{ total: number }>(
     `${SCOPE_CTE},
-     drill_window AS (SELECT $7::date AS report_from, $8::date AS report_to),
+     drill_window AS (SELECT $8::date AS report_from, $9::date AS report_to),
      filtered AS (
        SELECT s.task_id FROM scope s WHERE ${kindPredicate(input.kind)})
      SELECT count(*)::int AS total FROM filtered`,

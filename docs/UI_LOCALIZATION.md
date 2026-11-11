@@ -8,8 +8,14 @@ V1.3 ships one bilingual interface for both deployments:
 | Manager browser app (V1.5.1, `src/` HTML Service) | 概要, 案件, 案件の階層, タスク, 申請, 管理 and its sub-screens, create/edit dialogs, 計測 (diagnostics) | 日本語 |
 | Shared dashboard (`dashboard-app/`) | project dashboard, project detail, task detail, deadline change request, completion report | 日本語 |
 
-The official application name is **設計・開発課 管理** and is identical in every language.
+The V1 application's official name is **設計・開発課 管理** and is identical in every language.
 It is never translated, abbreviated or re-branded.
+
+> **V2 is branded differently.** The PostgreSQL application under `apps/` and `packages/` is branded
+> **シゴトモ** (Japanese) / **SHIGOTOMO** (English) in its header, sign-in title, browser title and
+> accessible application name. The brand is a product name only: a division named `設計・開発課` is
+> stored data and is rendered exactly as stored, and no identifier, table, package, API, environment
+> variable, migration or stored enum is renamed. See `docs/v2/DIVISIONS.md` §11.1.
 
 ## 1. Architecture
 

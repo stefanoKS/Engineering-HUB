@@ -20,6 +20,8 @@ import type {
 import { projectColorVars } from '@eh/domain';
 import { api, queryString } from '../api/client';
 import { useQuery } from '../state/cache';
+import { useDivisionScope } from '../state/division';
+import { useDivisionTransition } from '../state/scope';
 import { useI18n } from '../i18n';
 import { ErrorBox } from '../components/ui';
 import { RemoteSelect } from '../components/forms';
@@ -260,6 +262,9 @@ export function TimelineScreen({
     resetToInitial: !!initialProjectId
   });
   const [responsibilityId, setResponsibilityId] = useRouteMemoryState('timeline:responsibility', '');
+  // The shell's division switch narrows the timeline summaries; it is a display filter that the
+  // server re-narrows against the resolved scope.
+  const { selected: selectedDivision } = useDivisionScope();
   const initialWindow = useMemo(() => calendarMonthWindow(initialAnchor ?? todayJst()), [initialAnchor]);
   const [displayStart, setDisplayStart] = useRouteMemoryState('timeline:display-start', initialWindow.from, {
     resetToInitial: !!initialAnchor
@@ -275,6 +280,15 @@ export function TimelineScreen({
   const [subprojectId, setSubprojectId] = useRouteMemoryState('timeline:subproject', '');
   const [includeCompleted, setIncludeCompleted] = useRouteMemoryState('timeline:include-completed', true);
   const [page, setPage] = useRouteMemoryState('timeline:page', 1);
+  // Division switching clears a project selection that belonged to the previous scope: a
+  // project-focused timeline must never keep displaying division-A work under a division-B label.
+  // The selection is re-validated by the server if it is still reachable, and the period, sort and
+  // expansion are presentation state that survive.
+  useDivisionTransition(() => {
+    setProjectId('');
+    setSubprojectId('');
+    setPage(1);
+  });
   const [expanded, setExpanded] = useRouteMemoryState<string[]>('timeline:expanded', []);
   const [details, setDetails] = useRouteMemoryState<string | null>('timeline:details', null);
   const observerRef = useRef<ResizeObserver | null>(null);
@@ -315,10 +329,17 @@ export function TimelineScreen({
   const todayOffset = markerOf(todayJst(), window, dayWidth);
 
   const overview = useQuery<TimelineProjectPage>(
-    `work/timeline:overview:${responsibilityId}:${includeCompleted}:${page}`,
+    `work/timeline:overview:${responsibilityId}:${includeCompleted}:${page}:${selectedDivision ?? 'all'}`,
     () =>
       api.get<TimelineProjectPage>(
-        '/api/work/timeline' + queryString({ responsibilityId, page, pageSize: 25, includeCompleted: includeCompleted ? 'true' : 'false' })
+        '/api/work/timeline' +
+          queryString({
+            responsibilityId,
+            page,
+            pageSize: 25,
+            includeCompleted: includeCompleted ? 'true' : 'false',
+            divisionId: selectedDivision ?? undefined
+          })
       ),
     { enabled: !projectId }
   );

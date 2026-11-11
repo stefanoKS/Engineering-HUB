@@ -7,6 +7,10 @@
  *   entry - invalidation, a forced refresh and a logout all supersede the older owner;
  * - invalidating a prefix refetches the queries that are currently mounted instead of leaving a
  *   blank screen;
+ * - a refresh keeps the last successful payload and reports itself as *refreshing*, so a background
+ *   failure is presented as "older data + a refresh warning" instead of an empty screen;
+ * - a retained payload is never borrowed across keys: freshness metadata is per entry;
+ * - subscribers are key-scoped: a change to one entry only re-renders the components that read it;
  * - nothing is persisted: no private manager data reaches localStorage or IndexedDB.
  */
 import { useEffect, useReducer, useRef } from 'react';
@@ -17,7 +21,12 @@ type Entry = {
   promise?: Promise<unknown>;
   updatedAt: number;
   generation: number;
+  /** Bumped on every mutation of this entry, so a subscriber can detect its own change. */
+  version: number;
 };
+
+/** A hard ceiling on retained payloads, so a long session cannot grow without bound. */
+const MAX_ENTRIES = 240;
 
 type Active = {
   count: number;
@@ -26,11 +35,29 @@ type Active = {
 
 const STALE_AFTER_MS = 30_000;
 
+export type QuerySnapshot<T> = {
+  data?: T;
+  error?: unknown;
+  /** A first read is still in flight and there is nothing to show yet. */
+  loading: boolean;
+  /** A read is in flight while an earlier payload is still displayed. */
+  refreshing: boolean;
+  /** When the displayed payload was last confirmed by the server (epoch milliseconds, 0 = never). */
+  updatedAt: number;
+  /** The displayed payload is older than the revalidation window. */
+  stale: boolean;
+};
+
 class QueryCache {
   private entries = new Map<string, Entry>();
   private active = new Map<string, Active>();
   private listeners = new Set<() => void>();
   generation = 0;
+  /**
+   * Identifies the signed-in session's private data. `clear()` advances it, and a mutation that
+   * started before a sign-out therefore performs no cache effect afterwards.
+   */
+  sessionEpoch = 0;
 
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
@@ -39,6 +66,17 @@ class QueryCache {
 
   private emit(): void {
     for (const listener of [...this.listeners]) listener();
+  }
+
+  private touch(key: string): void {
+    const entry = this.entries.get(key);
+    if (entry) entry.version += 1;
+    this.emit();
+  }
+
+  /** The change counter of one key: a subscriber re-renders only when its own entry changed. */
+  version(key: string): number {
+    return this.entries.get(key)?.version ?? 0;
   }
 
   /** Registers a mounted query so invalidation can refetch it. */
@@ -54,13 +92,29 @@ class QueryCache {
     else this.active.set(key, { ...existing, count: existing.count - 1 });
   }
 
-  peek<T>(key: string): { data?: T; error?: unknown; loading: boolean } {
+  peek<T>(key: string): QuerySnapshot<T> {
     const entry = this.entries.get(key);
+    const hasData = entry?.data !== undefined;
     return {
       data: entry?.data as T | undefined,
       error: entry?.error,
-      loading: !!entry?.promise && entry.data === undefined
+      loading: !!entry?.promise && !hasData,
+      refreshing: !!entry?.promise && hasData,
+      updatedAt: entry?.updatedAt ?? 0,
+      stale: hasData && Date.now() - (entry?.updatedAt ?? 0) >= STALE_AFTER_MS
     };
+  }
+
+  /** Drops the least recently confirmed payloads once the bounded size is exceeded. */
+  private trim(): void {
+    if (this.entries.size <= MAX_ENTRIES) return;
+    const ordered = [...this.entries.entries()]
+      .filter(([, entry]) => !entry.promise)
+      .sort((left, right) => left[1].updatedAt - right[1].updatedAt);
+    for (const [key] of ordered) {
+      if (this.entries.size <= MAX_ENTRIES) break;
+      this.entries.delete(key);
+    }
   }
 
   async fetch<T>(key: string, loader: () => Promise<T>, options: { force?: boolean } = {}): Promise<T> {
@@ -70,12 +124,14 @@ class QueryCache {
       return existing.data as T;
     }
     // A new entry object becomes the sole owner of the key. Any older read still in flight sees
-    // a different object in the map and drops its result, error and completion.
+    // a different object in the map and drops its result, error and completion. The last
+    // successful payload is carried over, so a refresh is never a blank screen.
     const entry: Entry = {
       data: existing?.data,
       error: undefined,
       updatedAt: existing?.updatedAt ?? 0,
-      generation: this.generation
+      generation: this.generation,
+      version: (existing?.version ?? 0) + 1
     };
     const owns = (): boolean => this.entries.get(key) === entry;
     const promise = loader()
@@ -93,6 +149,8 @@ class QueryCache {
       .finally(() => {
         if (!owns()) return;
         entry.promise = undefined;
+        entry.version += 1;
+        this.trim();
         this.emit();
       });
     entry.promise = promise;
@@ -104,14 +162,21 @@ class QueryCache {
   /**
    * Removes cached and in-flight entries whose key starts with one of the prefixes, then
    * refetches every mounted query in that group once.
+   *
+   * A mounted query keeps its last successful payload while it refetches, so an invalidation never
+   * blanks a screen that is on display (and never unmounts the editor a user is working in). An
+   * entry nobody is looking at is dropped, which keeps the cache bounded. The union of cached and
+   * in-flight keys is what counts, so a read started before a newer write can neither paint nor be
+   * joined by the refresh that follows it.
    */
   invalidate(prefixes: string[]): void {
     const matches = (key: string): boolean => prefixes.some((prefix) => key.startsWith(prefix));
+    const affected = new Set<string>([...this.entries.keys(), ...this.active.keys()]);
     let changed = false;
-    for (const key of [...this.entries.keys()]) {
+    for (const key of affected) {
       if (!matches(key)) continue;
-      this.entries.delete(key);
-      changed = true;
+      if (this.active.has(key)) continue;
+      if (this.entries.delete(key)) changed = true;
     }
     this.generation += 1;
     if (changed || prefixes.length) this.emit();
@@ -122,10 +187,16 @@ class QueryCache {
     }
   }
 
-  /** Drops every payload. Used on sign-out and on a lost session; nothing is refetched. */
+  /**
+   * Drops every payload. Used on sign-out and on a lost session; nothing is refetched.
+   *
+   * The session epoch advances, so a mutation that was already in flight when the session ended
+   * can never invalidate, repopulate or otherwise touch the next user's cache.
+   */
   clear(): void {
     this.entries.clear();
     this.generation += 1;
+    this.sessionEpoch += 1;
     this.emit();
   }
 }
@@ -173,6 +244,7 @@ export const keys = {
   status: 'manager/status',
   workload: 'manager/workload',
   references: 'manager/references',
+  divisions: 'manager/divisions',
   employee: 'employee/snapshot',
   myWork: 'employee/my-work',
   myProjects: 'employee/my-work/projects',
@@ -190,18 +262,26 @@ export const keys = {
   timeline: 'work/timeline'
 };
 
+export type QueryResult<T> = QuerySnapshot<T> & {
+  refresh: () => void;
+  /** Re-reads only when the displayed payload is older than the revalidation window. */
+  revalidate: () => void;
+};
+
 export function useQuery<T>(
   key: string,
   loader: () => Promise<T>,
   options: { enabled?: boolean } = {}
-): { data?: T; error?: unknown; loading: boolean; refresh: () => void } {
+): QueryResult<T> {
   const [, rerender] = useReducer((value: number) => value + 1, 0);
   const loaderRef = useRef(loader);
   loaderRef.current = loader;
+  const seenVersion = useRef(queryCache.version(key));
 
   useEffect(() => {
     if (options.enabled === false) return undefined;
     let cancelled = false;
+    seenVersion.current = queryCache.version(key);
     queryCache.activate(key, () => loaderRef.current());
     void queryCache
       .fetch(key, () => loaderRef.current())
@@ -211,8 +291,14 @@ export function useQuery<T>(
       .catch(() => {
         if (!cancelled) rerender();
       });
+    // Key-scoped notification: this component re-renders only when its own entry changed, so an
+    // unrelated save never repaints every open list.
     const unsubscribe = queryCache.subscribe(() => {
-      if (!cancelled) rerender();
+      if (cancelled) return;
+      const version = queryCache.version(key);
+      if (version === seenVersion.current) return;
+      seenVersion.current = version;
+      rerender();
     });
     return () => {
       cancelled = true;
@@ -221,11 +307,16 @@ export function useQuery<T>(
     };
   }, [key, options.enabled]);
 
-  const state = queryCache.peek<T>(key);
+  const refresh = (): void => {
+    void queryCache.fetch(key, () => loaderRef.current(), { force: true }).catch(() => undefined);
+  };
+
   return {
-    ...state,
-    refresh: () => {
-      void queryCache.fetch(key, () => loaderRef.current(), { force: true }).catch(() => undefined);
+    ...queryCache.peek<T>(key),
+    refresh,
+    revalidate: () => {
+      if (!queryCache.peek<T>(key).stale) return;
+      refresh();
     }
   };
 }

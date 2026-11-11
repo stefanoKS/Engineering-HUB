@@ -6,6 +6,7 @@ import { z } from 'zod';
 import {
   AuditEntry,
   DisplayTaskStatus,
+  DivisionReference,
   HealthStatus,
   MemberSummary,
   ProgressRollup,
@@ -18,7 +19,7 @@ import {
   TaskSummary
 } from './dto';
 import { Id, IsoDate, IsoTimestamp, Revision, paged } from './common';
-import { Priority, ProjectStatus, RequestType, ResponsibilityStatus, ScheduleMissingPart, SubmissionBlockReason, TaskStatus } from './enums';
+import { Priority, ProjectStatus, RequestType, ResponsibilityStatus, Role, ScheduleMissingPart, SubmissionBlockReason, TaskStatus } from './enums';
 
 export const ScopeCounts = z.object({
   workItems: z.number().int().min(0),
@@ -36,7 +37,9 @@ export const Reference = z.object({
   id: z.string(),
   name: z.string(),
   status: z.string(),
-  parentId: z.string().nullable().optional()
+  parentId: z.string().nullable().optional(),
+  /** A responsibility's division, so a creation form can offer only that division's areas. */
+  divisionId: z.string().nullable().optional()
 });
 export type Reference = z.infer<typeof Reference>;
 
@@ -77,6 +80,8 @@ export type Overview = z.infer<typeof Overview>;
 export const OverviewQuery = z
   .object({
     responsibilityId: Id.optional(),
+    /** Narrows the authorized scope; it never widens it. */
+    divisionId: Id.optional(),
     unassigned: z.enum(['true', 'false']).transform((value) => value === 'true').default(false),
     upcomingDays: z.coerce
       .number()
@@ -90,7 +95,7 @@ export const Actor = z.object({
   memberId: z.string(),
   name: z.string(),
   email: z.string(),
-  role: z.enum(['ADMIN', 'MANAGER', 'MEMBER', 'VIEWER']),
+  role: Role,
   active: z.boolean(),
   verified: z.boolean(),
   selfServiceEnabled: z.boolean()
@@ -105,6 +110,17 @@ export const Bootstrap = z.object({
     schemaVersion: z.number().int(),
     defaultLocale: z.enum(['ja', 'en']),
     environment: z.string()
+  }),
+  /**
+   * The divisions the signed-in person may read and the one their role may write, resolved on the
+   * server. The browser may render them but never widen them: every request re-resolves the scope.
+   */
+  divisions: z.object({
+    readable: z.array(DivisionReference),
+    writable: z.array(DivisionReference),
+    /** `true` only for the cross-division read-only oversight role. */
+    allDivisions: z.boolean(),
+    defaultDivisionId: z.string().nullable()
   }),
   references: z.object({
     responsibilities: z.array(Reference),
@@ -134,6 +150,8 @@ export const MemberProfileView = z.object({
   ownership: z.object({
     current: z.number().int().min(0),
     previous: z.number().int().min(0),
+    /** Former assignments in a division the reader may not see: counted, never described. */
+    previousHidden: z.number().int().min(0).default(0),
     additionalCurrent: z.number().int().min(0),
     historicalOnly: z.number().int().min(0),
     limitation: z.string(),
@@ -175,7 +193,9 @@ const WORKLOAD_FILTERS = {
   end: IsoDate.optional(),
   memberId: Id.optional(),
   projectId: Id.optional(),
-  responsibilityId: Id.optional()
+  responsibilityId: Id.optional(),
+  /** Narrows the authorized readable scope to one division; it can never widen it. */
+  divisionId: Id.optional()
 };
 
 /** Query for `GET /api/manager/reports/workload`; the server resolves the period. */
@@ -341,7 +361,12 @@ export const PublicationStatus = z.object({
   rows: z.record(z.string(), z.number().int().min(0)),
   hash: z.string(),
   activeSlot: z.enum(['A', 'B', 'NONE']),
-  destinationConfigured: z.boolean()
+  destinationConfigured: z.boolean(),
+  /**
+   * False while the company-wide snapshot cannot scope rows to a reader's divisions. Publication
+   * fails closed at execution in that state; a previously published snapshot is unaffected.
+   */
+  divisionIsolationSupported: z.boolean().default(false)
 });
 export type PublicationStatus = z.infer<typeof PublicationStatus>;
 
@@ -553,7 +578,11 @@ export type MyWorkProjectOptions = z.infer<typeof MyWorkProjectOptions>;
  */
 export const MyWorkProjectFormOptions = z.object({
   projectCreationEnabled: z.boolean(),
-  responsibilities: z.array(z.object({ responsibilityId: z.string(), name: z.string() }))
+  responsibilities: z.array(
+    z.object({ responsibilityId: z.string(), name: z.string(), divisionId: z.string().nullable().optional() })
+  ),
+  /** The divisions this member may create in; never a division they only read. */
+  divisions: z.array(DivisionReference).default([])
 });
 export type MyWorkProjectFormOptions = z.infer<typeof MyWorkProjectFormOptions>;
 
@@ -591,7 +620,9 @@ export const ProjectDetail = z.object({
   subprojects: z.array(z.unknown()),
   tasks: z.array(TaskSummary),
   milestones: z.array(z.unknown()),
-  phases: z.array(z.unknown())
+  phases: z.array(z.unknown()),
+  /** Whether this record may be written by the caller; a presentation aid, never authority. */
+  canWrite: z.boolean().optional()
 });
 export type ProjectDetail = z.infer<typeof ProjectDetail>;
 
@@ -603,7 +634,7 @@ export const LocalAccount = z.object({
   employeeId: z.string(),
   memberId: z.string(),
   name: z.string(),
-  role: z.enum(['ADMIN', 'MANAGER', 'MEMBER', 'VIEWER']),
+  role: Role,
   active: z.boolean(),
   mustChangePassword: z.boolean()
 });
@@ -622,7 +653,7 @@ export type LocalAccountList = z.infer<typeof LocalAccountList>;
 export const LinkableMember = z.object({
   memberId: z.string(),
   name: z.string(),
-  role: z.enum(['ADMIN', 'MANAGER', 'MEMBER', 'VIEWER']),
+  role: Role,
   active: z.boolean(),
   employeeId: z.string().nullable()
 });
@@ -646,7 +677,9 @@ export const WorkProject = z.object({
   projectId: z.string(),
   projectName: z.string(),
   description: z.string(),
-  /** Grouping key; `null` means the documented unassigned (未分類) scope. */
+  /** Display name of the canonical division; the identifier stays on the manager projection. */
+  divisionName: z.string(),
+  /** Grouping key; `null` means the documented unassigned (未刁E��E scope. */
   responsibilityId: z.string().nullable(),
   responsibilityName: z.string(),
   projectOwnerName: z.string(),
@@ -720,6 +753,25 @@ export const WorkTaskPage = z.object({
 });
 export type WorkTaskPage = z.infer<typeof WorkTaskPage>;
 
+export const TaskAssigneeOptionPage = z.object({
+  items: z.array(
+    z.object({
+      memberId: z.string().min(1),
+      name: z.string(),
+      active: z.boolean(),
+      /** Division display names, the first disambiguator for two people who share a name. */
+      divisionNames: z.array(z.string()).default([]),
+      /** Present only for a reader who may already see employee identifiers. */
+      employeeId: z.string().optional()
+    })
+  ),
+  total: z.number().int().min(0),
+  page: z.number().int().min(1),
+  pageSize: z.number().int().min(1),
+  totalPages: z.number().int().min(0)
+});
+export type TaskAssigneeOptionPage = z.infer<typeof TaskAssigneeOptionPage>;
+
 /**
  * One responsibility summary in the member overview.
  *
@@ -771,6 +823,8 @@ export type WorkOverview = z.infer<typeof WorkOverview>;
 export const WorkOverviewQuery = z
   .object({
     responsibilityId: Id.optional(),
+    /** Narrows the authorized scope; it never widens it. */
+    divisionId: Id.optional(),
     upcomingDays: z.coerce
       .number()
       .pipe(z.union([z.literal(7), z.literal(14), z.literal(30)]))
@@ -780,7 +834,7 @@ export const WorkOverviewQuery = z
 export type WorkOverviewQuery = z.infer<typeof WorkOverviewQuery>;
 
 /**
- * The ADMIN-only capability behind "Reopen task / 完了を取り消す".
+ * The ADMIN-only capability behind "Reopen task / 完亁E��取り消す".
  *
  * The answer never grants authority: the command re-reads the task, the project and the revision
  * inside its own transaction. A missing or failed answer keeps the action unavailable.

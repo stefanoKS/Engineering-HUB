@@ -10,6 +10,7 @@ import { runMigrations } from './migrate';
 import { insertMember } from './repo/directory';
 import { insertResponsibility } from './repo/directory';
 import { insertProject, insertSubproject } from './repo/work';
+import { bootstrapDivisions, grantDivisionMembership } from './divisions-bootstrap';
 import { insertTask } from './repo/tasks';
 import { KNOWN_SETTINGS } from './repo/system';
 import { addDays, businessDate } from '@eh/domain';
@@ -81,9 +82,22 @@ export async function seedDemo(db: Database, options: { force?: boolean; tasks?:
   }, 'MEM-VIEWER');
   counts.members = 5;
 
+  // The demo deployment records the approved initial divisions and gives every demo member a
+  // membership in the first one. This is seed data for development, never an operational backfill.
+  await bootstrapDivisions(db);
+  for (const member of [admin, manager, memberA, memberB, viewer]) {
+    await grantDivisionMembership(db, {
+      memberId: member.memberId,
+      divisionId: 'DIV-DESIGN-DEV',
+      actor: 'seed'
+    });
+  }
+  counts.divisions = 3;
+
   const design = await insertResponsibility(db, {
     name: '機械設計',
     description: '機構設計と図面',
+    divisionId: 'DIV-DESIGN-DEV',
     ownerMemberId: manager.memberId,
     sortOrder: 1,
     colorHex: '#2563EB'
@@ -91,6 +105,7 @@ export async function seedDemo(db: Database, options: { force?: boolean; tasks?:
   const software = await insertResponsibility(db, {
     name: 'ソフトウェア開発',
     description: '制御ソフトウェア',
+    divisionId: 'DIV-DESIGN-DEV',
     ownerMemberId: admin.memberId,
     sortOrder: 2,
     colorHex: '#0D9488'
@@ -101,6 +116,7 @@ export async function seedDemo(db: Database, options: { force?: boolean; tasks?:
     projectName: '新型ポンプ開発',
     description: '次期主力ポンプの設計・試作',
     category: 'Product',
+    divisionId: 'DIV-DESIGN-DEV',
     responsibilityId: design.responsibilityId,
     projectOwnerId: manager.memberId,
     status: 'Active',
@@ -117,6 +133,7 @@ export async function seedDemo(db: Database, options: { force?: boolean; tasks?:
     projectName: '制御ユニット刷新',
     description: '制御基板とファームウェアの刷新',
     category: 'Product',
+    divisionId: 'DIV-DESIGN-DEV',
     responsibilityId: software.responsibilityId,
     projectOwnerId: admin.memberId,
     status: 'Active',

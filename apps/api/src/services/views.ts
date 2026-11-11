@@ -11,8 +11,11 @@ import {
   listAllProjects,
   listAllTasksForScope,
   listAudit,
+  listDivisions,
   listTaskSummaries,
   listMembers,
+  memberDivisionNames,
+  memberWorkDivisionIds,
   listPendingRequests,
   listResponsibilities,
   listSkills,
@@ -31,22 +34,34 @@ import type {
 import { API_VERSION, APP_VERSION, DB_SCHEMA_VERSION } from '@eh/contracts';
 import {
   businessDate,
+  assertReadableDivision,
   createScope,
   deadlineState,
   projectScheduleStatus,
+  readableDivisionIds,
   rollup,
+  scopedDivisionIds,
+  type DivisionScope,
   type Identity,
   type SubprojectLike
 } from '@eh/domain';
+import { divisionReferences } from './divisions';
 
 export type ReadCtx = {
   db: Database;
   cache: Map<string, Promise<unknown>>;
   today: string;
+  /** The division scope of the caller, resolved once per request. */
+  divisions: DivisionScope;
 };
 
 export function readCtx(request: FastifyRequest): ReadCtx {
-  return { db: request.state.db, cache: request.state.cache, today: businessDate() };
+  return {
+    db: request.state.db,
+    cache: request.state.cache,
+    today: businessDate(),
+    divisions: request.state.divisions
+  };
 }
 
 export function memo<T>(ctx: ReadCtx, key: string, load: () => Promise<T>): Promise<T> {
@@ -62,12 +77,14 @@ export const TASK_INDEX_LIMIT = 2000;
 
 export function directory(ctx: ReadCtx) {
   return memo(ctx, 'directory', async () => {
+    // One read per table per request, each already restricted to the caller's divisions.
+    const divisionIds = readableDivisionIds(ctx.divisions);
     const [responsibilities, members, skills, subprojects, projects] = await Promise.all([
-      listResponsibilities(ctx.db),
+      listResponsibilities(ctx.db, { divisionIds }),
       listMembers(ctx.db, { includeInactive: true, limit: 1000 }),
       listSkills(ctx.db),
-      listSubprojects(ctx.db),
-      listAllProjects(ctx.db, 2000)
+      listSubprojects(ctx.db, undefined, divisionIds),
+      listAllProjects(ctx.db, 2000, divisionIds)
     ]);
     return { responsibilities, members, skills, subprojects, projects };
   });
@@ -75,7 +92,10 @@ export function directory(ctx: ReadCtx) {
 
 export function taskScope(ctx: ReadCtx) {
   return memo(ctx, 'scope', async () => {
-    const [dir, tasks] = await Promise.all([directory(ctx), listAllTasksForScope(ctx.db)]);
+    const [dir, tasks] = await Promise.all([
+      directory(ctx),
+      listAllTasksForScope(ctx.db, 20000, readableDivisionIds(ctx.divisions))
+    ]);
     const projects = new Map<string, { status: string; notificationEnabled: boolean }>();
     for (const project of dir.projects) {
       projects.set(project.projectId, {
@@ -97,8 +117,25 @@ export function taskScope(ctx: ReadCtx) {
   });
 }
 
-export function actorDto(identity: Identity): Actor {  return {
-    memberId: identity.memberId,
+/**
+ * The divisions a screen may offer, resolved in the caller's scope. "All divisions" is expressed by
+ * the scope flag, never by a browser-supplied list, so a division created later is included for an
+ * account that may oversee every division.
+ */
+async function listDivisionsWithScope(ctx: ReadCtx): Promise<Bootstrap['divisions']> {
+  // Retired divisions stay readable so history stays reachable; `writable` still excludes them.
+  const divisions = await listDivisions(ctx.db, { includeRetired: true });
+  const { readable, writable } = divisionReferences(ctx.divisions, divisions);
+  const defaultDivisionId = writable[0]?.divisionId ?? readable[0]?.divisionId ?? null;
+  return {
+    readable,
+    writable,
+    allDivisions: ctx.divisions.manageAll || ctx.divisions.overseeAll,
+    defaultDivisionId
+  };
+}
+
+export function actorDto(identity: Identity): Actor {  return {    memberId: identity.memberId,
     name: identity.name,
     email: identity.email,
     role: identity.role,
@@ -112,6 +149,8 @@ export function buildProjectSummary(
   project: {
     projectId: string;
     projectName: string;
+    divisionId?: string | null;
+    divisionName?: string;
     responsibilityId: string | null;
     responsibilityName: string;
     projectOwnerId: string | null;
@@ -132,6 +171,8 @@ export function buildProjectSummary(
   return {
     projectId: project.projectId,
     projectName: project.projectName,
+    divisionId: project.divisionId ?? null,
+    divisionName: project.divisionName ?? '',
     responsibilityId: project.responsibilityId,
     responsibilityName: project.responsibilityName,
     projectOwnerId: project.projectOwnerId,
@@ -185,9 +226,12 @@ function toRollupTasks(
 
 export async function buildOverview(
   ctx: ReadCtx,
-  input: { responsibilityId?: string; unassigned?: boolean; upcomingDays: 7 | 14 | 30 }
+  input: { responsibilityId?: string; divisionId?: string; unassigned?: boolean; upcomingDays: 7 | 14 | 30 }
 ): Promise<Overview> {
   const { scope, dir } = await taskScope(ctx);
+  // The same narrowing rule as every list: an unauthorized division is refused, never silently
+  // applied to the aggregate figure, the cards or paged sections.
+  const divisionIds = scopedDivisionIds(ctx.divisions, input.divisionId);
   const responsibilityOfProject = new Map<string, string | null>(
     dir.projects.map((project) => [project.projectId, project.responsibilityId])
   );
@@ -219,6 +263,7 @@ export async function buildOverview(
   const commonFilters = {
     responsibilityId: input.responsibilityId,
     unassigned: input.unassigned,
+    divisionIds,
     today: ctx.today
   };
   const upcomingTo = addDaysIso(ctx.today, input.upcomingDays - 1);
@@ -324,7 +369,16 @@ export async function buildOverview(
 export async function buildBootstrap(ctx: ReadCtx, identity: Identity, environment: string): Promise<Bootstrap> {
   const dir = await directory(ctx);
   const { scope } = await taskScope(ctx);
-  const index = await compactTaskIndex(ctx.db, TASK_INDEX_LIMIT);
+  const index = await compactTaskIndex(ctx.db, TASK_INDEX_LIMIT, readableDivisionIds(ctx.divisions));
+  const divisions = await listDivisionsWithScope(ctx);
+  const memberDivisions = await memberDivisionNames(
+    ctx.db,
+    dir.members.map((member) => member.memberId)
+  );
+  const memberWork = await memberWorkDivisionIds(
+    ctx.db,
+    dir.members.map((member) => member.memberId)
+  );
 
   const projects = dir.projects
     .slice(0, PROJECT_INDEX_LIMIT)
@@ -345,18 +399,22 @@ export async function buildBootstrap(ctx: ReadCtx, identity: Identity, environme
       defaultLocale: 'ja',
       environment
     },
+    divisions,
     references: {
       responsibilities: dir.responsibilities.map((responsibility) => ({
         id: responsibility.responsibilityId,
         name: responsibility.name,
-        status: responsibility.status
+        status: responsibility.status,
+        divisionId: responsibility.divisionId ?? null
       })),
       members: dir.members.map((member) => ({
         memberId: member.memberId,
         name: member.name,
         active: member.active,
         role: member.role,
-        employeeId: member.employeeId
+        employeeId: member.employeeId,
+        divisionNames: memberDivisions.get(member.memberId) ?? [],
+        workDivisionIds: memberWork.get(member.memberId) ?? []
       })),
       skills: dir.skills,
       subprojects: dir.subprojects.map((subproject) => ({
@@ -380,6 +438,7 @@ export async function buildBootstrap(ctx: ReadCtx, identity: Identity, environme
 
 /** Project detail: the record, its rollup, descendants and its task summaries. */
 export async function buildProjectDetail(ctx: ReadCtx, project: import('@eh/contracts').Project) {
+  assertReadableDivision(ctx.divisions, project.divisionId);
   const dir = await directory(ctx);
   const tasks = await listTaskSummariesForProject(ctx.db, project.projectId);
   const { scope } = await taskScope(ctx);
@@ -419,8 +478,12 @@ export async function buildProjectDetail(ctx: ReadCtx, project: import('@eh/cont
 
 /** One member's current and former work, with audit evidence for recorded activity. */
 export async function buildMemberProfile(ctx: ReadCtx, member: import('@eh/contracts').Member) {
-  const [{ current, previous }, activity] = await Promise.all([
-    listTaskSummariesForMember(ctx.db, member.memberId),
+  const [{ current, previous, previousHidden }, activity] = await Promise.all([
+    // Both lists are read in the caller's divisions; a former assignment elsewhere is counted,
+    // never described.
+    listTaskSummariesForMember(ctx.db, member.memberId, {
+      currentDivisionIds: readableDivisionIds(ctx.divisions)
+    }),
     listAudit(ctx.db, { limit: 50 })
   ]);
   const ownActivity = activity.filter((entry) => entry.actor === member.email);
@@ -441,9 +504,11 @@ export async function buildMemberProfile(ctx: ReadCtx, member: import('@eh/contr
     ownership: {
       current: current.length,
       previous: previous.length,
+      previousHidden,
       additionalCurrent: current.filter((task) => task.ownerMemberId !== member.memberId).length,
       historicalOnly: previous.filter((task) => task.ownerMemberId !== member.memberId).length,
-      limitation: 'Ownership history is derived from relationship rows and audit evidence only',
+      limitation:
+        'Ownership history is derived from relationship rows and audit evidence only; former work in a division you may not read is counted but not described',
       evidence: 'AUDIT_LOG'
     }
   };

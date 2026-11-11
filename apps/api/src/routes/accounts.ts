@@ -15,9 +15,11 @@ import type { FastifyInstance } from 'fastify';
 import { CreateAccountBody, ResetAccountPasswordBody } from '@eh/contracts';
 import { DomainError, effectiveRole, requireRole } from '@eh/domain';
 import { listLinkableMembers, newId } from '@eh/db';
+import type { Transaction } from '@eh/db';
 import { adminOf, ok, type AppDependencies } from '../http';
 import { sendError } from '../errors';
 import { runIdempotent } from '../services/common';
+import { lockDivisionMutation } from '../services/divisions';
 import { hashPassword } from '../auth/password';
 
 const listQuery = z.object({
@@ -101,8 +103,17 @@ export function registerAccountRoutes(app: FastifyInstance, deps: AppDependencie
       if (!isLink && !body.name) {
         throw new DomainError('VALIDATION_FAILED', 'An employee name is required for a new member');
       }
+      // The access check a replayed creation must still pass: the stored answer is returned only
+      // to an account that is still an active ADMIN.
+      const requireCurrentAdmin = async (tx: Transaction): Promise<void> => {
+        const current = await tx.one<{ role: string; active: boolean }>(
+          'SELECT role, active FROM members WHERE member_id = $1',
+          [actor.memberId]
+        );
+        requireRole({ ...actor, role: effectiveRole(current?.role), active: !!current?.active }, 'ADMIN');
+      };
       const result = await runIdempotent(
-        { db: deps.db, identity: actor, correlationId: request.state.correlationId },
+        { db: deps.db, identity: actor, correlationId: request.state.correlationId, divisions: request.state.divisions },
         {
           scope: `local-account:${actor.memberId}`,
           key: body.idempotencyKey,
@@ -114,17 +125,10 @@ export function registerAccountRoutes(app: FastifyInstance, deps: AppDependencie
           }
         },
         async (tx) => {
-          // The last-administrator rule and role changes share one lock; a stale session role is
-          // re-read here so a role revoked a moment ago cannot create an account.
-          await tx.advisoryLock('members:role-and-activation');
-          const current = await tx.one<{ role: string; active: boolean }>(
-            'SELECT role, active FROM members WHERE member_id = $1',
-            [actor.memberId]
-          );
-          requireRole(
-            { ...actor, role: effectiveRole(current?.role), active: !!current?.active },
-            'ADMIN'
-          );
+          // The last-administrator rule and role changes share the app-wide lock order; a stale
+          // session role is re-read here so a role revoked a moment ago cannot create an account.
+          await lockDivisionMutation(tx);
+          await requireCurrentAdmin(tx);
 
           const taken = await tx.one<{ employee_id: string }>(
             'SELECT employee_id FROM local_accounts WHERE employee_id = $1',
@@ -181,7 +185,8 @@ export function registerAccountRoutes(app: FastifyInstance, deps: AppDependencie
             ]
           );
           return { memberId, linked: isLink };
-        }
+        },
+        { authorize: requireCurrentAdmin }
       );
       return ok(reply, request, result.data);
     } catch (error) {
@@ -200,7 +205,7 @@ export function registerAccountRoutes(app: FastifyInstance, deps: AppDependencie
       const body = ResetAccountPasswordBody.parse(request.body ?? {});
       const hash = await hashPassword(body.password);
       await deps.db.transaction(async (tx) => {
-        await tx.advisoryLock('members:role-and-activation');
+        await lockDivisionMutation(tx);
         const current = await tx.one<{ role: string; active: boolean }>(
           'SELECT role, active FROM members WHERE member_id = $1',
           [actor.memberId]

@@ -4,6 +4,15 @@ The V1 workbook stays the authoritative source until you deliberately switch. Th
 only **reads** it and writes a fresh V2 database. It never edits, clears or migrates a live
 workbook, and it never sends a notification.
 
+## 0. Current schema: 12, and no new migration for the 2026-11-11 corrections
+
+The latest migration is `0012_divisions.sql`; a build from this repository requires schema **12**.
+The division/branding corrective release of 2026-11-11 adds **no** migration: it changes the write
+path, the ordering it computes at runtime (`Sort_Order` is allocated and re-sequenced by the service,
+never by a schema default), the client and the documentation. Nothing therefore needs to run against
+an existing database for that release, and `0012_divisions.sql` must not be edited to change runtime
+ordering - an applied migration file is immutable.
+
 ## 1. Commands
 
 ### Schema 10 → 11 on an existing installation (Windows LAN)
@@ -199,3 +208,72 @@ before a rollback (`pg_dump`), because V1 cannot read it.
 | Measured import duration for the production volume | **NOT_RUN** | No production dataset locally |
 
 No live data was read, migrated or written while building V2.
+
+## 9. Schema 12: divisions (課)
+
+`0012_divisions.sql` is additive and seeds nothing:
+
+* `DIVISIONS` (stable `division_id`, name, `Active`/`Retired`, sort order, revision);
+* `MEMBER_DIVISIONS` (`WORK` membership or `READ` additional access, soft removal, one active
+  relationship per member and division);
+* `MEMBERS.all_divisions_read` and the extended `MEMBERS.role` check (`GENERAL_MANAGER`);
+* `PROJECTS.division_id` and `RESPONSIBILITIES.division_id`, both nullable so historical rows keep
+  their unmapped state;
+* `eh_check_project_division` / `eh_check_responsibility_division` and the supporting indexes.
+
+The approved bootstrap is `bootstrapDivisions` (`packages/db/src/divisions-bootstrap.ts`): a fresh
+deployment records 設計・開発課 / 設計・技術課 / 生産・技術課 once. It is never called at startup and
+never overwrites an existing name.
+
+Mapping existing data is a separate, explicit step. The dry-run report must list every unmapped
+project, every unmapped area, every inconsistent area/project pair and every member with no
+membership; the administrator supplies the mapping; apply it on an isolated copy; verify identifier
+and row preservation; then remediate what remains unmapped (ADMIN-only until mapped). Nothing is
+inferred from a name, a free-text department, a role, an owner or a task assignment. See
+[DIVISIONS.md](./DIVISIONS.md) §5 for the procedure and §8 for the publication boundary.
+
+### 9.1 Schema 11 → 12 on an existing installation — and the current LAN state (2026-11-10)
+
+The LAN trial installation was running a build that requires schema 12 against a schema-11 database.
+That mismatch is what produced the sign-in symptom: `/readyz` answered
+`503 DATABASE_MIGRATION_REQUIRED`, and any page that resolved a division scope failed, which hid
+`/api/public-config` behind the same failure. **The repair in this repository fixes the code path;
+it does not migrate that database.** Migration 0012 has **not** been applied to it by this work.
+
+Read-only inspection (no secret is printed, nothing is written):
+
+```powershell
+# Schema state only: version numbers and file names from the ledger.
+psql "$env:DATABASE_URL" -c "SELECT version, name, applied_at FROM schema_migrations ORDER BY version;"
+# Readiness of the running build.
+Invoke-RestMethod http://localhost:8050/readyz
+# The three tables/columns the division feature owns; their absence means "not migrated".
+psql "$env:DATABASE_URL" -c "SELECT to_regclass('public.divisions') AS divisions, to_regclass('public.member_divisions') AS member_divisions, to_regclass('public.projects') IS NOT NULL AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='projects' AND column_name='division_id') AS projects_division;"
+```
+
+Applying it (only with separate, explicit authorization) is the documented order:
+
+```powershell
+# 1. Verified encrypted backup first; a failed backup stops the upgrade.
+./deploy/windows/Backup-Now.cmd
+
+# 2. Apply the reviewed additive migration; the prompt requires "APPLY MIGRATIONS".
+./deploy/windows/Migrate-Lan.cmd
+
+# 3. Verify the ledger, readiness and preservation of the existing rows.
+psql "$env:DATABASE_URL" -c "SELECT version, name FROM schema_migrations ORDER BY version;"
+psql "$env:DATABASE_URL" -c "SELECT (SELECT count(*) FROM projects) AS projects, (SELECT count(*) FROM tasks) AS tasks, (SELECT count(*) FROM members) AS members, (SELECT count(*) FROM local_accounts) AS logins, (SELECT count(*) FROM sessions) AS sessions;"
+Invoke-RestMethod http://localhost:8050/readyz
+
+# 4. Record the initial divisions once (bootstrapDivisions) and run the reviewed mapping.
+#    Nothing is seeded or mapped automatically, and no account, password or session is touched.
+
+# 5. Only after 1-4 pass, publish the new build and start it.
+./deploy/windows/Start-Lan.cmd
+```
+
+`0012` is additive: it creates two tables, adds three columns, widens one CHECK and installs two
+triggers. It rewrites no row, so accounts, password hashes, password versions, sessions and all
+operational work survive it. Do not edit an applied migration; a correction is the next migration
+ID. Until the mapping is complete the installation is **not** operationally ready: every existing
+project has a blank division and is therefore ADMIN-only.

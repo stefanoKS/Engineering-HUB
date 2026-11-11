@@ -18,6 +18,7 @@ describe('strict mutation bodies', () => {
     const base = {
       idempotencyKey: 'key-00000001',
       projectName: 'Project',
+      divisionId: 'DIV-1',
       responsibilityId: 'RSP-1'
     };
     expect(CreateProjectBody.safeParse(base).success).toBe(true);
@@ -82,6 +83,7 @@ describe('read-only member projection', () => {
       projectId: 'PRJ-1',
       projectName: 'Alpha',
       description: 'Overview',
+      divisionName: '設計・開発課',
       responsibilityId: 'RSP-1',
       responsibilityName: 'Design',
       projectOwnerName: 'Owner',

@@ -13,7 +13,8 @@ import { ProjectPicker } from '../components/ProjectPicker';
 import { AssigneePicker } from '../components/AssigneePicker';
 import type { Reference, Task, TaskDetail } from '@eh/contracts';
 import { api } from '../api/client';
-import { keys, queryCache, useQuery } from '../state/cache';
+import { keys, useQuery } from '../state/cache';
+import { commitMutation } from '../state/mutation';
 import { useI18n } from '../i18n';
 import { ErrorBox, Modal, SaveState } from '../components/ui';
 import {
@@ -28,7 +29,14 @@ import {
 } from '../components/forms';
 
 type References = {
-  members: { memberId: string; name: string; active: boolean; employeeId?: string }[];
+  members: {
+    memberId: string;
+    name: string;
+    active: boolean;
+    employeeId?: string;
+    divisionNames?: string[];
+    workDivisionIds?: string[];
+  }[];
   skills: { skillId: string; skillName: string }[];
   subprojects: Reference[];
 };
@@ -109,13 +117,31 @@ export function TaskForm({
 
   // The picker and this form share one cache key, so the readable name costs no extra request.
   const knownProjectId = task?.projectId ?? initialProjectId;
-  // The name is read for the selected project, including after the manager changes away from the
-  // context that opened the form; the context name is only valid for the project it describes.
-  const projectRecord = useQuery<{ record: { projectId: string; projectName: string } }>(
+  // The name and the division are read for the selected project, including when the opening screen
+  // already supplied the name: an assignment option depends on the division, not on a label.
+  const projectRecord = useQuery<{ record: { projectId: string; projectName: string; divisionId?: string | null } }>(
     `manager/project/${form.projectId}`,
-    () => api.get<{ record: { projectId: string; projectName: string } }>(`/api/manager/projects/${form.projectId}`),
-    { enabled: !!form.projectId && (form.projectId !== knownProjectId || !context?.projectName) }
+    () =>
+      api.get<{ record: { projectId: string; projectName: string; divisionId?: string | null } }>(
+        `/api/manager/projects/${form.projectId}`
+      ),
+    { enabled: !!form.projectId }
   );
+  // An assignment selector offers only the people who belong to the division of the selected work.
+  // A person already assigned stays visible, so an existing relationship is never silently dropped;
+  // the server re-validates every newly added identifier. While the context is unresolved - or the
+  // work has no division - nothing is offered and nothing is selected by default, so the form never
+  // falls back to "every employee".
+  const assignmentContextReady = !!form.projectId && !projectRecord.loading && !!projectRecord.data;
+  const projectDivisionId = assignmentContextReady ? projectRecord.data?.record.divisionId ?? null : undefined;
+  const assignableMembers = projectDivisionId
+    ? (references?.members ?? []).filter(
+        (member) =>
+          (member.workDivisionIds ?? []).includes(projectDivisionId) ||
+          assigneeIds.includes(member.memberId) ||
+          member.memberId === task?.ownerMemberId
+      )
+    : [];
 
   const knownSubprojectId = task?.subprojectId ?? initialSubprojectId;
   const effectiveProjectName =
@@ -196,20 +222,18 @@ export function TaskForm({
   const pendingPatch = task ? editPatch() : null;
   const nothingToSave = !!pendingPatch && Object.keys(pendingPatch).length === 1;
 
-  const invalidate = (saved: Task): void => {
-    queryCache.invalidate([
-      keys.task(saved.taskId),
-      keys.tasks,
-      keys.taskIndex,
-      keys.overview,
-      keys.project(saved.projectId),
-      keys.workload,
-      keys.myWork,
-      // A new or renamed task changes every parent selector's candidate list.
-      keys.parentOptions,
-      keys.timeline
-    ]);
-  };
+  const taskSaveKeys = (saved: Task): string[] => [
+    keys.task(saved.taskId),
+    keys.tasks,
+    keys.taskIndex,
+    keys.overview,
+    keys.project(saved.projectId),
+    keys.workload,
+    keys.myWork,
+    // A new or renamed task changes every parent selector's candidate list.
+    keys.parentOptions,
+    keys.timeline
+  ];
 
   const blocked: string[] = [];
   if (!form.projectId) blocked.push(t('taskForm.projectRequired'));
@@ -223,21 +247,24 @@ export function TaskForm({
 
   async function submit(addAnother: boolean): Promise<void> {
     await save.run(
-      async () => {
-        if (!task) {
-          const created = await api.post<{ task: Task }>('/api/manager/tasks', {
-            idempotencyKey,
-            projectId: form.projectId,
-            ...createPayload
-          });
-          return created.task;
-        }
-        const updated = await api.patch<{ task: Task }>(`/api/manager/tasks/${task.taskId}`, pendingPatch);
-        return updated.task;
-      },
+      // The cache effect belongs to the session and runs inside the mutation, so a form that is
+      // closed while the save is in flight still refreshes the lists and aggregates it changed.
+      () =>
+        commitMutation(async () => {
+          if (!task) {
+            const created = await api.post<{ task: Task }>('/api/manager/tasks', {
+              idempotencyKey,
+              projectId: form.projectId,
+              ...createPayload
+            });
+            return created.task;
+          }
+          const updated = await api.patch<{ task: Task }>(`/api/manager/tasks/${task.taskId}`, pendingPatch);
+          return updated.task;
+        }, taskSaveKeys),
       {
+        // Only the dialog-local part lives here: it disappears with the form.
         onSuccess: (saved) => {
-          invalidate(saved);
           if (!addAnother) {
             onSaved(saved);
             return;
@@ -442,11 +469,19 @@ export function TaskForm({
         <section className="stack">
           <h3>{t('assignee.heading')}</h3>
           <p className="muted small">{t('taskForm.assigneeHint')}</p>
+          {!assignmentContextReady && form.projectId ? (
+            <p className="muted small" role="status">
+              {t('taskForm.divisionPending')}
+            </p>
+          ) : null}
+          {assignmentContextReady && !projectDivisionId ? (
+            <p className="banner warning">{t('taskForm.divisionMissing')}</p>
+          ) : null}
           <AssigneePicker
-            members={references?.members ?? []}
+            members={assignableMembers}
             selectedIds={assigneeIds}
             onChange={setAssigneeIds}
-            disabled={save.state === 'saving'}
+            disabled={save.state === 'saving' || !assignmentContextReady}
             primaryId={task?.ownerMemberId ?? undefined}
           />
         </section>

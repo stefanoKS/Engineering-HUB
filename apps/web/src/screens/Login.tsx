@@ -27,6 +27,7 @@ export function LoginScreen({
   const buttonRef = useRef<HTMLDivElement>(null);
   const [config, setConfig] = useState<PublicConfig | null>(null);
   const [configError, setConfigError] = useState('');
+  const [configAttempt, setConfigAttempt] = useState(0);
   const [email, setEmail] = useState('');
   const [employeeId, setEmployeeId] = useState('');
   const [password, setPassword] = useState('');
@@ -36,27 +37,31 @@ export function LoginScreen({
 
   useEffect(() => {
     let cancelled = false;
+    setConfigError('');
     api
       .get<unknown>('/api/public-config')
       .then((value) => {
         const parsed = PublicConfig.safeParse(value);
         if (cancelled) return;
         if (!parsed.success) {
-          setConfigError(t('login.configError'));
+          setConfigError(t('login.configInvalid'));
           return;
         }
         setConfig(parsed.data);
       })
       .catch((failure: unknown) => {
         if (cancelled) return;
-        setConfigError(
-          failure instanceof ApiFailure && failure.code === 'NETWORK' ? failure.message : t('login.configError')
-        );
+        // The sign-in screen must never guess an authentication mode from a failed load, and it
+        // must name a readiness problem instead of presenting it as a credential failure.
+        const code = failure instanceof ApiFailure ? failure.code : 'NETWORK';
+        if (code === 'DATABASE_MIGRATION_REQUIRED') setConfigError(t('login.readinessRequired'));
+        else if (code === 'NETWORK') setConfigError(t('login.configUnavailable'));
+        else setConfigError(t('login.configInvalid'));
       });
     return () => {
       cancelled = true;
     };
-  }, [t]);
+  }, [t, configAttempt]);
 
   useEffect(() => {
     if (!clientId) return undefined;
@@ -95,7 +100,11 @@ export function LoginScreen({
       setCsrfToken(session.csrfToken);
       onSignedIn(session);
     } catch (failure) {
-      setError(failure instanceof ApiFailure ? failure.message : t('login.failed'));
+      // A readiness failure is not a credential problem, so it is named as such.
+      const code = failure instanceof ApiFailure ? failure.code : '';
+      if (code === 'DATABASE_MIGRATION_REQUIRED') setError(t('login.readinessRequired'));
+      else if (code === 'NOT_CONFIGURED') setError(t('login.unconfigured'));
+      else setError(failure instanceof ApiFailure ? failure.message : t('login.failed'));
     } finally {
       setBusy(false);
     }
@@ -106,9 +115,19 @@ export function LoginScreen({
       <div className="login-card">
         <img src="/branding/companyLogo.png" alt="広島化成" className="company-login-logo" />
         <h1>{t('app.name')}</h1>
-        <p className="muted">{t(config?.authMode === 'local' ? 'local.intro' : 'login.domain')}</p>
+        {config ? (
+          <p className="muted">{t(config.authMode === 'local' ? 'local.intro' : 'login.domain')}</p>
+        ) : null}
         {notice ? <div className="banner warning">{notice}</div> : null}
-        {configError ? <div className="banner danger">{configError}</div> : null}
+        {configError ? (
+          <div className="banner danger" role="alert">
+            <p>{configError}</p>
+            <button type="button" className="button secondary" onClick={() => setConfigAttempt((value) => value + 1)}>
+              {t('login.retry')}
+            </button>
+          </div>
+        ) : null}
+        {!config && !configError ? <p className="muted" role="status">{t('state.loading')}</p> : null}
         {config && !config.authConfigured && !config.devSignInEnabled ? (
           <div className="banner danger">{t('login.unconfigured')}</div>
         ) : null}

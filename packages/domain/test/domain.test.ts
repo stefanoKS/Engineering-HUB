@@ -587,7 +587,9 @@ describe('publication allowlist', () => {
     completedAt: null,
     progressPercent: 40,
     pendingRequest: true,
-    projectVisibility: 'INTERNAL'
+    projectVisibility: 'INTERNAL',
+    // A published row only exists for work mapped to a division.
+    projectDivisionId: 'DIV-1'
   };
 
   it('publishes only allowlisted fields and only an INTERNAL project', () => {

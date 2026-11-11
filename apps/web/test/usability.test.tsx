@@ -138,7 +138,6 @@ function stubTaskDetail(payload: unknown, blockedReasons?: string[]): ReturnType
   vi.stubGlobal('fetch', fetcher);
   return fetcher;
 }
-
 describe('guided task creation', () => {
   it('keeps the location, assignees and priority for the next task and rotates the idempotency key', async () => {
     const posts: Record<string, unknown>[] = [];
@@ -148,7 +147,7 @@ describe('guided task creation', () => {
       vi.fn(async (url: string, init?: RequestInit) => {
         if (url.includes('parent-options')) return response({ items: [] });
         if (url.includes('/api/manager/projects/PRJ-A')) {
-          return response({ record: { projectId: 'PRJ-A', projectName: 'Alpha' } });
+          return response({ record: { projectId: 'PRJ-A', projectName: 'Alpha', divisionId: 'DIV-DEV' } });
         }
         if ((init?.method ?? 'GET') === 'POST' && url.includes('/api/manager/tasks')) {
           posts.push(JSON.parse(String(init?.body ?? '{}')));
@@ -163,7 +162,7 @@ describe('guided task creation', () => {
       <I18nProvider>
         <TaskForm
           initialProjectId="PRJ-A"
-          references={{ members: [{ memberId: 'MEM-MEMBER', name: 'Ann', active: true }], skills: [], subprojects: [] }}
+          references={{ members: [{ memberId: 'MEM-MEMBER', name: 'Ann', active: true, workDivisionIds: ['DIV-DEV'] }], skills: [], subprojects: [] }}
           onClose={() => undefined}
           onSaved={onSaved}
         />

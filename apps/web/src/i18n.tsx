@@ -5,10 +5,12 @@
  * labels that did not exist in V1 are declared here with an identical ja/en pair. Stored text,
  * identifiers and enum values are never translated - only presentation labels are.
  */
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
-import { APP_NAME, DEFAULT_LANGUAGE, LANGUAGES, STORAGE_KEY, isLanguage, label as dictLabel, t as dictT, type Language } from '@eh/i18n';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { APP_BRAND, APP_NAME, DEFAULT_LANGUAGE, LANGUAGES, STORAGE_KEY, brandName, isLanguage, label as dictLabel, t as dictT, type Language } from '@eh/i18n';
 
 export const V2_LABELS = {
+ // The product name is the V2 brand (シゴトモ / SHIGOTOMO), never a division name.
+ 'app.name': { ja: APP_BRAND.ja, en: APP_BRAND.en },
  'nav.back': { ja: '← 戻る', en: '← Back' },
  'hierarchy.title': { ja: 'プロジェクト構成', en: 'Project structure' },
  'hierarchy.directTasks': { ja: 'プロジェクト直下のタスク', en: 'Direct project tasks' },
@@ -76,6 +78,13 @@ export const V2_LABELS = {
  'delete.useLogicalRemoval': { ja: '通常の削除に戻る', en: 'Return to normal removal' },
  'tasks.noChanges': { ja: '変更はありません。', en: 'No changes to save.' },
  'assignee.inactive': { ja: '無効', en: 'Inactive' },
+ 'assignee.loading': { ja: '読み込み中…', en: 'Loading…' },
+ 'assignee.unavailable': { ja: '利用できない担当者', en: 'Unavailable assignee' },
+ 'tasks.assigneeFilter': { ja: '担当者', en: 'Assignee' },
+ 'tasks.assigneeSearch': { ja: '担当者を検索', en: 'Search assignees' },
+ 'tasks.assigneeEmpty': { ja: '該当する担当者がいません', en: 'No matching assignees' },
+ 'tasks.contextOnly': { ja: '階層表示のみ', en: 'Hierarchy context only' },
+ 'tasks.filteredTreeScope': { ja: '表示中の階層 {n} 件 / 一致するタスク {total} 件', en: '{n} branches shown / {total} matching tasks' },
  'assignee.addMore': { ja: '担当者を追加', en: 'Add assignee' },
  'action.open': { ja: '詳細を開く', en: 'Open' },
  'deadline.label': { ja: '納期', en: 'Deadline' },
@@ -202,6 +211,62 @@ export const V2_LABELS = {
  'assignee.ownerNote': {
    ja: '先頭の担当者が主担当として記録されます。担当者は権限ではなく、作業の責任者を表します。',
    en: 'The first assignee is stored as the primary owner. Assignment is accountability, not permission.'
+ },
+ // Divisions (課). The stored identifiers never change; only these labels are localized.
+ 'division.label': { ja: '課', en: 'Division' },
+ 'division.select': { ja: '表示する課', en: 'Division' },
+ 'division.all': { ja: 'すべての閲覧可能な課', en: 'All readable divisions' },
+ 'division.none': { ja: '閲覧できる課がありません', en: 'No readable division' },
+ 'division.selectPlaceholder': { ja: '課を選択してください', en: 'Select a division' },
+ 'division.singleHint': { ja: '閲覧できる課はこの1つです。', en: 'This is the only division you can read.' },
+ 'division.manage': { ja: '課の管理', en: 'Divisions' },
+ 'division.new': { ja: '課を追加', en: 'Add division' },
+ 'division.edit': { ja: '課を編集', en: 'Edit division' },
+ 'division.name': { ja: '課名', en: 'Division name' },
+ 'division.status': { ja: '状態', en: 'State' },
+ 'division.order': { ja: '表示順', en: 'Order' },
+ 'division.active': { ja: '有効', en: 'Active' },
+ 'division.retired': { ja: '廃止', en: 'Retired' },
+ 'division.retire': { ja: '廃止', en: 'Retire' },
+ 'division.reactivate': { ja: '再有効化', en: 'Reactivate' },
+ 'division.moveUp': { ja: '上へ', en: 'Move up' },
+ 'division.moveDown': { ja: '下へ', en: 'Move down' },
+ 'division.hint': {
+   ja: '課は組織の境界です。廃止しても記録は削除されず、既存の作業は完了または移管できます。',
+   en: 'A division is the organisational boundary. Retiring it deletes nothing; existing work can be completed or transferred.'
+ },
+ 'division.retiredHint': { ja: '廃止した課には新しい作業や担当者を登録できません。', en: 'A retired division accepts no new work or assignment.' },
+ 'projectForm.divisionHint': {
+   ja: '新しいプロジェクトの課です。作成後は ADMIN の課移動でのみ変更できます。',
+   en: 'The division of the new project. After creation only an ADMIN division transfer can change it.'
+ },
+ 'projectForm.ownerHint': {
+   ja: '選択した課に所属（WORK）しているメンバーのみ表示されます。',
+   en: 'Only people with a WORK membership in the selected division are listed.'
+ },
+ 'taskForm.divisionPending': {
+   ja: '選択したプロジェクトの課を確認しています。確認できるまで担当者は選べません。',
+   en: 'Checking the division of the selected project. Assignment stays unavailable until it is known.'
+ },
+ 'taskForm.divisionMissing': {
+   ja: 'このプロジェクトには課が設定されていません。管理者が課を設定するまで担当者を登録できません。',
+   en: 'This project has no division. An administrator must map it before anybody can be assigned.'
+ },
+ 'members.divisions': { ja: '所属（業務対象）', en: 'Membership (work)' },
+ 'members.additionalRead': { ja: '追加閲覧', en: 'Additional read' },
+ 'members.divisionsHint': {
+   ja: '所属は担当者の割り当てと、役割の範囲内での作成・更新を許可します。追加閲覧は参照のみで、担当者の割り当てや更新は許可しません。所属は閲覧権限を含みます。',
+   en: 'Membership grants assignment eligibility and the actions the role allows. Additional read grants reading only - never assignment or a write. Membership implies read access.'
+ },
+ 'members.allDivisions': { ja: '全課を閲覧', en: 'Read all divisions' },
+ 'members.selectedDivisions': { ja: '指定した課のみ閲覧', en: 'Read selected divisions only' },
+ 'members.allDivisionsHint': {
+   ja: '全課を閲覧には今後追加される課も含まれます。指定した課のみ閲覧には、後から追加した課は自動的に含まれません。',
+   en: 'Reading all divisions includes divisions added later. Reading selected divisions does not include a division added later automatically.'
+ },
+ 'members.divisionBlocked': {
+   ja: '進行中の作業が残っているため所属を解除できません。先に作業を完了または再割り当てしてください。',
+   en: 'This membership cannot be removed while active work depends on it. Complete or reassign that work first.'
  },
  'skills.grade': { ja: '技能グレード', en: 'Skill grade' },
  'skills.notAssessed': { ja: '未評価', en: 'Not assessed' },
@@ -397,7 +462,7 @@ export const V2_LABELS = {
   'nav.automation': { ja: '自動化設定', en: 'Automation' },
   'nav.status': { ja: '状態・公開', en: 'Status & publication' },
   'nav.signOut': { ja: 'サインアウト', en: 'Sign out' },
-  'login.title': { ja: '設計・開発課 管理にサインイン', en: 'Sign in to Engineering Management' },
+  'login.title': { ja: 'シゴトモにサインイン', en: 'Sign in to SHIGOTOMO' },
   'login.google': { ja: 'Google でサインイン', en: 'Sign in with Google' },
   'login.dev': { ja: '開発用サインイン（この環境のみ）', en: 'Development sign-in (this environment only)' },
   'login.email': { ja: '会社のメールアドレス', en: 'Company e-mail address' },
@@ -410,6 +475,19 @@ export const V2_LABELS = {
     ja: 'サインイン設定を読み込めませんでした。再読み込みしてください。',
     en: 'The sign-in configuration could not be loaded. Reload the page.'
   },
+  'login.configUnavailable': {
+    ja: 'サインイン設定に接続できませんでした。通信状態を確認して、もう一度お試しください。',
+    en: 'The sign-in configuration could not be reached. Check the connection and try again.'
+  },
+  'login.configInvalid': {
+    ja: 'サインイン設定の応答が不正でした。管理者に連絡してください。',
+    en: 'The sign-in configuration response was invalid. Contact an administrator.'
+  },
+  'login.readinessRequired': {
+    ja: 'データベースのスキーマがこのビルドと一致していません。管理者が承認済みの移行を適用する必要があります。',
+    en: 'The database schema does not match this build. An administrator must apply the reviewed migration.'
+  },
+  'login.retry': { ja: '再試行', en: 'Try again' },
   'login.domain': { ja: '会社の Google アカウントでサインインしてください。', en: 'Sign in with your company Google account.' },
   'overview.openWork': { ja: '未完了の作業', en: 'Open work' },
   'overview.completedWork': { ja: '完了タスク', en: 'Completed' },
@@ -431,6 +509,7 @@ export const V2_LABELS = {
   'overview.scope': { ja: '表示範囲', en: 'Scope' },
   'overview.unassigned': { ja: '未分類', en: 'Unassigned' },
   'projects.groupContinues': { ja: '· 続きは他のページに表示されます。', en: '· More projects appear on other pages.' },
+  'projects.groupCount': { ja: '{n} 件', en: '{n} projects' },
   'projects.completedTasks': { ja: '完了したタスク', en: 'Completed tasks' },
   'tasks.advanced': { ja: '詳細操作', en: 'Advanced' },
   'tasks.advancedHint': {
@@ -704,6 +783,7 @@ export const V2_LABELS = {
   'state.empty': { ja: '該当するデータがありません。', en: 'Nothing to show.' },
   'state.denied': { ja: '権限がありません。', en: 'You are not authorised for this action.' },
   'state.sessionLost': { ja: 'サインインが失効しました。再度サインインしてください。', en: 'Your session ended. Sign in again.' },
+  'state.unavailable': { ja: 'サーバーに接続できませんでした。時間をおいて再試行してください。', en: 'The server could not be reached. Try again shortly.' },
   'state.retry': { ja: '再試行', en: 'Retry' },
   'action.create': { ja: '作成', en: 'Create' },
   'action.save': { ja: '保存', en: 'Save' },
@@ -1122,6 +1202,195 @@ export const V2_LABELS = {
   'reopen.blocked.PROJECT_CANCELLED': {
     ja: '親プロジェクトが取消済みです。別の手順で再有効化してください。',
     en: 'The parent project is cancelled; reactivate it in a separate step.'
+  },
+  // ---- Unmapped-work division mapping (ADMIN) -------------------------------------------
+  'mapping.title': { ja: '未分類の案件と分野の割り当て', en: 'Unmapped work and division mapping' },
+  'mapping.hint': {
+    ja: '課が未設定の案件と分野を確認し、対象の課を決めてからまとめて割り当てます。この画面は確認のみで、何も変更しません。',
+    en: 'Review projects and areas without a division, choose a target, then map them together. This view only reads; it changes nothing.'
+  },
+  'mapping.counts': {
+    ja: '未分類: 分野 {responsibilities} 件・案件 {projects} 件（保管 {archivedResponsibilities} / {archivedProjects} 件）・タスク {tasks} 件',
+    en: 'Unmapped: {responsibilities} areas, {projects} projects (archived {archivedResponsibilities} / {archivedProjects}) and {tasks} tasks'
+  },
+  'mapping.none': { ja: '未分類の記録はありません。', en: 'No unmapped records.' },
+  'mapping.includeArchived': { ja: '保管・廃止も表示', en: 'Include archived and retired' },
+  'mapping.entity.all': { ja: 'すべて', en: 'All' },
+  'mapping.entity.responsibility': { ja: '分野', en: 'Area' },
+  'mapping.entity.project': { ja: '案件', en: 'Project' },
+  'mapping.column.record': { ja: '対象', en: 'Record' },
+  'mapping.column.state': { ja: '判定', en: 'Proposal' },
+  'mapping.column.division': { ja: '割り当て先の課', en: 'Target division' },
+  'mapping.column.evidence': { ja: '根拠', en: 'Evidence' },
+  'mapping.column.select': { ja: '選択', en: 'Select' },
+  'mapping.state.SUGGESTED': { ja: '候補あり', en: 'Suggested' },
+  'mapping.state.AMBIGUOUS': { ja: '候補が複数', en: 'Ambiguous' },
+  'mapping.state.CONFLICT': { ja: '競合', en: 'Conflict' },
+  'mapping.state.UNRESOLVED': { ja: '判定できません', en: 'Unresolved' },
+  'mapping.rule.EXPLICIT': { ja: '管理者の選択', en: 'Administrator selection' },
+  'mapping.rule.RESPONSIBILITY': { ja: '分野の課に従う', en: 'Follows the area division' },
+  'mapping.rule.COMMON_MEMBERSHIP': { ja: '担当者の共通の課', en: 'Common division of the assignees' },
+  'mapping.rule.NONE': { ja: '根拠なし', en: 'No rule applied' },
+  'mapping.blocker.noEvidence': {
+    ja: '有効な担当者がいないため、候補を決められません。',
+    en: 'There is no active assignee, so no target can be proposed.'
+  },
+  'mapping.blocker.ambiguous': {
+    ja: '共通する課が複数あります。対象の課を明示してください。',
+    en: 'Several divisions are compatible. Select the target explicitly.'
+  },
+  'mapping.blocker.conflict': {
+    ja: '担当者の所属が一致しません。対象の課を選ぶ前に担当を確認してください。',
+    en: 'The assignees do not share a division. Review the assignment before selecting a target.'
+  },
+  'mapping.blocker.ineligible': {
+    ja: '対象の課に所属していない有効な担当者がいます: {members}',
+    en: 'Active assignees do not belong to the target division: {members}'
+  },
+  'mapping.blocker.mappedProject': {
+    ja: 'すでに別の課に割り当てられた案件があります: {projects}',
+    en: 'Some linked projects are already mapped elsewhere: {projects}'
+  },
+  'mapping.assignment.historical': { ja: '履歴（無効な担当者）', en: 'Historical (inactive assignee)' },
+  'mapping.assignment.active': { ja: '有効', en: 'Active' },
+  'mapping.linkedProjects': { ja: '対象の案件: {names}', en: 'Affected projects: {names}' },
+  'mapping.selectPlaceholder': { ja: '課を選択', en: 'Select a division' },
+  'mapping.review': { ja: '選択した内容を確認', en: 'Review the selection' },
+  'mapping.selected': { ja: '選択中: {n} 件', en: 'Selected: {n}' },
+  'mapping.batchLimit': { ja: '1回に割り当てられるのは {n} 件までです。', en: 'One batch accepts at most {n} records.' },
+  'mapping.confirmHint': { ja: '確認のため「{phrase}」と入力してください。', en: 'Type “{phrase}” to confirm.' },
+  'mapping.reason': { ja: '理由（任意）', en: 'Reason (optional)' },
+  'mapping.apply': { ja: '割り当てを実行', en: 'Apply mapping' },
+  'mapping.applied': {
+    ja: '割り当てを実行しました（分野 {responsibilities} 件・案件 {projects} 件）。',
+    en: 'Mapping applied ({responsibilities} areas, {projects} projects).'
+  },
+  'mapping.previewStale': {
+    ja: '確認後に記録が変わりました。再読み込みしてから、もう一度確認してください。',
+    en: 'A record changed after you reviewed it. Reload and review again.'
+  },
+  'mapping.backup.ok': { ja: '検証済みバックアップ: {id}', en: 'Verified backup: {id}' },
+  'mapping.backup.required': {
+    ja: '検証済みのバックアップがありません。割り当てを実行する前にバックアップを作成し、検証してください。',
+    en: 'No verified backup exists. Create and verify a backup before applying a mapping.'
+  },
+  'mapping.backup.message': { ja: 'バックアップ: {message}', en: 'Backup: {message}' },
+  'mapping.overviewLink': { ja: '未分類の割り当てを開く', en: 'Open unmapped work' },
+  'mapping.overviewBanner': {
+    ja: '課が未設定の記録が {n} 件あります。管理者が割り当てるまで、他の利用者には表示されません。',
+    en: '{n} records have no division yet. They stay invisible to other users until an administrator maps them.'
+  },
+  'mapping.archivedTag': { ja: '保管・廃止', en: 'Archived' },
+  'mapping.noTarget': { ja: '未選択', en: 'Not selected' },
+  'mapping.batchEmpty': { ja: '割り当てる記録を選択してください。', en: 'Select the records to map.' },
+  'division.unmapped': { ja: '未分類の割り当て', en: 'Unmapped work' },
+
+  // Query state: the difference between "loading", "refreshing", "failed" and "older than a
+  // moment ago" is a user-visible fact, so each one has its own label.
+  'query.refreshFailedTitle': { ja: '最新の取得に失敗しました', en: 'The latest refresh failed' },
+  'query.refreshFailedHelp': {
+    ja: '表示中の内容は前回取得したものです。再試行してください。',
+    en: 'What you see is the previous result. Try again to refresh it.'
+  },
+  'query.updating': { ja: '更新中…', en: 'Updating…' },
+  'query.lastUpdated': { ja: '最終更新 {time}（東京）', en: 'Last updated {time} (Tokyo)' },
+  'query.notYetUpdated': { ja: 'まだ取得していません', en: 'Not loaded yet' },
+  'query.mayBeOutdated': { ja: '再確認をおすすめします', en: 'may be out of date' },
+  'query.refresh': { ja: '更新', en: 'Refresh' },
+  'query.noReadableScope': {
+    ja: '表示できる課がありません。',
+    en: 'There is no division you can read.'
+  },
+  'query.noReadableScopeHelp': {
+    ja: '管理者に課の割り当てを確認してください。課が未設定の記録は管理者だけに表示されます。',
+    en: 'Ask an administrator about your division access. Unmapped records are visible to administrators only.'
+  },
+  'query.noMatches': { ja: '条件に一致する記録がありません。', en: 'No records match the current filters.' },
+  'query.noMatchesHelp': { ja: '検索語や絞り込み条件を変更してください。', en: 'Change the search text or filters.' },
+  'query.clearFilters': { ja: '絞り込みを解除', en: 'Clear filters' },
+  'filter.deadlineWindow': { ja: '期限の範囲', en: 'Deadline window' },
+
+  // Action availability: an action that the role may not perform on this record is not offered,
+  // and the reason is stated when it helps.
+  'capability.readOnlyRecord': { ja: '閲覧のみ', en: 'View only' },
+  'capability.readOnlyRecordHelp': {
+    ja: 'この課の業務は閲覧のみです。変更には作業権限が必要です。',
+    en: 'You can read work in this division but not change it; editing requires work access.'
+  },
+  'capability.noWritableDestination': {
+    ja: '作成できる課がありません。管理者に作業権限を確認してください。',
+    en: 'There is no division where you can create work. Ask an administrator about work access.'
+  },
+  'capability.unmappedReadOnly': {
+    ja: '課が未設定のため、管理者のみ変更できます。',
+    en: 'This work has no division yet, so only an administrator can change it.'
+  },
+
+  // Request review context.
+  'requests.reviewHeading': { ja: '申請の内容', en: 'Request details' },
+  'requests.reason': { ja: '申請理由', en: 'Reason given' },
+  'requests.explanation': { ja: '詳細・対応方針', en: 'Details and planned response' },
+  'requests.decisionNote': { ja: '判断メモ', en: 'Decision note' },
+  'requests.decidedAt': { ja: '判断日時', en: 'Decided' },
+  'requests.staleReason': { ja: '再確認が必要な理由', en: 'Why re-review is required' },
+  'requests.requested': { ja: '希望期限', en: 'Requested deadline' },
+  'requests.current': { ja: '現在の期限', en: 'Current deadline' },
+  'requests.completionNote': { ja: '完了メモ', en: 'Completion note' },
+  'requests.noNote': { ja: '記入なし', en: 'None given' },
+  'requests.details': { ja: '申請の詳細', en: 'Request details' },
+  'requests.close': { ja: '閉じる', en: 'Close' },
+  'requests.summary': { ja: '内容', en: 'Summary' },
+  'requests.syncBusy': { ja: '同期中…', en: 'Syncing…' },
+  'requests.syncDone': { ja: '同期しました: 新規 {n} 件', en: 'Synchronised: {n} new request(s)' },
+  'requests.syncNothingNew': { ja: '新しい申請はありませんでした。', en: 'There were no new requests.' },
+  'requests.syncPartial': {
+    ja: '一部のみ取り込みました（新規 {n} 件 / 失敗 {failed} 件）。再試行してください。',
+    en: 'Only partly imported ({n} new, {failed} failed). Try again.'
+  },
+  'requests.syncNotConfigured': {
+    ja: '受信箱が設定されていないため同期できません。管理者に連絡してください。',
+    en: 'The request inbox is not configured, so nothing could be synchronised. Contact a manager.'
+  },
+  'requests.syncFailed': { ja: '同期に失敗しました。表示中の申請はそのままです。', en: 'Synchronisation failed. The requests already shown are unchanged.' },
+
+  // Submission tracking that outlives the dialog.
+  'submission.heading': { ja: '申請の送信状況', en: 'Request submission' },
+  'submission.sending': {
+    ja: '送信中… 画面を閉じても処理は続きます。',
+    en: 'Sending… the request continues even if you close the form.'
+  },
+  'submission.received': { ja: '受付完了（申請ID: {id}）', en: 'Received (request ID: {id})' },
+  'submission.receivedNoId': {
+    ja: '受付完了しました。申請一覧で状況を確認できます。',
+    en: 'Received. Check the request list for its status.'
+  },
+  'submission.unknown': {
+    ja: '送信結果を確認できませんでした。自動では再送していません。申請一覧で状況を確認してください。',
+    en: 'The outcome could not be confirmed, and it was not sent again automatically. Check the request list.'
+  },
+  'submission.refused': { ja: '申請は受け付けられませんでした。', en: 'The request was not accepted.' },
+  'submission.dismiss': { ja: 'この通知を閉じる', en: 'Dismiss this notice' },
+  'submission.checkRequests': { ja: '申請一覧で確認', en: 'Check the request list' },
+
+  // Server-backed search feedback.
+  'search.updating': { ja: '検索しています…', en: 'Searching…' },
+  'search.label': { ja: '検索', en: 'Search' },
+  'search.clear': { ja: '検索をクリア', en: 'Clear search' },
+
+  // Sortable header state and row action menu.
+  'column.sortedAscending': { ja: '昇順で並べ替え済み', en: 'sorted ascending' },
+  'column.sortedDescending': { ja: '降順で並べ替え済み', en: 'sorted descending' },
+  'column.sortBy': { ja: '{name}で並べ替え', en: 'Sort by {name}' },
+
+  // Conflict recovery.
+  'editor.conflictReload': { ja: '最新の内容を読み込む', en: 'Load the latest version' },
+  'editor.conflictHint': {
+    ja: '入力内容は保持されています。最新の内容を確認してから、もう一度保存してください。',
+    en: 'Your input is kept. Review the latest version, then save again deliberately.'
+  },
+  'editor.unknownHint': {
+    ja: '保存できたか確認できません。再読み込みして最新の状態を確認してください。',
+    en: 'It is not known whether the save was applied. Reload and check the current state.'
   }
 } as const;
 
@@ -1156,6 +1425,15 @@ export function I18nProvider({ children }: { children: ReactNode }): JSX.Element
     }
   }, []);
 
+  // The document title follows the selected language. It is set on the same element the static
+  // document declares, so the tab, a bookmark and a screen reader all read the V2 brand name.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.title = brandName(language);
+    const applicationName = document.querySelector('meta[name="application-name"]');
+    if (applicationName) applicationName.setAttribute('content', brandName(language));
+  }, [language]);
+
   const value = useMemo(() => {
     const translate = (key: string, vars?: Record<string, string | number>): string => {
       const local = (V2_LABELS as Record<string, { ja: string; en: string }>)[key];
@@ -1185,4 +1463,4 @@ export function useI18n() {
   return value;
 }
 
-export { APP_NAME, LANGUAGES };
+export { APP_BRAND, APP_NAME, LANGUAGES, brandName };

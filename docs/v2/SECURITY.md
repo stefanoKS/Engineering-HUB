@@ -350,6 +350,15 @@ for the database URL, allowed domains or Google client ID.
 6. **Rate limiting is per process.** A multi-instance deployment should move the limit to the
    reverse proxy.
 7. **No penetration test has been performed.** Local mocks are not a security verification.
+8. **The V1 shared-dashboard snapshot cannot enforce division isolation.** It is one company-wide,
+   allowlisted `INTERNAL` portfolio with no per-viewer identity, so publication now fails closed at
+   execution (`NOT_CONFIGURED`) instead of writing division-restricted work into it. A snapshot that
+   was committed before this change is **not** revoked by it: retiring or re-scoping an existing
+   snapshot is a separate, explicit operational decision.
+9. **Serialization is application-level.** Division-scoped writes take the `member-divisions`
+   advisory lock and then the `members:role-and-activation` lock, and re-read the actor, the role,
+   the division and the memberships inside their transaction. A writer that bypasses the application
+   (direct SQL, a restore) is outside that guarantee; PostgreSQL row-level security is still not used.
 
 ## 13. Security-relevant test coverage (local, real PostgreSQL)
 
@@ -360,3 +369,154 @@ for the database URL, allowed domains or Google client ID.
   `Done` refusal, hierarchy depth/cycle refusals, revision conflict, soft relationship removal.
 * `packages/contracts/test/contracts.test.ts`: the publication contract exposes exactly the
   allowlisted fields.
+
+## 14. Division scope (課)
+
+* One resolved `DivisionScope` per request decides where a role may read and write. Role,
+  membership (`WORK`) and additional read access (`READ`) are separate; membership implies reading,
+  and read access never authorizes a write or an assignment.
+* `ADMIN` manages every division and is the only role that may change a division, a membership, the
+  oversight flag or a project's division.
+* `GENERAL_MANAGER` (次長) is cross-division read-only oversight. It ranks below `MEMBER` in
+  `ROLE_ORDER` so no comparison grants it a write, it never sees private HR, credential or settings
+  data, and it is never assignment eligible.
+* An empty authorization set is never global access; unmapped work is an ADMIN-only remediation
+  view (readable **and** editable by ADMIN so it can be mapped; publication skips it); an
+  unauthorized `divisionId` is refused rather than silently ignored.
+* Assignment eligibility is a membership question: `ADMIN` status, oversight and read-only access
+  never qualify a person, and a mixed selection commits nothing.
+* Coverage: `apps/api/test/divisions.test.ts` (authorization, assignment, administration, migration
+  constraints) and `packages/domain/test/divisions.test.ts` (policy). The V1 shared-dashboard
+  workbook remains a company-wide allowlisted publication; per-division isolation there is BLOCKED
+  and documented, not claimed.
+
+## 15. Division upgrade repair — 2026-11-10
+
+Local implementation and verification only; nothing here was deployed, migrated or activated.
+
+* **Sign-in configuration is session-independent.** `GET /api/public-config` and
+  `POST /api/session` no longer resolve a session or a division scope, so a stale cookie, an
+  expired session or a database that still needs migration 0012 cannot break the sign-in screen.
+  The sign-in route builds its division payload *before* issuing a cookie and revokes the prepared
+  session when that payload cannot be built.
+* **A schema that is behind this build is one readiness failure.** An undefined table, column or
+  function becomes `DATABASE_MIGRATION_REQUIRED` (503) with safe wording and a sanitized server
+  log line, instead of `INTERNAL_ERROR` or a misleading credential error.
+* **One narrowing mechanism.** `scopedDivisionIds(scope, requested)` in
+  `packages/domain/src/divisions.ts` is the only place a client-supplied `divisionId` narrows a
+  query; manager projects, tasks, tree, search, overview, timeline, reports, requests and reference
+  lists all use it. An unauthorized identifier answers `NOT_FOUND`, exactly like an unknown one.
+* **The generic editor is not an authorization.** `/api/manager/editor` resolves the entity first,
+  then authorizes its division (task/subproject through the project, project and responsibility
+  directly) and requires edit capability, not only read access. The member editor is ADMIN-only.
+* **Writes re-check inside the transaction.** Every division-scoped write re-reads the acting
+  account (role, activation, memberships), the project's current division and every newly added
+  assignee's membership through the transaction handle, under the `member-divisions` advisory lock
+  (membership changes and retirements take the same lock). `WORK → READ` counts as a membership
+  removal for the active-work blocker; `READ → absent` does not.
+* **History is authorized, never erased.** A member profile withholds a former assignment in a
+  division the reader may not see and reports the withheld count (`ownership.previousHidden`)
+  instead of describing the task.
+* **The company-wide snapshot fails closed.** See the limitation above; `publicationStatus`
+  reports `divisionIsolationSupported: false` so the UI can state it.
+* Coverage added: `apps/api/test/sign-in.test.ts` (public configuration, stale cookie, no-grant
+  reader, schema-behind readiness), `apps/api/test/division-concurrency.test.ts` (membership
+  removal/downgrade vs assignment, access revocation vs write, retirement vs assignment, transfer),
+  and new cases in `apps/api/test/divisions.test.ts` (query-scope bypasses, editor boundary,
+  history withholding, retired-division creation).
+
+## 16. Division corrections — 2026-11-11
+
+Local implementation and verification only; nothing here was deployed, migrated or activated.
+
+* **Two locks, one order.** `lockDivisionMutation(tx)` acquires `member-divisions` and then
+  `members:role-and-activation`. Every division-scoped write, membership change, role/activation
+  change and account mutation takes that order, and no path takes the pair in the opposite order, so
+  the protocol cannot deadlock. Rule 9 above is the corrected statement.
+* **The actor is re-read, not remembered.** `authorizeMutation` re-reads the stored role and
+  activation, re-applies the canonical role capability, re-checks division authority and optionally
+  the division lifecycle. A `MEMBER` or `VIEWER` that retains a `WORK` membership is refused by a
+  manager mutation (`403 AUTHORIZATION_DENIED`), and a division membership is never an action
+  capability. Idempotent replays are answered only after the same authorization.
+* **Paths covered by the gate.** Project create/edit/archive; subproject create/edit/move/archive/
+  reactivate; task create/edit; assignment approval; schedule confirmation; direct completion;
+  ADMIN override; reopening; request submission and decision; responsibility create/edit/reorder/
+  lifecycle; division create/rename/reorder/lifecycle/transfer; member create/edit (role, activation
+  and grants) and the account routes.
+* **A responsibility assignment follows the division.** New or changed owners and newly added
+  members need an active `WORK` membership of the area's division; a division change re-validates
+  every retained relationship; a retained relationship survives a deactivation and an unrelated edit;
+  an unmapped area is ADMIN-only.
+* **A division transfer re-queries its evidence.** The complete assignment set is read through the
+  transaction handle after the lock is taken, so a child assignment committed while the transfer
+  waited is part of what is validated and can refuse the move.
+* **Retired divisions stay readable history.** A retained `WORK`/`READ` relationship and documented
+  oversight keep a mapped retired division readable; it is never a new-work or new-grant
+  destination, and a submitted edit keeps a retained grant it did not remove.
+* Coverage added: `apps/api/test/division-writes.test.ts` (responsibility assignment and ordering,
+  a real transfer interleaving, demotion while membership remains, actor deactivation, membership
+  removal through the member service, division creation/reordering, retained grants and
+  retired-division list/detail/totals), the corrected read-grant-revocation and cross-division
+  transfer cases in `apps/api/test/division-concurrency.test.ts`, and
+  `apps/web/test/overview-division.test.tsx` / `apps/web/test/branding.test.tsx` for the client.
+
+## 17. Unmapped work mapping — 2026-11-11
+
+Local implementation and verification only. Nothing was mapped, migrated, deployed or activated,
+and no operational record was touched.
+
+* **ADMIN only, re-checked inside the transaction.** The three mapping routes call
+  `requireRoleOf(request, 'ADMIN')`, and `applyMapping` re-reads the stored role and activation after
+  `lockDivisionMutation`, so a demotion that commits while the apply waits for the lock is refused
+  (`403 AUTHORIZATION_DENIED`) with nothing written. A `MANAGER`, `GENERAL_MANAGER`, `MEMBER` or
+  `VIEWER` can neither read the view nor apply.
+* **Unmapped work is not scoped work.** A blank division is readable by `ADMIN` alone: a manager
+  with three divisions and a manager with all-division oversight both see nothing of it (proved
+  end-to-end in `apps/api/test/division-mapping.test.ts`). Mapping the record is the only way to make
+  it visible, and it grants nobody anything - the members who already hold that division see it.
+* **The write is bounded and reviewed.** The batch carries the record IDs, the target IDs and the
+  revisions the screen displayed, is limited to 100 records, requires the derived phrase
+  `MAP <n> RECORD(S)` and `confirmed: true`, and is applied as one transaction with projects before
+  responsibilities. A stale revision, an already mapped record, an ineligible active assignee or a
+  responsibility whose projects disagree refuses the whole batch; nothing is partially applied.
+* **Backup gate.** A `backup_log` row with `result = 'OK'` and a checksum, no older than 24 hours, is
+  required; otherwise `409 MAPPING_BACKUP_REQUIRED` and no write. The gate is not bypassable through
+  the API and not configurable in the browser.
+* **Audit.** `PROJECT_DIVISION_MAPPED` / `RESPONSIBILITY_DIVISION_MAPPED` per record and
+  `DIVISION_MAPPING_APPLIED` per batch (actor, reason, backup, deterministic batch identifier). A
+  replayed idempotency key re-authorizes before it returns the stored answer, so a revoked
+  administrator cannot read it back.
+* **No inference, no privilege from evidence.** A proposal is only a suggestion shown to the
+  administrator; the apply always names its target. A historical (inactive or removed) assignment is
+  reported and never re-activated, and no membership, role or oversight flag is written by this path.
+* **Failure visibility.** The panel distinguishes a failed read from a successful empty one, keeps a
+  conflict on screen with a retry, and never presents an error as "nothing is unmapped".
+
+Coverage: `apps/api/test/division-mapping.test.ts` and `apps/web/test/division-mapping-ui.test.tsx`.
+Browser and live Workspace verification remain NOT_RUN, and `docs/PRODUCTION_READINESS.md` stays
+**NOT APPROVED FOR PRODUCTION**.
+
+## 18. Record-level capability flags — 2026-11-11
+
+`canWrite` on a task, project or detail payload answers exactly one question: *may this verified
+account write this record, in the division it belongs to?* It is computed on the server from the
+resolved scope with `canWriteDivision` and never from a request parameter.
+
+Security properties:
+
+- It exposes no authorization internal: no membership row, access kind, e-mail address or member
+  identifier. A caller already knows which divisions it may read (the session payload).
+- It grants nothing. Every command re-checks the scope inside its transaction
+  (`assertWritableDivision`), so a browser that forges `canWrite: true` is refused by the server with
+  `AUTHORIZATION_DENIED` (or `DIVISION_REQUIRED` for unmapped work).
+- It is resolved **before** paging, so a mixed or all-division list cannot show a page whose
+  capability flags describe a different scope.
+- Unmapped work keeps its documented shape: `canWrite` is true only for `ADMIN`
+  (`canWriteDivision` returns `scope.manageAll` for a blank division).
+
+A `GENERAL_MANAGER` and a `MEMBER` with `READ` access receive `false`; `VIEWER` reads the read-only
+projection, which carries no flag at all.
+
+The server-side refusal for the read-only division is covered by
+`apps/api/test/divisions.test.ts` ("keeps the read-only division readable while refusing its writes
+on the server").

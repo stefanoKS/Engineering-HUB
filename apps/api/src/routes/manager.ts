@@ -21,7 +21,9 @@ import {
   DecisionBody,
   DeleteBody,
   DeleteResponsibilityBody,
+  EditorQuery,
   MoveResponsibilityBody,
+  MoveDivisionBody,
   OverrideCompleteBody,
   PatchProjectBody,
   PatchSubprojectBody,
@@ -32,9 +34,13 @@ import {
   ReconcileBody,
   RemoveBody,
   ReopenTaskBody,
+  SaveDivisionBody,
   SaveMemberBody,
   SaveResponsibilityBody,
   TaskListQuery,
+  TransferProjectDivisionBody,
+  MappingApplyBody,
+  MappingPreviewBody,
   OverviewQuery,
   WorkloadDrilldownQuery,
   WorkloadQuery
@@ -47,6 +53,7 @@ import {
   getSubproject,
   getTask,
   listAssessments,
+  listDivisions,
   listMembersPaged,
   listMilestones,
   listProjectPhases,
@@ -56,11 +63,22 @@ import {
   listTaskSummaries,
   listTaskTreeSummaries,
   listTaskSummariesForProject,
+  memberDivisionNames,
+  memberWorkDivisionIds,
   searchTasks
 } from '@eh/db';
-import { DomainError } from '@eh/domain';
+import { DomainError, assertReadableDivision, assertWritableDivision, canWriteDivision, readableDivisionIds } from '@eh/domain';
 import { managerOf, ok, requireRoleOf, type AppDependencies } from '../http';
 import { sendError } from '../errors';
+import {
+  createDivision,
+  memberGrantsForEditor,
+  moveDivision,
+  requestedDivision,
+  saveDivision,
+  setDivisionStatus,
+  transferProjectDivision
+} from '../services/divisions';
 import {
   buildBootstrap,
   buildMemberProfile,
@@ -100,6 +118,7 @@ import {
   setResponsibilityStatus
 } from '../services/directory';
 import { decideRequest, queue } from '../services/requests';
+import { applyMapping, mappingView } from '../services/division-mapping';
 import {
   emergencyStop,
   getAutomation,
@@ -124,7 +143,8 @@ function serviceCtx(request: FastifyRequest): ServiceCtx {
   return {
     db: request.state.db,
     identity: managerOf(request),
-    correlationId: request.state.correlationId
+    correlationId: request.state.correlationId,
+    divisions: request.state.divisions
   };
 }
 
@@ -139,6 +159,16 @@ const ParentOptionsQuery = z.object({
   selectedId: z.string().trim().max(64).optional()
 });
 
+/**
+ * The division of every project the caller may read, from the request-local directory read.
+ * One read per request, so a page of tasks costs no extra query per row.
+ */
+async function projectDivisionLookup(request: FastifyRequest): Promise<(projectId: string) => string | null> {
+  const { dir } = await taskScope(readCtx(request));
+  const byProject = new Map(dir.projects.map((project) => [project.projectId, project.divisionId ?? null]));
+  return (projectId: string) => byProject.get(projectId) ?? null;
+}
+
 async function projectPage(request: FastifyRequest, query: ReturnType<typeof ProjectListQuery.parse>) {  const ctx = readCtx(request);
   const { scope, dir } = await taskScope(ctx);
   const page = await listProjects(
@@ -149,6 +179,7 @@ async function projectPage(request: FastifyRequest, query: ReturnType<typeof Pro
       status: query.status,
       schedule: query.schedule,
       query: query.query,
+      divisionIds: requestedDivision(ctx, query.divisionId),
       sort: query.sort,
       direction: query.direction
     },
@@ -162,6 +193,10 @@ async function projectPage(request: FastifyRequest, query: ReturnType<typeof Pro
       const source = byId.get(project.projectId) ?? project;
       return {
         ...buildProjectSummary(source, scope.counts((task) => task.projectId === project.projectId, ctx.today), ctx.today),
+        // Mixed- and all-division lists resolve the write availability per record, so a manager who
+        // may only read one division is never offered an edit there. The shell's selected division
+        // is not evidence of a record's permission.
+        canWrite: canWriteDivision(request.state.divisions, source.divisionId ?? null),
         _revision: project.revision
       };
     }),
@@ -172,6 +207,22 @@ async function projectPage(request: FastifyRequest, query: ReturnType<typeof Pro
     totalPages: Math.ceil(page.total / query.pageSize)
   };
 }
+
+/** The read-only mapping view query: scalar filters, so it stays a plain bounded GET. */
+const MappingListQuery = z
+  .object({
+    page: z.coerce.number().int().min(1).max(10000).default(1),
+    pageSize: z.coerce.number().int().min(1).max(50).default(10),
+    includeArchived: z
+      .union([z.boolean(), z.enum(['true', 'false'])])
+      .transform((value) => value === true || value === 'true')
+      .default(false),
+    entityType: z.enum(['ALL', 'RESPONSIBILITY', 'PROJECT']).default('ALL'),
+    divisionId: z.string().trim().max(64).optional(),
+    responsibilityId: z.string().trim().max(64).optional(),
+    projectId: z.string().trim().max(64).optional()
+  })
+  .strict();
 
 export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencies): void {
   const read = (path: string, handler: (request: FastifyRequest) => Promise<unknown>): void => {
@@ -211,6 +262,7 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
     const detail = await buildProjectDetail(readCtx(request), project);
     return {
       ...detail,
+      canWrite: canWriteDivision(request.state.divisions, project.divisionId ?? null),
       milestones: await listMilestones(request.state.db, id),
       phases: await listProjectPhases(request.state.db, id)
     };
@@ -257,7 +309,18 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
 
   read('/api/manager/subprojects', async (request) => {
     const query = request.query as { projectId?: string };
-    return { items: await listSubprojects(request.state.db, query.projectId) };
+    if (query.projectId) {
+      const project = await getProject(request.state.db, query.projectId);
+      if (!project) throw new DomainError('NOT_FOUND', `Project not found: ${query.projectId}`);
+      assertReadableDivision(request.state.divisions, project.divisionId);
+    }
+    return {
+      items: await listSubprojects(
+        request.state.db,
+        query.projectId,
+        readableDivisionIds(request.state.divisions)
+      )
+    };
   });
 
   app.post('/api/manager/subprojects', async (request, reply) => {
@@ -331,12 +394,24 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
     try {
       managerOf(request);
       const query = TaskListQuery.parse(request.query ?? {});
-      const filters = { ...query, today: readCtx(request).today };
+      const filters = {
+        ...query,
+        today: readCtx(request).today,
+        // One narrowing rule: a client-supplied division can only narrow the resolved scope and
+        // an unauthorized one is refused before paging, totals or the tree are computed.
+        divisionIds: requestedDivision(request.state, query.divisionId)
+      };
       const result = query.tree === 'true'
         ? await listTaskTreeSummaries(request.state.db, filters, query.treeParentId, query.page, query.pageSize)
         : await listTaskSummaries(request.state.db, filters, query.page, query.pageSize);
+      // A task's write availability follows its project's division, resolved per record so a mixed
+      // list never offers an action the server would refuse.
+      const divisionOf = await projectDivisionLookup(request);
       return ok(reply, request, {
-        items: result.items,
+        items: result.items.map((item) => ({
+          ...item,
+          canWrite: canWriteDivision(request.state.divisions, divisionOf(item.projectId))
+        })),
         ...('matchedTotal' in result ? { matchedTotal: result.matchedTotal } : {}),
         total: result.total,
         page: query.page,
@@ -354,7 +429,11 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
   });
 
   read('/api/manager/task-index', async (request) => {
-    const index = await compactTaskIndex(request.state.db, 2000);
+    const index = await compactTaskIndex(
+      request.state.db,
+      2000,
+      readableDivisionIds(request.state.divisions)
+    );
     return { entries: index.entries, total: index.total, complete: index.entries.length >= index.total };
   });
 
@@ -362,13 +441,25 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
     const query = request.query as { query?: string; limit?: string };
     if (!query.query) throw new DomainError('VALIDATION_FAILED', 'query is required');
     const limit = Math.min(Number(query.limit ?? 20), 50);
-    return { items: await searchTasks(request.state.db, query.query, limit) };
+    return {
+      items: await searchTasks(
+        request.state.db,
+        query.query,
+        limit,
+        readableDivisionIds(request.state.divisions)
+      )
+    };
   });
 
   app.get('/api/manager/tasks/:id', async (request, reply) => {
     try {
       const { id } = request.params as { id: string };
-      return ok(reply, request, await taskDetail(serviceCtx(request), id));
+      const detail = await taskDetail(serviceCtx(request), id);
+      const divisionOf = await projectDivisionLookup(request);
+      return ok(reply, request, {
+        ...detail,
+        canWrite: canWriteDivision(request.state.divisions, divisionOf(detail.context.projectId))
+      });
     } catch (error) {
       return sendError(reply, request.state, error);
     }
@@ -481,41 +572,91 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
     }
   });
 
+  /**
+   * The narrow editor read: one entity-specific authorization *before* anything is returned.
+   *
+   * The generic route type is not an authorization: a task or subproject is authorized through its
+   * project division, a project and a responsibility through their own division, and the member
+   * editor stays an ADMIN-only directory projection. Read access alone never yields an edit form.
+   */
   read('/api/manager/editor', async (request) => {
-    const query = request.query as { type?: string; id?: string };
-    const id = String(query.id ?? '');
-    if (!id) throw new DomainError('VALIDATION_FAILED', 'id is required');
+    const query = EditorQuery.parse(request.query ?? {});
+    const id = query.id;
     const db = request.state.db;
-    const record =
-      query.type === 'task'
-        ? await getTask(db, id)
-        : query.type === 'project'
-          ? await getProject(db, id)
-          : query.type === 'member'
-            ? await getMember(db, id)
-            : query.type === 'responsibility'
-              ? await getResponsibility(db, id)
-              : query.type === 'subproject'
-                ? await getSubproject(db, id)
-                : null;
-    if (!record) throw new DomainError('NOT_FOUND', `Record not found: ${id}`);
-    return { record: { ...record, _revision: record.revision } };
+    const ctx = serviceCtx(request);
+    // A record outside the caller's readable divisions answers like an unknown one; a record inside
+    // a read-only division is an authorization refusal. Either way no edit form is built.
+    const authorize = (divisionId: string | null): void => {
+      assertReadableDivision(ctx.divisions, divisionId);
+      assertWritableDivision(ctx.divisions, divisionId);
+    };
+    const projectDivision = async (projectId: string): Promise<string | null> => {
+      const project = await getProject(db, projectId);
+      if (!project) throw new DomainError('NOT_FOUND', `Record not found: ${id}`);
+      return project.divisionId ?? null;
+    };
+    switch (query.type) {
+      case 'task': {
+        const task = await getTask(db, id);
+        if (!task) throw new DomainError('NOT_FOUND', `Record not found: ${id}`);
+        authorize(await projectDivision(task.projectId));
+        return { record: { ...task, _revision: task.revision } };
+      }
+      case 'subproject': {
+        const subproject = await getSubproject(db, id);
+        if (!subproject) throw new DomainError('NOT_FOUND', `Record not found: ${id}`);
+        authorize(await projectDivision(subproject.projectId));
+        return { record: { ...subproject, _revision: subproject.revision } };
+      }
+      case 'project': {
+        const project = await getProject(db, id);
+        if (!project) throw new DomainError('NOT_FOUND', `Record not found: ${id}`);
+        authorize(project.divisionId ?? null);
+        return { record: { ...project, _revision: project.revision } };
+      }
+      case 'responsibility': {
+        const responsibility = await getResponsibility(db, id);
+        if (!responsibility) throw new DomainError('NOT_FOUND', `Record not found: ${id}`);
+        authorize(responsibility.divisionId);
+        return { record: { ...responsibility, _revision: responsibility.revision } };
+      }
+      case 'member': {
+        // Division grants, a role and an e-mail address are administrative data, never a
+        // manager's directory read.
+        requireRoleOf(request, 'ADMIN');
+        const { member } = await memberGrantsForEditor(id, db);
+        if (!member) throw new DomainError('NOT_FOUND', `Record not found: ${id}`);
+        return { record: { ...member, _revision: member.revision } };
+      }
+      default:
+        throw new DomainError('VALIDATION_FAILED', 'Unknown editor type');
+    }
   });
 
   read('/api/manager/references', async (request) => {
     const dir = await directory(readCtx(request));
+    // Two bounded reads supply the membership facts an assignment selector needs; they never
+    // carry an access kind, an e-mail address or an identifier the caller may not read.
+    const memberIds = dir.members.map((entry) => entry.memberId);
+    const [divisionNames, workDivisionIds] = await Promise.all([
+      memberDivisionNames(request.state.db, memberIds),
+      memberWorkDivisionIds(request.state.db, memberIds)
+    ]);
     return {
       responsibilities: dir.responsibilities.map((entry) => ({
         id: entry.responsibilityId,
         name: entry.name,
-        status: entry.status
+        status: entry.status,
+        divisionId: entry.divisionId ?? null
       })),
       members: dir.members.map((entry) => ({
         memberId: entry.memberId,
         name: entry.name,
         active: entry.active,
         role: entry.role,
-        employeeId: entry.employeeId
+        employeeId: entry.employeeId,
+        divisionNames: divisionNames.get(entry.memberId) ?? [],
+        workDivisionIds: workDivisionIds.get(entry.memberId) ?? []
       })),
       skills: dir.skills,
       subprojects: dir.subprojects.map((entry) => ({
@@ -801,6 +942,125 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
     try {
       const body = ReconcileBody.parse(request.body ?? {});
       return ok(reply, request, await reconcileDeletions(serviceCtx(request), body));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  /* ------------------------------ divisions ------------------------------ */
+
+  /** The division administration screen: ADMIN sees every division, retired included. */
+  read('/api/manager/divisions', async (request) => {
+    requireRoleOf(request, 'ADMIN');
+    const items = await listDivisions(request.state.db, { includeRetired: true });
+    return { items: items.map((division) => ({ ...division, _revision: division.revision })) };
+  });
+
+  app.post('/api/admin/divisions', async (request, reply) => {
+    try {
+      const body = SaveDivisionBody.parse(request.body ?? {});
+      return ok(reply, request, await createDivision(serviceCtx(request), body));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  app.patch('/api/admin/divisions/:id', async (request, reply) => {
+    try {
+      const body = SaveDivisionBody.parse({
+        ...(request.body ?? {}),
+        divisionId: (request.params as { id: string }).id
+      });
+      return ok(reply, request, await saveDivision(serviceCtx(request), (request.params as { id: string }).id, body));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  app.patch('/api/admin/divisions/:id/order', async (request, reply) => {
+    try {
+      const body = MoveDivisionBody.parse(request.body ?? {});
+      const { id } = request.params as { id: string };
+      return ok(reply, request, { division: await moveDivision(serviceCtx(request), id, body) });
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  for (const action of ['retire', 'reactivate'] as const) {
+    app.post(`/api/admin/divisions/:id/${action}`, async (request, reply) => {
+      try {
+        const body = ConfirmReasonBody.parse(request.body ?? {});
+        const { id } = request.params as { id: string };
+        const division = await setDivisionStatus(serviceCtx(request), id, {
+          revision: body.revision,
+          confirmed: true,
+          status: action === 'retire' ? 'Retired' : 'Active',
+          reason: body.reason
+        });
+        return ok(reply, request, { division });
+      } catch (error) {
+        return sendError(reply, request.state, error);
+      }
+    });
+  }
+
+  /**
+   * An explicit ADMIN transfer. Ordinary project editing never exposes a persisted project's
+   * division, and the transfer refuses the whole move when an owner or assignee would become
+   * ineligible.
+   */
+  /* --------------------- unmapped-work division mapping -------------------- */
+
+  /**
+   * The read-only mapping view: unmapped counts, paginated records and a proposal per record.
+   * Opening it mutates nothing. A single record identifier narrows the explanation to that record;
+   * the multi-record preview uses the POST form.
+   */
+  read('/api/admin/divisions/unmapped', async (request) => {
+    requireRoleOf(request, 'ADMIN');
+    const query = MappingListQuery.parse(request.query ?? {});
+    return mappingView(serviceCtx(request), {
+      ...(query.divisionId ? { divisionId: query.divisionId } : {}),
+      ...(query.responsibilityId ? { responsibilityIds: [query.responsibilityId] } : {}),
+      ...(query.projectId ? { projectIds: [query.projectId] } : {}),
+      includeArchived: query.includeArchived,
+      page: query.page,
+      pageSize: query.pageSize,
+      entityType: query.entityType
+    });
+  });
+
+  /** The same preview for an explicit multi-record selection. Read-only. */
+  app.post('/api/admin/divisions/mapping/preview', async (request, reply) => {
+    try {
+      requireRoleOf(request, 'ADMIN');
+      const body = MappingPreviewBody.parse(request.body ?? {});
+      return ok(reply, request, await mappingView(serviceCtx(request), body));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  /**
+   * The reviewed apply. Bound to the record IDs, target IDs and revisions the administrator saw,
+   * gated by a verified backup and applied as one all-or-nothing transaction.
+   */
+  app.post('/api/admin/divisions/mapping/apply', async (request, reply) => {
+    try {
+      requireRoleOf(request, 'ADMIN');
+      const body = MappingApplyBody.parse(request.body ?? {});
+      return ok(reply, request, await applyMapping(serviceCtx(request), body));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  app.post('/api/admin/projects/:id/transfer-division', async (request, reply) => {
+    try {
+      const body = TransferProjectDivisionBody.parse(request.body ?? {});
+      const { id } = request.params as { id: string };
+      return ok(reply, request, await transferProjectDivision(serviceCtx(request), id, body));
     } catch (error) {
       return sendError(reply, request.state, error);
     }

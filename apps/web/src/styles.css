@@ -768,7 +768,7 @@ body { background: radial-gradient(ellipse at 90% 0, #fbecef 0, transparent 42%)
 /* Supplied brand assets: the company lockup on the sign-in card and the department lockup in the
    authenticated header. Both keep their intrinsic aspect ratio; neither is cropped or recoloured. */
 .company-login-logo { display: block; width: 100%; max-width: 320px; height: auto; object-fit: contain; margin: 0 auto; }
-.design-team-logo { display: block; width: auto; height: 64px; max-width: min(360px, 40vw); object-fit: contain; flex-shrink: 0; }
+.industrial-logo { display: block; width: auto; height: 64px; max-width: min(360px, 40vw); object-fit: contain; flex-shrink: 0; }
 .app-header h1 { font-size: 1.2rem; letter-spacing: .015em; }
 .app-header .muted { font-size: .78rem; }
 .app-nav { padding: .65rem 2rem; gap: .35rem; box-shadow: 0 4px 14px #17233b05; }
@@ -834,10 +834,14 @@ input[type=checkbox] { min-height: auto; width: 17px; height: 17px; accent-color
 .project-picker .pagination { flex-wrap: wrap; font-size: .75rem; gap: .3rem; }
 .project-picker .pagination .button { min-height: 32px; padding: .2rem .45rem; }
 @media (max-width: 850px) {
-  .design-team-logo { height: 46px; max-width: min(240px, 65vw); }
+  .industrial-logo { height: 46px; max-width: min(240px, 65vw); }
   .company-login-logo { max-width: 260px; }
   .app-header { align-items: flex-start; flex-wrap: wrap; padding: 1rem; }
-  .header-actions { justify-content: flex-start; gap: .7rem; }
+  /* The division switch, the language switch and the account menu share one row that may wrap; the
+     header never forces a horizontal page scroll on a narrow viewport. */
+  .header-actions { justify-content: flex-start; gap: .7rem; flex-wrap: wrap; max-width: 100%; }
+  .division-scope { min-width: 0; max-width: 100%; }
+  .division-scope select { max-width: 100%; }
   .app-nav { padding: .5rem .8rem; flex-wrap: nowrap; overflow-x: auto; }
   .nav-link { white-space: nowrap; }
   .app-main { padding: 1rem .8rem 3rem; }
@@ -1068,7 +1072,28 @@ input[type=checkbox] { min-height: auto; width: 17px; height: 17px; accent-color
 }
 .table-sort:focus-visible,
 .completed-work-toggle:focus-visible { outline: 2px solid var(--project-accent, #9f203e); outline-offset: 2px; }
-.project-group-heading th { background: #f8f2f4; text-align: left; }
+.project-group-heading th {
+  background: var(--area-tint, #f3f4f6);
+  border-top: 1rem solid white;
+  border-left: .3rem solid var(--area-accent, #6c7080);
+  text-align: left;
+}
+.project-group-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: #242831;
+  cursor: pointer;
+  display: inline-flex;
+  flex-wrap: wrap;
+  font: inherit;
+  font-weight: 700;
+  gap: .5rem;
+  padding: .3rem;
+}
+.project-group-toggle:focus-visible { outline: 2px solid #252b39; outline-offset: 2px; }
+.project-group-count { background: #fff; border: 1px solid #aeb5bf; border-radius: 1rem; font-size: .8rem; padding: .1rem .5rem; }
+.project-group-sort { display: inline-block; margin-inline-start: .75rem; }
 .advanced-actions,
 .completed-work { border: 1px solid var(--ui-border); border-radius: .45rem; padding: .8rem 1rem; }
 .advanced-actions summary,
@@ -1525,7 +1550,7 @@ button {
   min-width: 0;
 }
 
-.design-team-logo {
+.industrial-logo {
   height: 40px;
   max-width: min(220px, 34vw);
   object-fit: contain;
@@ -2322,13 +2347,15 @@ input[type='search'] {
   .header-actions {
     justify-content: flex-end;
     gap: var(--space-2);
+    flex-wrap: wrap;
+    max-width: 100%;
   }
 
   .account-name {
     max-width: 7rem;
   }
 
-  .design-team-logo {
+  .industrial-logo {
     height: 32px;
     max-width: min(150px, 40vw);
   }
@@ -2389,48 +2416,10 @@ input[type='search'] {
   font-size: 0.875rem;
 }
 
-/* Task list: the task name takes the remaining width; every other column keeps one alignment. */
-.task-table {
-  width: 100%;
-}
-
-.task-table .col-project {
-  width: 15rem;
-}
-
-.task-table .col-owner {
-  width: 10rem;
-}
-
-.task-table .col-status {
-  width: 11rem;
-}
-
-.task-table .col-deadline {
-  width: 9rem;
-}
-
-.task-table .col-actions {
-  width: 1%;
-}
-
-.task-table td.project-actions-cell {
-  white-space: nowrap;
-}
-
 .row-action {
   min-height: 32px;
   padding: 0 var(--space-3);
   font-size: 0.8125rem;
-}
-
-@media (max-width: 900px) {
-  .task-table .col-project,
-  .task-table .col-owner,
-  .task-table .col-status,
-  .task-table .col-deadline {
-    width: auto;
-  }
 }
 
 /* Overview: two actionable figures first, history and structure as a quiet second line. */
@@ -2559,40 +2548,28 @@ input[type='search'] {
   flex: 1 1 16rem;
 }
 
-/* Task list action column: three compact controls fit on one line. */
-.task-table .col-actions {
-  width: 17rem;
-}
 
-@media (max-width: 1100px) {
-  .task-table .col-actions {
-    width: 1%;
-  }
-}
-
-.task-table .col-owner {
-  width: 11rem;
-}
-
-.task-table td.project-actions-cell .actions {
-  flex-wrap: nowrap;
-}
-
-/* Fixed column widths let the task name take every remaining pixel. */
+/* Task list column widths: ONE canonical rule per table.
+ *
+ * The task name takes every remaining pixel, and only the columns that must not reflow keep a
+ * width. Fixed layout makes the row heights predictable, and the action column stays narrow
+ * because secondary row actions live in the その他 menu rather than as competing buttons.
+ */
 .task-table {
+  width: 100%;
   table-layout: fixed;
 }
 
 .task-table .col-project {
-  width: 13rem;
+  width: 12rem;
 }
 
 .task-table .col-owner {
-  width: 11rem;
+  width: 9rem;
 }
 
 .task-table .col-status {
-  width: 9rem;
+  width: 8.5rem;
 }
 
 .task-table .col-deadline {
@@ -2600,5 +2577,169 @@ input[type='search'] {
 }
 
 .task-table .col-actions {
-  width: 14.5rem;
+  width: 7.5rem;
+}
+
+.task-table td.project-actions-cell {
+  white-space: nowrap;
+}
+
+.task-table td.project-actions-cell .actions {
+  flex-wrap: nowrap;
+}
+
+/* Text that must wrap rather than be clipped: a long project, owner or task name is readable. */
+.task-table td {
+  overflow-wrap: anywhere;
+}
+
+/* Narrower windows let the flexible columns shrink before anything is hidden. */
+@media (max-width: 1100px) {
+  .task-table .col-project,
+  .task-table .col-owner {
+    width: 7rem;
+  }
+  .task-table .col-status {
+    width: 7rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .task-table .col-project,
+  .task-table .col-owner,
+  .task-table .col-status,
+  .task-table .col-deadline,
+  .task-table .col-actions {
+    width: auto;
+  }
+  .task-table {
+    table-layout: auto;
+  }
+}
+
+
+/* Division switch (?): a display narrowing of the server-resolved scope. */
+.division-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .85rem;
+  white-space: nowrap;
+}
+.division-scope-label {
+  color: var(--ui-muted, #64748b);
+  font-weight: 600;
+}
+.division-scope select {
+  max-width: 14rem;
+}
+/* A stored value the form deliberately does not edit (e.g. a project's division). */
+.field-readonly {
+  margin: 0;
+  padding: .45rem .6rem;
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  background: var(--surface-muted, #f7f9fc);
+  font-weight: 600;
+}
+.division-grant-table th,
+.division-grant-table td {
+  text-align: left;
+  vertical-align: middle;
+}
+.division-grant-table th:nth-child(n + 2),
+.division-grant-table td:nth-child(n + 2) {
+  width: 8rem;
+  text-align: center;
+}
+@media (max-width: 720px) {
+  .division-scope {
+    white-space: normal;
+  }
+  .division-grant-table {
+    display: block;
+    overflow-x: auto;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Query state, freshness and the read-only marker.
+ *
+ * These are the small pieces every list screen shares after this release: one freshness line,
+ * one background-refresh warning, one read-only marker, one empty-scope explanation and one
+ * search box with its updating status. They use the existing tokens instead of introducing a
+ * second colour system.
+ * ------------------------------------------------------------------------- */
+.query-freshness {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  min-height: 1.25rem;
+}
+
+.query-freshness.stale .query-stale-note {
+  color: var(--amber);
+}
+
+.query-refresh {
+  margin-left: auto;
+}
+
+.search-field .search-status {
+  min-height: 1rem;
+}
+
+.read-only-record {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--ui-border);
+  border-radius: 999px;
+  background: var(--ui-bg);
+  color: var(--ui-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.empty-scope,
+.empty-action {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.submission-notices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.submission-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.submission-dismiss {
+  margin-left: auto;
+  min-height: 28px;
+  min-width: 28px;
+}
+
+/* One review surface: long notes wrap and keep their line breaks. */
+.request-review .description-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.request-review h3 {
+  margin: var(--space-3) 0 var(--space-1);
+  font-size: 0.9rem;
+}
+
+.row-highlight {
+  background: var(--ui-accent-soft);
 }

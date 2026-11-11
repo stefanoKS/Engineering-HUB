@@ -35,9 +35,11 @@ export function isTerminalTaskStatus(status: string): boolean {
 }
 
 /** Blank member roles keep the least privilege instead of being promoted. */
-export function effectiveRole(stored: string | null | undefined): 'ADMIN' | 'MANAGER' | 'MEMBER' | 'VIEWER' {
+export function effectiveRole(
+  stored: string | null | undefined
+): 'ADMIN' | 'MANAGER' | 'GENERAL_MANAGER' | 'MEMBER' | 'VIEWER' {
   const role = String(stored ?? '').trim().toUpperCase();
-  return role === 'ADMIN' || role === 'MANAGER' || role === 'MEMBER' || role === 'VIEWER'
+  return role === 'ADMIN' || role === 'MANAGER' || role === 'GENERAL_MANAGER' || role === 'MEMBER' || role === 'VIEWER'
     ? role
     : 'VIEWER';
 }

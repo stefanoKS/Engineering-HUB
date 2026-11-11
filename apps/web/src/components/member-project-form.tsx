@@ -12,6 +12,7 @@ import { ApiFailure, api } from '../api/client';
 import { useI18n } from '../i18n';
 import { ErrorBox, Modal } from './ui';
 import { SelectInput, TextInput, createIdempotencyKey, useSave } from './forms';
+import { useDivisionScope } from '../state/division';
 
 export function MemberProjectForm({
   options,
@@ -36,8 +37,29 @@ export function MemberProjectForm({
   const [acknowledged, setAcknowledged] = useState(false);
 
   const responsibilities = options?.responsibilities ?? [];
-  const valid = projectName.trim().length > 0 && !!responsibilityId;
+  const divisions = (options?.divisions ?? []).filter((division) => division.status === 'Active');
+  // A creation form needs one concrete division; the aggregate "all readable" scope is never a
+  // creation destination. One writable division is preselected, several fall back to the shell
+  // selection *when that selection is itself writable*, and otherwise nothing is presumed.
+  const divisionScope = useDivisionScope();
+  const shellDivision =
+    divisionScope.selected && divisions.some((entry) => entry.divisionId === divisionScope.selected)
+      ? divisionScope.selected
+      : '';
+  const [divisionId, setDivisionId] = useState(divisions.length === 1 ? divisions[0]!.divisionId : shellDivision);
+  const valid = projectName.trim().length > 0 && !!responsibilityId && !!divisionId;
   const needsAcknowledgement = save.error instanceof ApiFailure && save.error.code === 'CONFIRMATION_REQUIRED';
+
+  // Only the areas of the selected division are offered; changing the division never leaves an
+  // incompatible area selected.
+  const responsibilitiesForDivision = responsibilities.filter(
+    (entry) => !divisionId || !entry.divisionId || entry.divisionId === divisionId
+  );
+  const changeDivision = (next: string): void => {
+    setDivisionId(next);
+    const selected = responsibilities.find((entry) => entry.responsibilityId === responsibilityId);
+    if (selected?.divisionId && selected.divisionId !== next) setResponsibilityId('');
+  };
 
   const submit = async (): Promise<void> => {
     if (!valid || save.state === 'saving') return;
@@ -46,6 +68,7 @@ export function MemberProjectForm({
         api.post<{ project: { projectId: string; projectName: string } }>('/api/employee/projects', {
           idempotencyKey,
           projectName: projectName.trim(),
+          divisionId,
           responsibilityId,
           description: description.trim() || undefined,
           priority,
@@ -93,12 +116,21 @@ export function MemberProjectForm({
           <TextInput value={projectName} onChange={setProjectName} required autoFocus />
         </label>
         <label className="field">
+          <span className="field-label">{t('division.label')}</span>
+          <SelectInput
+            value={divisionId}
+            onChange={changeDivision}
+            allowEmpty={t('division.selectPlaceholder')}
+            options={divisions.map((entry) => ({ value: entry.divisionId, label: entry.name }))}
+          />
+        </label>
+        <label className="field">
           <span className="field-label">{t('projects.responsibility')}</span>
           <SelectInput
             value={responsibilityId}
             onChange={setResponsibilityId}
             allowEmpty={t('common.unset')}
-            options={responsibilities.map((entry) => ({
+            options={responsibilitiesForDivision.map((entry) => ({
               value: entry.responsibilityId,
               label: entry.name
             }))}

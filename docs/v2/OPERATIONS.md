@@ -1,5 +1,52 @@
 # Operations Runbook (V2)
 
+## Division corrections and V2 branding — 2026-11-11
+
+No migration is part of this change: schema 12 stays as applied, and the operational database was not
+touched by the release itself.
+
+* **The product name is `シゴトモ` / `SHIGOTOMO`.** It appears in the authenticated header, the
+  sign-in title, the browser tab and the accessible application name. A division named `設計・開発課`
+  keeps that name; branding never renames stored data. A user who reports "the old name" is looking
+  at a stale browser bundle, not at a data problem.
+* **A refused action now names the real reason.** A demotion (`MANAGER` → `MEMBER`/`VIEWER`) or a
+  deactivation while a write was in flight answers `403 AUTHORIZATION_DENIED`; a membership change
+  that an active relation still needs answers `DIVISION_MEMBERSHIP_BLOCKED`; a retired division
+  answers `INVALID_TRANSITION`. Nothing is half-written when one of these is returned.
+* **A division transfer can now refuse a change that arrived while it waited.** If an assignment was
+  added in the meantime and the assignee would be ineligible, the transfer refuses and the project's
+  division and every assignment stay as they were.
+* **Reordering is scoped.** A division move stays inside the active or retired group, and an area
+  move stays inside its division and status group. If the list changed, the move answers
+  `EDIT_CONFLICT`; reload and retry. Equal sort orders no longer make a row un-movable.
+* **A retired division is history, not a destination.** It stays visible to a reader who may already
+  read it, is never offered for new work, and a retained grant survives an unrelated member edit.
+  A *new* grant in a retired division is refused; reactivate the division first (再有効化) if the
+  grant is genuinely needed.
+* **A rollback is an authorization regression, not a schema question.** Follow
+  [DIVISIONS.md](./DIVISIONS.md) §9: keep the current build serving, preserve every division row and
+  audit record, restrict exposure if an older build must run, and revert forward. Never drop the
+  division tables, columns or history.
+
+## Task assignee filter — 2026-11-10
+
+On All Work, 担当者 / Assignee starts at すべて / All. Search for a name or member ID and choose
+an option; duplicate names include their IDs and inactive people are labelled. The options contain
+only people with retained assignments in work you may read, including inactive people. The filter
+matches the primary owner or a non-removed additional assignee, combines with the other filters,
+and does not change access. A hierarchy-context badge marks a parent included only to reach a
+match. The matching-task total and the paged top-level branch total are separate; neither is a
+workload KPI. Choosing another assignee returns to the first page and closes expanded branches.
+The selection remains in page memory during navigation and language changes, not browser storage.
+
+## Project sections — 2026-11-10
+
+Projects are grouped by 分野 when all areas are selected. Each heading can be collapsed, shows the
+total in the current filtered authorized scope, and indicates when projects continue on other pages.
+Selecting one area returns the responsibility column. Edit remains visible; archive and, for ADMIN,
+delete are under その他. The existing confirmations and deletion preflight still apply.
+The area selector remains in place; no additional filter-chip list has been introduced.
+
 ## Project status, new-project visibility and date rollover — 2026-11-05
 
 * **Nothing runs at midnight.** A project's displayed status is calculated at read time from its
@@ -133,6 +180,30 @@ check.
 Authorization is re-read per request, so a role change takes effect immediately. Confirm the
 member row (`role`, `active`) in the database and the `audit_log` entry for the change.
 
+### The sign-in screen reports that it cannot load the sign-in configuration
+1. `Invoke-RestMethod http://localhost:8050/readyz`. A `503 DATABASE_MIGRATION_REQUIRED` with
+   `schemaVersion` **is** the cause: the running build needs the schema the database does not have.
+   Do not change `AUTH_MODE`, and do not reset accounts, passwords or sessions.
+2. Compare the ledger: `SELECT version, name FROM schema_migrations ORDER BY version;`. The last
+   reviewed migration for this release is `0012_divisions.sql`.
+3. Apply the reviewed upgrade in the documented order — verified encrypted backup
+   (`Backup-Now.cmd`), then the one-shot migration (`Migrate-Lan.cmd`), then verify the ledger,
+   `/readyz` and the preserved row counts (see [MIGRATION.md](./MIGRATION.md) §9.1). This is a
+   separate, explicitly authorized operation; the application never migrates at startup.
+4. After the migration, record the initial divisions once and run the reviewed mapping
+   ([DIVISIONS.md](./DIVISIONS.md) §5). Until then every existing project is unmapped and therefore
+   ADMIN-only.
+5. If `/readyz` says `ready` and the sign-in screen still fails, the failure is the browser's
+   request: run `curl -i http://localhost:8050/api/public-config`. That endpoint is answered without
+   a session and without a division scope, so a 500 there is a build/proxy problem, not an
+   authentication problem.
+
+### Shared-dashboard publication is refused
+`503 NOT_CONFIGURED` with "cannot enforce per-division isolation" is the intended state: the
+company-wide snapshot cannot scope rows to a reader's divisions. Do not work around it by disabling
+the check; a per-division reader is a separate release. A snapshot that was published by an earlier
+build stays readable until an operator deliberately replaces or removes it.
+
 ## 5. Change management
 
 1. Branch, implement, run `npm ci`, `npm run lint`, `npm test`, `npm run validate`.
@@ -227,3 +298,69 @@ the rebuilt web bundle. Confirm an ADMIN can remove one disposable empty task/su
 has no delete icon, the audit view contains `RECORD_REMOVED`, and Back returns Project detail →
 Task detail → Project detail without collapsing the branch. Do not initialize, migrate, deploy to
 production, or alter the operational database outside the reviewed application command.
+
+## Divisions (課): first-run and maintenance checklist
+
+1. **Create the divisions once.** Run the approved bootstrap (`bootstrapDivisions`) against the
+   environment, or create them from `課の管理` as ADMIN. The migration seeds nothing and sets no
+   default, so a fresh database has no division until this step.
+2. **Map existing work deliberately, projects before areas.** Read the unmapped view as ADMIN
+   (`課の管理` → 未分類の割り当て, or `GET /api/admin/divisions/unmapped`), which reports unmapped
+   projects, unmapped areas, inconsistent area/project pairs, the proposed target with its rule and
+   the assignment evidence; then apply the reviewed mapping with a verified backup, which performs
+   the constraint-compatible order of [DIVISIONS.md](./DIVISIONS.md) §5 (projects while their area is
+   still unmapped, then the area) in one transaction. Grant memberships separately (step 3) and
+   verify that identifiers and rows are preserved. Unmapped work stays ADMIN-only.
+3. **Grant membership, not roles, for eligibility.** A person can be assigned only where they hold
+   `WORK` membership. `ADMIN` status and 次長 oversight never qualify anybody.
+4. **Removing a membership is preflighted.** Unresolved active work blocks the removal with
+   `DIVISION_MEMBERSHIP_BLOCKED`; complete or reassign that work first. Nothing is silently
+   unassigned, moved or archived.
+5. **Retirement is 廃止.** A retired division keeps its rows and history, accepts no new work or
+   assignment and can be reactivated (再有効化). Never delete a division.
+6. **A project's division changes only through the ADMIN transfer command**, which refuses the whole
+   move when an owner or assignee would become ineligible and audits both divisions.
+7. **Publication stays OFF.** `publishNow` skips unmapped work; the V1 workbook remains a
+   company-wide allowlisted `INTERNAL` portfolio, and per-division isolation there is BLOCKED
+   pending a separate release. Nothing here activates mail, Calendar or publication.
+
+## Mapping unmapped legacy work (ADMIN, 2026-11-11)
+
+Unmapped work is invisible to everybody but `ADMIN`, so this is the only way it becomes work again.
+Nothing below happens automatically, and no step is scheduled.
+
+1. **Take a verified backup**: `deploy\windows\Backup-Now.cmd` on the local Windows host, or
+   `node --env-file=<worker env> apps/worker/dist/cli.js backup-now` (Compose:
+   `docker compose exec worker node apps/worker/dist/cli.js backup-now`). The apply refuses to run
+   without a `backup_log` row with `result = 'OK'` and a checksum that is younger than 24 hours
+   (`409 MAPPING_BACKUP_REQUIRED`). A backup that failed is not a backup.
+2. **Open 課の管理 → 未分類の割り当て** (ADMIN). The panel lists the counts, one page of records with
+   the proposal state, the rule that produced it, the blockers and every assignment, plus the backup
+   status. Add `保管・廃止も表示` to include archived records, and use the division filter to see the
+   work one division claims.
+3. **Review every record you intend to write.** A `SUGGESTED` record is not an approval; check the
+   evidence (an inactive former owner is shown as 履歴 and is never a blocker), then select the
+   record and confirm the target division. Change the target where the proposal is wrong; a
+   `CONFLICT` or `UNRESOLVED` record needs a decision, and the tool never guesses one.
+4. **Type the phrase and apply.** The phrase is `MAP <n> RECORD(S)` for the selected batch, and the batch
+   is limited to 100 records. Review the selection once more, then apply. The answer reports how many
+   areas and projects were mapped and which backup was used; `PROJECT_DIVISION_MAPPED`,
+   `RESPONSIBILITY_DIVISION_MAPPED` and `DIVISION_MAPPING_APPLIED` appear in the audit log.
+5. **If it is refused, read the reason and re-read the view** - the apply is all-or-nothing, so a
+   refusal means nothing was written:
+   * `MAPPING_BACKUP_REQUIRED` - take a backup (step 1) and reopen the view so the banner clears.
+   * `EDIT_CONFLICT` - a record changed after the preview; refresh and review it again. Do not widen
+     the batch to "get past" a conflict.
+   * `INVALID_TRANSITION` - the record is already mapped, or the area's projects still disagree. Map
+     the projects first (they can be in the same batch, projects are written first).
+   * `400 VALIDATION_FAILED` / `DIVISION_MEMBERSHIP_REQUIRED` - an active owner or assignee would be
+     ineligible in the target division. Decide the assignment first; the tool never reassigns.
+6. **Verify.** The record leaves the unmapped list and appears in the division for the members who
+   hold it. Counts, identifiers, owners, deadlines, statuses and history are unchanged apart from the
+   mapped columns; a responsibility scope change touches `RESPONSIBILITIES.division_id` only.
+7. **Do not** disable a trigger, edit the spreadsheet or the database directly, or grant a
+   membership "so it becomes visible". Granting access stays the reviewed membership path.
+
+Restoring a backup after a failed or unwanted mapping is a separate, explicit operation
+([BACKUP_RESTORE.md](../BACKUP_RESTORE.md)); the mapping tool never restores and has no undo
+command. Live execution of this procedure and its Workspace behaviour are **NOT_RUN** here.

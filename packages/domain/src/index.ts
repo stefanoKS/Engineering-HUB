@@ -11,6 +11,7 @@ export * from './scope';
 export * from './workload-period';
 export * from './planning';
 export * from './roles';
+export * from './divisions';
 export * from './requests';
 export * from './completion';
 export * from './lifecycle';

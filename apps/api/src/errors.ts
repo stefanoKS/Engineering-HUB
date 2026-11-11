@@ -67,6 +67,22 @@ export function sendError(reply: FastifyReply, context: RequestContext, error: u
     });
   }
   const message = error instanceof Error ? error.message : String(error);
+  const pgCode = (error as { code?: string }).code;
+  if (pgCode === '42P01' || pgCode === '42703' || pgCode === '42883') {
+    // The running build expects a newer schema. Report one safe readiness failure instead of an
+    // opaque INTERNAL_ERROR; the detail stays in the sanitized server log.
+    reply.log.error(
+      { code: pgCode, correlationId: context.correlationId },
+      'database schema does not match this build'
+    );
+    return failure(
+      reply,
+      context,
+      'DATABASE_MIGRATION_REQUIRED',
+      'The database schema does not match this build. Apply the reviewed migration, then reload.',
+      503
+    );
+  }
   if (/duplicate key value/.test(message)) {
     return failure(reply, context, 'VALIDATION_FAILED', 'A record with this identity already exists', 409);
   }

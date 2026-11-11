@@ -29,11 +29,18 @@ export type PublishSourceTask = {
   progressPercent: number | null;
   pendingRequest: boolean;
   projectVisibility: string;
+  /**
+   * The published snapshot carries only explicitly mapped work. A project whose division is blank
+   * is remediation material for ADMIN and is never widened by a publication.
+   */
+  projectDivisionId?: string | null;
 };
 
 /** Everything not in this function's return value never reaches the snapshot. */
 export function toPublishedRow(task: PublishSourceTask): PublishedTaskRow | null {
   if (!isPublishable(task.projectVisibility)) return null;
+  // Unmapped work fails closed for every ordinary reader; it must not reach the employee snapshot.
+  if (!task.projectDivisionId) return null;
   return {
     taskId: task.taskId,
     taskName: task.taskName,

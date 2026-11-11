@@ -5,17 +5,19 @@
  * first input, keeps the background inert (the native `<dialog>` does that), traps focus, supports
  * Escape and Cancel, and restores focus to the control that opened it. The draft stays in memory
  * across a validation error, a temporary failure and a language change, and nothing is written to
- * browser storage. Submission keeps the documented non-blocking semantics: the request is reported
- * as received only after a durable acknowledgement, a duplicate cannot be sent twice, and an
- * unobservable outcome stays explicitly unknown - it is never retried automatically.
+ * browser storage.
+ *
+ * Submission is owned by the session-level tracker (`state/submissions`), not by this component:
+ * closing the dialog while a request is in flight never cancels the tracking, and the outcome is
+ * still reported by the page-level notice. This dialog only *reads* its own entry, so it can show
+ * "sending", a refusal and the permanently-unknown outcome while it is open.
  */
 import { useEffect, useRef, useState } from 'react';
 import type { SubmissionBlockReason } from '@eh/contracts';
-import { ApiFailure, api } from '../api/client';
 import { useI18n } from '../i18n';
-import { keys, queryCache } from '../state/cache';
 import { Modal } from './ui';
 import { createIdempotencyKey } from './forms';
+import { submitRequest, reportSubmission, useClaimSubmission, useSubmission } from '../state/submissions';
 
 export type RequestKind = 'DEADLINE_CHANGE' | 'COMPLETION_REPORT';
 
@@ -76,23 +78,18 @@ export function RequestDialog({
   const [reason, setReason] = useState('');
   const [explanation, setExplanation] = useState('');
   const [completionNote, setCompletionNote] = useState('');
-  const [state, setState] = useState<'idle' | 'sending' | 'unknown'>('idle');
-  const [failure, setFailure] = useState<unknown>(null);
   const [validation, setValidation] = useState('');
   const clientRequestId = useRef(createIdempotencyKey());
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
+  const submitting = useRef(false);
+  const tracked = useSubmission(clientRequestId.current);
+  const state = tracked?.state ?? 'idle';
 
   const blocked = !submissionEnabled || blockedReasons.length > 0;
   const valid = requestType === 'DEADLINE_CHANGE' ? !!requestedDueDate : completionNote.trim().length > 0;
 
   const submit = async (): Promise<void> => {
-    if (blocked || state === 'sending' || state === 'unknown') return;
+    if (blocked || state === 'SENDING' || state === 'UNKNOWN' || state === 'RECEIVED') return;
+    if (submitting.current) return;
     if (!valid) {
       setValidation(
         requestType === 'DEADLINE_CHANGE' ? t('request.form.requiredDeadline') : t('request.form.requiredNote')
@@ -100,52 +97,54 @@ export function RequestDialog({
       return;
     }
     setValidation('');
-    setFailure(null);
-    setState('sending');
+    submitting.current = true;
     try {
-      const result = await api.post<{ requestId: string; state: string }>('/api/employee/requests', {
-        clientRequestId: clientRequestId.current,
+      // The tracker holds the request, the idempotency identity and the outcome. A refusal keeps
+      // the draft on screen so it can be corrected; an unknown outcome is never retried here.
+      await submitRequest({
+        submissionId: clientRequestId.current,
         taskId,
         requestType,
-        requestedDueDate: requestType === 'DEADLINE_CHANGE' ? requestedDueDate : undefined,
-        reason: reason.trim() || undefined,
-        explanation: explanation.trim() || undefined,
-        completionNote: requestType === 'COMPLETION_REPORT' ? completionNote.trim() : undefined
+        requestedDueDate,
+        reason: reason.trim(),
+        explanation: explanation.trim(),
+        completionNote: completionNote.trim()
       });
-      // A durable acknowledgement is the only thing that closes the dialog and reports success.
-      queryCache.invalidate([
-        keys.myRequests,
-        keys.myWork,
-        keys.task(taskId),
-        keys.tasks,
-        keys.requests,
-        keys.timeline,
-        keys.overview,
-        keys.reportEligibility(taskId)
-      ]);
-      if (!mounted.current) return;
-      onResult({
-        tone: 'ok',
-        text: `${t('request.transport.RECEIVED')} ${t('request.confirm.id')}: ${result.requestId}`
-      });
-      onClose();
-    } catch (error) {
-      if (!mounted.current) return;
-      if (error instanceof ApiFailure && ['NETWORK', 'INVALID_RESPONSE'].includes(error.code)) {
-        // The server may or may not have stored it: never retried automatically, never reported
-        // as success, and the same client request ID keeps a manual retry idempotent.
-        setState('unknown');
-        onResult({ tone: 'warning', text: t('request.transport.OUTCOME_UNKNOWN') });
-        return;
-      }
-      setState('idle');
-      setFailure(error);
-      // The definite refusal leaves the draft intact for a correction.
-      if (error instanceof ApiFailure) {
-        onResult({ tone: 'danger', text: error.message });
-      }
+    } finally {
+      submitting.current = false;
     }
   };
+
+  const refused = state === 'REFUSED' ? tracked?.message ?? '' : '';
+  const sending = state === 'SENDING';
+  const settled = state === 'RECEIVED' || state === 'UNKNOWN';
+  // While this dialog is open it is the reporter for its own submission, so the shell notice stays
+  // quiet for it. When the dialog closes, the shell takes over and the outcome is still delivered.
+  useClaimSubmission(clientRequestId.current);
+  const reported = useRef('');
+  useEffect(() => {
+    if (!tracked || tracked.state === 'SENDING') return;
+    const marker = `${tracked.state}:${tracked.requestId}:${tracked.message}`;
+    if (reported.current === marker) return;
+    reported.current = marker;
+    // The host page shows the outcome, so the shell notice stays quiet for this submission.
+    reportSubmission(tracked.submissionId);
+    if (tracked.state === 'RECEIVED') {
+      onResult({
+        tone: 'ok',
+        text: `${t('request.transport.RECEIVED')} ${t('request.confirm.id')}: ${tracked.requestId}`
+      });
+      // A durable acknowledgement closes the form. Closing earlier is not cancel: the tracker keeps
+      // the request and the shell reports it if this form is gone before the answer arrives.
+      onClose();
+      return;
+    }
+    onResult(
+      tracked.state === 'UNKNOWN'
+        ? { tone: 'warning', text: t('request.transport.OUTCOME_UNKNOWN') }
+        : { tone: 'danger', text: tracked.message || t('submission.refused') }
+    );
+  }, [tracked, onResult, onClose, t]);
 
   return (
     <Modal
@@ -154,11 +153,11 @@ export function RequestDialog({
       footer={
         <>
           <button type="button" className="button secondary" onClick={onClose}>
-            {state === 'sending' ? t('action.close') : t('request.form.cancel')}
+            {sending ? t('action.close') : settled ? t('action.close') : t('request.form.cancel')}
           </button>
-          {!blocked && state !== 'unknown' ? (
-            <button type="button" className="button" disabled={state === 'sending'} onClick={() => void submit()}>
-              {state === 'sending' ? t('request.transport.SENDING') : t('request.form.submit')}
+          {!blocked && !settled ? (
+            <button type="button" className="button" disabled={sending} onClick={() => void submit()}>
+              {sending ? t('request.transport.SENDING') : t('request.form.submit')}
             </button>
           ) : null}
         </>
@@ -197,7 +196,7 @@ export function RequestDialog({
             </ul>
           </div>
         ) : (
-          <fieldset className="stack form-fields" disabled={state !== 'idle'}>
+          <fieldset className="stack form-fields" disabled={sending || settled}>
             {requestType === 'DEADLINE_CHANGE' ? (
               <>
                 <label className="field">
@@ -232,15 +231,26 @@ export function RequestDialog({
           </fieldset>
         )}
 
-        {state === 'unknown' ? (
-          <p role="status" className="banner warning">
-            {t('request.transport.OUTCOME_UNKNOWN')}
+        {sending ? (
+          <p role="status" className="banner info">
+            {t('submission.sending')}
+          </p>
+        ) : null}
+        {state === 'RECEIVED' ? (
+          <p role="status" className="banner ok">
+            {t('request.transport.RECEIVED')} {t('request.confirm.id')}: {tracked?.requestId ?? ''}
+          </p>
+        ) : null}
+        {state === 'UNKNOWN' ? (
+          <p role="alert" className="banner warning">
+            <strong>{t('request.transport.OUTCOME_UNKNOWN')}</strong>{' '}
+            <span>{t('submission.unknown')}</span>
           </p>
         ) : null}
         {validation ? <div className="banner danger">{validation}</div> : null}
-        {failure ? (
+        {state === 'REFUSED' ? (
           <div className="banner danger" role="alert">
-            {failure instanceof ApiFailure ? failure.message : t('common.error')}
+            {refused || t('common.error')}
           </div>
         ) : null}
       </div>

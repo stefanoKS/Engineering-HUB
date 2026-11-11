@@ -10,6 +10,7 @@
  * a parent is opened.
  */
 import { ProjectPicker } from '../components/ProjectPicker';
+import { TaskAssigneePicker } from '../components/TaskAssigneePicker';
 import { useEditorState } from '../state/editor';
 /** Task list: server-side filtering and paging, narrow rows, one form for create and edit. */
 import { Fragment, useState } from 'react';
@@ -25,6 +26,10 @@ import { ConfirmDialog } from '../components/forms';
 import { TaskForm } from './TaskForm';
 import { MAX_TASK_DEPTH, projectColor } from '@eh/domain';
 import { useRouteMemoryState } from '../state/navigation';
+import { useDivisionScope } from '../state/division';
+import { useDivisionTransition } from '../state/scope';
+import { capabilitiesOf, canEditRecord, hasWritableDestination } from '../state/capabilities';
+import { DebouncedSearchInput } from '../components/search-input';
 
 type Page = { items: TaskSummary[]; matchedTotal?: number; total: number; page: number; pageSize: number; totalPages: number };
 type References = {
@@ -54,17 +59,22 @@ export function taskNavigationFilters(search: string): {
   displayStatus: '' | (typeof DISPLAY_STATUSES)[number];
   responsibilityId: string;
   unassigned: boolean;
+  dueFrom: string;
+  dueTo: string;
 } {
   const params = new URLSearchParams(search);
   const rawStatus = params.get('displayStatus') ?? '';
+  const date = (value: string | null): string => (/^\d{4}-\d{2}-\d{2}$/.test(value ?? '') ? value! : '');
   return {
-    explicit: NAVIGATION_FILTERS.some((key) => params.has(key)),
+    explicit: NAVIGATION_FILTERS.some((key) => params.has(key)) || params.has('dueFrom') || params.has('dueTo'),
     workState: params.get('workState') === 'OPEN' ? 'OPEN' : '',
     displayStatus: DISPLAY_STATUSES.includes(rawStatus as (typeof DISPLAY_STATUSES)[number])
       ? (rawStatus as (typeof DISPLAY_STATUSES)[number])
       : '',
     responsibilityId: (params.get('responsibilityId') ?? '').slice(0, 64),
-    unassigned: params.get('unassigned') === 'true'
+    unassigned: params.get('unassigned') === 'true',
+    dueFrom: date(params.get('dueFrom')),
+    dueTo: date(params.get('dueTo'))
   };
 }
 
@@ -82,10 +92,12 @@ export function TasksScreen({
   routeSearch?: string;
 }): JSX.Element {
   const { t } = useI18n();
+  const { selected: selectedDivision } = useDivisionScope();
   const memoryKey = readOnly ? 'all-work:read' : 'all-work:manager';
   const navigation = taskNavigationFilters(routeSearch);
   const reset = { resetToInitial: navigation.explicit };
   const [projectId, setProjectId] = useRouteMemoryState(`${memoryKey}:project`, '', reset);
+  const [assigneeMemberId, setAssigneeMemberId] = useRouteMemoryState(`${memoryKey}:assignee`, '', reset);
   const [responsibilityId, setResponsibilityId] = useRouteMemoryState(
     `${memoryKey}:responsibility`,
     navigation.unassigned ? '' : navigation.responsibilityId,
@@ -99,6 +111,10 @@ export function TasksScreen({
     reset
   );
   const [query, setQuery] = useRouteMemoryState(`${memoryKey}:query`, '', reset);
+  // A drilldown from the overview carries its deadline window, so the list answers the same
+  // question the card counted. The window is applied on the server before paging and totals.
+  const [dueFrom, setDueFrom] = useRouteMemoryState(`${memoryKey}:dueFrom`, navigation.dueFrom, reset);
+  const [dueTo, setDueTo] = useRouteMemoryState(`${memoryKey}:dueTo`, navigation.dueTo, reset);
   const [includeInactive, setIncludeInactive] = useRouteMemoryState(`${memoryKey}:inactive`, false, reset);
   const [page, setPage] = useRouteMemoryState(`${memoryKey}:page`, 1, reset);
   const [sort, setSort] = useRouteMemoryState<TaskSort>(`${memoryKey}:sort`, 'dueDate', reset);
@@ -108,6 +124,18 @@ export function TasksScreen({
     const next = new Set(current);
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
+  });
+  // The scope-transition policy: a division change starts the list again at page 1 and drops every
+  // selection the new scope cannot be shown to contain. The sort order and the search text are
+  // independent of the scope and survive; a selection that a still-loading reference read has not
+  // yet confirmed is not evidence of incompatibility on its own.
+  useDivisionTransition(() => {
+    setPage(1);
+    setExpanded(new Set());
+    setProjectId('');
+    setResponsibilityId('');
+    setUnassigned(false);
+    setAssigneeMemberId('');
   });
   const [editing, setEditing, loadEditor, editorError, editorLoading] = useEditorState<{ mode: 'create' } | { mode: 'edit'; detail: TaskDetail } | null>(null);
   const [action, setAction] = useState<{ kind: 'override' | 'complete'; task: TaskSummary } | null>(null);
@@ -135,6 +163,7 @@ export function TasksScreen({
   );
   const filters = {
     projectId,
+    assigneeMemberId,
     responsibilityId,
     unassigned,
     workState,
@@ -143,7 +172,11 @@ export function TasksScreen({
     includeInactive,
     sort,
     direction,
-    page
+    page,
+    dueFrom,
+    dueTo,
+    // The division switch narrows the server-resolved scope; it never widens it.
+    divisionId: selectedDivision ?? undefined
   };
   const listKey = `${keyPrefix}${queryString({ ...filters, tree: true })}`;
   const list = useQuery<Page>(listKey, () =>
@@ -152,6 +185,9 @@ export function TasksScreen({
     )
   );
   const canManage = !readOnly && (actor.role === 'ADMIN' || actor.role === 'MANAGER');
+  const divisionScope = useDivisionScope();
+  // A new task needs a destination this account may write in; a role on its own is not one.
+  const canCreate = canManage && hasWritableDestination(divisionScope);
   const setSortOrder = (next: TaskSort): void => {
     setDirection(next === sort ? (direction === 'asc' ? 'desc' : 'asc') : 'asc');
     setSort(next);
@@ -162,6 +198,10 @@ export function TasksScreen({
       {text} {sort === key ? <span aria-hidden="true">{direction === 'asc' ? '↑' : '↓'}</span> : null}
     </button>
   );
+  // `aria-sort` belongs on the header cell, so a screen reader announces the sorted column.
+  const sortProps = (key: TaskSort): { 'aria-sort'?: 'ascending' | 'descending' | 'none' } => ({
+    'aria-sort': sort === key ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'
+  });
 
   async function openEdit(summary: TaskSummary): Promise<void> {
     await loadEditor(async () => ({ mode: 'edit', detail: await api.get<TaskDetail>(`/api/manager/tasks/${summary.taskId}`) }));
@@ -178,10 +218,12 @@ export function TasksScreen({
           <h2>{t('nav.allWork')}</h2>
           <p className="muted small">{readOnly ? t('allWork.intro') : t('allWork.managerIntro')}</p>
         </div>
-        {canManage ? (
+        {canCreate ? (
           <button type="button" className="button" onClick={() => setEditing({ mode: 'create' })}>
             {t('tasks.new')}
           </button>
+        ) : canManage ? (
+          <p className="muted small">{t('capability.noWritableDestination')}</p>
         ) : null}
       </div>
 
@@ -194,6 +236,14 @@ export function TasksScreen({
             emptyLabel={t('filter.allProjects')}
             onChange={id => { setProjectId(id); setPage(1); }}
           />
+        </div>
+        <div className="field">
+          <span className="field-label">{t('tasks.assigneeFilter')}</span>
+          <TaskAssigneePicker value={assigneeMemberId} onChange={id => {
+            setAssigneeMemberId(id);
+            setPage(1);
+            setExpanded(new Set());
+          }} />
         </div>
         <label className="field">
           <span className="field-label">{t('filter.responsibility')}</span>
@@ -240,19 +290,15 @@ export function TasksScreen({
             ))}
           </select>
         </label>
-        <label className="field grow">
-          <span className="field-label">{t('myWork.filter.task')}</span>
-          <input
-            type="search"
-            aria-label={t('myWork.filter.task')}
-            placeholder={t('myWork.filter.task')}
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setPage(1);
-            }}
-          />
-        </label>
+        <DebouncedSearchInput
+          className="grow"
+          value={query}
+          label={t('myWork.filter.task')}
+          onApplied={(applied) => {
+            setQuery(applied);
+            setPage(1);
+          }}
+        />
         {canManage ? (
           <label className="checkbox">
             <input
@@ -272,6 +318,26 @@ export function TasksScreen({
       <ErrorBox error={editorError} />
       <ErrorBox error={list.error} onRetry={() => list.refresh()} />
 
+      {dueFrom || dueTo ? (
+        <p className="active-filter-summary" role="status">
+          <span>{t('filter.deadlineWindow')}:</span>
+          <span className="filter-chip">
+            {dueFrom || '…'} – {dueTo || '…'}
+          </span>
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => {
+              setDueFrom('');
+              setDueTo('');
+              setPage(1);
+            }}
+          >
+            {t('query.clearFilters')}
+          </button>
+        </p>
+      ) : null}
+
       {!list.data ? (
         <p className="muted">{t('state.loading')}</p>
       ) : list.data.items.length === 0 ? (
@@ -288,11 +354,11 @@ export function TasksScreen({
           </colgroup>
           <thead>
             <tr>
-              <th>{sortHeader('name', t('column.name'))}</th>
-              <th>{sortHeader('project', t('nav.projects'))}</th>
-              <th>{sortHeader('owner', t('column.owner'))}</th>
-              <th>{sortHeader('status', t('column.status'))}</th>
-              <th>{sortHeader('dueDate', t('column.deadline'))}</th>
+              <th {...sortProps('name')}>{sortHeader('name', t('column.name'))}</th>
+              <th {...sortProps('project')}>{sortHeader('project', t('nav.projects'))}</th>
+              <th {...sortProps('owner')}>{sortHeader('owner', t('column.owner'))}</th>
+              <th {...sortProps('status')}>{sortHeader('status', t('column.status'))}</th>
+              <th {...sortProps('dueDate')}>{sortHeader('dueDate', t('column.deadline'))}</th>
               {canManage ? <th>{t('column.actions')}</th> : null}
             </tr>
           </thead>
@@ -314,7 +380,7 @@ export function TasksScreen({
         </table>
       )}
 
-      {list.data ? <p className="muted small">{t('allWork.scope', { n: list.data.items.length, total: list.data.matchedTotal ?? list.data.total })}</p> : null}
+      {list.data ? <p className="muted small">{t('tasks.filteredTreeScope', { n: list.data.items.length, total: list.data.matchedTotal ?? list.data.total })}</p> : null}
       {list.data ? (
         <Pagination page={list.data.page} totalPages={list.data.totalPages} total={list.data.total} onChange={setPage} />
       ) : null}
@@ -352,6 +418,7 @@ export function TasksScreen({
           reasonRequired={action.kind === 'override'}
           destructive={action.kind === 'override'}
           onCancel={() => setAction(null)}
+          onReload={() => list.refresh()}
           onConfirm={async ({ confirmation, reason }) => {
             if (action.kind === 'complete') {
               await api.post(`/api/manager/tasks/${action.task.taskId}/complete`, {
@@ -421,6 +488,7 @@ type TreeProps = {
   toggle: (id: string) => void;
   filters: {
     projectId: string;
+    assigneeMemberId: string;
     responsibilityId: string;
     unassigned: boolean;
     workState: string;
@@ -439,7 +507,8 @@ type TreeProps = {
 function TaskTreeRows(props: TreeProps & { items: TaskSummary[] }): JSX.Element {
   const { actor, readOnly, expanded, toggle, openEdit, startDelete, setAction } = props;
   const { t } = useI18n();
-  const canManage = !readOnly && (actor.role === 'ADMIN' || actor.role === 'MANAGER');
+  const capabilities = capabilitiesOf(actor);
+  const canManage = !readOnly && capabilities.canEdit;
   const columnCount = canManage ? 6 : 5;
   return <>{props.items.map(task => <Fragment key={task.taskId}>
               <tr data-task-id={task.taskId} style={{ ['--project-accent' as string]: projectColor(task.projectId) }}>
@@ -453,6 +522,7 @@ function TaskTreeRows(props: TreeProps & { items: TaskSummary[] }): JSX.Element 
                     <a href={`#/task/${task.taskId}`}>{task.taskName}</a>
                   </span>
                   {task.container ? <Badge>{t('request.container')}</Badge> : null}
+                  {task.contextOnly ? <Badge>{t('tasks.contextOnly')}</Badge> : null}
                   {task.reviewState === 'PENDING' ? <Badge tone="warn">{t('tasks.review')}</Badge> : null}
                 </td>
                 <td className="muted small">{task.projectName}</td>
@@ -468,45 +538,65 @@ function TaskTreeRows(props: TreeProps & { items: TaskSummary[] }): JSX.Element 
                 {canManage ? (
                   <td className="project-actions-cell">
                     <div className="actions">
-                      <button type="button" className="button secondary row-action" onClick={() => void openEdit(task)}>
-                        {t('action.edit')}
-                      </button>
-                      {!task.container && task.displayStatus !== 'DONE' && task.displayStatus !== 'CANCELLED' ? (
-                        <button type="button" className="button row-action" onClick={() => setAction({ kind: 'complete', task })}>
-                          {t('tasks.completeDirect')}
-                        </button>
-                      ) : null}
-                      {actor.role === 'ADMIN' ? (
-                        <Menu label={t('action.more')} className="row-menu">
-                          {(close) => (
-                            <>
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className="menu-item"
-                                onClick={() => {
-                                  close();
-                                  setAction({ kind: 'override', task });
-                                }}
-                              >
-                                {t('tasks.override')}
-                              </button>
-                              <div className="menu-separator" role="separator" />
-                              <button
-                                type="button"
-                                role="menuitem"
-                                className="menu-item danger"
-                                onClick={() => {
-                                  close();
-                                  void startDelete(task);
-                                }}
-                              >
-                                {t('projects.delete')}
-                              </button>
-                            </>
-                          )}
-                        </Menu>
-                      ) : null}
+                      {canEditRecord(capabilities, task) ? (
+                        <>
+                          <button type="button" className="button secondary row-action" onClick={() => void openEdit(task)}>
+                            {t('action.edit')}
+                          </button>
+                          {/* Secondary row actions live in one menu, so the name, deadline and
+                              status keep their width instead of competing with a row of buttons. */}
+                          <Menu label={t('action.more')} className="row-menu">
+                            {(close) => (
+                              <>
+                                {!task.container && task.displayStatus !== 'DONE' && task.displayStatus !== 'CANCELLED' ? (
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    className="menu-item"
+                                    onClick={() => {
+                                      close();
+                                      setAction({ kind: 'complete', task });
+                                    }}
+                                  >
+                                    {t('tasks.completeDirect')}
+                                  </button>
+                                ) : null}
+                                {actor.role === 'ADMIN' ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      role="menuitem"
+                                      className="menu-item"
+                                      onClick={() => {
+                                        close();
+                                        setAction({ kind: 'override', task });
+                                      }}
+                                    >
+                                      {t('tasks.override')}
+                                    </button>
+                                    <div className="menu-separator" role="separator" />
+                                    <button
+                                      type="button"
+                                      role="menuitem"
+                                      className="menu-item danger"
+                                      onClick={() => {
+                                        close();
+                                        void startDelete(task);
+                                      }}
+                                    >
+                                      {t('projects.delete')}
+                                    </button>
+                                  </>
+                                ) : null}
+                              </>
+                            )}
+                          </Menu>
+                        </>
+                      ) : (
+                        <span className="read-only-record" title={t('capability.readOnlyRecordHelp')}>
+                          {t('capability.readOnlyRecord')}
+                        </span>
+                      )}
                     </div>
                   </td>
                 ) : null}

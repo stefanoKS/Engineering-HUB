@@ -12,7 +12,7 @@ import { Database, insertMember, insertProject, insertTask } from '@eh/db';
 import { buildApp } from '../src/app';
 import { loadConfig } from '../src/config';
 import { NullInboxSource } from '../src/inbox';
-import { freshDatabase, requireDatabase } from '../../../packages/db/test/support/db';
+import { freshDatabase, requireDatabase, seedTestDivisions } from '../../../packages/db/test/support/db';
 
 let app: FastifyInstance;
 let db: Database;
@@ -51,6 +51,7 @@ beforeEach(async () => {
     MAIL_FROM_ADDRESS: 'noreply@example.co.jp',
     SHARED_DASHBOARD_SNAPSHOT_SPREADSHEET_ID: 'sheet-id'
   });
+  await seedTestDivisions(db);
   app = await buildApp({ config, db, inbox: new NullInboxSource(), logger: false });
   await app.ready();
 });

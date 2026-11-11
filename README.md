@@ -2,6 +2,11 @@
 
 [日本語](README_JP.md)
 
+The V2 application (`apps/`, `packages/`) is branded **シゴトモ** / **SHIGOTOMO**. The V1 Apps
+Script application keeps its own name, `設計・開発課 管理`. A division named `設計・開発課` is
+organisational data, never branding; no table, identifier, package, API, environment variable or
+migration is renamed by the brand.
+
 Engineering-HUB manages a design and development department's projects, task hierarchy, deadlines,
 progress and completion reviews. V2 runs a React application, TypeScript API and background worker
 on your company LAN, with PostgreSQL as the database. Employee-ID/password sign-in needs no Google

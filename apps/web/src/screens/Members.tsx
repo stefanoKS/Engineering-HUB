@@ -7,9 +7,10 @@ import { useI18n } from '../i18n';
 import { Badge, EmptyState, ErrorBox, Pagination, SaveState, Section } from '../components/ui';
 import { DeadlineCell } from '../components/deadline';
 import { TaskStatusBadge, WorkflowHint } from '../components/task-status';import { SelectInput, TextInput, useIdempotencyKey, useSave } from '../components/forms';
+import { useDivisionScope } from '../state/division';
 
 type Page = { items: (Member & { _revision: number })[]; total: number; page: number; pageSize: number; totalPages: number };
-const ROLES = ['ADMIN', 'MANAGER', 'MEMBER', 'VIEWER'];
+const ROLES = ['ADMIN', 'MANAGER', 'GENERAL_MANAGER', 'MEMBER', 'VIEWER'];
 
 export function MembersScreen({ actor }: { actor: Actor }): JSX.Element {
   const { t } = useI18n();
@@ -118,6 +119,7 @@ function MemberForm({
   const { t } = useI18n();
   const save = useSave();
   const idempotencyKey = useIdempotencyKey();
+  const scope = useDivisionScope();
   const [name, setName] = useState(member?.name ?? '');
   const [email, setEmail] = useState(member?.email ?? '');
   const [department, setDepartment] = useState(member?.department ?? '');
@@ -125,6 +127,21 @@ function MemberForm({
   const [role, setRole] = useState(member?.role ?? 'VIEWER');
   const [active, setActive] = useState(member?.active ?? true);
   const [capacity, setCapacity] = useState(member?.weeklyCapacityHours !== null && member?.weeklyCapacityHours !== undefined ? String(member.weeklyCapacityHours) : '');
+  // Division access is an ADMIN relationship edit; the server refuses it for any other role.
+  const [grants, setGrants] = useState<Record<string, 'WORK' | 'READ'>>(() =>
+    Object.fromEntries((member?.divisionGrants ?? []).map((grant) => [grant.divisionId, grant.accessKind]))
+  );
+  const [allDivisions, setAllDivisions] = useState(member?.allDivisionsRead === true);
+  const activeDivisions = scope.readable.filter((division) => division.status === 'Active');
+
+  const setGrant = (divisionId: string, kind: 'WORK' | 'READ' | null): void => {
+    setGrants((current) => {
+      const next = { ...current };
+      if (kind) next[divisionId] = kind;
+      else delete next[divisionId];
+      return next;
+    });
+  };
 
   return (
     <div className="modal-screen" role="dialog" aria-modal="true">
@@ -170,6 +187,63 @@ function MemberForm({
             </label>
           </div>
           {canChangeRole ? (
+            <section className="field divison-grants">
+              <h3 className="field-label">{t('division.label')}</h3>
+              <p className="muted small">{t('members.divisionsHint')}</p>
+              {activeDivisions.length === 0 ? (
+                <p className="muted small">{t('division.none')}</p>
+              ) : (
+                <table className="table division-grant-table">
+                  <thead>
+                    <tr>
+                      <th>{t('division.label')}</th>
+                      <th>{t('members.divisions')}</th>
+                      <th>{t('members.additionalRead')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeDivisions.map((division) => (
+                      <tr key={division.divisionId}>
+                        <td>{division.name}</td>
+                        <td>
+                          <input
+                            type="checkbox"
+                            aria-label={`${division.name} ${t('members.divisions')}`}
+                            checked={grants[division.divisionId] === 'WORK'}
+                            onChange={(event) => setGrant(division.divisionId, event.target.checked ? 'WORK' : null)}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="checkbox"
+                            aria-label={`${division.name} ${t('members.additionalRead')}`}
+                            checked={grants[division.divisionId] === 'READ'}
+                            onChange={(event) => setGrant(division.divisionId, event.target.checked ? 'READ' : null)}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {role === 'GENERAL_MANAGER' ? (
+                <fieldset className="field">
+                  <legend className="field-label">{t('division.label')}</legend>
+                  <label className="checkbox">
+                    <input type="radio" name="division-oversight" checked={allDivisions} onChange={() => setAllDivisions(true)} />
+                    {t('members.allDivisions')}
+                  </label>
+                  <label className="checkbox">
+                    <input type="radio" name="division-oversight" checked={!allDivisions} onChange={() => setAllDivisions(false)} />
+                    {t('members.selectedDivisions')}
+                  </label>
+                  <span className="field-hint">{t('members.allDivisionsHint')}</span>
+                </fieldset>
+              ) : null}
+              {save.error ? <span className="field-hint">{t('members.divisionBlocked')}</span> : null}
+            </section>
+          ) : null}
+          {canChangeRole ? (
             <label className="checkbox">
               <input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)} />
               {t('members.active')}
@@ -198,6 +272,18 @@ function MemberForm({
                     if (canChangeRole) {
                       if (!member || role !== member.role) payload.role = role;
                       if (!member || active !== member.active) payload.active = active;
+                      const storedGrants = JSON.stringify(
+                        (member?.divisionGrants ?? [])
+                          .map((grant) => [grant.divisionId, grant.accessKind])
+                          .sort()
+                      );
+                      const nextGrants = JSON.stringify(Object.entries(grants).sort());
+                      if (!member || storedGrants !== nextGrants) {
+                        payload.divisionGrants = Object.entries(grants).map(([divisionId, accessKind]) => ({ divisionId, accessKind }));
+                      }
+                      if (role === 'GENERAL_MANAGER' && (!member || allDivisions !== member.allDivisionsRead)) {
+                        payload.allDivisionsRead = allDivisions;
+                      }
                     }
                     if (!member) {
                       return api.post('/api/manager/members', { ...payload, idempotencyKey });

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Member self-service work.
  *
  * A member files work for themselves only. This is a deliberately separate service from the
@@ -19,18 +19,45 @@ import type {
   Project,
   Subproject
 } from '@eh/contracts';
-import { getProject, insertProject, insertSubproject, insertTask, getTask } from '@eh/db';
+import { getDivision, getProject, insertProject, insertSubproject, insertTask, getTask, listDivisions } from '@eh/db';
 import {
   DomainError,
+  assertDivisionAcceptsNewWork,
   businessDate,
   canCreateOwnProject,
   canCreateOwnTask,
+  assertWritableDivision,
+  readableDivisionIds,
   requireRole,
   taskScheduleStatus
 } from '@eh/domain';
+import type { Transaction } from '@eh/db';
 import { audit, enqueueJob, hashRequest, runIdempotent, type ServiceCtx } from './common';
+import {
+  lockDivisionMutation,
+  assertAssignmentEligibility,
+  divisionForWriteOfProject,
+  getDivisionForWrite,
+  reauthorizeInTransaction
+} from './divisions';
 import { assertProjectDeadlineWarnings, ensureActiveResponsibility } from './projects';
 import { assertTaskPlacement, planTaskDeadline } from './tasks';
+
+/**
+ * Re-resolves the member's authority inside a write.
+ *
+ * The result is the authorization the body of the write uses, and the same call is the access
+ * check a *replayed* create must still pass: a retry is answered only for a verified active MEMBER,
+ * and the operation itself is never re-executed.
+ */
+async function authorizeMemberWrite(
+  ctx: ServiceCtx,
+  tx: Transaction
+): Promise<Awaited<ReturnType<typeof reauthorizeInTransaction>>> {
+  const fresh = await reauthorizeInTransaction(tx, ctx);
+  requireRole(fresh.identity, 'MEMBER');
+  return fresh;
+}
 
 const PAGE_SIZE = 25;
 export type MyWorkSection = 'active' | 'completed';
@@ -165,13 +192,31 @@ export async function listMyWork(
     );
   }
   const filterWhere = where.length ? ` AND ${where.join(' AND ')}` : '';
+  // Current work is read within the caller's divisions. Completed work stays available as history,
+  // so a reassignment or a revoked grant never erases what a person actually did.
+  const divisionIds = readableDivisionIds(ctx.divisions);
+  const appliesDivision = section !== 'completed' && divisionIds !== undefined;
+  const divisionClause = (index: number): string => {
+    if (!appliesDivision) return '';
+    return divisionIds && divisionIds.length ? ` AND p.division_id = ANY($${index}::text[])` : ' AND false';
+  };
+  const divisionWhere = (() => {
+    if (!appliesDivision) return '';
+    if (!divisionIds || !divisionIds.length) return ' AND false';
+    params.push(divisionIds);
+    return divisionClause(params.length);
+  })();
+  const unfilteredParams: unknown[] = appliesDivision && divisionIds && divisionIds.length
+    ? [ctx.identity.memberId, divisionIds]
+    : [ctx.identity.memberId];
+  const unfilteredDivisionWhere = divisionClause(2);
   const pageParam = params.length + 1;
   params.push((page - 1) * PAGE_SIZE);
 
   const [rows, total, activeTotal, completedTotal, unfiltered] = await Promise.all([
     ctx.db.many<MyWorkRow>(
       `${MY_WORK_SELECT}
-        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND ${sectionWhere}${filterWhere}
+        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND ${sectionWhere}${filterWhere}${divisionWhere}
         ORDER BY ${order}
         LIMIT ${PAGE_SIZE} OFFSET $${pageParam}`,
       params
@@ -180,28 +225,28 @@ export async function listMyWork(
       `SELECT count(*)::text AS count
          FROM tasks t
          JOIN projects p ON p.project_id = t.project_id
-        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND ${sectionWhere}${filterWhere}`,
+        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND ${sectionWhere}${filterWhere}${divisionWhere}`,
       params.slice(0, -1)
     ),
     ctx.db.one<{ count: string }>(
       `SELECT count(*)::text AS count
          FROM tasks t
          JOIN projects p ON p.project_id = t.project_id
-        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND t.status <> 'Done'${filterWhere}`,
+        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND t.status <> 'Done'${filterWhere}${divisionWhere}`,
       params.slice(0, -1)
     ),
     ctx.db.one<{ count: string }>(
       `SELECT count(*)::text AS count
          FROM tasks t
          JOIN projects p ON p.project_id = t.project_id
-        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND t.status = 'Done'${filterWhere}`,
+        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND t.status = 'Done'${filterWhere}${divisionWhere}`,
       params.slice(0, -1)
     ),
     ctx.db.one<{ count: string }>(
       `SELECT count(*)::text AS count
          FROM tasks t JOIN projects p ON p.project_id = t.project_id
-        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND t.status <> 'Done'`,
-      [ctx.identity.memberId]
+        WHERE ${ACTIVE_WORK} AND ${OWN_WORK} AND t.status <> 'Done'${unfilteredDivisionWhere}`,
+      unfilteredParams
     )
   ]);
   return {
@@ -318,16 +363,37 @@ export async function myWorkProjectFormOptions(ctx: ServiceCtx): Promise<MyWorkP
   if (!canCreateOwnProject(ctx.identity)) {
     throw new DomainError('AUTHORIZATION_DENIED', 'Only a MEMBER files a project through self-service');
   }
-  const rows = await ctx.db.many<{ responsibility_id: string; name: string }>(
-    `SELECT responsibility_id, name
-       FROM responsibilities
-      WHERE status = 'Active'
-      ORDER BY name, responsibility_id
-      LIMIT 500`
-  );
+  // Only the divisions this member actually belongs to, and only the areas that belong to them.
+  const writable = [...ctx.divisions.work].sort();
+  if (!writable.length) {
+    return { projectCreationEnabled: false, responsibilities: [], divisions: [] };
+  }
+  const [rows, divisions] = await Promise.all([
+    ctx.db.many<{ responsibility_id: string; name: string; division_id: string | null }>(
+      `SELECT responsibility_id, name, division_id
+         FROM responsibilities
+        WHERE status = 'Active' AND division_id = ANY($1::text[])
+        ORDER BY name, responsibility_id
+        LIMIT 500`,
+      [writable]
+    ),
+    listDivisions(ctx.db)
+  ]);
   return {
     projectCreationEnabled: true,
-    responsibilities: rows.map((row) => ({ responsibilityId: row.responsibility_id, name: row.name }))
+    responsibilities: rows.map((row) => ({
+      responsibilityId: row.responsibility_id,
+      name: row.name,
+      divisionId: row.division_id
+    })),
+    divisions: divisions
+      .filter((division) => division.status === 'Active' && writable.includes(division.divisionId))
+      .map((division) => ({
+        divisionId: division.divisionId,
+        name: division.name,
+        status: division.status,
+        sortOrder: division.sortOrder
+      }))
   };
 }
 
@@ -336,14 +402,18 @@ export async function myWorkProjectOptions(ctx: ServiceCtx): Promise<MyWorkProje
   if (!canCreateOwnTask(ctx.identity)) {
     throw new DomainError('AUTHORIZATION_DENIED', 'Only a MEMBER files a task through self-service');
   }
+  // A member files work only in a project of a division they belong to.
+  const writable = [...ctx.divisions.work].sort();
+  if (!writable.length) return { taskCreationEnabled: false, items: [] };
   const [projects, subprojects] = await Promise.all([
     ctx.db.many<{ project_id: string; project_name: string; responsibility_name: string | null }>(
       `SELECT p.project_id, p.project_name, r.name AS responsibility_name
          FROM projects p
          LEFT JOIN responsibilities r ON r.responsibility_id = p.responsibility_id
-        WHERE p.status = 'Active' AND p.archived_at IS NULL
+        WHERE p.status = 'Active' AND p.archived_at IS NULL AND p.division_id = ANY($1::text[])
         ORDER BY p.project_name
-        LIMIT 500`
+        LIMIT 500`,
+      [writable]
     ),
     ctx.db.many<{
       subproject_id: string;
@@ -357,9 +427,10 @@ export async function myWorkProjectOptions(ctx: ServiceCtx): Promise<MyWorkProje
          FROM subprojects s
          JOIN projects p ON p.project_id = s.project_id
         WHERE s.deleted_at IS NULL AND s.status <> 'Archived'
-          AND p.status = 'Active' AND p.archived_at IS NULL
+          AND p.status = 'Active' AND p.archived_at IS NULL AND p.division_id = ANY($1::text[])
         ORDER BY eh_subproject_depth(s.subproject_id), s.subproject_name
-        LIMIT 2000`
+        LIMIT 2000`,
+      [writable]
     )
   ]);
   return {
@@ -422,6 +493,15 @@ export async function createMyTask(
   if (project.status !== 'Active' || project.archivedAt) {
     throw new DomainError('INVALID_TRANSITION', 'Work can only be filed under an active project');
   }
+  // A member files work only in a division they belong to, and the write itself is refused for a
+  // division their role cannot manage. A retired division accepts no new work.
+  assertWritableDivision(ctx.divisions, project.divisionId);
+  if (project.divisionId) {
+    const division = await getDivision(ctx.db, project.divisionId);
+    if (!division) throw new DomainError('VALIDATION_FAILED', 'Unknown division');
+    assertDivisionAcceptsNewWork(division.status);
+  }
+  await assertAssignmentEligibility(ctx, project.divisionId, [ctx.identity.memberId]);
   await assertTaskPlacement(ctx, {
     id: null,
     projectId: body.projectId,
@@ -443,6 +523,13 @@ export async function createMyTask(
     ctx,
     { scope: `employee.task.create:${ctx.identity.memberId}`, key: body.idempotencyKey, request: body },
     async (tx) => {
+      // The member's own membership and the division lifecycle are re-read inside the write.
+      await lockDivisionMutation(tx);
+      const fresh = await authorizeMemberWrite(ctx, tx);
+      const division = await divisionForWriteOfProject(tx, body.projectId);
+      assertWritableDivision(fresh.scope, division.divisionId);
+      if (division.status !== null) assertDivisionAcceptsNewWork(division.status);
+      await assertAssignmentEligibility(ctx, division.divisionId, [ctx.identity.memberId], new Set(), tx);
       const task = await insertTask(tx, {
         projectId: body.projectId,
         subprojectId: body.subprojectId ?? null,
@@ -479,7 +566,8 @@ export async function createMyTask(
         });
       }
       return { taskId: task.taskId };
-    }
+    },
+    { authorize: async (tx) => { await authorizeMemberWrite(ctx, tx); } }
   );
   return { taskId: result.data.taskId, replayed: result.replayed };
 }
@@ -502,7 +590,18 @@ export async function createMyProject(
   }
   const projectName = body.projectName.trim();
   if (!projectName) throw new DomainError('VALIDATION_FAILED', 'A project name is required');
+  // A member creates work only inside a division they belong to; membership is the eligibility,
+  // the role check above is the capability.
+  await getDivisionForWrite(ctx, body.divisionId);
+  await assertAssignmentEligibility(ctx, body.divisionId, [ctx.identity.memberId]);
   await ensureActiveResponsibility(ctx, body.responsibilityId);
+  const responsibility = await ctx.db.one<{ division_id: string | null }>(
+    'SELECT division_id FROM responsibilities WHERE responsibility_id = $1',
+    [body.responsibilityId]
+  );
+  if (responsibility?.division_id && responsibility.division_id !== body.divisionId) {
+    throw new DomainError('VALIDATION_FAILED', 'The selected responsibility belongs to another division');
+  }
   if (body.plannedStart && body.committedDeadline && body.plannedStart > body.committedDeadline) {
     throw new DomainError('VALIDATION_FAILED', 'Start date must be on or before finish date');
   }
@@ -512,9 +611,17 @@ export async function createMyProject(
     ctx,
     { scope: `employee.project.create:${ctx.identity.memberId}`, key: body.idempotencyKey, request: body },
     async (tx) => {
+      await lockDivisionMutation(tx);
+      const fresh = await authorizeMemberWrite(ctx, tx);
+      const division = await getDivision(tx, body.divisionId);
+      if (!division) throw new DomainError('VALIDATION_FAILED', 'Unknown division');
+      assertDivisionAcceptsNewWork(division.status);
+      assertWritableDivision(fresh.scope, division.divisionId);
+      await assertAssignmentEligibility(ctx, division.divisionId, [ctx.identity.memberId], new Set(), tx);
       const project = await insertProject(tx, {
         projectName,
         description: body.description ?? '',
+        divisionId: body.divisionId,
         responsibilityId: body.responsibilityId,
         projectOwnerId: ctx.identity.memberId,
         status: 'Active',
@@ -540,7 +647,8 @@ export async function createMyProject(
         }
       });
       return project;
-    }
+    },
+    { authorize: async (tx) => { await authorizeMemberWrite(ctx, tx); } }
   );
   return { project: result.data, replayed: result.replayed };
 }
@@ -569,6 +677,13 @@ export async function createMySubproject(
   if (project.status !== 'Active' || project.archivedAt) {
     throw new DomainError('INVALID_TRANSITION', 'A subproject can only be filed under an active project');
   }
+  assertWritableDivision(ctx.divisions, project.divisionId);
+  if (project.divisionId) {
+    const division = await getDivision(ctx.db, project.divisionId);
+    if (!division) throw new DomainError('VALIDATION_FAILED', 'Unknown division');
+    assertDivisionAcceptsNewWork(division.status);
+  }
+  await assertAssignmentEligibility(ctx, project.divisionId, [ctx.identity.memberId]);
 
   const parentSubprojectId = body.parentSubprojectId ?? null;
   if (parentSubprojectId) {
@@ -579,6 +694,12 @@ export async function createMySubproject(
     ctx,
     { scope: `employee.subproject.create:${ctx.identity.memberId}`, key: body.idempotencyKey, request: body },
     async (tx) => {
+      await lockDivisionMutation(tx);
+      const fresh = await authorizeMemberWrite(ctx, tx);
+      const division = await divisionForWriteOfProject(tx, body.projectId);
+      assertWritableDivision(fresh.scope, division.divisionId);
+      if (division.status !== null) assertDivisionAcceptsNewWork(division.status);
+      await assertAssignmentEligibility(ctx, division.divisionId, [ctx.identity.memberId], new Set(), tx);
       const subproject = await insertSubproject(tx, {
         projectId: body.projectId,
         parentSubprojectId: null,
@@ -604,7 +725,8 @@ export async function createMySubproject(
         }
       });
       return subproject;
-    }
+    },
+    { authorize: async (tx) => { await authorizeMemberWrite(ctx, tx); } }
   );
   return { subproject: result.data, replayed: result.replayed };
 }

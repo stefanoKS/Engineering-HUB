@@ -6,7 +6,7 @@ import { PROJECT_SCHEDULE_STATES } from '@eh/contracts';
 import { api, queryString } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
-import { EmptyState, ErrorBox, Pagination, Section } from '../components/ui';
+import { ErrorBox, EmptyState, Menu, Pagination, Section } from '../components/ui';
 import { ConfirmDialog, SelectInput, TextInput, useIdempotencyKey, useSave, type SaveStateValue } from '../components/forms';
 import { SaveState } from '../components/ui';
 import { ScheduleBadge } from '../components/project-schedule';
@@ -14,7 +14,11 @@ import { ProjectTable, type ProjectRowView, type ProjectSort } from '../componen
 import { navigate } from '../App';
 import { useRouteMemoryState } from '../state/navigation';
 import { useBusinessDate } from '../state/business-date';
-import { capabilitiesOf } from '../state/capabilities';
+import { useDivisionScope } from '../state/division';
+import { useDivisionTransition } from '../state/scope';
+import { capabilitiesOf, canEditRecord, hasWritableDestination } from '../state/capabilities';
+import { DebouncedSearchInput } from '../components/search-input';
+import { NoMatches, QueryState, RefreshWarning } from '../components/query-state';
 
 type ProjectRow = ProjectSummary & { _revision: number };
 type Page = {
@@ -25,7 +29,16 @@ type Page = {
   pageSize: number;
   totalPages: number;
 };
-type References = { responsibilities: Reference[]; members: { memberId: string; name: string; active: boolean }[] };
+type References = {
+  responsibilities: Reference[];
+  members: {
+    memberId: string;
+    name: string;
+    active: boolean;
+    workDivisionIds?: string[];
+    divisionNames?: string[];
+  }[];
+};
 
 /** The status filter is the derived schedule state, resolved on the server before paging. */
 const SCHEDULE_STATES: ProjectScheduleState[] = [...PROJECT_SCHEDULE_STATES];
@@ -46,14 +59,29 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
   const [deleteTarget, setDeleteTarget] = useState<{ summary: ProjectRow; confirmation: string; blockers: string[] } | null>(null);
 
   const references = useQuery<References>(keys.references, () => api.get<References>('/api/manager/references'));
+  // The shell's division switch narrows every division-sensitive screen. It is a display filter
+  // that is sent with the request; the server re-narrows it against the resolved scope.
+  const { selected: selectedDivision } = useDivisionScope();
   // The derived status depends on today, so the cache identity carries the Tokyo business date.
   const today = useBusinessDate();
-  const listKey = `${keys.projects}${queryString({ responsibilityId, unassigned, schedule, query, sort, direction, page })}:${today}`;
+  const listKey = `${keys.projects}${queryString({ responsibilityId, unassigned, schedule, query, sort, direction, page, divisionId: selectedDivision ?? undefined })}:${today}`;
   const list = useQuery<Page>(listKey, () =>
-    api.get<Page>(`/api/manager/projects${queryString({ responsibilityId, unassigned, schedule, query, sort, direction, page, pageSize: 25 })}`)
+    api.get<Page>(`/api/manager/projects${queryString({ responsibilityId, unassigned, schedule, query, sort, direction, page, pageSize: 25, divisionId: selectedDivision ?? undefined })}`)
   );
+  // A different division starts the list again at page 1 and drops the responsibility selection,
+  // whose compatibility with the new scope is not known here. The sort order is presentation state
+  // and survives, and so does the search text. A superseded response cannot repaint because the
+  // cache key carries the selection.
+  useDivisionTransition(() => {
+    setPage(1);
+    setResponsibilityId('');
+    setUnassigned(false);
+  });
   const canManage = capabilitiesOf(actor).canEdit;
   const capabilities = capabilitiesOf(actor);
+  const divisionScope = useDivisionScope();
+  // A new project needs a destination the manager may actually write in; a role alone is not one.
+  const canCreate = canManage && hasWritableDestination(divisionScope);
   const setSortOrder = (next: ProjectSort): void => {
     setDirection(next === sort ? (direction === 'asc' ? 'desc' : 'asc') : 'asc');
     setSort(next);
@@ -89,6 +117,8 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
 
   // The shared table renders the identity, schedule and counts; only the action cell is a
   // manager concern, so a role without a management capability renders no action column at all.
+  // Within a mixed or all-division list the actions are resolved per record: a project the caller
+  // may only read carries the read-only explanation instead of a disabled-looking editor.
   const toRow = (project: ProjectRow): ProjectRowView => ({
     projectId: project.projectId,
     projectName: project.projectName,
@@ -101,20 +131,28 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
     openWork: project.openWork,
     overdueWork: project.overdueWork,
     nextAction: project.nextAction,
-    actions: (
+    actions: canEditRecord(capabilities, project) ? (
       <div className="actions">
         <button type="button" className="link-button" onClick={() => void openEditor(project)}>
           {t('action.edit')}
         </button>
-        <button type="button" className="link-button" onClick={() => setArchiveTarget(project)}>
-          {t('projects.archive')}
-        </button>
-        {capabilities.canDelete ? (
-          <button type="button" className="link-button danger" onClick={() => void startDelete(project)}>
-            {t('projects.delete')}
-          </button>
-        ) : null}
+        <Menu label={t('action.more')} className="row-menu">
+          {(close) => <>
+            <button type="button" role="menuitem" className="menu-item" onClick={() => { close(); setArchiveTarget(project); }}>
+              {t('projects.archive')}
+            </button>
+            {capabilities.canDelete ? (
+              <button type="button" role="menuitem" className="menu-item danger" onClick={() => { close(); void startDelete(project); }}>
+                {t('projects.delete')}
+              </button>
+            ) : null}
+          </>}
+        </Menu>
       </div>
+    ) : (
+      <span className="read-only-record" title={t('capability.readOnlyRecordHelp')}>
+        {t('capability.readOnlyRecord')}
+      </span>
     )
   });
 
@@ -122,10 +160,12 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
     <div className="screen">
       <div className="screen-header">
         <h2>{t('nav.projects')}</h2>
-        {canManage ? (
+        {canCreate ? (
           <button type="button" className="button" onClick={() => setEditing({ mode: 'create' })}>
             {t('projects.new')}
           </button>
+        ) : canManage ? (
+          <p className="muted small">{t('capability.noWritableDestination')}</p>
         ) : null}
       </div>
 
@@ -158,42 +198,52 @@ export function ProjectsScreen({ actor }: { actor: Actor }): JSX.Element {
             options={SCHEDULE_STATES.map((value) => ({ value, label: t(`project.schedule.${value}`) }))}
           />
         </label>
-        <label className="field grow">
-          <span className="field-label">{t('filter.searchProjects')}</span>
-          <input
-            type="search"
-            aria-label={t('filter.searchProjects')}
-            placeholder={t('filter.searchProjects')}
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setPage(1);
-            }}
-          />
-        </label>
+        <DebouncedSearchInput
+          className="grow"
+          value={query}
+          label={t('filter.searchProjects')}
+          onApplied={(applied) => {
+            setQuery(applied);
+            setPage(1);
+          }}
+        />
       </div>
 
       {editorLoading && <p role="status">{t('state.loading')}</p>}
       <ErrorBox error={editorError} />
-      <ErrorBox error={list.error} onRetry={() => list.refresh()} />
+      <RefreshWarning error={list.error} onRetry={() => list.refresh()} />
 
-      {!list.data ? (
-        <p className="muted">{t('state.loading')}</p>
-      ) : list.data.items.length === 0 ? (
-        <EmptyState />
-      ) : (
-        <ProjectTable
-          items={list.data.items.map(toRow)}
-          groupTotals={list.data.groupTotals}
-          grouped={!responsibilityId && !unassigned}
-          sort={sort}
-          direction={direction}
-          onSort={setSortOrder}
-          collapsedGroups={collapsedGroups}
-          onToggleGroup={toggleGroup}
-          showActions
-        />
-      )}
+      <QueryState query={list}>
+        {(data) =>
+          data.items.length === 0 ? (
+            query || responsibilityId || unassigned || schedule ? (
+              <NoMatches
+                onClear={() => {
+                  setQuery('');
+                  setResponsibilityId('');
+                  setUnassigned(false);
+                  setStatus('');
+                  setPage(1);
+                }}
+              />
+            ) : (
+              <EmptyState />
+            )
+          ) : (
+            <ProjectTable
+              items={data.items.map(toRow)}
+              groupTotals={data.groupTotals}
+              grouped={!responsibilityId && !unassigned}
+              sort={sort}
+              direction={direction}
+              onSort={setSortOrder}
+              collapsedGroups={collapsedGroups}
+              onToggleGroup={toggleGroup}
+              showActions
+            />
+          )
+        }
+      </QueryState>
 
       {list.data ? (
         <Pagination page={list.data.page} totalPages={list.data.totalPages} total={list.data.total} onChange={setPage} />
@@ -282,6 +332,20 @@ export function ProjectForm({
   const { t, label } = useI18n();
   const save = useSave();
   const idempotencyKey = useIdempotencyKey();
+  // A creation needs one concrete writable division; the aggregate "all readable" scope is not a
+  // creation destination. An existing project's division is not editable here - a transfer is a
+  // separate, guarded ADMIN operation.
+  const divisionScope = useDivisionScope();
+  const writableDivisions = divisionScope.writable;
+  // The shell selection is a *read* scope: it becomes the default only when it is also a division
+  // this account may create in, so a read-only filter can never turn into a writable default.
+  const shellDivision =
+    divisionScope.selected && writableDivisions.some((entry) => entry.divisionId === divisionScope.selected)
+      ? divisionScope.selected
+      : '';
+  const [divisionId, setDivisionId] = useState(
+    project?.divisionId ?? (writableDivisions.length === 1 ? writableDivisions[0]!.divisionId : shellDivision)
+  );
   const [form, setForm] = useState({
     projectName: project?.projectName ?? '',
     description: project?.description ?? '',
@@ -304,6 +368,34 @@ export function ProjectForm({
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]): void =>
     setForm((current) => ({ ...current, [key]: value }));
+
+  // Options follow the selected division: a responsibility of another division and a person
+  // without a WORK membership there cannot be chosen. An existing owner or responsibility is
+  // preserved and shown so an unrelated edit never silently drops a relationship.
+  const divisionResponsibilities = (references?.responsibilities ?? []).filter(
+    (entry) =>
+      !divisionId ||
+      entry.divisionId === divisionId ||
+      entry.divisionId === null ||
+      entry.divisionId === undefined ||
+      entry.id === form.responsibilityId
+  );
+  const divisionMembers = (references?.members ?? []).filter(
+    (entry) =>
+      !divisionId ||
+      (entry.workDivisionIds ?? []).includes(divisionId) ||
+      entry.memberId === form.projectOwnerId
+  );
+
+  const changeDivision = (next: string): void => {
+    setDivisionId(next);
+    const responsibility = (references?.responsibilities ?? []).find(
+      (entry) => entry.id === form.responsibilityId
+    );
+    if (responsibility?.divisionId && responsibility.divisionId !== next) set('responsibilityId', '');
+    const owner = (references?.members ?? []).find((entry) => entry.memberId === form.projectOwnerId);
+    if (owner && next && !(owner.workDivisionIds ?? []).includes(next)) set('projectOwnerId', '');
+  };
 
   async function checkPlan(): Promise<void> {
     if (!form.committedDeadline) {
@@ -340,12 +432,32 @@ export function ProjectForm({
             />
           </label>
           <label className="field">
+            <span className="field-label">{t('division.label')}</span>
+            {mode === 'create' ? (
+              <>
+                <SelectInput
+                  value={divisionId}
+                  onChange={changeDivision}
+                  allowEmpty={t('division.selectPlaceholder')}
+                  options={writableDivisions.map((entry) => ({ value: entry.divisionId, label: entry.name }))}
+                />
+                <span className="field-hint">{t('projectForm.divisionHint')}</span>
+              </>
+            ) : (
+              <p className="field-readonly">
+                {divisionScope.readable.find((entry) => entry.divisionId === project?.divisionId)?.name ??
+                  project?.divisionId ??
+                  t('common.unset')}
+              </p>
+            )}
+          </label>
+          <label className="field">
             <span className="field-label">{t('projects.responsibility')}</span>
             <SelectInput
               value={form.responsibilityId}
               onChange={(value) => set('responsibilityId', value)}
               allowEmpty={t('common.unset')}
-              options={(references?.responsibilities ?? []).map((entry) => ({ value: entry.id, label: entry.name }))}
+              options={divisionResponsibilities.map((entry) => ({ value: entry.id, label: entry.name }))}
             />
           </label>
           <label className="field">
@@ -354,8 +466,9 @@ export function ProjectForm({
               value={form.projectOwnerId}
               onChange={(value) => set('projectOwnerId', value)}
               allowEmpty={t('common.unset')}
-              options={(references?.members ?? []).map((entry) => ({ value: entry.memberId, label: entry.name }))}
+              options={divisionMembers.map((entry) => ({ value: entry.memberId, label: entry.name }))}
             />
+            <span className="field-hint">{t('projectForm.ownerHint')}</span>
           </label>
           <div className="field-row">
             <div className="field">
@@ -453,7 +566,7 @@ export function ProjectForm({
             <button
               type="button"
               className="button"
-              disabled={save.state === 'saving'}
+              disabled={save.state === 'saving' || (mode === 'create' && (!divisionId || !form.projectName.trim() || !form.responsibilityId))}
               onClick={() =>
                 void save.run(
                   async () => {
@@ -463,6 +576,7 @@ export function ProjectForm({
                         projectName: form.projectName,
                         description: form.description || undefined,
                         category: form.category || undefined,
+                        divisionId,
                         responsibilityId: form.responsibilityId,
                         projectOwnerId: form.projectOwnerId || undefined,
                         priority: form.priority,

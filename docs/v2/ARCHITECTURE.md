@@ -1,5 +1,64 @@
 # V2 Architecture
 
+## Division corrections and V2 branding — 2026-11-11
+
+This is a client-and-write-path corrective release. Schema 12, the migrations, the employee contract
+and the authorization model are unchanged; no migration is added.
+
+* **Branding.** The V2 product name is `シゴトモ` / `SHIGOTOMO` (`APP_BRAND`). The header `<h1>`,
+  the sign-in `<h1>`, the navigation `aria-label`, `document.title` and the `application-name` meta
+  follow the selected language and a language switch never navigates. The generated V1 dictionary
+  keeps the V1 name and is not the branding source; a division named `設計・開発課` is stored data
+  and is never renamed. See the Branding assets section.
+* **One transaction-time gate.** `lockDivisionMutation(tx)` takes `member-divisions` then
+  `members:role-and-activation`; `authorizeMutation(tx, ctx, …)` re-reads the stored role and
+  activation, re-applies the canonical capability, re-checks division authority and optionally the
+  division lifecycle. Project, subproject, task, approval, schedule, completion, override, reopen,
+  request decision/submission, responsibility, division and member/account mutations all use it, so
+  a role downgrade that keeps a `WORK` membership never passes a manager write.
+* **Transfer reloads its evidence.** `transferProjectDivision` takes the lock first and re-queries
+  the complete assignment set (`currentAssignmentSet`) through the transaction handle. A transfer
+  waiting on the lock sees an assignment committed while it waited and refuses the whole move.
+* **Scoped, deterministic ordering.** Division order is active/retired group, sort order, name and
+  identifier, evaluated once in `listDivisions`; responsibility order is the same status group *and
+  the same division*, from `listResponsibilities`. A move takes its neighbour from that one order,
+  refuses a foreign neighbour, writes only changed `Sort_Order` values with their revisions
+  (`resequencedSortOrders`), and a new division receives the next free order in its group.
+* **Retired divisions are read-only history.** Scope resolution and references include retired
+  divisions a caller may already read; `writable` never offers one; a retained grant survives an
+  unrelated member edit while a new grant in a retired division is refused.
+* **The overview follows the switch.** Both overview variants subscribe to
+  `apps/web/src/state/division.ts`, send the selection, key the cache entry with it, filter and clear
+  the responsibility options, and carry it into the KPI/overdue/upcoming drilldowns.
+
+Local verification and the evidence matrix live in [ACCEPTANCE.md](./ACCEPTANCE.md); the detailed
+rules are in [DIVISIONS.md](./DIVISIONS.md) §11. Live Workspace and browser-layout verification stay
+NOT_RUN.
+
+## Task assignee filtering — 2026-11-10
+
+The existing task list and child-branch query accept `assigneeMemberId`. The authorized SQL scope
+matches either the primary owner or a non-removed additional relationship before pagination and
+ancestor projection. Inactive members retain their assignments. Tree pages report sibling
+`total` separately from `matchedTotal`; `contextOnly` marks ancestors that do not match. These
+are task-list figures, not workload counts.
+
+The bounded `/api/work/task-assignees` reference searches only members assigned to tasks in the
+caller's readable scope. It returns member ID, display name and active flag only; member IDs
+disambiguate duplicate names. The client keeps the selected ID in route memory, keys both list
+and branch reads by all filters, and clears expanded branches on assignee changes.
+
+## Project grouping presentation — 2026-11-10
+
+The shared manager/read-only project table separates the current page into responsibility sections.
+Group totals come from the already-filtered authorized server scope; a continuation label indicates
+that a group also appears on other pages. Grouping hides the redundant responsibility column; the
+column returns when a responsibility filter is selected. A responsibility ID selects an existing
+safe palette entry under a separate namespace, and unassigned work remains neutral. Project identity
+and semantic status colors retain their separate meanings. No new read or schema field is used.
+The manager's Edit action remains visible; archive and authorized deletion use the existing menu and
+the same preflight, confirmation and revision-checked commands as before.
+
 ## Application shell, readable palette and first-screen productivity — 2026-11-06
 
 **One shell, two navigation surfaces.** `App.tsx` renders a 64 px header (brand, language switch, one
@@ -400,13 +459,19 @@ permission checks against PostgreSQL and never calls Apps Script or Sheets.
 1. `onRequest` assigns a correlation ID and a **per-request** database context (its own query
    counter), so `meta.dbCalls` describes this request only.
 2. `preHandler` resolves the session cookie (stored as a SHA-256 hash), loads the member row and
-   builds the verified identity. A mutation additionally requires the session CSRF token and,
-   when a browser sends `Origin`, an allowed origin.
+   builds the verified identity, then resolves the caller's `DivisionScope` once per request. Two
+   paths are deliberately session-independent: `GET /api/public-config` and `POST /api/session`, so
+   sign-in configuration cannot be broken by a stale cookie or by a database that still needs a
+   migration. A mutation additionally requires the session CSRF token and, when a browser sends
+   `Origin`, an allowed origin.
 3. The route validates the body/query with zod (strict objects), calls a service, and returns
    `{ ok: true, data, meta }` or `{ ok: false, error: { code, message, details, retryable,
-   correlationId } }`.
+   correlationId } }`. An undefined table/column/function is translated into
+   `503 DATABASE_MIGRATION_REQUIRED` with safe wording rather than an opaque `INTERNAL_ERROR`.
 4. Authorization is re-checked in the service (`requireRole`). A browser-supplied role, actor or
    owner is never authority; strict schemas reject such fields outright.
+5. A division-scoped write repeats the authorization, the division lookup and the assignment
+   eligibility check inside its own transaction (§ Divisions).
 
 ## 5. Transaction and concurrency model
 
@@ -419,6 +484,10 @@ permission checks against PostgreSQL and never calls Apps Script or Sheets.
   PostgreSQL triggers (`tasks_hierarchy_guard`, `eh_subproject_guard`, dependency cycle guard,
   container-completion guard) so a concurrent writer cannot slip a cycle in.
 * Hierarchy reparenting takes a targeted advisory lock per aggregate, not one global lock.
+* The division boundary takes one shared advisory lock (`member-divisions`) as the **first** lock of
+  every division-scoped write, including membership changes, retirements and transfers. The current
+  actor, the project's division and every new assignee's membership are re-read through the
+  transaction handle after that lock, so a check made before the transaction is only a pre-check.
 * `FOR UPDATE SKIP LOCKED` on the outbox lets several workers run concurrently.
 
 ## 6. Read model and caching
@@ -544,15 +613,23 @@ separately.
 
 ## Branding assets
 
+The V2 application name is **シゴトモ** (ja) / **SHIGOTOMO** (en), supplied by `APP_BRAND` in
+`packages/i18n/src/index.ts` and the `app.name` label in `apps/web/src/i18n.tsx`. The generated
+dictionary (`packages/i18n/src/dictionary.json`, built from the V1 source) keeps the V1 product name
+and is deliberately not the branding source, so regenerating it cannot revert the V2 brand.
+`I18nProvider` sets `document.title` and the `application-name` meta on every language change without
+touching the route. A division named `設計・開発課` is stored data and is never renamed by branding.
+
 The supplied logo files live in `apps/web/public/branding/` and are referenced by absolute URL
-(`/branding/companyLogo.png`, `/branding/designTeam.png`); Vite copies `public/` unchanged into
-`dist/branding/`. The sign-in card shows only the company lockup (`company-login-logo`); the
-authenticated shell shows only the department lockup (`design-team-logo`) in place of the former
-`brand-symbol` box, for every role, next to the application name. Both images keep their intrinsic
+(`/branding/companyLogo.png` on the sign-in card, `/branding/industrialName.png` in the authenticated
+header); Vite copies `public/` unchanged into `dist/branding/`. The sign-in card shows only the
+company lockup (`company-login-logo`); the authenticated shell shows only the industrial lockup
+(`industrial-logo`) next to the application name, for every role. Both images keep their intrinsic
 aspect ratio (`width`/`height` auto on one axis with `object-fit: contain`), so they are never
-cropped or stretched; the files themselves are not modified. The header logo shrinks below 850 px,
-and the header wraps instead of hiding the language switch, identity, role or sign-out controls.
-Assets and styles carry no data, authorization or publication meaning.
+cropped or stretched; the files themselves are not modified. Each image keeps an alternative text
+that describes the image, never the product name. The header logo shrinks below 850 px, and the
+header wraps instead of hiding the language switch, identity, role or sign-out controls. Assets and
+styles carry no data, authorization or publication meaning.
 
 ## Expandable task hierarchy
 
@@ -602,3 +679,122 @@ form edits it; the read-only projection copies it into `WorkSubproject.descripti
 `context` (project name and the subproject chain, root first). The chain is one bounded recursive
 query (`depth < 8`) over `subprojects`, carrying names only - no owner, deadline or private column -
 so both the manager and the read-only task screen can show the same breadcrumb.
+
+## Divisions (課) and scoped authorization
+
+Schema 12 adds `DIVISIONS`, `MEMBER_DIVISIONS`, `PROJECTS.division_id`,
+`RESPONSIBILITIES.division_id`, `MEMBERS.all_divisions_read` and the `GENERAL_MANAGER` role value.
+
+One request resolves one `DivisionScope` (`packages/domain/src/divisions.ts`) from the member row and
+its active relationships, and that scope is threaded through `ServiceCtx`/`ReadCtx`. Every list,
+tree, search, report, request queue, employee snapshot and publication source passes it to the SQL
+layer (`divisionScopeSql`), where `undefined` means the ADMIN unrestricted view and an empty list
+matches nothing. A direct read asserts readability and answers `NOT_FOUND`; a write asserts
+writability and answers `AUTHORIZATION_DENIED` (or `DIVISION_REQUIRED` for unmapped work).
+
+`GENERAL_MANAGER` ranks below `MEMBER` in `ROLE_ORDER`, so no comparison grants it a write; the
+oversight behaviour is an explicit capability. Assignment eligibility is a membership question only:
+`ADMIN` status, oversight and additional read access never qualify a person.
+
+See [DIVISIONS.md](./DIVISIONS.md) for the role matrix, the route inventory and the mapping
+procedure.
+
+## Divisions: request hook, narrowing and write serialization (2026-11-10)
+
+* **Public endpoints bypass the session hook.** `registerContext` skips session resolution and the
+  division-scope resolution for `/api/public-config` and `POST /api/session`. Before this, any
+  authenticated request on a database without the schema-12 tables failed inside the hook, so the
+  sign-in screen lost its configuration even though it needs no identity. `isSessionIndependentPath`
+  is the only list of such endpoints, and it is closed: adding one is a deliberate change.
+* **`scopedDivisionIds` is the single narrowing function.** A client `divisionId` narrows the
+  resolved scope (`undefined` = ADMIN unrestricted, `[]` = nothing) and is refused as `NOT_FOUND`
+  when it is not authorized. Manager projects/tasks/tree/search/overview/timeline, work reads and
+  the reports call it before paging or aggregating; no route builds `[divisionId]` itself.
+* **Unmapped work stays the ADMIN remediation view.** `readableDivisionIds` returns `undefined` only
+  for `manageAll`; an all-division `GENERAL_MANAGER` gets the explicit list of every mapped
+  division, so `NULL` never matches for it. `canWriteDivision(scope, null)` is true only for ADMIN,
+  which is what lets an administrator map a legacy row.
+* **A write re-checks inside its transaction.** `reauthorizeInTransaction` re-reads the acting
+  member (role, activation, relationships), and `divisionForWriteOfProject` re-reads the project's
+  current division and its status, through the transaction handle. Assignment eligibility, the
+  division lifecycle and the acting authority are therefore decided twice: once on the request
+  handle as a cheap pre-check and once authoritatively inside the write.
+* **Lock order is one edge, and it is now two locks.** Every division-scoped write takes the
+  `member-divisions` advisory lock first and then the `members:role-and-activation` lock
+  (`lockDivisionMutation`). Membership changes, role/activation changes, retirements, account
+  mutations and transfers take the same two locks in the same order, and no path takes the pair in
+  the opposite order, so the protocol cannot deadlock. (An earlier revision of this document said a
+  division write took no second advisory lock; that statement is superseded - see
+  [DIVISIONS.md](./DIVISIONS.md) §11.2.) The contract is verified by
+  `apps/api/test/division-concurrency.test.ts` and `apps/api/test/division-writes.test.ts`, which
+  observe a request queued on the lock and commit the conflicting change before releasing it.
+* **One logical operation is still one transaction.** The re-checks, the row update, the audit row
+  and the outbox job commit together; a refusal commits nothing, and a mixed assignment selection
+  never leaves a partial relationship.
+
+## Unmapped work mapping — module layout (2026-11-11)
+
+The ADMIN remediation of legacy work without a division is one vertical slice, deliberately built
+from the existing division boundary rather than a new subsystem:
+
+| Layer | File | Responsibility |
+| --- | --- | --- |
+| contract | `packages/contracts/src/mapping.ts` | strict preview/apply bodies, the read model DTOs and the `MAPPING_BACKUP_REQUIRED` error code |
+| read model | `packages/db/src/repo/division-mapping.ts` | bounded, paginated queries with `= ANY($n::text[])`; counts, evidence per record, linked projects, the newest verified backup row |
+| rules + write | `apps/api/src/services/division-mapping.ts` | proposal rules A/B/C, the read model assembly, the backup gate and the reviewed apply |
+| routes | `apps/api/src/routes/manager.ts` | the three ADMIN endpoints |
+| client | `apps/web/src/components/division-mapping-panel.tsx` | read-only view, the phrase, the reviewed apply and its invalidations |
+
+The write path reuses the existing serialization protocol instead of introducing its own: the same
+`lockDivisionMutation` (`member-divisions` → `members:role-and-activation`), the same
+`reauthorizeInTransaction`, the same `runIdempotent` replay, the same `updateProject` /
+`updateResponsibility` row updates and the same `insertAudit`. No advisory lock, trigger, table or
+column is added, so there is no second hierarchy or a parallel history.
+
+Two ordering facts constrain the implementation and are enforced in code, not in prose:
+
+* projects are written before their area, because `eh_check_responsibility_division` compares a
+  scoped area against its projects;
+* the whole affected area scope is validated **before** the first update, so a batch containing one
+  contradicting project is refused instead of being half-applied.
+
+The client keeps the local-first behaviour it already had: after an apply it invalidates the
+division, project, task, task-index, overview and workload caches instead of patching a summary, and
+a read started before a newer write is superseded by the existing cache generation.
+
+## Client state, freshness and mutation ownership — 2026-11-11
+
+The web client keeps one set of rules for asynchronous work. They are implemented once and reused,
+so a screen cannot invent a second definition.
+
+| Concern | Module | Rule |
+| --- | --- | --- |
+| Read state | `apps/web/src/state/cache.ts` | Per-key entries with an owner token, in-flight deduplication, stale-while-revalidate, a `version` counter per key, `loading` / `refreshing` / `updatedAt` / `stale` metadata and a bounded cache (240 entries, least-recently-confirmed dropped first). |
+| Invalidation | `queryCache.invalidate` | A **mounted** key keeps its last payload and refetches in place (so a save never blanks a screen or unmounts an open editor); a key nobody is watching is dropped. The union of cached and in-flight keys decides what is affected, so a read started before a newer write can neither paint nor be joined by the refresh. |
+| Session boundary | `queryCache.sessionEpoch`, `clear()` | Sign-out and a lost session clear every payload and advance the epoch. A mutation that started earlier performs no cache effect afterwards. |
+| Mutation completion | `apps/web/src/state/mutation.ts` | `commitMutation` runs the write, then applies its invalidation **inside the session**, so the cache effect never depends on a mounted component. A failed refresh after a confirmed write is not reported as a failed write. |
+| Submission tracking | `apps/web/src/state/submissions.ts` | The request belongs to the session, not the dialog: `SENDING` → `RECEIVED` (durable acknowledgement) / `UNKNOWN` (unobservable, never retried) / `REFUSED` (definite). Bounded to 20 entries, non-sensitive metadata only, cleared with the session. |
+| Scope transitions | `apps/web/src/state/scope.ts` | `useDivisionTransition` fires once per real division change: page 1, incompatible selections/project focus/drilldowns cleared, sort order and search text kept. An unloaded scope is *unknown*, not empty. |
+| Server search | `apps/web/src/state/search.ts` | Visible input separate from the applied query, 275 ms debounce, IME composition respected, applied query in the request and the cache key. |
+| Display formatting | `apps/web/src/state/format.ts` | Instants render as Asia/Tokyo wall-clock values; date-only values are never converted. |
+| Route memory | `apps/web/src/state/navigation.tsx` | One route table (`APP_ROUTES`) decides what exists and who may reach it, so the renderer, the role guard and the Back behaviour cannot disagree. `resetRouteMemory()` clears the session's filters, selections, expansion and scroll, and a late write from an ended session is ignored. |
+
+The query cache notifies per key: a component re-renders only when *its* entry changed, not on every
+unrelated save.
+
+### Verification of this section
+
+- `apps/web/test/query-state.test.tsx`: initial loading, initial failure with Retry, data plus a
+  refresh warning, freshness labels, key isolation, retained payload on refetch, session epoch.
+- `apps/web/test/submissions.test.tsx`: delayed success after the dialog closed, unknown outcome not
+  retried, definite refusal distinguished, mutation cache effect without an observer, no effect after
+  the session ended.
+- `apps/web/test/search.test.tsx`: debounce, Japanese IME composition, immediate clear.
+- `apps/web/test/capability-and-scope.test.tsx`: WORK versus READ action availability (task and
+  project), and a scope change with page > 1 and a selection, including a late superseded answer.
+- `apps/web/test/format.test.ts`: a UTC instant across the Tokyo date boundary and date-only values
+  that must not shift.
+- `apps/api/test/divisions.test.ts`: `canWrite` per record for a manager with WORK in one division
+  and READ in another, and the server still refusing the write.
+
+Local evidence only. No live Workspace behaviour is claimed.

@@ -30,9 +30,11 @@ import {
 } from '@eh/db';
 import {
   DomainError,
+  assertReadableDivision,
   canIncludeArchivedWork,
   canSeeRestrictedWork,
   projectScheduleStatus,
+  readableDivisionIds,
   requireRole,
   taskScheduleStatus
 } from '@eh/domain';
@@ -177,6 +179,8 @@ export async function timelineProjects(
   ctx: WorkCtx,
   input: {
     responsibilityId?: string;
+    /** The narrowed division filter; `undefined` means the whole readable scope. */
+    divisionIds?: readonly string[];
     query?: string;
     page: number;
     pageSize?: number;
@@ -190,6 +194,9 @@ export async function timelineProjects(
     throw new DomainError('AUTHORIZATION_DENIED', 'Archived work is restricted to managers');
   }
   const pageSize = Math.min(Math.max(input.pageSize ?? 25, 1), 100);
+  // The caller's requested division has already been narrowed against the resolved scope; the
+  // default remains the whole readable scope.
+  const divisionIds = input.divisionIds ?? readableDivisionIds(ctx.divisions);
   const [page, responsibilities, loaded] = await Promise.all([
     listProjects(
       ctx.db,
@@ -198,6 +205,7 @@ export async function timelineProjects(
         queryProjectNameOnly: true,
         responsibilityId: input.responsibilityId,
         internalOnly: !manager,
+        divisionIds,
         includeArchived: input.includeArchived === true ? undefined : false,
         sort: 'deadline',
         direction: 'asc'
@@ -206,7 +214,7 @@ export async function timelineProjects(
       pageSize,
       ctx.today
     ),
-    listWorkResponsibilityOptions(ctx.db, !manager),
+    listWorkResponsibilityOptions(ctx.db, !manager, divisionIds),
     taskScope(ctx)
   ]);
   const ranges = descendantRanges(loaded.tasks, loaded.dir.subprojects, input.includeCompleted !== false);
@@ -274,7 +282,9 @@ export async function timelineBranch(
 ): Promise<TimelineProjectBranch> {
   requireRole(ctx.identity, 'VIEWER');
   const project = await getProject(ctx.db, projectId);
-  if (!project || !projectVisibleTo(ctx, project)) {
+  if (!project) throw new DomainError('NOT_FOUND', `Project not found: ${projectId}`);
+  assertReadableDivision(ctx.divisions, project.divisionId);
+  if (!projectVisibleTo(ctx, project)) {
     throw new DomainError('NOT_FOUND', `Project not found: ${projectId}`);
   }
   const manager = canSeeRestrictedWork(ctx.identity);

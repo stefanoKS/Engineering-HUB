@@ -17,7 +17,7 @@ import {
   Role,
   TaskStatus
 } from './enums';
-import { DisplayTaskStatus } from './dto';
+import { DisplayTaskStatus, DivisionGrant } from './dto';
 import { Confirm, Id, IdempotencyKey, IsoDate, NullableIsoDate, Revision } from './common';
 
 const Text = (max: number) => z.string().max(max);
@@ -37,6 +37,11 @@ export const CreateProjectBody = z
     projectName: Text(200).min(1),
     description: Text(5000).optional(),
     category: Text(100).optional(),
+    /**
+     * The canonical division. A new project must name an active division the actor may work in;
+     * the server also refuses a division that contradicts the selected responsibility.
+     */
+    divisionId: Id,
     responsibilityId: Id,
     projectOwnerId: Id.nullable().optional(),
     status: ProjectStatus.optional(),
@@ -138,6 +143,7 @@ export const CreateMyProjectBody = z
     idempotencyKey: IdempotencyKey,
     projectName: Text(200).min(1),
     description: Text(5000).optional(),
+    divisionId: Id,
     responsibilityId: Id,
     priority: Priority.optional(),
     plannedStart: NullableIsoDate.optional(),
@@ -332,6 +338,8 @@ export const SaveResponsibilityBody = z
     revision: Revision.optional(),
     name: Text(200).min(1).optional(),
     description: Text(5000).optional(),
+    /** The division this area belongs to; `null` keeps the documented unassigned path. */
+    divisionId: Id.nullable().optional(),
     ownerMemberId: Id.nullable().optional(),
     status: z.enum(['Active', 'Retired']).optional(),
     sortOrder: z.number().int().min(0).max(100000).optional(),
@@ -389,7 +397,49 @@ export const SaveMemberBody = z
     active: z.boolean().optional(),
     managerId: Id.nullable().optional(),
     weeklyCapacityHours: z.number().min(0).max(168).nullable().optional(),
-    role: Role.optional()
+    role: Role.optional(),
+    /**
+     * The complete desired membership set. An omitted list keeps the stored relationships, so an
+     * ordinary edit never removes a membership by accident. Removal is a soft relationship change.
+     */
+    divisionGrants: z.array(DivisionGrant).max(200).optional(),
+    /** GENERAL_MANAGER oversight of every division, including divisions added later. */
+    allDivisionsRead: z.boolean().optional()
+  })
+  .strict();
+
+/** Create or rename an administrator-managed division. The identifier never changes. */
+export const SaveDivisionBody = z
+  .object({
+    divisionId: Id.optional(),
+    idempotencyKey: IdempotencyKey.optional(),
+    revision: Revision.optional(),
+    name: Text(200).min(1).optional(),
+    sortOrder: z.number().int().min(0).max(100000).optional()
+  })
+  .strict();
+
+export const MoveDivisionBody = z
+  .object({
+    revision: Revision,
+    direction: z.enum(['UP', 'DOWN']),
+    expectedNeighborId: Id.nullable()
+  })
+  .strict();
+
+/**
+ * ADMIN-only transfer of a project between divisions.
+ *
+ * Ordinary editing never exposes a persisted project's division; a transfer is one explicit,
+ * audited transaction that refuses the whole move when an owner or an assignee would become
+ * ineligible.
+ */
+export const TransferProjectDivisionBody = z
+  .object({
+    revision: Revision,
+    divisionId: Id,
+    confirmed: Confirm,
+    reason: Text(1000).optional()
   })
   .strict();
 
@@ -427,6 +477,8 @@ export const DecisionBody = z
 export const RequestQueueQuery = z
   .object({
     includeDecided: z.union([z.boolean(), z.enum(['true', 'false'])]).transform(value => value === true || value === 'true').default(false),
+    /** Narrows the authorized readable scope to one division; it can never widen it. */
+    divisionId: Id.optional(),
     page: z.coerce.number().int().min(1).max(1000000).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(25)
   })
@@ -471,6 +523,8 @@ export const TaskListQuery = z
     projectId: Id.optional(),
     subprojectId: Id.optional(),
     responsibilityId: Id.optional(),
+    /** Narrows the authorized scope; it can never widen it. */
+    divisionId: Id.optional(),
     unassigned: z.coerce.boolean().default(false),
     status: TaskStatus.optional(),
     /** All unfinished leaf work in the active project/subproject scope, including overdue work. */
@@ -482,6 +536,14 @@ export const TaskListQuery = z
      */
     displayStatus: DisplayTaskStatus.optional(),
     ownerMemberId: Id.optional(),
+    assigneeMemberId: z.union([Id, z.literal('')]).optional(),
+    /**
+     * An inclusive deadline window, applied on the server before paging and before totals - so a
+     * drilldown from "next 7 days" answers the same question the card counted. Both bounds are
+     * plain dates and are compared with the stored `due_date`.
+     */
+    dueFrom: IsoDate.optional(),
+    dueTo: IsoDate.optional(),
     query: z.string().trim().max(200).optional(),
     containerOnly: z.coerce.boolean().default(false),
     overdueOnly: z.coerce.boolean().default(false),
@@ -497,6 +559,8 @@ export const TaskListQuery = z
 export const ProjectListQuery = z
   .object({
     responsibilityId: Id.optional(),
+    /** Narrows the authorized scope; it can never widen it. */
+    divisionId: Id.optional(),
     unassigned: z.coerce.boolean().default(false),
     status: ProjectStatus.optional(),
     /** The derived schedule state; resolved on the server before pagination. */

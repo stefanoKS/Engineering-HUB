@@ -5,17 +5,21 @@ import type { Queryable } from '../pool';
 import { newId } from '../ids';
 import { toProject, toSubproject, type ProjectRow, type SubprojectRow } from '../map';
 import { updateWithRevision } from './patch';
+import { divisionScopeSql } from './divisions';
 
 type Db = Queryable;
 
 const PROJECT_SELECT = `
-  SELECT p.project_id, p.project_name, p.description, p.category, p.responsibility_id,
+  SELECT p.project_id, p.project_name, p.description, p.category, p.division_id,
+         d.name AS division_name,
+         p.responsibility_id,
          r.name AS responsibility_name, p.project_owner_id, owner.name AS project_owner_name,
          p.status, p.priority, p.planned_start, p.forecast_end, p.committed_deadline,
          p.original_deadline, p.actual_completion, p.progress_percent, p.health, p.next_milestone,
          p.next_action, p.notification_enabled, p.dashboard_visibility, p.dashboard_summary,
          p.archived_at, p.created_at, p.updated_at, p.revision
     FROM projects p
+    LEFT JOIN divisions d ON d.division_id = p.division_id
     LEFT JOIN responsibilities r ON r.responsibility_id = p.responsibility_id
     LEFT JOIN members owner ON owner.member_id = p.project_owner_id`;
 
@@ -55,6 +59,12 @@ export type ProjectFilters = {
   direction?: 'asc' | 'desc';
   /** Visibility policy: only `INTERNAL` projects are employee-visible. */
   internalOnly?: boolean;
+  /**
+   * The caller's authorized divisions, resolved on the server before paging.
+   * `undefined` is unrestricted (ADMIN remediation); an empty list matches nothing. A project with
+   * a blank division is therefore readable only through the unrestricted administrative scope.
+   */
+  divisionIds?: readonly string[];
   /** Archived projects are an explicit management view. */
   includeArchived?: boolean;
 };
@@ -114,6 +124,9 @@ export async function listProjects(
   if (filters.internalOnly === true) {
     where.push("p.dashboard_visibility = 'INTERNAL'");
   }
+  // Division scope is applied before paging, exactly like the visibility policy. An empty
+  // authorized list matches nothing, and a blank project division is never matched by it.
+  divisionScopeSql('p.division_id', filters.divisionIds, params, where);
   // Only an explicit `false` hides archived projects, so the manager list keeps its behaviour and
   // `status=Archived` remains a usable filter.
   if (filters.includeArchived === false && filters.status !== 'Archived') {
@@ -144,10 +157,18 @@ export async function listProjects(
   };
 }
 
-export async function listAllProjects(db: Db, limit = 500): Promise<Project[]> {
+export async function listAllProjects(
+  db: Db,
+  limit = 500,
+  divisionIds?: readonly string[]
+): Promise<Project[]> {
+  const where: string[] = ['p.deleted_at IS NULL'];
+  const params: unknown[] = [];
+  divisionScopeSql('p.division_id', divisionIds, params, where);
+  params.push(limit);
   const rows = await db.many<ProjectRow>(
-    `${PROJECT_SELECT} WHERE p.deleted_at IS NULL ORDER BY p.project_name ASC LIMIT $1`,
-    [limit]
+    `${PROJECT_SELECT} WHERE ${where.join(' AND ')} ORDER BY p.project_name ASC LIMIT $${params.length}`,
+    params
   );
   return rows.map((row) => toProject(row));
 }
@@ -163,6 +184,8 @@ export type ProjectInput = {
   projectName: string;
   description?: string;
   category?: string;
+  /** The canonical division; `null` leaves the work unmapped (ADMIN remediation only). */
+  divisionId?: string | null;
   responsibilityId?: string | null;
   projectOwnerId?: string | null;
   status?: string;
@@ -183,31 +206,40 @@ export async function insertProject(
   input: ProjectInput,
   projectId: string = newId('PRJ')
 ): Promise<Project> {
+  // `divisionId: undefined` leaves the column to its (production: none) default, while an explicit
+  // `null` records deliberately unmapped legacy work. The API always supplies a division.
+  const divisionProvided = input.divisionId !== undefined;
   await db.query(
-    `INSERT INTO projects
-       (project_id, project_name, description, category, responsibility_id, project_owner_id, status,
-        priority, planned_start, forecast_end, committed_deadline, original_deadline, next_milestone,
-        next_action, notification_enabled, dashboard_visibility, dashboard_summary)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
-    [
-      projectId,
-      input.projectName,
-      input.description ?? '',
-      input.category ?? '',
-      input.responsibilityId ?? null,
-      input.projectOwnerId ?? null,
-      input.status ?? 'Planned',
-      input.priority ?? 'Medium',
-      input.plannedStart ?? null,
-      input.forecastEnd ?? null,
-      input.committedDeadline ?? null,
-      input.originalDeadline ?? null,
-      input.nextMilestone ?? '',
-      input.nextAction ?? '',
-      input.notificationEnabled ?? true,
-      input.dashboardVisibility ?? 'RESTRICTED',
-      input.dashboardSummary ?? ''
-    ]
+   `INSERT INTO projects
+      (project_id, project_name, description, category, ${divisionProvided ? 'division_id, ' : ''}responsibility_id,
+       project_owner_id, status, priority, planned_start, forecast_end, committed_deadline,
+       original_deadline, next_milestone, next_action, notification_enabled, dashboard_visibility,
+       dashboard_summary)
+    VALUES ($1,$2,$3,$4,${divisionProvided ? '$5,' : ''}$${divisionProvided ? 6 : 5},$${divisionProvided ? 7 : 6},
+       $${divisionProvided ? 8 : 7},$${divisionProvided ? 9 : 8},$${divisionProvided ? 10 : 9},
+       $${divisionProvided ? 11 : 10},$${divisionProvided ? 12 : 11},$${divisionProvided ? 13 : 12},
+       $${divisionProvided ? 14 : 13},$${divisionProvided ? 15 : 14},$${divisionProvided ? 16 : 15},
+       $${divisionProvided ? 17 : 16},$${divisionProvided ? 18 : 17})`,
+   [
+     projectId,
+     input.projectName,
+     input.description ?? '',
+     input.category ?? '',
+     ...(divisionProvided ? [input.divisionId] : []),
+     input.responsibilityId ?? null,
+     input.projectOwnerId ?? null,
+     input.status ?? 'Planned',
+     input.priority ?? 'Medium',
+     input.plannedStart ?? null,
+     input.forecastEnd ?? null,
+     input.committedDeadline ?? null,
+     input.originalDeadline ?? null,
+     input.nextMilestone ?? '',
+     input.nextAction ?? '',
+     input.notificationEnabled ?? true,
+     input.dashboardVisibility ?? 'RESTRICTED',
+     input.dashboardSummary ?? ''
+   ]
   );
   const created = await getProject(db, projectId);
   if (!created) throw new Error('Project insert returned no row');
@@ -218,6 +250,11 @@ const PROJECT_COLUMNS: Record<string, string> = {
   projectName: 'project_name',
   description: 'description',
   category: 'category',
+  /**
+   * Deliberately reachable only from the ADMIN transfer command. Ordinary project editing builds
+   * its own allowlist and never includes this key.
+   */
+  divisionId: 'division_id',
   responsibilityId: 'responsibility_id',
   projectOwnerId: 'project_owner_id',
   status: 'status',
@@ -288,12 +325,32 @@ const SUBPROJECT_SELECT = `
     FROM subprojects s
     LEFT JOIN members owner ON owner.member_id = s.owner_id`;
 
-export async function listSubprojects(db: Db, projectId?: string): Promise<Subproject[]> {
+export async function listSubprojects(
+  db: Db,
+  projectId?: string,
+  divisionIds?: readonly string[]
+): Promise<Subproject[]> {
+  // A subproject has no division of its own: it derives one through its project, so the scope is
+  // resolved by joining the project rather than by a second stored column.
+  const where: string[] = ['s.deleted_at IS NULL'];
+  const params: unknown[] = [projectId ?? null];
+  where.push('($1::text IS NULL OR s.project_id = $1)');
+  if (divisionIds !== undefined) {
+    const unique = [...new Set(divisionIds)];
+    if (!unique.length) {
+      where.push('false');
+    } else {
+      params.push(unique);
+      where.push(
+        `s.project_id IN (SELECT p.project_id FROM projects p WHERE p.division_id = ANY($${params.length}::text[]))`
+      );
+    }
+  }
   const rows = await db.many<SubprojectRow>(
     `${SUBPROJECT_SELECT}
-      WHERE s.deleted_at IS NULL AND ($1::text IS NULL OR s.project_id = $1)
+      WHERE ${where.join(' AND ')}
       ORDER BY s.project_id, eh_subproject_depth(s.subproject_id), s.subproject_name`,
-    [projectId ?? null]
+    params
   );
   return rows.map((row) => toSubproject(row));
 }
@@ -394,17 +451,20 @@ export async function updateSubproject(
  */
 export async function listWorkResponsibilityOptions(
   db: Db,
-  internalOnly: boolean
+  internalOnly: boolean,
+  divisionIds?: readonly string[]
 ): Promise<{ responsibilityId: string; name: string }[]> {
   const where = ['p.deleted_at IS NULL', "p.status <> 'Archived'", 'p.archived_at IS NULL'];
+  const params: unknown[] = [];
   if (internalOnly) where.push("p.dashboard_visibility = 'INTERNAL'");
+  divisionScopeSql('p.division_id', divisionIds, params, where);
   return db.many<{ responsibilityId: string; name: string }>(
     `SELECT DISTINCT r.responsibility_id AS "responsibilityId", r.name
        FROM projects p
        JOIN responsibilities r ON r.responsibility_id = p.responsibility_id
       WHERE ${where.join(' AND ')}
       ORDER BY r.name`,
-    []
+    params
   );
 }
 
@@ -491,6 +551,7 @@ export async function collectPublishedSourceRows(db: Db) {
     progress_percent: number | null;
     pending_request: boolean;
     dashboard_visibility: string;
+    project_division_id: string | null;
   }>(
     `SELECT t.task_id, t.task_name, t.project_id, p.project_name,
             p.responsibility_id, r.name AS responsibility_name, r.color_hex AS responsibility_color,
@@ -505,7 +566,7 @@ export async function collectPublishedSourceRows(db: Db) {
                        ORDER BY rr.submitted_at DESC LIMIT 1), '') AS review_state,
             t.completed_at, t.progress_percent,
             EXISTS (SELECT 1 FROM task_requests rp WHERE rp.task_id = t.task_id AND rp.status IN ('PENDING','PROCESSING')) AS pending_request,
-            p.dashboard_visibility
+            p.dashboard_visibility, p.division_id AS project_division_id
        FROM tasks t
        JOIN projects p ON p.project_id = t.project_id
        LEFT JOIN responsibilities r ON r.responsibility_id = p.responsibility_id

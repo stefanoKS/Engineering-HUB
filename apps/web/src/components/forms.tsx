@@ -46,6 +46,14 @@ export function useSave(): {
   return { state, error, run, reset: () => setState('idle') };
 }
 
+/**
+ * One confirmation surface.
+ *
+ * A failure here is classified before it is shown, because the recovery differs: a revision
+ * conflict keeps the dialog and offers an explicit reload, an unknown outcome says so instead of
+ * pretending the write failed, and a definite refusal shows the server's reason. The dialog never
+ * silently retries, never merges a conflicting edit and never closes itself after a failure.
+ */
 export function ConfirmDialog({
   title,
   message,
@@ -53,7 +61,8 @@ export function ConfirmDialog({
   reasonRequired,
   destructive,
   onCancel,
-  onConfirm
+  onConfirm,
+  onReload
 }: {
   title: string;
   message: ReactNode;
@@ -62,14 +71,25 @@ export function ConfirmDialog({
   destructive?: boolean;
   onCancel: () => void;
   onConfirm: (input: { confirmation: string; reason: string }) => Promise<void> | void;
+  /** Re-reads the authoritative record after a conflict; the dialog stays open. */
+  onReload?: () => Promise<void> | void;
 }): JSX.Element {
   const { t } = useI18n();
   const [typed, setTyped] = useState('');
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>('');
+  const [failure, setFailure] = useState<unknown>(null);
+  const inFlight = useRef(false);
 
   const canConfirm = (!confirmText || typed.trim() === confirmText) && (!reasonRequired || reason.trim().length > 0);
+  const apiFailure = failure instanceof ApiFailure ? failure : null;
+  const conflict = apiFailure?.isConflict === true;
+  const unknown = !!apiFailure && ['NETWORK', 'INVALID_RESPONSE'].includes(apiFailure.code);
+  const errorText = failure
+    ? apiFailure
+      ? apiFailure.message
+      : (failure as Error).message
+    : '';
 
   return (
     <Modal
@@ -85,13 +105,17 @@ export function ConfirmDialog({
             className={destructive ? 'button danger' : 'button'}
             disabled={!canConfirm || busy}
             onClick={async () => {
+              // Synchronous guard: a second click in the same tick never starts a second write.
+              if (inFlight.current) return;
+              inFlight.current = true;
               setBusy(true);
-              setError('');
+              setFailure(null);
               try {
                 await onConfirm({ confirmation: typed.trim(), reason: reason.trim() });
-              } catch (failure) {
-                setError(failure instanceof ApiFailure ? failure.message : (failure as Error).message);
+              } catch (error) {
+                setFailure(error);
               } finally {
+                inFlight.current = false;
                 setBusy(false);
               }
             }}
@@ -115,7 +139,19 @@ export function ConfirmDialog({
             <input value={typed} onChange={(event) => setTyped(event.target.value)} autoFocus />
           </label>
         ) : null}
-        {error ? <div className="banner danger">{error}</div> : null}
+        {failure ? (
+          <div className="banner danger" role="alert">
+            <strong>
+              {conflict ? t('error.conflictTitle') : unknown ? t('error.unknownTitle') : t('error.title')}
+            </strong>
+            <span>{conflict ? t('editor.conflictHint') : unknown ? t('editor.unknownHint') : errorText}</span>
+            {conflict && onReload ? (
+              <button type="button" className="link-button" onClick={() => void onReload()}>
+                {t('editor.conflictReload')}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </Modal>
   );

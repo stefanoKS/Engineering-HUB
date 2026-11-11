@@ -2,7 +2,7 @@ import {beforeAll,beforeEach,afterEach,describe,it,expect} from 'vitest';
 import type {FastifyInstance} from 'fastify';
 import type pg from 'pg';
 import type {Database} from '@eh/db';
-import {freshDatabase} from '../../../packages/db/test/support/db';
+import {freshDatabase,seedTestDivisions} from '../../../packages/db/test/support/db';
 import {buildApp} from '../src/app';
 import {loadConfig} from '../src/config';
 import {NullInboxSource} from '../src/inbox';
@@ -13,6 +13,7 @@ beforeAll(async()=>{hash=await hashPassword(password);});
 beforeEach(async()=>{const context=await freshDatabase();db=context.db;pool=context.pool;
  await db.query("INSERT INTO members(member_id,name,role) VALUES('ADMIN','Admin','ADMIN'),('MEMBER','Member','MEMBER'),('OTHER','Other','MEMBER')");
  await db.query("INSERT INTO local_accounts(member_id,employee_id,password_hash,must_change_password) VALUES('ADMIN','0001',$1,false),('MEMBER','0002',$1,true),('OTHER','0003',$1,false)",[hash]);
+ await seedTestDivisions(db);
  app=await buildApp({db,inbox:new NullInboxSource(),logger:false,config:loadConfig({NODE_ENV:'test',AUTH_MODE:'local',PUBLIC_ORIGIN:'http://localhost:8050'})});});
 afterEach(async()=>{await app.close();await pool.end();});
 async function login(employeeId='0001',value=password){return app.inject({method:'POST',url:'/api/session',payload:{employeeId,password:value}});}

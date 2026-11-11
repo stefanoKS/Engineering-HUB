@@ -52,11 +52,13 @@ export function TaskDetailScreen({
   const [notice, setNotice] = useState('');
   const endpoint = readOnly ? `/api/work/tasks/${taskId}` : `/api/manager/tasks/${taskId}`;
   const capabilities = capabilitiesOf(actor);
-  const canManage = !readOnly && capabilities.canEdit;
+  const detail = useQuery<TaskDetail>(keys.task(taskId), () => api.get<TaskDetail>(endpoint));
+  // Management is resolved per record: the task's project division must allow a write for this
+  // account, so a manager who may only read that division is not offered the editor.
+  const canManage = !readOnly && capabilities.canEdit && detail.data?.canWrite !== false;
   // A completion report may be filed by any authenticated MEMBER, MANAGER or ADMIN; an extension
   // request stays limited to the assigned MEMBER. Eligibility itself is a server answer.
   const canReport = capabilities.canSubmitCompletionRequest;
-  const detail = useQuery<TaskDetail>(keys.task(taskId), () => api.get<TaskDetail>(endpoint));
   const references = useQuery<References>(keys.references, () =>
     readOnly ? Promise.resolve({ members: [], skills: [], subprojects: [] }) : api.get<References>('/api/manager/references')
   );
