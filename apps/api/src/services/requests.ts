@@ -13,6 +13,7 @@ import {
   getProject,
   getRequest,
   getRequestByInboxId,
+  getRequestScoped,
   getSettings,
   getTask,
   hasPendingRequest,
@@ -36,6 +37,7 @@ import {
   canReportCompletion,
   canRequestDeadlineChange,
   canSeeRestrictedWork,
+  canWriteDivision,
   createCalendar,
   readableDivisionIds,
   scopedDivisionIds,
@@ -189,9 +191,36 @@ export async function queue(
     const total = Number(count?.total ?? 0);
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const page = Math.min(input.page ?? 1, totalPages);
-    const items = await listRequests(tx, input.includeDecided, page, pageSize, { divisionIds });
+    const rows = await listRequests(tx, input.includeDecided, page, pageSize, { divisionIds });
+    // The decision capability is resolved per record, from the division of that request's own
+    // work: a mixed queue must tell a manager who may only read one division that they cannot
+    // decide there. It is a presentation aid; `decideRequest` re-checks the division.
+    const items = rows.map(({ request, divisionId }) => ({
+      ...request,
+      canDecide: canWriteDivision(ctx.divisions, divisionId)
+    }));
     return { items, total, page, pageSize, totalPages, imported };
   });
+}
+
+/**
+ * One request by its identifier, for a manager.
+ *
+ * This is the bounded lookup a deep link and a conflict reload use: it never scans the queue and
+ * it applies the same division boundary as the list, so a request outside the caller's read scope
+ * is `NOT_FOUND` rather than a foreign record.
+ */
+export async function managerRequest(
+  ctx: ServiceCtx,
+  requestId: string
+): Promise<{ request: TaskRequest }> {
+  requireRole(ctx.identity, 'MANAGER');
+  const scoped = await getRequestScoped(ctx.db, requestId);
+  if (!scoped) throw new DomainError('NOT_FOUND', 'Request not found');
+  assertReadableDivision(ctx.divisions, scoped.divisionId);
+  return {
+    request: { ...scoped.request, canDecide: canWriteDivision(ctx.divisions, scoped.divisionId) }
+  };
 }
 
 export type EmployeeTaskRow = {

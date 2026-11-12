@@ -53,7 +53,22 @@ export function useSave(): {
  * conflict keeps the dialog and offers an explicit reload, an unknown outcome says so instead of
  * pretending the write failed, and a definite refusal shows the server's reason. The dialog never
  * silently retries, never merges a conflicting edit and never closes itself after a failure.
+ *
+ * The reload protocol is explicit, because "refresh the list behind the dialog" is not recovery:
+ * the caller must re-read the *selected record by id* through an authorized read and replace the
+ * revision this dialog will submit. The dialog reports what happened and requires a deliberate new
+ * confirmation; an unusable record disables the action.
  */
+
+/** What a conflict reload achieved. The dialog decides what to show from this. */
+export type ReloadOutcome =
+  /** The selected record was replaced with its current version; confirm again deliberately. */
+  | { status: 'fresh' }
+  /** The record can no longer be acted on (decided, completed, deleted, out of scope). */
+  | { status: 'ineligible'; message: string }
+  /** The reload failed. The draft is kept and no refusal is implied. */
+  | { status: 'failed'; message: string };
+
 export function ConfirmDialog({
   title,
   message,
@@ -71,25 +86,60 @@ export function ConfirmDialog({
   destructive?: boolean;
   onCancel: () => void;
   onConfirm: (input: { confirmation: string; reason: string }) => Promise<void> | void;
-  /** Re-reads the authoritative record after a conflict; the dialog stays open. */
-  onReload?: () => Promise<void> | void;
+  /** Re-reads the selected record by id; the dialog stays open and keeps the entered text. */
+  onReload?: () => Promise<ReloadOutcome>;
 }): JSX.Element {
   const { t } = useI18n();
   const [typed, setTyped] = useState('');
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const [failure, setFailure] = useState<unknown>(null);
+  const [reloadState, setReloadState] = useState<ReloadOutcome | null>(null);
   const inFlight = useRef(false);
+  const reloadInFlight = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
-  const canConfirm = (!confirmText || typed.trim() === confirmText) && (!reasonRequired || reason.trim().length > 0);
+  const ineligible = reloadState?.status === 'ineligible';
+  const canConfirm =
+    !ineligible &&
+    (!confirmText || typed.trim() === confirmText) &&
+    (!reasonRequired || reason.trim().length > 0);
   const apiFailure = failure instanceof ApiFailure ? failure : null;
   const conflict = apiFailure?.isConflict === true;
   const unknown = !!apiFailure && ['NETWORK', 'INVALID_RESPONSE'].includes(apiFailure.code);
-  const errorText = failure
-    ? apiFailure
-      ? apiFailure.message
-      : (failure as Error).message
-    : '';
+  const errorText = failure ? (apiFailure ? apiFailure.message : (failure as Error).message) : '';
+
+  const reload = async (): Promise<void> => {
+    // Duplicate reloads are refused synchronously; only the first one runs.
+    if (!onReload || reloadInFlight.current) return;
+    reloadInFlight.current = true;
+    setReloading(true);
+    try {
+      const outcome = await onReload();
+      if (!mounted.current) return;
+      setReloadState(outcome);
+      // A successful reload clears the conflict so a deliberate confirmation can follow; a failed
+      // reload keeps it, and no "latest loaded" state is implied.
+      if (outcome.status === 'fresh') setFailure(null);
+    } catch (error) {
+      // A rejected reload is a failure, never an unhandled promise.
+      if (!mounted.current) return;
+      setReloadState({
+        status: 'failed',
+        message: error instanceof Error ? error.message : t('common.error')
+      });
+    } finally {
+      reloadInFlight.current = false;
+      if (mounted.current) setReloading(false);
+    }
+  };
 
   return (
     <Modal
@@ -110,6 +160,7 @@ export function ConfirmDialog({
               inFlight.current = true;
               setBusy(true);
               setFailure(null);
+              setReloadState(null);
               try {
                 await onConfirm({ confirmation: typed.trim(), reason: reason.trim() });
               } catch (error) {
@@ -146,10 +197,25 @@ export function ConfirmDialog({
             </strong>
             <span>{conflict ? t('editor.conflictHint') : unknown ? t('editor.unknownHint') : errorText}</span>
             {conflict && onReload ? (
-              <button type="button" className="link-button" onClick={() => void onReload()}>
-                {t('editor.conflictReload')}
+              <button type="button" className="link-button" disabled={reloading} onClick={() => void reload()}>
+                {reloading ? t('editor.reloading') : t('editor.conflictReload')}
               </button>
             ) : null}
+          </div>
+        ) : null}
+        {reloadState?.status === 'fresh' ? (
+          <div className="banner info" role="status">
+            {t('editor.conflictReloaded')}
+          </div>
+        ) : null}
+        {reloadState?.status === 'ineligible' ? (
+          <div className="banner warning" role="alert">
+            {reloadState.message}
+          </div>
+        ) : null}
+        {reloadState?.status === 'failed' ? (
+          <div className="banner danger" role="alert">
+            {`${t('editor.conflictReloadFailed')} ${reloadState.message}`.trim()}
           </div>
         ) : null}
       </div>

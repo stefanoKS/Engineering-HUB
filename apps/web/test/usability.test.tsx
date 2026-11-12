@@ -388,6 +388,9 @@ describe('request review', () => {
           snapshotVersion: '1',
           staleReason: '',
           requesterMemberId: null,
+          // The server resolves the decision capability per record; without it the interface
+          // offers no decision at all.
+          canDecide: true,
           revision: 1
         }
       ],

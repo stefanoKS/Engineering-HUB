@@ -332,6 +332,7 @@ export type RequestRow = {
   stale_reason: string;
   revision: number;
   requester_member_id?: string | null;
+  division_id?: string | null;
   task_name?: string | null;
   project_name?: string | null;
   subproject_name?: string | null;

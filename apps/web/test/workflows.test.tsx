@@ -116,7 +116,14 @@ describe('member self-service work', () => {
     const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET';
       calls.push({ url, method, body: typeof init?.body === 'string' ? init.body : undefined });
-      if (method === 'POST' && url.endsWith('/api/employee/requests')) return response({ requestId: 'REQ-NEW' });
+      if (method === 'POST' && url.endsWith('/api/employee/requests'))
+        return response({
+          requestId: 'REQ-NEW',
+          state: 'RECEIVED',
+          requestType: 'COMPLETION_REPORT',
+          taskId: 'TSK-REPORT',
+          submittedAt: '2026-11-11T12:00:00.000Z'
+        });
       if (url.includes('/projects')) return response(projects());
       if (url.includes('/requests/mine')) return response({ items: [], submissionEnabled: options.submissionEnabled });
       if (method === 'POST' && url.endsWith('/api/employee/my-work')) return response({ taskId: 'TSK-NEW', replayed: false });

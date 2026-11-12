@@ -7,11 +7,11 @@
  * session.
  */
 import { useI18n } from '../i18n';
-import { dismissSubmission, isClaimed, useSubmissions, type Submission } from '../state/submissions';
+import { dismissSubmission, isClaimed, useSubmissions, type SubmissionAttempt } from '../state/submissions';
 
 const VISIBLE = 3;
 
-function toneOf(state: Submission['state']): { tone: 'info' | 'ok' | 'warning' | 'danger'; role: 'status' | 'alert' } {
+function toneOf(state: SubmissionAttempt['outcome']): { tone: 'info' | 'ok' | 'warning' | 'danger'; role: 'status' | 'alert' } {
   switch (state) {
     case 'SENDING':
       return { tone: 'info', role: 'status' };
@@ -28,30 +28,29 @@ export function SubmissionNotices(): JSX.Element | null {
   const { t } = useI18n();
   const submissions = useSubmissions();
   if (submissions.length === 0) return null;
-  // A submission that an open dialog is already reporting is not repeated here, and neither is one
-  // its host page has already shown.
+  // A dismissed notice is hidden without deleting the attempt: the attempt is what prevents an
+  // uncertain submission from being sent twice. A submission an open dialog reports is not
+  // repeated here either.
   const visible = submissions
-    .filter((entry) => !entry.reported && !isClaimed(entry.submissionId))
+    .filter((entry) => !entry.dismissed && !entry.reported && !isClaimed(entry.attemptId))
     .slice(0, VISIBLE);
   if (visible.length === 0) return null;
   return (
     <div className="submission-notices">
       {visible.map((entry) => {
-        const { tone, role } = toneOf(entry.state);
+        const { tone, role } = toneOf(entry.outcome);
         const text =
-          entry.state === 'SENDING'
+          entry.outcome === 'SENDING'
             ? t('submission.sending')
-            : entry.state === 'RECEIVED'
-              ? entry.requestId
-                ? t('submission.received', { id: entry.requestId })
-                : t('submission.receivedNoId')
-              : entry.state === 'UNKNOWN'
-                ? t('submission.unknown')
+            : entry.outcome === 'RECEIVED'
+              ? t('submission.received', { id: entry.requestId })
+              : entry.outcome === 'UNKNOWN'
+                ? `${t('request.transport.OUTCOME_UNKNOWN')} ${t('submission.unknown')}`
                 : `${t('submission.refused')} ${entry.message}`.trim();
         return (
-          <div key={entry.submissionId} className={`banner ${tone} submission-notice`} role={role}>
+          <div key={entry.attemptId} className={`banner ${tone} submission-notice`} role={role}>
             <span>{text}</span>
-            {entry.state === 'UNKNOWN' ? (
+            {entry.outcome === 'UNKNOWN' ? (
               <a className="link-button" href="#/my-work">
                 {t('submission.checkRequests')}
               </a>
@@ -60,7 +59,7 @@ export function SubmissionNotices(): JSX.Element | null {
               type="button"
               className="link-button submission-dismiss"
               aria-label={t('submission.dismiss')}
-              onClick={() => dismissSubmission(entry.submissionId)}
+              onClick={() => dismissSubmission(entry.attemptId)}
             >
               ×
             </button>

@@ -25,7 +25,10 @@ type Entry = {
   version: number;
 };
 
-/** A hard ceiling on retained payloads, so a long session cannot grow without bound. */
+/**
+ * Retention target for *inactive, settled* entries. Mounted and in-flight entries are exempt, so
+ * this is not a hard ceiling on total memory - see `trim()`.
+ */
 const MAX_ENTRIES = 240;
 
 type Active = {
@@ -105,13 +108,21 @@ class QueryCache {
     };
   }
 
-  /** Drops the least recently confirmed payloads once the bounded size is exceeded. */
+  /**
+   * Drops the least recently confirmed payloads once the retention target is exceeded.
+   *
+   * **The limit applies to inactive, settled entries only.** An entry that a mounted query is
+   * reading, or whose read is in flight, is never evicted: evicting it would blank a screen that is
+   * on display, and re-reading it immediately would thrash. The total therefore can exceed
+   * `MAX_ENTRIES` while many screens are mounted; that is the documented retention policy rather
+   * than a claim of a hard total bound.
+   */
   private trim(): void {
     if (this.entries.size <= MAX_ENTRIES) return;
-    const ordered = [...this.entries.entries()]
-      .filter(([, entry]) => !entry.promise)
+    const evictable = [...this.entries.entries()]
+      .filter(([key, entry]) => !entry.promise && !this.active.has(key))
       .sort((left, right) => left[1].updatedAt - right[1].updatedAt);
-    for (const [key] of ordered) {
+    for (const [key] of evictable) {
       if (this.entries.size <= MAX_ENTRIES) break;
       this.entries.delete(key);
     }

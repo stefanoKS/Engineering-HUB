@@ -261,7 +261,14 @@ export function TaskForm({
           }
           const updated = await api.patch<{ task: Task }>(`/api/manager/tasks/${task.taskId}`, pendingPatch);
           return updated.task;
-        }, taskSaveKeys),
+        }, taskSaveKeys).then((outcome) => {
+          // An answer from an ended session has no local effect; the caller must not treat it as a
+          // saved task. Rejecting keeps this form from reporting a success it does not own.
+          if (outcome.status !== 'committed') {
+            throw new Error('The session ended before this save could be confirmed');
+          }
+          return outcome.value;
+        }),
       {
         // Only the dialog-local part lives here: it disappears with the form.
         onSuccess: (saved) => {

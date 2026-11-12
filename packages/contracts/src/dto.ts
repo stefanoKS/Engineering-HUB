@@ -512,9 +512,37 @@ export const TaskRequest = z.object({
   snapshotVersion: z.string(),
   staleReason: z.string(),
   requesterMemberId: z.string().nullable().optional(),
+  /**
+   * Server-computed availability of a decision on *this* request, resolved from the caller's
+   * division scope for the request's work. A presentation aid for a mixed or all-division queue:
+   * a manager who may only read that division must not be offered approve/reject/return. It is
+   * never authority - the decision command re-checks the division inside its transaction - and an
+   * absent value is treated as "not decidable" by the interface.
+   */
+  canDecide: z.boolean().optional(),
   revision: Revision
 });
 export type TaskRequest = z.infer<typeof TaskRequest>;
+
+/**
+ * The authoritative acknowledgement of `POST /api/employee/requests`.
+ *
+ * `RECEIVED` means the server stored the request; `DUPLICATE` means it was already stored under
+ * this client request id. Both are acknowledgements; anything that does not match this shape is
+ * not, and the caller must treat it as an unknown outcome rather than a success.
+ */
+export const RequestSubmissionReceipt = z.object({
+  requestId: Id,
+  state: z.enum(['RECEIVED', 'DUPLICATE']),
+  requestType: z.string().min(1),
+  taskId: Id,
+  /**
+   * Display-only. A different textual form is not evidence that the write failed, so this is a
+   * non-empty string rather than a strict instant; the identity and the state decide the outcome.
+   */
+  submittedAt: z.string().min(1)
+});
+export type RequestSubmissionReceipt = z.infer<typeof RequestSubmissionReceipt>;
 
 export const RequestQueue = z.object({
   page: z.number().int().positive(),

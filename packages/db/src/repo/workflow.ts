@@ -18,6 +18,7 @@ const REQUEST_SELECT = `
          reviewer, decided_at, decision_note, task_revision_at_submission, due_date_at_submission,
          reported_completion_at, accepted_completion_at, inbox_request_id, imported_at,
          snapshot_version, stale_reason, revision, requester_member_id,
+         (SELECT p.division_id FROM projects p WHERE p.project_id = task_requests.project_id) AS division_id,
          COALESCE((SELECT t.task_name FROM tasks t WHERE t.task_id = task_requests.task_id), '') AS task_name,
          COALESCE((SELECT p.project_name FROM projects p WHERE p.project_id = task_requests.project_id), '') AS project_name,
          COALESCE((SELECT s.subproject_name
@@ -25,13 +26,21 @@ const REQUEST_SELECT = `
                     WHERE t.task_id = task_requests.task_id), '') AS subproject_name
     FROM task_requests`;
 
+/**
+ * A request together with the division of its work.
+ *
+ * The division is not part of the public request DTO: the server uses it to resolve the caller's
+ * write capability for this record and to refuse a record outside their read scope.
+ */
+export type ScopedRequest = { request: TaskRequest; divisionId: string | null };
+
 export async function listRequests(
   db: Db,
   includeDecided: boolean,
   page = 1,
   pageSize = 25,
   options: { divisionIds?: readonly string[] } = {}
-): Promise<TaskRequest[]> {
+): Promise<ScopedRequest[]> {
   // A request belongs to the division of its task's project. `undefined` is the administrative
   // unrestricted scope; an empty list matches nothing.
   const where: string[] = ["($1::boolean OR status IN ('PENDING','PROCESSING','STALE'))"];
@@ -56,12 +65,18 @@ export async function listRequests(
       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
     [...params, pageSize, (page - 1) * pageSize]
   );
-  return rows.map(toRequest);
+  return rows.map((row) => ({ request: toRequest(row), divisionId: row.division_id ?? null }));
 }
 
 export async function getRequest(db: Db, requestId: string): Promise<TaskRequest | null> {
   const row = await db.one<RequestRow>(`${REQUEST_SELECT} WHERE request_id = $1`, [requestId]);
   return row ? toRequest(row) : null;
+}
+
+/** One request with the division of its work, for an authorized by-id read. */
+export async function getRequestScoped(db: Db, requestId: string): Promise<ScopedRequest | null> {
+  const row = await db.one<RequestRow>(`${REQUEST_SELECT} WHERE request_id = $1`, [requestId]);
+  return row ? { request: toRequest(row), divisionId: row.division_id ?? null } : null;
 }
 
 export async function getRequestByInboxId(db: Db, inboxRequestId: string): Promise<TaskRequest | null> {

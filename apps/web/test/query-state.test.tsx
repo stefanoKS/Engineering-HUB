@@ -103,6 +103,65 @@ describe('cache key isolation', () => {
   });
 });
 
+describe('cache retention and eviction', () => {
+  // The documented policy: the retention target applies to inactive, settled entries.
+  const RETENTION = 240;
+
+  async function fillInactive(prefix: string, count: number): Promise<void> {
+    for (let index = 0; index < count; index += 1) {
+      await queryCache.fetch(`${prefix}/${index}`, async () => index);
+    }
+  }
+
+  it('never evicts a payload an active consumer is displaying', async () => {
+    await queryCache.fetch('active/key', async () => 'visible');
+    queryCache.activate('active/key', async () => 'visible');
+
+    await fillInactive('inactive', RETENTION + 40);
+
+    // The displayed payload survives, and the oldest inactive entries are the ones dropped.
+    expect(queryCache.peek<string>('active/key').data).toBe('visible');
+    expect(queryCache.peek<number>('inactive/0').data).toBeUndefined();
+    expect(queryCache.peek<number>(`inactive/${RETENTION + 39}`).data).toBe(RETENTION + 39);
+    queryCache.deactivate('active/key');
+  });
+
+  it('makes an entry eligible again once the last consumer leaves', async () => {
+    await queryCache.fetch('multi/key', async () => 'kept');
+    queryCache.activate('multi/key', async () => 'kept');
+    queryCache.activate('multi/key', async () => 'kept');
+    queryCache.deactivate('multi/key');
+
+    await fillInactive('second', RETENTION + 20);
+    // One consumer left: it is still active.
+    expect(queryCache.peek<string>('multi/key').data).toBe('kept');
+
+    queryCache.deactivate('multi/key');
+    await queryCache.fetch('trigger/one', async () => 'x');
+    await fillInactive('third', RETENTION + 20);
+    expect(queryCache.peek<string>('multi/key').data).toBeUndefined();
+  });
+
+  it('keeps ownership of an in-flight read that is not evicted', async () => {
+    const pending = queryCache.fetch('pending/key', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return 'resolved';
+    });
+    await fillInactive('while-pending', RETENTION + 10);
+    await pending;
+    // If the entry had been evicted the completion would have been dropped.
+    expect(queryCache.peek<string>('pending/key').data).toBe('resolved');
+  });
+
+  it('removes every private payload on a session clear', async () => {
+    await queryCache.fetch('private/one', async () => 'secret');
+    queryCache.activate('private/one', async () => 'secret');
+    queryCache.clear();
+    expect(queryCache.peek<string>('private/one').data).toBeUndefined();
+    queryCache.deactivate('private/one');
+  });
+});
+
 describe('menu keyboard contract', () => {
   function renderMenu(): void {
     render(

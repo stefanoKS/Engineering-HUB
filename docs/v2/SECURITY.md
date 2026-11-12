@@ -520,3 +520,25 @@ projection, which carries no flag at all.
 The server-side refusal for the read-only division is covered by
 `apps/api/test/divisions.test.ts` ("keeps the read-only division readable while refusing its writes
 on the server").
+
+## 19. Request decision capability — 2026-11-11
+
+`TaskRequest.canDecide` answers one question: *may this verified account decide this request, in the
+division its work belongs to?* It is computed with `canWriteDivision(scope, division-of-the-work)`
+in the queue read and in the by-id read, before paging, and never from a request parameter.
+
+- It exposes no authorization internal: no grant, access kind, e-mail address or member identifier.
+- It grants nothing. `POST /api/manager/requests/:id/decide` re-reads the actor, the role and the
+  request's division inside its transaction, so a forged flag answers `AUTHORIZATION_DENIED` and the
+  request stays `PENDING`.
+- A missing value is treated by the interface as "cannot decide", never as permission.
+- A `MEMBER` or `VIEWER` receives no queue at all (`requireRole(ctx.identity, 'MANAGER')`), and
+  `GENERAL_MANAGER` oversight is read-only, so all three receive `canDecide: false` at most.
+
+`GET /api/manager/requests/:id` applies the same read boundary: a request outside the caller's
+readable divisions is `NOT_FOUND`, and the response never contains another division's task name.
+
+Covered by `apps/api/test/divisions.test.ts` (queue flags for a manager with WORK in one division and
+READ in another, an ADMIN queue, the refused decision leaving `PENDING`, and a foreign by-id read
+answered `NOT_FOUND`) and by `apps/web/test/request-sync.test.tsx` (per-record availability, a
+missing value failing closed, ADMIN unchanged).

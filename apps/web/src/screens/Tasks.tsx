@@ -15,14 +15,15 @@ import { useEditorState } from '../state/editor';
 /** Task list: server-side filtering and paging, narrow rows, one form for create and edit. */
 import { Fragment, useState } from 'react';
 import type { Actor, Reference, Task, TaskDetail, TaskSummary } from '@eh/contracts';
-import { api, queryString } from '../api/client';
+import { api, queryString, ApiFailure } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
+import { commitMutation } from '../state/mutation';
 import { useI18n } from '../i18n';
 import { Badge, EmptyState, ErrorBox, Menu, Pagination } from '../components/ui';
 import { DeleteEntityDialog } from '../components/DeleteEntityDialog';
 import { DeadlineCell } from '../components/deadline';
 import { TaskStatusBadge, WorkflowHint, taskStatusTone } from '../components/task-status';
-import { ConfirmDialog } from '../components/forms';
+import { ConfirmDialog, type ReloadOutcome } from '../components/forms';
 import { TaskForm } from './TaskForm';
 import { MAX_TASK_DEPTH, projectColor } from '@eh/domain';
 import { useRouteMemoryState } from '../state/navigation';
@@ -32,6 +33,18 @@ import { capabilitiesOf, canEditRecord, hasWritableDestination } from '../state/
 import { DebouncedSearchInput } from '../components/search-input';
 
 type Page = { items: TaskSummary[]; matchedTotal?: number; total: number; page: number; pageSize: number; totalPages: number };
+/**
+ * The authoritative fields a completion confirmation needs. It is rebuilt from the record-by-id
+ * read after a conflict, so a second confirmation never resubmits a superseded revision.
+ */
+type TaskActionTarget = {
+  taskId: string;
+  taskName: string;
+  projectId: string;
+  revision: number;
+  status: TaskSummary['status'];
+  container: boolean;
+};
 type References = {
   responsibilities?: { id: string; name: string; status: string }[];
   members: { memberId: string; name: string; active: boolean; employeeId?: string; role?: string }[];
@@ -138,7 +151,7 @@ export function TasksScreen({
     setAssigneeMemberId('');
   });
   const [editing, setEditing, loadEditor, editorError, editorLoading] = useEditorState<{ mode: 'create' } | { mode: 'edit'; detail: TaskDetail } | null>(null);
-  const [action, setAction] = useState<{ kind: 'override' | 'complete'; task: TaskSummary } | null>(null);
+  const [action, setAction] = useState<{ kind: 'override' | 'complete'; task: TaskActionTarget } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TaskSummary | null>(null);
 
   const endpoint = readOnly ? '/api/work/tasks' : '/api/manager/tasks';
@@ -209,6 +222,42 @@ export function TasksScreen({
 
   async function startDelete(summary: TaskSummary): Promise<void> {
     setDeleteTarget(summary);
+  }
+
+  /**
+   * Re-reads the selected task by id after a conflict and replaces the revision the dialog will
+   * submit. The row may have moved off the current page, so the list is never the source here.
+   */
+  async function reloadTaskAction(taskId: string): Promise<ReloadOutcome> {
+    try {
+      const detail = await api.get<TaskDetail>(`/api/manager/tasks/${taskId}`);
+      const fresh: TaskActionTarget = {
+        taskId: detail.record.taskId,
+        taskName: detail.record.taskName,
+        projectId: detail.record.projectId,
+        revision: detail.record.revision,
+        status: detail.record.status,
+        // A task with children is a work container; it is never completed directly.
+        container: detail.children.length > 0
+      };
+      if (detail.canWrite === false) {
+        return { status: 'ineligible', message: t('capability.readOnlyRecordHelp') };
+      }
+      if (fresh.status === 'Done' || fresh.status === 'Cancelled') {
+        return { status: 'ineligible', message: t('requests.decideAlreadySettled') };
+      }
+      if (fresh.container) {
+        return { status: 'ineligible', message: t('tasks.containerCannotComplete') };
+      }
+      setAction((current) => (current && current.task.taskId === taskId ? { ...current, task: fresh } : current));
+      return { status: 'fresh' };
+    } catch (failure) {
+      const code = failure instanceof ApiFailure ? failure.code : '';
+      return {
+        status: 'failed',
+        message: code === 'NOT_FOUND' ? t('tasks.actionUnavailable') : t('common.error')
+      };
+    }
   }
 
   return (
@@ -418,32 +467,37 @@ export function TasksScreen({
           reasonRequired={action.kind === 'override'}
           destructive={action.kind === 'override'}
           onCancel={() => setAction(null)}
-          onReload={() => list.refresh()}
+          onReload={() => reloadTaskAction(action.task.taskId)}
           onConfirm={async ({ confirmation, reason }) => {
-            if (action.kind === 'complete') {
-              await api.post(`/api/manager/tasks/${action.task.taskId}/complete`, {
-                revision: action.task.revision,
-                confirmed: true,
-                note: reason || undefined
-              });
-            } else {
-              await api.post(`/api/manager/tasks/${action.task.taskId}/override-complete`, {
-                revision: action.task.revision,
-                reason,
-                confirmation
-              });
-            }
+            // The revision the confirmation carries is the one currently shown, which a conflict
+            // reload has replaced with the server's current value.
+            const outcome = await commitMutation(
+              () =>
+                action.kind === 'complete'
+                  ? api.post(`/api/manager/tasks/${action.task.taskId}/complete`, {
+                      revision: action.task.revision,
+                      confirmed: true,
+                      note: reason || undefined
+                    })
+                  : api.post(`/api/manager/tasks/${action.task.taskId}/override-complete`, {
+                      revision: action.task.revision,
+                      reason,
+                      confirmation
+                    }),
+              [
+                keys.tasks,
+                keys.task(action.task.taskId),
+                keys.taskIndex,
+                keys.overview,
+                keys.project(action.task.projectId),
+                keys.myWork,
+                keys.parentOptions,
+                keys.timeline
+              ]
+            );
+            // A result from an ended session changes nothing on this screen.
+            if (outcome.status !== 'committed') return;
             setAction(null);
-            queryCache.invalidate([
-              keys.tasks,
-              keys.task(action.task.taskId),
-              keys.taskIndex,
-              keys.overview,
-              keys.project(action.task.projectId),
-              keys.myWork,
-              keys.parentOptions,
-              keys.timeline
-            ]);
           }}
         />
       ) : null}

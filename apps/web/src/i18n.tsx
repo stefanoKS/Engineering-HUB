@@ -1307,6 +1307,14 @@ export const V2_LABELS = {
   },
   'query.noMatches': { ja: '条件に一致する記録がありません。', en: 'No records match the current filters.' },
   'query.noMatchesHelp': { ja: '検索語や絞り込み条件を変更してください。', en: 'Change the search text or filters.' },
+  'tasks.containerCannotComplete': {
+    ja: '子タスクを持つタスクは直接完了できません。子タスクから完了してください。',
+    en: 'A task with subtasks cannot be completed directly. Complete it from its subtasks.'
+  },
+  'tasks.actionUnavailable': {
+    ja: 'このタスクは現在操作できません。削除済みか、閲覧できない課の可能性があります。',
+    en: 'This task cannot be acted on. It may be removed, or in a division you cannot read.'
+  },
   'query.clearFilters': { ja: '絞り込みを解除', en: 'Clear filters' },
   'filter.deadlineWindow': { ja: '期限の範囲', en: 'Deadline window' },
 
@@ -1338,6 +1346,7 @@ export const V2_LABELS = {
   'requests.completionNote': { ja: '完了メモ', en: 'Completion note' },
   'requests.noNote': { ja: '記入なし', en: 'None given' },
   'requests.details': { ja: '申請の詳細', en: 'Request details' },
+  'request.confirm.revision': { ja: '申請の版', en: 'Request revision' },
   'requests.close': { ja: '閉じる', en: 'Close' },
   'requests.summary': { ja: '内容', en: 'Summary' },
   'requests.syncBusy': { ja: '同期中…', en: 'Syncing…' },
@@ -1352,6 +1361,22 @@ export const V2_LABELS = {
     en: 'The request inbox is not configured, so nothing could be synchronised. Contact a manager.'
   },
   'requests.syncFailed': { ja: '同期に失敗しました。表示中の申請はそのままです。', en: 'Synchronisation failed. The requests already shown are unchanged.' },
+  'requests.linkUnavailable': {
+    ja: '指定された申請は表示できません。処理済み、削除済み、または閲覧できない課の可能性があります。',
+    en: 'That request cannot be shown. It may be decided, removed, or in a division you cannot read.'
+  },
+  'requests.linkLookupFailed': {
+    ja: '指定された申請を読み込めませんでした。申請一覧から選び直してください。',
+    en: 'The linked request could not be loaded. Choose it from the list.'
+  },
+  'requests.decideRedonlyNow': {
+    ja: 'この申請は現在あなたの権限では処理できません。最新の内容を確認してください。',
+    en: 'You can no longer decide this request. Review the latest version.'
+  },
+  'requests.decideAlreadySettled': {
+    ja: 'この申請はすでに処理されています。最新の内容を確認してください。',
+    en: 'This request has already been decided. Review the latest version.'
+  },
 
   // Submission tracking that outlives the dialog.
   'submission.heading': { ja: '申請の送信状況', en: 'Request submission' },
@@ -1369,6 +1394,10 @@ export const V2_LABELS = {
     en: 'The outcome could not be confirmed, and it was not sent again automatically. Check the request list.'
   },
   'submission.refused': { ja: '申請は受け付けられませんでした。', en: 'The request was not accepted.' },
+  'submission.correctHint': {
+    ja: '入力は保持されています。内容を修正して、もう一度送信してください。',
+    en: 'Your input is kept. Correct it and submit again.'
+  },
   'submission.dismiss': { ja: 'この通知を閉じる', en: 'Dismiss this notice' },
   'submission.checkRequests': { ja: '申請一覧で確認', en: 'Check the request list' },
 
@@ -1384,6 +1413,15 @@ export const V2_LABELS = {
 
   // Conflict recovery.
   'editor.conflictReload': { ja: '最新の内容を読み込む', en: 'Load the latest version' },
+  'editor.reloading': { ja: '最新の内容を読み込み中…', en: 'Loading the latest version…' },
+  'editor.conflictReloaded': {
+    ja: '最新の内容を読み込みました。内容を確認してから、もう一度確定してください。',
+    en: 'The latest version is loaded. Review it, then confirm again.'
+  },
+  'editor.conflictReloadFailed': {
+    ja: '最新の内容を取得できませんでした。入力内容は保持されています。',
+    en: 'The latest version could not be loaded. Your input is kept.'
+  },
   'editor.conflictHint': {
     ja: '入力内容は保持されています。最新の内容を確認してから、もう一度保存してください。',
     en: 'Your input is kept. Review the latest version, then save again deliberately.'

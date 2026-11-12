@@ -764,3 +764,39 @@ business and is untouched.
 `divisionId` on both the page-entry import and the manual control, and reads
 `imported.configured/imported/failed` to decide between success, partial import, not configured and
 failure. Only `imported > 0` triggers a re-read of the affected queue and derived views.
+
+## Corrections to the interface stabilization release — 2026-11-11
+
+`GET /api/manager/requests/:id` (ADMIN/MANAGER) returns `{ request: TaskRequest }` for one request,
+resolved by id with the same division boundary as the queue: a request whose work is outside the
+caller's readable divisions, or one that does not exist, is `NOT_FOUND`. It is the bounded lookup a
+deep link and a conflict reload use - the queue is never scanned and no page is fetched to find one
+record.
+
+`TaskRequest` now carries an allowlisted `canDecide` (`boolean?`), resolved per request from
+`canWriteDivision(scope, division-of-the-work)` before paging:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `TaskRequest.canDecide` | `boolean?` | Whether *this* request may be decided by the caller. Absent means "not decidable" in the interface. |
+
+It is a presentation aid: `POST /api/manager/requests/:id/decide` re-checks the division inside its
+transaction, so a forged flag is refused and the request stays `PENDING`.
+
+`POST /api/employee/requests` acknowledges with a fixed shape, now published as
+`RequestSubmissionReceipt` in `packages/contracts` and validated by the client before anything is
+reported as received:
+
+```json
+{ "requestId": "REQ-…", "state": "RECEIVED|DUPLICATE", "requestType": "DEADLINE_CHANGE|COMPLETION_REPORT", "taskId": "TSK-…", "submittedAt": "…" }
+```
+
+`requestId` is a non-empty identifier (≤ 64 characters). `state` is exactly one of the two
+acknowledgement values. `submittedAt` is display-only: a different textual form is not evidence that
+the write failed, so it is validated as a non-empty string rather than a strict instant. Any other
+success payload is an unknown outcome, never a success.
+
+The idempotency contract is unchanged: a replay with the same `clientRequestId` and the same content
+returns the stored receipt (`DUPLICATE`); the same key with different content answers
+`IDEMPOTENCY_REPLAY`. A refusal raised before the idempotency step (validation, eligibility,
+authorization) reserves no key, so a corrected attempt may use a new identity.

@@ -1342,3 +1342,104 @@ request, the cache's superseded-read ownership, and the "no silent zero" rule fo
 Conventions introduced here are recorded in [UI_CONVENTIONS.md](./UI_CONVENTIONS.md); the API
 surface in [API.md](./API.md), the client-state model in [ARCHITECTURE.md](./ARCHITECTURE.md) and
 the flag's security properties in [SECURITY.md](./SECURITY.md) §18.
+
+## Corrective release: verified defects in the V2 interface stabilization - 2026-11-11
+
+This section corrects the release recorded above. Seven reproducible defects were found in that
+implementation and are fixed here; the earlier table is preserved unchanged and the rows it got
+wrong are corrected below. No migration, table, column, Script Property or trigger was added;
+schema 12 and employee contract 1.6 are unchanged. Nothing was deployed, initialized or activated,
+and no operational record was read or written outside the disposable test database.
+
+### D1 — an acknowledgement without a request id was reported as received
+
+`submitRequest` accepted any success payload and substituted an empty `requestId`.
+`RequestSubmissionReceipt` (packages/contracts) is now the authoritative contract
+(`requestId`, `state` ∈ {`RECEIVED`,`DUPLICATE`}, `requestType`, `taskId`, `submittedAt`) and is
+validated at the response boundary. Anything else is `UNKNOWN` with `INVALID_RESPONSE`; a success
+notice is never shown for it. Regression cases: a valid receipt, an idempotent replay, an empty
+object, `null` data, a missing / empty / numeric `requestId`, an unknown state, and an unreadable
+body.
+
+### D2 — a corrected draft could never be sent after a definite refusal
+
+The tracker answered every repeat for the same identity from its `REFUSED` entry. The unit of work
+is now an **attempt**: one immutable payload and one identity (`clientRequestId`). `SENDING`,
+`RECEIVED` and `UNKNOWN` are never resubmitted; a **definite** refusal keeps the editable draft and
+a deliberate resubmission starts a **new** attempt with a **new** identity, because the server
+refuses before it reserves the key (reusing the key with different content would answer
+`IDEMPOTENCY_REPLAY`). `IDEMPOTENCY_REPLAY`, `NETWORK` and `INVALID_RESPONSE` are classified as
+uncertain, not correctable. Dismissing a notice now only hides it (`dismissed`) and never removes the
+replay guard.
+
+### D3 — "Reload latest" did not recover a conflict
+
+The reload refreshed the list behind the dialog and left the superseded record in place. The
+dialog's reload protocol is now `Promise<ReloadOutcome>` (`fresh` | `ineligible` | `failed`); the
+caller re-reads the **selected record by id** through an authorized bounded read
+(`GET /api/manager/requests/:id`, `GET /api/manager/tasks/:id`), replaces the revision the dialog
+will submit, keeps the entered note/reason, requires a deliberate second confirmation, refuses the
+action when the record is decided/completed/contained/out of scope, reports a failed reload without
+claiming a fresh revision, refuses duplicate reloads and never reopens a closed dialog.
+
+### D4 — the async completion path was not fully guarded
+
+`commitMutation` returned an ordinary success value after a session change, so callers ran their
+follow-ups; the decision and task actions invalidated a second time; the request synchronisation had
+no effective unmount guard. `commitMutation` now returns
+`MutationOutcome<T>` = `{status:'committed', value}` | `{status:'superseded'}`, and every caller
+handles `superseded` explicitly. `submitRequest` returns the same shape
+(`settled` | `superseded`). Synchronisation applies its cache effect only inside the session that
+started it, applies feedback only while its own scope and render are current, and always settles its
+busy state.
+
+### D5 — cache trimming could evict a displayed payload
+
+`trim()` skipped pending entries but not active ones. It now evicts only **inactive, settled**
+entries, so a mounted consumer can never lose its data (and a screen is never blanked to be
+immediately re-read). The retention target is documented as applying to inactive entries; the
+module claims no hard total bound while screens are mounted.
+
+### D6 — request decisions were offered from status alone
+
+The queue now carries a server-derived `canDecide` per request, resolved with the canonical
+`canWriteDivision` for that request's own work before paging. The interface treats a missing value
+as "cannot decide". The decision command still re-checks the division inside its transaction, so a
+forged flag is refused.
+
+### D7 — a request deep link only searched the loaded page
+
+A link now resolves the record through the same authorized by-id read, respects the division
+boundary (`NOT_FOUND` for a foreign record), opens it once, and is abandoned when the link, scope,
+session or component changes.
+
+### Corrected and additional evidence
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| `npm ci` | PASS | Run as required for this release; the lockfile is unchanged and the install completed without modifying it. |
+| `npm run lint` | PASS | `lint:v1` and `lint:v2` exit 0. |
+| `npm run typecheck` | PASS | Every workspace compiles. |
+| `npm run test:v2` | PASS | 69 files, 794 passed / 1 skipped, real PostgreSQL 18. The corrected and new cases are listed under each defect above; `apps/web/test/submissions.test.tsx` (21), `apps/web/test/request-sync.test.tsx` (22), `apps/web/test/conflict-recovery.test.tsx` (3), `apps/web/test/query-state.test.tsx` (14) and four `canDecide` cases plus a by-id case in `apps/api/test/divisions.test.ts`. |
+| `npm run test:v1` | 775/776 (pre-existing) | `tests/v1_6_1-counting.test.js` "a container task is never an extra unit of work in an area card" fails on its fixed fixture due date (2026-11-10, now in the past). Unchanged by this release; recorded, not silenced. |
+| `npm run validate` | PASS | V1 source, V2 (235 files) and the deployment templates. |
+| `npm run build` | PASS | API, web, worker and migration CLI artifacts. |
+| `npm run smoke:prod` | PASS | Disposable PostgreSQL, no operational deployment. |
+| Acknowledged submission only | PASS | `apps/web/test/submissions.test.tsx`: valid receipt and replay become `RECEIVED`; empty object, `null`, missing/empty/numeric id, unknown state and unreadable body become `UNKNOWN`; no success notice is rendered. |
+| Correction after refusal | PASS | Same file: refusal keeps the draft, the corrected submit sends exactly one POST with a **different** `clientRequestId`, and the acknowledgement completes. A double click sends one POST. A dismissed notice still blocks a repeat. |
+| Conflict reload recovers | PASS | `apps/web/test/request-sync.test.tsx` and `apps/web/test/conflict-recovery.test.tsx`: revision N conflicts, the by-id read returns N+1, the dialog shows the new context, the second confirmation sends N+1 and succeeds; a record off the page still resolves; an ineligible record disables the action; a failed reload claims nothing; a reload that finishes after close does not reopen the dialog. |
+| Oblique completions have no effect | PASS | `apps/web/test/submissions.test.tsx`: `commitMutation` returns `superseded` after a session change and performs no invalidation; the decision and task dialogs act only on `committed`. Synchronisation feedback is not applied under a new scope and its busy state settles. |
+| Active data is never evicted | PASS | `apps/web/test/query-state.test.tsx`: a displayed payload survives 280 further entries; inactive entries are evicted; the last consumer decides eligibility; an in-flight read keeps ownership; `clear()` removes everything. |
+| Decision capability per record | PASS | `apps/web/test/request-sync.test.tsx` (WORK vs READ, missing value, ADMIN) and `apps/api/test/divisions.test.ts` (queue flags, an ADMIN queue, the refused decision left `PENDING`, and a foreign request answered `NOT_FOUND` without revealing its task name). |
+| Deep link resolves by id | PASS | `apps/web/test/request-sync.test.tsx`: a record absent from page 1 opens; a decided record opens; a missing/out-of-scope link is explained; an authorization refusal reveals nothing; a lookup that finishes after navigation does not reopen a dialog. |
+| Browser verification | BLOCKED | `npm run test:browser` (real Chromium against an isolated PostgreSQL stack, no operational deployment: `TEST_DATABASE_URL` and `DATABASE_URL` are unset) reached and passed the API, worker, task-tree, hierarchy, responsibility and manager-journey stages, then stopped at `scripts/browser-smoke.mjs` line 296: it waits for `getByRole('link', { name: 'View in timeline' })`, but the committed project page renders that action as `<a role="menuitem">` inside the その他 menu, so the query matches nothing. The script is unmodified (`git diff --stat scripts/browser-smoke.mjs` is empty) and the markup is the committed HEAD version, so this is a pre-existing script/UI mismatch that occurs before every scenario this release changed. The scenarios in the task (close during a delayed submit, conflict reload, division switch with page > 1, drawer and menus, JA/EN, 1366px, narrow/125–150% zoom, long names) are therefore **NOT_RUN**. jsdom is not a substitute and is not claimed as one. |
+| Live Workspace / deployment | NOT_RUN | Nothing was deployed, migrated, initialized or activated. |
+| Production approval | **NOT APPROVED** | `docs/PRODUCTION_READINESS.md` is unchanged. |
+
+Remaining limitations, stated rather than hidden: no field-by-field conflict diff (a reload shows
+the whole current record, not a comparison); no universal polling or autosave; and the older
+create/edit forms (project, project form in `Projects.tsx`, members, skills, responsibilities) still
+perform their invalidation in a local `onSuccess`, so a confirmed write in one of those forms that
+unmounts mid-flight can lose its refresh — the task form and both confirmation dialogs are on the
+session-bound path. Those forms were outside the defects reported for this release and were not
+rewritten. The duplicate-notice surfaces are described in [UI_CONVENTIONS.md](./UI_CONVENTIONS.md) §6.

@@ -117,7 +117,7 @@ import {
   saveResponsibility,
   setResponsibilityStatus
 } from '../services/directory';
-import { decideRequest, queue } from '../services/requests';
+import { decideRequest, managerRequest, queue } from '../services/requests';
 import { applyMapping, mappingView } from '../services/division-mapping';
 import {
   emergencyStop,
@@ -832,6 +832,12 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
     } catch (error) {
       return sendError(reply, request.state, error);
     }
+  });
+
+  read('/api/manager/requests/:id', async (request) => {
+    const { id } = request.params as { id: string };
+    if (!id) throw new DomainError('VALIDATION_FAILED', 'A request ID is required');
+    return managerRequest(serviceCtx(request), id);
   });
 
   app.post('/api/manager/requests/:id/decide', async (request, reply) => {

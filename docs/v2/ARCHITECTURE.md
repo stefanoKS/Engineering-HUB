@@ -798,3 +798,47 @@ unrelated save.
   and READ in another, and the server still refusing the write.
 
 Local evidence only. No live Workspace behaviour is claimed.
+
+### Corrections (2026-11-11)
+
+**An operation reports an obsolete session explicitly.** `commitMutation` returns
+`MutationOutcome<T>` = `{ status: 'committed'; value: T }` or `{ status: 'superseded' }`, and
+`submitRequest` returns `{ status: 'settled'; attempt }` or `{ status: 'superseded' }`. Returning an
+ordinary value with a comment would let a caller run its follow-ups after a sign-out; a discriminated
+union forces the decision. Every current caller acts only on `committed` / `settled`.
+
+**A submission is an attempt, not a dialog.** `attemptId` is the `clientRequestId` the server keys
+idempotency on; `submissionId` is the dialog identity and is stable across corrections. `SENDING`,
+`RECEIVED` and `UNKNOWN` are never resubmitted. A **definite** refusal (`VALIDATION_FAILED`,
+`CONFIRMATION_REQUIRED`, `AUTHORIZATION_DENIED`, `NOT_FOUND`, `INVALID_TRANSITION`,
+`DIVISION_REQUIRED`, `NOT_CONFIGURED`, `EDIT_CONFLICT`) keeps the draft and a deliberate correction
+starts a new attempt with a new identity. `IDEMPOTENCY_REPLAY`, `NETWORK` and `INVALID_RESPONSE` are
+uncertain, never "safe to retry". `RECEIVED` requires `RequestSubmissionReceipt` validation.
+
+**Notice visibility and operation identity are separate.** `dismissSubmission` sets `dismissed` and
+never deletes the attempt: the attempt is the only duplicate/uncertainty guard. `reported` marks an
+outcome a host page has shown; `RECEIVED` and `REFUSED` are marked, `UNKNOWN` deliberately is not, so
+an unobservable outcome stays visible in the shell after the form is gone.
+
+**Claims are part of the snapshot.** `claimSubmission` and its release replace the attempt array
+reference before notifying, because `useSyncExternalStore` compares snapshots by identity: mutating a
+side set produced no re-render and left the shell permanently quiet. `clearSubmissions` ends every
+claim with the session.
+
+**Cache retention exempts active and in-flight entries.** `trim()` evicts only inactive, settled
+entries, least-recently-confirmed first. A mounted consumer therefore never loses its payload (an
+evicted active key would blank the screen and immediately re-read it). The retention target is
+documented as applying to inactive entries; the module claims no hard total bound while screens are
+mounted.
+
+**A conflict reload re-reads the record.** `ConfirmDialog.onReload` returns
+`Promise<ReloadOutcome>` (`fresh` | `ineligible` | `failed`). The caller reads the selected record by
+id (`/api/manager/requests/:id`, `/api/manager/tasks/:id`), replaces the revision the dialog submits,
+keeps the entered note/reason, requires a new confirmation, disables the action for an unusable
+record, refuses duplicate reloads, and never reopens a closed dialog. For a task the reload derives
+`container` from the record's children, so a task that became a work container cannot be completed
+directly.
+
+**Synchronisation separates the three audiences.** The cache effect runs only inside the session that
+started the import; the feedback is applied only while its own scope and render are current; the busy
+flag always settles, so a scope change cannot leave the control permanently disabled.

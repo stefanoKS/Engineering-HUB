@@ -118,3 +118,31 @@ and the applied query in the cache key. Whole datasets are never loaded to filte
 - A **date only** value (`Due_Date`, `plannedStart`) is displayed exactly as stored, so a deadline
   never shifts by a day because of the browser's timezone.
 - Raw ISO slicing (`string.slice(0, 16)`) is not used for display.
+
+## 11. Corrections to §6 (2026-11-11)
+
+The section above described the intent; the implementation had four defects, now fixed. Read §6 with
+these corrections:
+
+- **A submission is an attempt.** A dialog owns `submissionId`; each attempt owns `attemptId` (the
+  `clientRequestId`). A definite refusal keeps the draft and a deliberate correction starts a **new**
+  attempt with a **new** identity. `SENDING`, `RECEIVED` and `UNKNOWN` are never resubmitted.
+- **Success requires a validated acknowledgement.** `RECEIVED` is shown only when the payload
+  matches `RequestSubmissionReceipt`. An empty payload, a missing/invalid `requestId` or an unknown
+  state is `UNKNOWN` with `INVALID_RESPONSE`.
+- **Dismissal hides, it does not forget.** The notice can be dismissed; the attempt (and therefore
+  the duplicate/uncertainty guard) is retained.
+- **Notification surfaces.** While an open dialog reports its own attempt the shell stays quiet. A
+  `RECEIVED` or `REFUSED` outcome is marked as reported by the host page; an `UNKNOWN` outcome is
+  deliberately **not**, so it remains visible in the shell after the dialog or the page is gone. A
+  host page that shows the same message therefore shows it once; an unknown outcome can appear both
+  in the form and in the shell, which is intentional for the one state a person must not ignore.
+- **A conflict reload re-reads the record.** "Load the latest version" reads the selected record by
+  id and replaces the revision the dialog submits; it is not a refresh of the list behind the dialog.
+  The entered note/reason is kept, a new confirmation is required, an unusable record disables the
+  action, and a failed reload claims nothing.
+- **Cache retention exempts what is on screen.** Trimming evicts only inactive, settled entries; the
+  retention target is not a hard total bound while screens are mounted.
+
+Still not implemented, and stated as a limitation: no field-by-field conflict comparison (a reload
+shows the whole current record), no universal polling, no autosave.

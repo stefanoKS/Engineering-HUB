@@ -935,3 +935,102 @@ describe('record-level write availability', () => {
     expect(legacy?.canWrite).toBe(true);
   });
 });
+
+/**
+ * Per-request decision capability.
+ *
+ * A manager may hold `WORK` membership in one division and only `READ` access in another. The queue
+ * must resolve the decision capability for each request's own work, and the decision command must
+ * still refuse the read-only division even if a browser claims otherwise.
+ */
+describe('request decision capability', () => {
+  async function seedRequests(): Promise<void> {
+    await db.query(`
+      INSERT INTO task_requests
+        (request_id, request_type, task_id, project_id, requester_name, status,
+         task_revision_at_submission, due_date_at_submission, snapshot_version, inbox_request_id,
+         requester_member_id)
+      VALUES
+        ('REQ-DEV','DEADLINE_CHANGE','TSK-DEV','PRJ-DEV','Member A','PENDING','1','2026-12-01','1','INBOX-DEV','MEM-A'),
+        ('REQ-PROD','DEADLINE_CHANGE','TSK-PROD','PRJ-PROD','Member B','PENDING','1','2026-12-03','1','INBOX-PROD','MEM-B')
+    `);
+  }
+
+  async function readOnlyManager(): Promise<Record<string, string>> {
+    await db.query(
+      "INSERT INTO members(member_id,name,role,active) VALUES ('MEM-MGR-RO','Read-only manager','MANAGER',true)"
+    );
+    await db.query(
+      "INSERT INTO local_accounts(member_id,employee_id,password_hash,must_change_password) VALUES ('MEM-MGR-RO','0009',$1,false)",
+      [hash]
+    );
+    await replaceGrants('MEM-MGR-RO', [
+      { divisionId: DEV, accessKind: 'WORK' },
+      { divisionId: PROD, accessKind: 'READ' }
+    ]);
+    return login('0009');
+  }
+
+  it('marks a request decidable only in the division the manager works in', async () => {
+    await seedRequests();
+    const manager = await readOnlyManager();
+    const queue = await get(manager, '/api/manager/requests?includeDecided=true');
+    expect(queue.status, JSON.stringify(queue.body)).toBe(200);
+    const items = queue.body.data!.items as { requestId: string; canDecide: boolean }[];
+    const byId = new Map(items.map((item) => [item.requestId, item.canDecide]));
+    expect(byId.get('REQ-DEV')).toBe(true);
+    expect(byId.get('REQ-PROD')).toBe(false);
+  });
+
+  it('gives ADMIN the same decision on both records', async () => {
+    await seedRequests();
+    const admin = await login('0001');
+    const queue = await get(admin, '/api/manager/requests?includeDecided=true');
+    const items = queue.body.data!.items as { requestId: string; canDecide: boolean }[];
+    expect(items.every((item) => item.canDecide)).toBe(true);
+  });
+
+  it('still refuses the decision the interface does not offer', async () => {
+    await seedRequests();
+    const manager = await readOnlyManager();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/manager/requests/REQ-PROD/decide',
+      headers: {
+        cookie: manager.cookie!,
+        'x-csrf-token': manager['x-csrf-token']!,
+        origin: 'http://localhost:8050'
+      },
+      payload: { decision: 'APPROVE', revision: 1, confirmed: true }
+    });
+    expect([403, 404]).toContain(response.statusCode);
+    // Nothing was decided.
+    const row = await db.one<{ status: string }>('SELECT status FROM task_requests WHERE request_id = $1', ['REQ-PROD']);
+    expect(row?.status).toBe('PENDING');
+  });
+
+  it('resolves one request by id inside the caller scope and refuses a foreign one', async () => {
+    await seedRequests();
+    const manager = await readOnlyManager();
+    const own = await get(manager, '/api/manager/requests/REQ-DEV');
+    expect(own.status, JSON.stringify(own.body)).toBe(200);
+    expect((own.body.data as unknown as { request: { canDecide: boolean } }).request.canDecide).toBe(true);
+
+    const foreign = await get(manager, '/api/manager/requests/REQ-MISSING');
+    expect(foreign.status).toBe(404);
+
+    // A request of a division the caller cannot read is not revealed.
+    await db.query("INSERT INTO divisions(division_id,name,status,sort_order) VALUES ('DIV-HIDDEN','Hidden','Active',9)");
+    await insertProject(db, { projectName: 'Hidden project', divisionId: 'DIV-HIDDEN', status: 'Active' }, 'PRJ-HIDDEN');
+    await insertTask(db, { projectId: 'PRJ-HIDDEN', taskName: 'Hidden task', dueDate: '2026-12-09' }, 'TSK-HIDDEN');
+    await db.query(`
+      INSERT INTO task_requests
+        (request_id, request_type, task_id, project_id, requester_name, status,
+         task_revision_at_submission, due_date_at_submission, snapshot_version, inbox_request_id)
+      VALUES ('REQ-HIDDEN','DEADLINE_CHANGE','TSK-HIDDEN','PRJ-HIDDEN','Someone','PENDING','1','2026-12-09','1','INBOX-HIDDEN')
+    `);
+    const hidden = await get(manager, '/api/manager/requests/REQ-HIDDEN');
+    expect(hidden.status).toBe(404);
+    expect(JSON.stringify(hidden.body)).not.toContain('Hidden task');
+  });
+});
