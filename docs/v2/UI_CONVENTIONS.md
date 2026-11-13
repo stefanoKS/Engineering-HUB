@@ -44,12 +44,47 @@ Empty states are distinct:
 
 - Capability flags (`state/capabilities.ts`) answer "may this role do this at all".
 - The record's server-computed `canWrite` answers "may it do it here". A write action is offered only
-  when both agree (`canEditRecord`).
+  when both agree (`canEditRecord`). Recoverable removal (`canRecoverDelete`) is a manager capability
+  and follows the same per-record rule: a mixed- or all-division list never offers a removal for a
+  record the server would refuse, and the shell's selected division is never evidence of a record's
+  permission.
+- Restoration (`canRestoreDeleted`), permanent erasure (`canPurgeRecord`) and reopening
+  (`canReopenTask`) are ADMIN capabilities and are never rendered for a manager.
 - Creation requires a concrete destination (`hasWritableDestination`), and an *unloaded* division
   scope is treated as unknown rather than empty.
 - A record the caller may only read shows a "閲覧のみ" marker instead of a disabled-looking editor.
 - These are presentation aids. The server re-checks every command; hiding a control is a usability
   decision and a forged flag grants nothing.
+
+## 3.1 Confirming a corrective action
+
+One component, `components/ActionConfirmDialog.tsx`, asks for a recoverable removal, a restoration, a
+corrective reopening and a permanent task/subproject erasure.
+
+- The panel names the exact record (readable name plus its project/subproject context) and states the
+  real consequence in words inside a red panel; colour is decoration, never the only signal.
+- There is no typed phrase and no mandatory free-text reason. The footer offers Cancel and exactly one
+  action-specific button: `削除する` / `Delete`, `復元する` / `Restore`, `完了を取り消す` /
+  `Reopen task`, `完全に消去する` / `Erase permanently`.
+- Nothing happens before that button is activated. A second activation in the same tick never starts a
+  second write, and the button shows a busy state while the write is in flight.
+- Wording stays honest: a recoverable removal disappears from normal lists while the record and its
+  history are retained; a restoration returns the existing record; a reopening reverses the current
+  completion while historical approvals stay; a permanent erasure cannot be restored through the
+  application.
+- Focus lands on Cancel first, Escape closes, and focus returns to the invoker (the shared `Modal`
+  owns the native `<dialog>`, the focus order and the focus return).
+- A conflict keeps the dialog open and offers an explicit reload; an unobservable outcome says so and
+  is never retried or presented as a failure. Project and responsibility erasure keep their typed
+  `DELETE <id>` confirmation.
+
+## 3.2 The task-list action column
+
+The task table is `table-layout: fixed`. Its action column holds Edit and the `その他` / `More` menu
+trigger side by side, so the column width must fit both controls plus the cell padding and the
+`.35rem` gap (`10.5rem` in `styles.css`), and the controls wrap inside the cell rather than protrude
+past the table's right border. Do not hide the overflow to conceal a misfit, and keep the menu popup
+reachable when the row sits at the right or bottom edge.
 
 ## 4. Scope transitions
 
@@ -146,3 +181,25 @@ these corrections:
 
 Still not implemented, and stated as a limitation: no field-by-field conflict comparison (a reload
 shows the whole current record), no universal polling, no autosave.
+
+
+## Member collaboration and manager recovery — 2026-11-13
+
+This user-approved policy supersedes earlier statements that members cannot edit/remove existing
+tasks or subprojects, and that restoration is ADMIN-only. MEMBER may edit ordinary task and
+subproject fields and recoverably delete either record regardless of owner, within a WORK division
+and an INTERNAL, non-archived project they may see. READ-only grants never allow a write.
+MANAGER may restore tasks/subprojects in WORK divisions; ADMIN retains cross-division recovery.
+Projects/responsibilities, approvals, direct completion, notification settings, permanent erasure
+and completed-task reopening retain their existing separate permissions. Members do not restore.
+
+The member opens a task detail to edit/delete it, or a project hierarchy to edit/delete a
+subproject. Editors fetch fresh narrow records and revisions; saves are partial patches. A red
+confirmation panel requires one explicit button and no typing. Deletion retains the row/history,
+children/dependencies and existing blockers; recovery restores the same ID and status. Completed
+work stays completed. Managers reach Deleted Items through the management navigation.
+
+Server authorization is repeated under the existing division/role advisory locks. Deleted Items
+filters both records and totals by writable divisions before pagination. Member edit APIs retain
+project visibility and field allowlists and do not expose manager-only history or settings.
+No schema change, operational migration, deployment or outbound activation is required or performed.

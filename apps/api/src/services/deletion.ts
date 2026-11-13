@@ -1,25 +1,55 @@
+import { authorizeWorkEdit } from './work-edit';
+import { writableDivisionIds } from '@eh/domain';
 /**
- * The narrow, ADMIN-only permanent deletion.
+ * Removal and restoration of a task or a subproject.
  *
- * `deleteEntity` is the only code path in V2 allowed to remove a row, and only for a
- * demonstrably mistaken, empty record. Every piece of operational evidence refuses deletion
- * and falls back to archive. A durable intent (`RECORD_DELETE_PREPARED` audit plus a tombstone
- * with the record snapshot) is written before the row disappears, and success is reported only
- * after `RECORD_DELETED` exists.
+ * Two capabilities with deliberately different reach live here:
+ *
+ * - `removeEntity` is the *recoverable* removal. It is available to an ADMIN and to a MANAGER
+ *   inside a division where that manager holds `WORK` membership; it stamps `deleted_at`, keeps
+ *   the row, its identifier and every historical record, and appends `RECORD_REMOVED`.
+ * - `deleteEntity` is the guarded, ADMIN-only *permanent* erasure of a demonstrably mistaken,
+ *   empty record. It refuses every piece of operational evidence and falls back to archive. A
+ *   durable intent (`RECORD_DELETE_PREPARED` audit plus a tombstone with the record snapshot) is
+ *   written before the row disappears, and success is reported only after `RECORD_DELETED` exists.
+ *
+ * `restoreEntity` brings a recoverably removed row back as the same record; `listDeletedRecords`
+ * and `restorePreflight` describe what an ADMIN may restore. None of these recreates a record,
+ * cascades to neighbours or retries an uncertain outcome.
  */
 import {
   deleteRecord,
   deleteResponsibilityMemberRows,
   getProject,
   getSubproject,
+  getSubprojectIncludingDeleted,
   getTaskIncludingDeleted,
   insertTombstone,
   listTombstones,
   listAudit
 } from '@eh/db';
-import type { DeletionPreflight, ResponsibilityDeletionPreflight } from '@eh/contracts';
-import { DomainError, deletionPreflight, requireRole, responsibilityDeletionPreflight } from '@eh/domain';
+import type {
+  DeletedRecord,
+  DeletedRecordPage,
+  DeletionPreflight,
+  ResponsibilityDeletionPreflight,
+  RestorePreflight
+} from '@eh/contracts';
+import {
+  DomainError,
+  MAX_SUBPROJECT_DEPTH,
+  MAX_TASK_DEPTH,
+  assertReadableDivision,
+  assertWritableDivision,
+  canRecoverablyDeleteRecord,
+  canRestoreDeletedRecord,
+  confirmationRecord,
+  deletionPreflight,
+  requireRole,
+  responsibilityDeletionPreflight
+} from '@eh/domain';
 import { audit, requireTypedConfirmation, type ServiceCtx } from './common';
+import { lockDivisionMutation, reauthorizeInTransaction } from './divisions';
 
 type EntityType = 'PROJECTS' | 'SUBPROJECTS' | 'TASKS';
 
@@ -28,8 +58,6 @@ type DbLike = Pick<ServiceCtx['db'], 'one' | 'many' | 'query'>;
 type RemovalEntityType = 'SUBPROJECTS' | 'TASKS';
 
 type RemovalBlocker = { code: string; detail: string };
-
-const REMOVAL_REASON = 'Created by mistake';
 
 const NON_OPERATIONAL_AUDIT_ACTIONS: Record<EntityType, readonly string[]> = {
   PROJECTS: ['PROJECT_CREATED'],
@@ -536,7 +564,7 @@ async function evaluateRemoval(
     blockers,
     dependencyCount: dependants.length,
     descendantCount: children.length,
-    requiresReason:
+    retainedHistory:
       record.status === 'Done' ||
       Number(record.actual_hours ?? 0) > 0 ||
       !!record.assignment_approved_at ||
@@ -552,8 +580,442 @@ export async function removalPreflight(
   entityType: RemovalEntityType,
   entityId: string
 ): Promise<DeletionPreflight> {
-  requireRole(ctx.identity, 'ADMIN');
+  requireRole(ctx.identity, 'MEMBER');
+  await assertRemovableRecord(ctx, entityType, entityId);
   return evaluateRemoval(ctx.db, entityType, entityId);
+}
+
+/**
+ * The record-level gate of a recoverable removal.
+ *
+ * Two independent questions are asked against authoritative data: the verified role may remove a
+ * task or a subproject at all, and the caller may write in the division of the project that
+ * carries the record. A manager with read-only access in that division, a GENERAL_MANAGER and a
+ * MEMBER all stop here. The read is a pre-check; `removeEntity` repeats it through the transaction
+ * handle before the first mutation.
+ */
+async function assertRemovableRecord(
+  ctx: ServiceCtx,
+  entityType: RemovalEntityType,
+  entityId: string,
+  db: DbLike = ctx.db
+): Promise<{ divisionId: string | null; projectId: string; revision: number; deletedAt: string | null }> {
+  if (!canRecoverablyDeleteRecord(ctx.identity)) {
+    throw new DomainError('AUTHORIZATION_DENIED', 'Removing this record requires a manager account');
+  }
+  const row = await db.one<{
+    revision: number;
+    deleted_at: string | null;
+    project_id: string;
+    division_id: string | null;
+  }>(
+    entityType === 'TASKS'
+      ? `SELECT t.revision, t.deleted_at, t.project_id, p.division_id
+           FROM tasks t JOIN projects p ON p.project_id = t.project_id
+          WHERE t.task_id = $1`
+      : `SELECT s.revision, s.deleted_at, s.project_id, p.division_id
+           FROM subprojects s JOIN projects p ON p.project_id = s.project_id
+          WHERE s.subproject_id = $1`,
+    [entityId]
+  );
+  if (!row) throw new DomainError('NOT_FOUND', `Record not found: ${entityId}`);
+  // A record outside the caller's readable divisions answers like an unknown one; a record inside a
+  // readable but read-only division is an authorization refusal.
+  assertReadableDivision(ctx.divisions, row.division_id);
+  assertWritableDivision(ctx.divisions, row.division_id);
+  await authorizeWorkEdit(ctx, row.project_id, db);
+  return {
+    divisionId: row.division_id,
+    projectId: row.project_id,
+    revision: row.revision,
+    deletedAt: row.deleted_at
+  };
+}
+
+/**
+ * Recovers the record's stable identity without creating or moving anything.
+ *
+ * The tombstone table only describes a *permanent* erasure, so its presence means the row no
+ * longer exists and cannot be restored through this workflow. The answer is reported so the
+ * interface can say so instead of offering an action the server would refuse.
+ */
+async function assertRestorableRecord(
+  ctx: ServiceCtx,
+  entityType: RemovalEntityType,
+  entityId: string,
+  db: DbLike = ctx.db
+): Promise<{
+  revision: number;
+  deletedAt: string | null;
+  projectId: string;
+  divisionId: string | null;
+  name: string;
+  subprojectId: string | null;
+  parentId: string | null;
+  level: number;
+}> {
+  if (!canRestoreDeletedRecord(ctx.identity)) {
+    throw new DomainError('AUTHORIZATION_DENIED', 'Restoring a removed record requires a manager account');
+  }
+  const row = await db.one<{
+    revision: number;
+    deleted_at: string | null;
+    project_id: string;
+    division_id: string | null;
+    name: string;
+    subproject_id: string | null;
+    parent_id: string | null;
+    level: number;
+  }>(
+    entityType === 'TASKS'
+      ? `SELECT t.revision, t.deleted_at, t.project_id, p.division_id, t.task_name AS name,
+                t.subproject_id, t.parent_task_id AS parent_id, eh_task_depth(t.task_id) AS level
+           FROM tasks t JOIN projects p ON p.project_id = t.project_id
+          WHERE t.task_id = $1`
+      : `SELECT s.revision, s.deleted_at, s.project_id, p.division_id, s.subproject_name AS name,
+                s.parent_subproject_id AS subproject_id,
+                s.parent_subproject_id AS parent_id, eh_subproject_depth(s.subproject_id) AS level
+           FROM subprojects s JOIN projects p ON p.project_id = s.project_id
+          WHERE s.subproject_id = $1`,
+    [entityId]
+  );
+  if (!row) {
+    const tombstone = await db.one(
+      'SELECT 1 FROM record_deletions WHERE entity_type = $1 AND entity_id = $2',
+      [entityType, entityId]
+    );
+    throw new DomainError(
+      'NOT_FOUND',
+      tombstone
+        ? 'This record was erased permanently and cannot be restored through the application'
+        : `Record not found: ${entityId}`
+    );
+  }
+  assertReadableDivision(ctx.divisions, row.division_id);
+  assertWritableDivision(ctx.divisions, row.division_id);
+  return {
+    revision: Number(row.revision),
+    deletedAt: row.deleted_at,
+    projectId: row.project_id,
+    divisionId: row.division_id,
+    name: row.name,
+    subprojectId: row.subproject_id,
+    parentId: row.parent_id,
+    level: Number(row.level)
+  };
+}
+
+/**
+ * Why a removed record cannot be restored right now.
+ *
+ * Nothing is repaired silently: a deleted parent, an archived or cancelled project, a removed
+ * subproject that carried the task and a hierarchy that no longer fits are all reported with an
+ * actionable explanation. Restoring a record never restores, moves or deletes its neighbours.
+ */
+async function restoreBlockers(
+  db: DbLike,
+  entityType: RemovalEntityType,
+  row: { projectId: string; subprojectId: string | null; parentId: string | null; level: number }
+): Promise<RemovalBlocker[]> {
+  const blockers: RemovalBlocker[] = [];
+  const project = await db.one<{ project_name: string; status: string; deleted_at: string | null }>(
+    'SELECT project_name, status, deleted_at FROM projects WHERE project_id = $1',
+    [row.projectId]
+  );
+  if (!project) {
+    blockers.push({ code: 'PROJECT_DELETED', detail: 'The project of this record no longer exists' });
+  } else if (project.deleted_at) {
+    blockers.push({
+      code: 'PROJECT_DELETED',
+      detail: `Restore the project ${project.project_name} first; this record belongs to it`
+    });
+  } else if (project.status === 'Archived' || project.status === 'Cancelled') {
+    blockers.push({
+      code: 'PROJECT_INACTIVE',
+      detail: `The project ${project.project_name} is ${project.status}; an ADMIN must reopen it before this record can return`
+    });
+  }
+
+  if (entityType === 'SUBPROJECTS') {
+    if (row.parentId) {
+      const parent = await db.one<{ subproject_name: string; deleted_at: string | null }>(
+        'SELECT subproject_name, deleted_at FROM subprojects WHERE subproject_id = $1',
+        [row.parentId]
+      );
+      if (!parent || parent.deleted_at) {
+        blockers.push({
+          code: 'PARENT_DELETED',
+          detail: 'The parent subproject is removed; restore the parent first'
+        });
+      }
+    }
+    if (row.level > MAX_SUBPROJECT_DEPTH) {
+      blockers.push({
+        code: 'HIERARCHY_DEPTH',
+        detail: `Subprojects are limited to ${MAX_SUBPROJECT_DEPTH} levels`
+      });
+    }
+    return blockers;
+  }
+
+  if (row.level > MAX_TASK_DEPTH) {
+    blockers.push({ code: 'HIERARCHY_DEPTH', detail: `Tasks are limited to ${MAX_TASK_DEPTH} levels` });
+  }
+  if (row.subprojectId) {
+    const subproject = await db.one<{ subproject_name: string; deleted_at: string | null }>(
+      'SELECT subproject_name, deleted_at FROM subprojects WHERE subproject_id = $1',
+      [row.subprojectId]
+    );
+    if (!subproject || subproject.deleted_at) {
+      blockers.push({
+        code: 'PARENT_DELETED',
+        detail: 'The subproject of this task is removed; restore the subproject first'
+      });
+    }
+  }
+  if (row.parentId) {
+    const parent = await db.one<{ task_name: string; deleted_at: string | null }>(
+      'SELECT task_name, deleted_at FROM tasks WHERE task_id = $1',
+      [row.parentId]
+    );
+    if (!parent || parent.deleted_at) {
+      blockers.push({
+        code: 'PARENT_DELETED',
+        detail: 'The parent task is removed; restore the parent first'
+      });
+    }
+  }
+  return blockers;
+}
+
+/** The ADMIN answer a restoration dialog reads before it offers the confirmation button. */
+export async function restorePreflight(
+  ctx: ServiceCtx,
+  entityType: RemovalEntityType,
+  entityId: string
+): Promise<RestorePreflight> {
+  requireRole(ctx.identity, 'MANAGER');
+  const row = await assertRestorableRecord(ctx, entityType, entityId);
+  if (!row.deletedAt) {
+    return {
+      entityType,
+      entityId,
+      name: row.name,
+      restorable: false,
+      blockers: [{ code: 'NOT_DELETED', detail: 'This record is not removed, so there is nothing to restore' }],
+      revision: row.revision
+    };
+  }
+  const blockers = await restoreBlockers(ctx.db, entityType, row);
+  return {
+    entityType,
+    entityId,
+    name: row.name,
+    restorable: blockers.length === 0,
+    blockers,
+    revision: row.revision
+  };
+}
+
+/**
+ * Restores one recoverably removed task or subproject.
+ *
+ * The stored row and its identifier come back; nothing is recreated. The confirmation is the
+ * red-panel button (no typed phrase, no mandatory reason), the revision the editor loaded is
+ * re-checked under the row lock, and a repeated delivery returns the stored answer without a
+ * second audit row.
+ */
+export async function restoreEntity(
+  ctx: ServiceCtx,
+  entityType: RemovalEntityType,
+  entityId: string,
+  input: { revision: number; confirmed: true }
+): Promise<{ entityType: RemovalEntityType; entityId: string; revision: number; alreadyRestored: boolean }> {
+  requireRole(ctx.identity, 'MANAGER');
+  if (input.confirmed !== true) {
+    throw new DomainError('CONFIRMATION_REQUIRED', 'Restoring a removed record requires explicit confirmation');
+  }
+
+  return ctx.db.transaction(async (tx) => {
+    // The canonical lock order of a division-scoped write: the advisory locks first, then the
+    // target row. The division is read *after* the row is locked, so a transfer committed while
+    // this request waited cannot leave the authorization describing a different division.
+    await lockDivisionMutation(tx);
+    const fresh = await reauthorizeInTransaction(tx, ctx);
+    if (!canRestoreDeletedRecord(fresh.identity)) {
+      throw new DomainError('AUTHORIZATION_DENIED', 'Restoring a removed record requires a manager account');
+    }
+    await lockTarget(tx, entityType, entityId);
+    const row = await assertRestorableRecord({ ...ctx, identity: fresh.identity, divisions: fresh.scope }, entityType, entityId, tx);
+    if (!row.deletedAt) {
+      // A retried delivery of an already completed restoration: no second effect, no second audit.
+      return { entityType, entityId, revision: row.revision, alreadyRestored: true };
+    }
+    const blockers = await restoreBlockers(tx, entityType, row);
+    if (blockers.length) {
+      throw new DomainError('INVALID_TRANSITION', 'This record cannot be restored right now', { blockers });
+    }
+    if (row.revision !== input.revision) {
+      throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
+    }
+    const table = entityType === 'TASKS' ? 'tasks' : 'subprojects';
+    const column = entityType === 'TASKS' ? 'task_id' : 'subproject_id';
+    const updated = await tx.one<{ revision: number }>(
+      `UPDATE ${table}
+          SET deleted_at = NULL, updated_at = now(), revision = revision + 1
+        WHERE ${column} = $1 AND revision = $2 AND deleted_at IS NOT NULL
+        RETURNING revision`,
+      [entityId, input.revision]
+    );
+    if (!updated) throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
+    await audit(tx, ctx, {
+      entityType,
+      entityId,
+      action: 'RECORD_RESTORED',
+      previousValue: { deletedAt: row.deletedAt, revision: input.revision, name: row.name },
+      newValue: {
+        ...confirmationRecord('RESTORE'),
+        restoredBy: ctx.identity.memberId,
+        revision: updated.revision,
+        projectId: row.projectId
+      }
+    });
+    if (entityType === 'TASKS') {
+      await tx.query(
+        `INSERT INTO outbox_jobs(kind, payload, dedupe_key, correlation_id)
+         VALUES ('publication.run', $1::jsonb, $2, $3)
+         ON CONFLICT (dedupe_key) DO NOTHING`,
+        [
+          JSON.stringify({ reason: 'TASK_RESTORED', taskId: entityId }),
+          `publication:task-restored:${entityId}:${updated.revision}`,
+          ctx.correlationId
+        ]
+      );
+    }
+    return { entityType, entityId, revision: updated.revision, alreadyRestored: false };
+  });
+}
+
+/**
+ * One bounded page of the ADMIN Deleted Items view.
+ *
+ * Only tasks and subprojects appear here: those are the records a manager may remove recoverably.
+ * A permanently erased record has no row left, so it is not a restore candidate and is never
+ * listed as one. Deletion metadata is read from the removal audit row; when that evidence is
+ * missing the fields stay `null` instead of being invented.
+ */
+export async function listDeletedRecords(
+  ctx: ServiceCtx,
+  query: { entityType: 'ALL' | 'TASKS' | 'SUBPROJECTS'; query?: string; page: number; pageSize: number }
+): Promise<DeletedRecordPage> {
+  requireRole(ctx.identity, 'MANAGER');
+  const divisionIds = writableDivisionIds(ctx.divisions) ?? null;
+  const search = `%${(query.query ?? '').trim()}%`;
+  const types = query.entityType === 'ALL' ? ['TASKS', 'SUBPROJECTS'] : [query.entityType];
+  const rows = await ctx.db.many<{
+    entity_type: 'TASKS' | 'SUBPROJECTS';
+    entity_id: string;
+    name: string;
+    project_id: string;
+    project_name: string;
+    location: string;
+    deleted_at: string;
+    revision: number;
+    deleted_by: string | null;
+    deleted_by_name: string | null;
+    reason: string | null;
+    confirmation_source: string | null;
+    subproject_id: string | null;
+    parent_id: string | null;
+    level: number;
+  }>(
+    `WITH deleted AS (
+       SELECT 'TASKS'::text AS entity_type, t.task_id AS entity_id, t.task_name AS name,
+              t.project_id, t.deleted_at, t.revision,
+              t.subproject_id AS subproject_id,
+              t.parent_task_id AS parent_id,
+              eh_task_depth(t.task_id) AS level
+         FROM tasks t
+        WHERE t.deleted_at IS NOT NULL
+       UNION ALL
+       SELECT 'SUBPROJECTS'::text, s.subproject_id, s.subproject_name,
+              s.project_id, s.deleted_at, s.revision,
+              s.parent_subproject_id, s.parent_subproject_id,
+              eh_subproject_depth(s.subproject_id)
+         FROM subprojects s
+        WHERE s.deleted_at IS NOT NULL
+     )
+     SELECT d.entity_type, d.entity_id, d.name, d.project_id, p.project_name,
+            COALESCE(parent.subproject_name, '') AS location,
+            d.deleted_at, d.revision,
+            NULLIF(removal.new_value->>'removedBy', '') AS deleted_by,
+            actor.name AS deleted_by_name,
+            NULLIF(removal.new_value->>'reason', '') AS reason,
+            NULLIF(removal.new_value->>'confirmationSource', '') AS confirmation_source,
+            d.subproject_id, d.parent_id, d.level
+       FROM deleted d
+       JOIN projects p ON p.project_id = d.project_id
+       LEFT JOIN subprojects parent ON parent.subproject_id = d.subproject_id
+       LEFT JOIN LATERAL (
+         SELECT new_value
+           FROM audit_log
+          WHERE entity_type = d.entity_type AND entity_id = d.entity_id AND action = 'RECORD_REMOVED'
+          ORDER BY occurred_at DESC, audit_id DESC
+          LIMIT 1
+       ) removal ON true
+       LEFT JOIN members actor ON actor.member_id = NULLIF(removal.new_value->>'removedBy', '')
+      WHERE d.entity_type = ANY($1::text[])
+         AND ($5::text[] IS NULL OR p.division_id = ANY($5::text[]))
+        AND ($2::text = '%%' OR d.name ILIKE $2 OR p.project_name ILIKE $2)
+      ORDER BY d.deleted_at DESC, d.entity_id
+      LIMIT $3 OFFSET $4`,
+    [types, search, query.pageSize, (query.page - 1) * query.pageSize, divisionIds]
+  );
+  const counted = await ctx.db.one<{ total: string }>(
+    `SELECT (SELECT count(*) FROM tasks t WHERE t.deleted_at IS NOT NULL AND 'TASKS' = ANY($1::text[])
+               AND ($3::text[] IS NULL OR EXISTS (SELECT 1 FROM projects p WHERE p.project_id = t.project_id AND p.division_id = ANY($3::text[])))
+              AND ($2::text = '%%' OR t.task_name ILIKE $2
+                   OR EXISTS (SELECT 1 FROM projects p WHERE p.project_id = t.project_id AND p.project_name ILIKE $2)))
+          + (SELECT count(*) FROM subprojects s WHERE s.deleted_at IS NOT NULL AND 'SUBPROJECTS' = ANY($1::text[])
+               AND ($3::text[] IS NULL OR EXISTS (SELECT 1 FROM projects p WHERE p.project_id = s.project_id AND p.division_id = ANY($3::text[])))
+              AND ($2::text = '%%' OR s.subproject_name ILIKE $2
+                   OR EXISTS (SELECT 1 FROM projects p WHERE p.project_id = s.project_id AND p.project_name ILIKE $2)))
+            AS total`,
+    [types, search, divisionIds]
+  );
+  const total = Number(counted?.total ?? 0);
+  const items: DeletedRecord[] = [];
+  for (const row of rows) {
+    const blockers = await restoreBlockers(ctx.db, row.entity_type, {
+      projectId: row.project_id,
+      subprojectId: row.subproject_id,
+      parentId: row.parent_id,
+      level: Number(row.level)
+    });
+    items.push({
+      entityType: row.entity_type,
+      entityId: row.entity_id,
+      name: row.name,
+      projectId: row.project_id,
+      projectName: row.project_name,
+      location: row.location,
+      deletedAt: row.deleted_at,
+      deletedByMemberId: row.deleted_by,
+      deletedByName: row.deleted_by_name,
+      reason: row.reason,
+      confirmationSource: row.confirmation_source,
+      revision: Number(row.revision),
+      restorable: blockers.length === 0,
+      blockers
+    });
+  }
+  return {
+    items,
+    total,
+    page: query.page,
+    pageSize: query.pageSize,
+    totalPages: Math.ceil(total / query.pageSize)
+  };
 }
 
 export async function removeEntity(
@@ -562,10 +1024,17 @@ export async function removeEntity(
   entityId: string,
   input: { revision: number; confirmed: true; reason?: string }
 ): Promise<{ entityType: RemovalEntityType; entityId: string; revision: number; alreadyRemoved: boolean }> {
-  requireRole(ctx.identity, 'ADMIN');
-  if (!input.confirmed) throw new DomainError('CONFIRMATION_REQUIRED', 'Removal requires explicit confirmation');
+  requireRole(ctx.identity, 'MEMBER');
+  if (input.confirmed !== true) throw new DomainError('CONFIRMATION_REQUIRED', 'Removal requires explicit confirmation');
 
   return ctx.db.transaction(async (tx) => {
+    // The canonical lock order of a division-scoped write: the advisory locks first, then the
+    // target row. The division is read *after* the row is locked, so a transfer committed while
+    // this request waited cannot leave the authorization describing a different division.
+    await lockDivisionMutation(tx);
+    const fresh = await reauthorizeInTransaction(tx, ctx);
+    await lockTarget(tx, entityType, entityId);
+    await assertRemovableRecord({ ...ctx, identity: fresh.identity, divisions: fresh.scope }, entityType, entityId, tx);
     const existing = await tx.one<{ revision: number; deleted_at: string | null }>(
       `SELECT revision, deleted_at
          FROM ${entityType === 'TASKS' ? 'tasks' : 'subprojects'}
@@ -586,15 +1055,11 @@ export async function removeEntity(
     if (checked.revision !== input.revision) {
       throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
     }
-    const reason = input.reason?.trim() ?? '';
-    if (checked.requiresReason && !reason) {
-      throw new DomainError('VALIDATION_FAILED', 'An administrative reason is required when retained history exists');
-    }
     const table = entityType === 'TASKS' ? 'tasks' : 'subprojects';
     const column = entityType === 'TASKS' ? 'task_id' : 'subproject_id';
     const previous = entityType === 'TASKS'
       ? await getTaskIncludingDeleted(tx, entityId)
-      : await getSubproject(tx, entityId);
+      : await getSubprojectIncludingDeleted(tx, entityId);
     if (!previous) throw new DomainError('NOT_FOUND', `Record not found: ${entityId}`);
     const updated = await tx.one<{ revision: number }>(
       `UPDATE ${table}
@@ -610,8 +1075,9 @@ export async function removeEntity(
       action: 'RECORD_REMOVED',
       previousValue: previous,
       newValue: {
-        reason: reason || REMOVAL_REASON,
+        ...confirmationRecord('REMOVE', input.reason),
         removedBy: ctx.identity.memberId,
+        removedByRole: ctx.identity.role,
         previousStatus: entityType === 'TASKS' ? previous.status : undefined,
         previousRevision: input.revision,
         revision: updated.revision
@@ -633,14 +1099,25 @@ export async function removeEntity(
   });
 }
 
+/**
+ * The guarded permanent erasure.
+ *
+ * A project erasure keeps its typed `DELETE <id>` confirmation and requires a reason, because that
+ * interaction was not part of the approved no-typing change. A task or subproject erasure uses the
+ * same ADMIN-only red-panel button confirmation as a recoverable removal; every physical-erasure
+ * safeguard (blockers, revision, tombstone, audit intent) is unchanged, and the stored reason is
+ * the application-generated description rather than an invented user explanation.
+ */
 export async function deleteEntity(
   ctx: ServiceCtx,
   entityType: EntityType,
   entityId: string,
-  input: { revision: number; confirmed: true; reason: string; confirmation: string }
+  input: { revision: number; confirmed?: boolean; reason?: string; confirmation?: string }
 ): Promise<{ entityType: EntityType; entityId: string; tombstoneId: string }> {
   requireRole(ctx.identity, 'ADMIN');
-  if (!String(input.reason ?? '').trim()) {
+  const typedConfirmation = entityType === 'PROJECTS';
+  const suppliedReason = String(input.reason ?? '').trim();
+  if (typedConfirmation && !suppliedReason) {
     throw new DomainError('VALIDATION_FAILED', 'A reason is required for a permanent removal');
   }
   const checked = await preflight(ctx, entityType, entityId);
@@ -652,7 +1129,13 @@ export async function deleteEntity(
   if (checked.revision !== input.revision) {
     throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
   }
-  requireTypedConfirmation(input.confirmation, checked.confirmationText);
+  if (typedConfirmation) {
+    requireTypedConfirmation(input.confirmation ?? '', checked.confirmationText);
+  } else if (input.confirmed !== true) {
+    throw new DomainError('CONFIRMATION_REQUIRED', 'A permanent erasure requires explicit confirmation');
+  }
+  const confirmation = confirmationRecord('PURGE', suppliedReason);
+  const reason = suppliedReason || confirmation.confirmationDescription;
 
   return ctx.db.transaction(async (tx) => {
     // Authoritative check: the target row is locked and every blocker and the revision are
@@ -679,14 +1162,14 @@ export async function deleteEntity(
       entityId,
       action: 'RECORD_DELETE_PREPARED',
       previousValue: record,
-      newValue: { reason: input.reason }
+      newValue: { reason, ...confirmation }
     });
 
     const tombstoneId = await insertTombstone(tx, {
       entityType,
       entityId,
       deletedBy: ctx.identity.email,
-      reason: input.reason,
+      reason,
       lastRevision: input.revision,
       snapshot: record
     });
@@ -707,7 +1190,7 @@ export async function deleteEntity(
       entityId,
       action: 'RECORD_DELETED',
       previousValue: record,
-      newValue: { tombstoneId, reason: input.reason }
+      newValue: { tombstoneId, reason, ...confirmation }
     });
     return { entityType, entityId, tombstoneId };
   });

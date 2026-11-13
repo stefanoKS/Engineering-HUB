@@ -363,6 +363,24 @@ export async function getSubproject(db: Db, subprojectId: string): Promise<Subpr
   return row ? toSubproject(row) : null;
 }
 
+/**
+ * A subproject read that also returns a recoverably removed row.
+ *
+ * Used by the ADMIN restoration path, which must snapshot and re-validate the stored row (and its
+ * parent chain) before the recoverable-deletion marker is cleared.
+ */
+export async function getSubprojectIncludingDeleted(
+  db: Db,
+  subprojectId: string
+): Promise<(Subproject & { deletedAt: string | null }) | null> {
+  const row = await db.one<SubprojectRow & { deleted_at: string | null }>(
+    `${SUBPROJECT_SELECT} WHERE s.subproject_id = $1`,
+    [subprojectId]
+  );
+  if (!row) return null;
+  return { ...toSubproject(row), deletedAt: row.deleted_at ?? null };
+}
+
 export type SubprojectInput = {
   projectId: string;
   parentSubprojectId?: string | null;

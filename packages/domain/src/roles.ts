@@ -65,13 +65,13 @@ export function isGeneralManager(identity: Identity | null): boolean {
 
 /**
  * ADMIN and MANAGER manage every project, subproject, task and responsibility.
- * MEMBER keeps the own-task boundary and never edits an existing task, even one it created.
+ * MEMBER may edit tasks regardless of ownership within its writable, visible division scope.
  * VIEWER stays read-only. Visibility and editability are independent: being able to read
  * another employee's task never grants authority to change it.
  */
 export function canEditTask(identity: Identity | null, task: { ownerMemberId: string | null } | null): boolean {
   if (!identity || !identity.active || !task) return false;
-  return identity.role === 'ADMIN' || identity.role === 'MANAGER';
+  return atLeast(identity, 'MEMBER');
 }
 
 /** Creating a task under an existing active project belongs to MEMBER; managers use the manager form. */
@@ -95,8 +95,39 @@ export function canEditRecords(identity: Identity | null): boolean {
   return isManager(identity);
 }
 
-/** Only an ADMIN holds the administrative removal capability. */
+/**
+ * The administrative removal capability: a project row, a responsibility area or a permanent
+ * erasure.
+ *
+ * Ordinary recoverable removal of a task or a subproject is a *different* capability with its own
+ * function, so widening one of them can never widen the other.
+ */
 export function canDeleteRecords(identity: Identity | null): boolean {
+  return isAdmin(identity);
+}
+
+/**
+ * Recoverable removal of a task or a subproject.
+ *
+ * The role answers "may this account remove work at all"; where it may do so is a second,
+ * independent question answered by `DivisionScope` (`canWriteDivision`, re-read inside the write
+ * transaction). A MANAGER with read-only access in a division therefore reaches neither the
+ * preflight nor the command.
+ */
+export function canRecoverablyDeleteRecord(identity: Identity | null): boolean {
+  return atLeast(identity, 'MEMBER');
+}
+
+/**
+ * Restoring a recoverably removed task or subproject is an administrative correction: the row and
+ * its stable ID come back; ADMIN or a division-authorized MANAGER may decide that.
+ */
+export function canRestoreDeletedRecord(identity: Identity | null): boolean {
+  return atLeast(identity, 'MANAGER');
+}
+
+/** Permanent erasure of a row stays a guarded ADMIN capability. */
+export function canPurgeRecord(identity: Identity | null): boolean {
   return isAdmin(identity);
 }
 
@@ -105,7 +136,7 @@ export function canDeleteRecords(identity: Identity | null): boolean {
  *
  * It is deliberately narrower than completion: a MANAGER decides completion through the reviewed
  * workflow, while reversing a stored completion is an explicit ADMIN correction with its own
- * reason, confirmation and audit evidence.
+ * confirmation and audit evidence.
  */
 export function canReopenTask(identity: Identity | null): boolean {
   return isAdmin(identity);

@@ -1,9 +1,10 @@
+import { MemberWorkEditor } from '../components/MemberWorkEditor';
 /** Task detail: the authoritative record, its relationships and the reviewed actions. */
-import { useState } from 'react';
-import { MAX_TASK_DEPTH } from '@eh/domain';
+import { useState } from 'react';import { MAX_TASK_DEPTH } from '@eh/domain';
 import type { Actor, Reference, ReopenEligibility, ReportEligibility, Task, TaskDetail } from '@eh/contracts';
 import { api } from '../api/client';
 import { keys, queryCache, useQuery } from '../state/cache';
+import { commitMutation } from '../state/mutation';
 import { useI18n } from '../i18n';
 import {
   Badge,
@@ -17,6 +18,7 @@ import {
   statusTone
 } from '../components/ui';
 import { ConfirmDialog } from '../components/forms';
+import { ActionConfirmDialog } from '../components/ActionConfirmDialog';
 import { blockedReasonLabel, RequestDialog, type RequestKind } from '../components/request-dialog';
 import { TaskForm } from './TaskForm';
 import { formatSkillGrade, projectColor } from '@eh/domain';
@@ -25,6 +27,7 @@ import { DeleteEntityDialog } from '../components/DeleteEntityDialog';
 import { DeadlineCell } from '../components/deadline';
 import { TaskStatusBadge } from '../components/task-status';
 import { capabilitiesOf } from '../state/capabilities';
+import { newAttemptKey } from '../state/attempt-key';
 
 type References = {
   members: { memberId: string; name: string; active: boolean; employeeId?: string }[];
@@ -49,6 +52,12 @@ export function TaskDetailScreen({
   const [action, setAction] = useState<'approve' | 'confirm' | 'override' | 'complete' | null>(null);
   const [removing, setRemoving] = useState(false);
   const [reopening, setReopening] = useState(false);
+  /**
+   * The identity of the current reopen attempt. It is created when the dialog opens (not on a
+   * render and not per click), so a retry of the same attempt replays its stored answer instead of
+   * creating a second correction, and a new attempt gets a new identity.
+   */
+  const [reopenAttemptKey, setReopenAttemptKey] = useState('');
   const [notice, setNotice] = useState('');
   const endpoint = readOnly ? `/api/work/tasks/${taskId}` : `/api/manager/tasks/${taskId}`;
   const capabilities = capabilitiesOf(actor);
@@ -58,6 +67,7 @@ export function TaskDetailScreen({
   const canManage = !readOnly && capabilities.canEdit && detail.data?.canWrite !== false;
   // A completion report may be filed by any authenticated MEMBER, MANAGER or ADMIN; an extension
   // request stays limited to the assigned MEMBER. Eligibility itself is a server answer.
+  const canMemberEdit = actor.role === 'MEMBER' && detail.data?.canWrite === true;
   const canReport = capabilities.canSubmitCompletionRequest;
   const references = useQuery<References>(keys.references, () =>
     readOnly ? Promise.resolve({ members: [], skills: [], subprojects: [] }) : api.get<References>('/api/manager/references')
@@ -125,6 +135,10 @@ export function TaskDetailScreen({
             {subprojectPath ? ` · ${subprojectPath}` : ''} · {record.taskId}
           </p>
         </div>
+        {canMemberEdit ? <div className="compact-toolbar">
+          <button type="button" className="button secondary" onClick={() => setEditing(true)}>{t("action.edit")}</button>
+          <button type="button" className="button danger" onClick={() => setRemoving(true)}>{t("delete.submit")}</button>
+        </div> : null}
         {canManage ? (
           <div className="compact-toolbar">
             <button type="button" className="button secondary" onClick={() => setEditing(true)}>
@@ -144,7 +158,7 @@ export function TaskDetailScreen({
                 {t('tasks.completeDirect')}
               </button>
             ) : null}
-            {canReopen || actor.role === 'ADMIN' ? (
+            {canReopen || capabilities.canRecoverDelete ? (
               <Menu label={t('action.more')} className="row-menu">
                 {(close) => (
                   <>
@@ -155,13 +169,14 @@ export function TaskDetailScreen({
                         className="menu-item"
                         onClick={() => {
                           close();
+                          setReopenAttemptKey(newAttemptKey('reopen'));
                           setReopening(true);
                         }}
                       >
                         {t('reopen.action')}
                       </button>
                     ) : null}
-                    {actor.role === 'ADMIN' ? (
+                    {capabilities.canRecoverDelete ? (
                       <>
                         <div className="menu-separator" role="separator" />
                         <button
@@ -463,16 +478,14 @@ export function TaskDetailScreen({
       ) : null}
 
       {reopening && capabilities.canReopenTask ? (
-        <ConfirmDialog
+        <ActionConfirmDialog
           title={t('reopen.title')}
-          destructive
-          confirmText={reopen.data?.confirmationText ?? `REOPEN ${record.taskId}`}
-          reasonRequired
-          message={
+          recordName={record.taskName}
+          context={`${context.projectName || record.projectId} · ${record.taskId}`}
+          warning={t('reopen.warning')}
+          confirmLabel={t('reopen.confirm')}
+          details={
             <div className="stack">
-              <p>
-                <strong>{record.taskName}</strong> · {record.taskId}
-              </p>
               <p>{t('reopen.body')}</p>
               {reopen.data?.completedAt ? (
                 <p className="muted small">{t('reopen.completedAt', { at: reopen.data.completedAt.slice(0, 16).replace('T', ' ') })}</p>
@@ -497,30 +510,38 @@ export function TaskDetailScreen({
             </div>
           }
           onCancel={() => setReopening(false)}
-          onConfirm={async ({ confirmation, reason }) => {
-            await api.post(`/api/manager/tasks/${record.taskId}/reopen`, {
-              idempotencyKey: `reopen-${record.taskId}-${record.revision}-${Date.now()}`,
-              revision: record.revision,
-              reason,
-              confirmation,
-              reopenProject: reopen.data?.projectReopenRequired === true || undefined
-            });
+          onConfirm={async () => {
+            // One attempted operation keeps one identity: the key is created when this attempt
+            // starts and is never regenerated by a retry or by a later render. A decision is a task
+            // write for invalidation purposes, so every derived view is re-read from the server.
+            const outcome = await commitMutation(
+              () =>
+                api.post(`/api/manager/tasks/${record.taskId}/reopen`, {
+                  idempotencyKey: reopenAttemptKey,
+                  revision: record.revision,
+                  confirmed: true,
+                  reopenProject: reopen.data?.projectReopenRequired === true || undefined
+                }),
+              [
+                keys.task(record.taskId),
+                keys.tasks,
+                keys.taskIndex,
+                keys.overview,
+                keys.project(record.projectId),
+                keys.projects,
+                keys.myWork,
+                keys.timeline,
+                keys.requests,
+                keys.workload,
+                keys.workProjects,
+                keys.workOverview,
+                keys.deletedRecords
+              ]
+            );
+            // A session that ended while the write was in flight paints nothing here.
+            if (outcome.status !== 'committed') return;
             setReopening(false);
             setStatus({ tone: 'ok', text: t('reopen.done') });
-            queryCache.invalidate([
-              keys.task(record.taskId),
-              keys.tasks,
-              keys.taskIndex,
-              keys.overview,
-              keys.project(record.projectId),
-              keys.projects,
-              keys.myWork,
-              keys.timeline,
-              keys.requests,
-              keys.workload,
-              keys.workProjects,
-              keys.workOverview
-            ]);
             detail.refresh();
             reopen.refresh();
             eligibility.refresh();
@@ -528,7 +549,8 @@ export function TaskDetailScreen({
         />
       ) : null}
 
-      {editing ? (
+      {editing && canMemberEdit ? <MemberWorkEditor kind="tasks" id={record.taskId} projectId={record.projectId} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); queryCache.invalidate(["work/", keys.task(taskId), keys.tasks, keys.myWork, keys.overview, keys.timeline]); }} /> : null}
+      {editing && canManage ? (
         <TaskForm
           task={record}
           detail={detail.data}
@@ -617,19 +639,31 @@ export function TaskDetailScreen({
 
       {removing ? (
         <DeleteEntityDialog
+          memberAction={actor.role === "MEMBER"}
           entityType="TASKS"
           entityId={record.taskId}
           entityName={record.taskName}
+          context={context.projectName || record.projectId}
+          canPurge={capabilities.canPurgeRecord}
           onClose={() => setRemoving(false)}
           onDeleted={() => {
+            // A removal is a task write: every derived view that showed this record is stale.
             queryCache.invalidate([
               keys.tasks,
+              keys.task(record.taskId),
               keys.taskIndex,
               keys.overview,
               keys.project(record.projectId),
+              keys.projects,
               keys.myWork,
               keys.parentOptions,
-              keys.timeline
+              keys.timeline,
+              keys.requests,
+              keys.workload,
+              keys.workProjects,
+              keys.workOverview,
+              keys.employee,
+              keys.deletedRecords
             ]);
             window.location.hash = '#/all-work';
           }}

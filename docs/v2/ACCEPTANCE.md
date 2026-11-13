@@ -1,5 +1,50 @@
 # V2 Acceptance Record
 
+## Manager recoverable removal, ADMIN restoration and no-typing confirmations — 2026-11-12
+
+**Local implementation and verification only.** No operational database was migrated, initialized,
+mapped or reset; nothing was deployed, restarted, committed, pushed or staged; no outbound service
+(mail, Calendar, publication) was activated; and no account or authentication setting was changed.
+**Schema 12 is unchanged and no migration is added**: `tasks.deleted_at` and `subprojects.deleted_at`
+already existed, so removal and restoration only set and clear them.
+
+This release implements the user-approved exception recorded in `AGENTS.md` rules 203–209: a MANAGER
+may recoverably remove a task or subproject inside a division where it holds `WORK` membership, an
+ADMIN restores removed records from 削除した記録 / Deleted items, and the confirmation for those
+actions (and for a permanent task/subproject erasure) is one clearly labelled button instead of a
+typed phrase plus a free-text reason. The task-list action column was widened so Edit and その他 stay
+inside the table.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Permission matrix | PASS | `apps/api/test/deletion.test.ts` — "keeps the permanent erasure ADMIN-only for every other role", "lets a MANAGER recoverably remove work inside a writable division only" (foreign division → `404`, no row written), "refuses a manager whose access in that division is READ-only" (`403`), "refuses MEMBER, VIEWER and GENERAL_MANAGER on removal, restoration and reopening" (all `403`, including `/api/admin/deleted-records`), and "does not let a forged browser capability authorize a server write" (extra `role`/`canDelete`/`divisionId` fields → `400 VALIDATION_FAILED`, then the honest call → `404`). `apps/web/test/division-ui.test.tsx` asserts the separated capability flags per role. |
+| Recoverable removal keeps the record | PASS | `deletion.test.ts` — the completed/approved task keeps its deadline history, approvals, historical assignee, requests and audit rows; a child task, an active dependant, a pending request and a queued notification job still block it; a stale revision is `409` and removes nothing; a repeated removal returns `alreadyRemoved: true` with exactly one `RECORD_REMOVED`; the audit carries `removedBy`, `removedByRole`, `confirmationSource: 'BUTTON'` and `userNote: null`. |
+| Role re-checked while the removal waits for the lock | PASS | `deletion.test.ts` — "rechecks the role while the removal waits for the division lock": the request is observed queued on `pg_advisory_xact_lock(hashtext('member-divisions'))`, `MEM-MANAGER` is demoted to `MEMBER` on the holding connection, and the removal then answers `403 AUTHORIZATION_DENIED` with the row still active and no `RECORD_REMOVED` row. |
+| Restore the same row | PASS | `apps/api/test/restoration.test.ts` (11 tests) — same identifier, name, status, dates, owner and retained assignment; a completed task comes back `Done` with its progress and `completed_at`; a subproject returns without touching its sibling; the `RECORD_RESTORED` audit carries `confirmationSource: 'BUTTON'`. |
+| Restoration blockers | PASS | Same file — a removed subproject blocks its task (`PARENT_DELETED`), a removed parent blocks a subproject, an archived project reports `PROJECT_INACTIVE` and refuses with `409`, nothing is repaired silently, and a permanently erased record answers `404` with "cannot be restored" and is never listed. |
+| Restoration is ADMIN-only, repeatable and stale-safe | PASS | Same file — MANAGER/MEMBER/VIEWER are `403` on both the preflight and the command; a stale revision is `409` and the row stays removed; the second restore of the same revision returns `alreadyRestored: true` with exactly one `RECORD_RESTORED`. |
+| Deleted items list | PASS | Same file — one bounded page with search over the name and project, the subproject location, the Tokyo deletion time, the deleting manager's display name, the recorded reason, the confirmation source and the current restore availability; `pageSize=2` returns 2 then 1 with `total: 3`; a row without removal evidence reports `null` rather than invented metadata; MANAGER/MEMBER/VIEWER are `403`. |
+| Reopening without typing | PASS | `apps/api/test/reopen.test.ts` — the ADMIN reopens with `confirmed: true` only, the audit records `confirmationSource: 'BUTTON'`, `userNote: null` and an application-generated description; an optional `note` is kept when supplied; MANAGER/MEMBER/VIEWER stay `403`; a container task, a stale revision, an archived project and a missing `reopenedProject` acknowledgement are still refused; a replayed idempotency key writes one audit row. |
+| One identity per attempt | PASS | `apps/web/test/task-reopen.test.tsx` — the dialog has no `input`/`textarea`, submits `revision: 3` and `confirmed: true`, sends exactly one POST on a double activation, and a retry after a definite failure reuses the same `idempotencyKey` (`reopen:` + UUID). |
+| No typing anywhere in the new confirmations | PASS | `apps/web/test/deleted-items.test.tsx` (7 tests) — the removal, permanent-erasure and restore dialogs contain no `input`/`textarea`; Cancel sends nothing; three activations in one tick send one POST; an unobservable outcome keeps the dialog open without a retry; unmounting during a pending write neither throws nor repeats it; and a session switch during the pending restore paints no notice into the next session. `apps/web/test/project-hierarchy.test.tsx` asserts the same for the hierarchy removal and the ADMIN permanent erasure. |
+| Action column stays inside the table | PASS (real browser) | `scripts/browser-smoke.mjs` `expectTaskActionColumnAcrossViewports`: bounding rectangles prove Edit and その他 end inside their cell and inside the table at **1366 / 1100 / 900 px** and at the 125 % (1093 px) and 150 % (911 px) equivalent CSS viewports, in **Japanese and English**; the cell hides no overflow (`scrollWidth - clientWidth ≤ 1`); the その他 popup opened on the last row stays inside the viewport and returns focus to its trigger. Screenshot: `work/screenshots/task-list-actions-ja-1366.png`. |
+| Manager and ADMIN journeys in a real browser | PASS | Same run: "Project hierarchy: contextual creation, smart Back, blocked removal, no-typing ADMIN removal", "Deleted items: recoverable removal listed, no-typing restore of the same record" and "manager journey: hierarchy in context, edit and complete allowed, recoverable removal offered, erasure absent" all pass against the built artifacts. |
+| `npm run typecheck` | PASS | All V2 workspaces compile (`api`, `web`, `worker`, `contracts`, `db`, `domain`, `i18n`). |
+| `npm run test:v2` | PASS | 72 files, 823 passed, 1 skipped, 0 failed (repeated runs after the final change are green). One earlier intermediate run reported a single failure that did not reproduce in any re-run; the log was overwritten before it could be attributed, so it is recorded here as an observed flake rather than a settled pass. |
+| `npm run lint` | PASS | ESLint clean for `src`, `dashboard-app`, `shared`, `scripts`, `tests` and for `apps`, `packages`, `tools`. |
+| `npm run validate` | PASS | Manager/dashboard source validation, V2 validation (243 files) and the deployment templates. |
+| `npm run build` | PASS | API, web, worker and migration artifacts built. |
+| `npm run test:v1` | FAIL (pre-existing, date-sensitive) | 775 pass, 1 fail: `tests/v1_6_1-counting.test.js` "a container task is never an extra unit of work in an area card" asserts no open work is overdue, but its fixtures carry `Due_Date` 2026-11-10/11 and today is 2026-11-12. Unrelated to this change and deliberately not modified. |
+| `npm run test:browser` (isolated production artifact) | PARTIAL | All production-artifact stages pass (isolated PostgreSQL, built migration CLI applying schema 12, `/healthz`, `/readyz`, fixture sign-in, authorized read and mutation, worker job) and every journey covering this change passes (task tree, action column, hierarchy removal, deleted items restore, responsibility areas, manager journey, timeline, workload). The run then stops in the **read-only MEMBER journey** on a pre-existing stale expectation unrelated to this change (the explorer's responsibility `<select>` has no accessible name and the smoke's fixture project is created in `DIV-SMOKE`, which the fixture MEMBER cannot read). Recorded as PARTIAL, **not** as a passing gate; the read-only journeys and the clean-shutdown stage were therefore not exercised in this run. |
+
+**Documented limitations.**
+
+- jsdom cannot prove layout; the action-column geometry is asserted only in the real Chromium run.
+- The browser smoke does not reach the read-only MEMBER/VIEWER journeys (see above), so the
+  read-only permission matrix is proven by the API and component suites, not by a browser journey.
+- No live Workspace or production deployment was performed; `docs/PRODUCTION_READINESS.md` stays
+  **NOT APPROVED FOR PRODUCTION**.
+
 ## Division write-path corrections and V2 branding — 2026-11-11
 
 **Local implementation and verification only.** No operational database was migrated, initialized,

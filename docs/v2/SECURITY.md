@@ -1,5 +1,42 @@
 # V2 Security Model
 
+## Manager recoverable removal, ADMIN restoration and no-typing confirmations — 2026-11-12
+
+**Approved policy change (narrow, deliberate).** A `MANAGER` may *recoverably* remove a task or a
+subproject inside a division where it holds a `WORK` membership. This replaces the earlier
+ADMIN-only rule for that one action. It does **not** change project or responsibility removal, the
+permanent erasure, restoration, reopening or any other permission, and it does not weaken any
+confirmation.
+
+**Four capabilities, four functions.** `canRecoverablyDeleteRecord` (ADMIN, or MANAGER within the
+record's division), `canRestoreDeletedRecord` (ADMIN), `canReopenTask` (ADMIN) and
+`canPurgeRecord` (ADMIN) are separate domain functions. A shared `canDelete` flag is never widened:
+widening one capability must not enable another. `MEMBER`, `VIEWER` and `GENERAL_MANAGER` hold none
+of them.
+
+**Two independent gates, re-checked inside the transaction.** The role answers *whether* the account
+may remove work at all; the record's project division answers *where*. `removeEntity` takes the
+canonical lock order (`member-divisions` then `members:role-and-activation`), re-reads the actor's
+stored role, activation and division relationships through the transaction handle, re-reads the
+record's current project division, and only then locks the target row and evaluates the blockers and
+the revision. A record outside the caller's readable divisions answers `NOT_FOUND`; a readable
+division without `WORK` membership answers `AUTHORIZATION_DENIED`. A client-supplied role,
+capability or division is data and is rejected by the strict contract.
+
+**The confirmation changed, the authority did not.** Recoverable removal, restoration, corrective
+reopening and permanent task/subproject erasure ask for one clearly labelled button in a red panel
+that names the record. No typed phrase and no mandatory free-text reason are collected. The server
+still requires `confirmed: true`, the verified role, the division, the current revision and the
+blockers, and the audit row records `confirmationSource: 'BUTTON'` plus an application-generated
+description; `userNote` is present only when a person actually wrote something. Project and
+responsibility erasure keep their typed `DELETE <id>` confirmation.
+
+**Restoration is administrative and never recreates a record.** Only an ADMIN restores, only the
+stored row and identifier come back (`deleted_at` cleared, revision incremented,
+`RECORD_RESTORED`), and a removed parent, an inactive project or a hierarchy that no longer fits
+blocks it with an explanation. A permanently erased record is not a restore candidate. Restoring a
+historical assignment is never a new membership grant.
+
 ## Member add-only creation, ADMIN reopening and modal requests — 2026-11-05
 
 **Identity and role stay server-side.** The new member commands (`POST /api/employee/projects`,
@@ -10,12 +47,17 @@ reopen routes require ADMIN from the same verified session and accept no role, a
 the body.
 
 **Capability flags are presentation only.** `canCreateProject`, `canCreateSubproject`,
-`canCreateTask`, `canEdit`, `canArchive`, `canDelete`, `canReopenTask`, `canSubmitCompletionRequest`
-and `canSubmitExtensionRequest` decide what a screen renders. Every command re-checks the role:
-- MEMBER: may create new work; may not edit, archive, delete or reopen, including its own records.
-- MANAGER: keeps its management commands and is refused by the reopen routes (403).
+`canCreateTask`, `canEdit`, `canArchive`, `canDelete`, `canRecoverDelete`, `canRestoreDeleted`,
+`canPurgeRecord`, `canReopenTask`, `canSubmitCompletionRequest` and `canSubmitExtensionRequest`
+decide what a screen renders. Every command re-checks the role:
+- MEMBER: may create new work; may not edit, archive, remove, restore, purge or reopen, including
+  its own records.
+- MANAGER: keeps its management commands and may recoverably remove a task or subproject inside a
+  division where it holds `WORK` membership; it is refused by restoration, permanent erasure and
+  the reopen routes (403).
 - VIEWER: may create nothing and may request nothing.
-- ADMIN: holds the reopening correction; the destructive ADMIN paths keep their own preflight.
+- ADMIN: holds the reopening correction and the restoration workflow; the destructive paths keep
+  their own preflight.
 
 **No manager data is reused for member screens.** The member project list and overview read
 `/api/work/*` only; `GET /api/employee/references` publishes only active responsibilities' identity
@@ -25,10 +67,10 @@ and a guessed identifier answers `404`. The member overview payload contains no 
 
 **A reopening is auditable and reversible only by a new event.** The original completion request,
 its approval and its audit rows are retained unchanged; the correction writes one `TASK_REOPENED`
-row naming the actor, reason, before/after state and the reversed completion request, and one
-`PROJECT_REOPENED` row when a parent project returns to `Active`. An archived or cancelled parent is
-never silently reactivated: the command refuses with an actionable explanation. A repeated delivery
-replays the stored answer instead of applying a second effect.
+row naming the actor, the confirmation source, the before/after state and the reversed completion
+request, and one `PROJECT_REOPENED` row when a parent project returns to `Active`. An archived or
+cancelled parent is never silently reactivated: the command refuses with an actionable explanation.
+A repeated delivery replays the stored answer instead of applying a second effect.
 
 **Request dialogs do not weaken submission policy.** The dialog is a presentation shell around the
 existing `POST /api/employee/requests`; the server re-checks visibility, role, assignment (for a
@@ -542,3 +584,25 @@ Covered by `apps/api/test/divisions.test.ts` (queue flags for a manager with WOR
 READ in another, an ADMIN queue, the refused decision leaving `PENDING`, and a foreign by-id read
 answered `NOT_FOUND`) and by `apps/web/test/request-sync.test.tsx` (per-record availability, a
 missing value failing closed, ADMIN unchanged).
+
+
+## Member collaboration and manager recovery — 2026-11-13
+
+This user-approved policy supersedes earlier statements that members cannot edit/remove existing
+tasks or subprojects, and that restoration is ADMIN-only. MEMBER may edit ordinary task and
+subproject fields and recoverably delete either record regardless of owner, within a WORK division
+and an INTERNAL, non-archived project they may see. READ-only grants never allow a write.
+MANAGER may restore tasks/subprojects in WORK divisions; ADMIN retains cross-division recovery.
+Projects/responsibilities, approvals, direct completion, notification settings, permanent erasure
+and completed-task reopening retain their existing separate permissions. Members do not restore.
+
+The member opens a task detail to edit/delete it, or a project hierarchy to edit/delete a
+subproject. Editors fetch fresh narrow records and revisions; saves are partial patches. A red
+confirmation panel requires one explicit button and no typing. Deletion retains the row/history,
+children/dependencies and existing blockers; recovery restores the same ID and status. Completed
+work stays completed. Managers reach Deleted Items through the management navigation.
+
+Server authorization is repeated under the existing division/role advisory locks. Deleted Items
+filters both records and totals by writable divisions before pagination. Member edit APIs retain
+project visibility and field allowlists and do not expose manager-only history or settings.
+No schema change, operational migration, deployment or outbound activation is required or performed.

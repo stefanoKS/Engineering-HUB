@@ -22,6 +22,7 @@ import { ErrorBox, Modal, SaveState } from '../components/ui';
 
 export function SubprojectForm({
   projectId,
+  memberEdit = false,
   projectName,
   item,
   members,
@@ -29,6 +30,7 @@ export function SubprojectForm({
   onSaved
 }: {
   projectId: string;
+  memberEdit?: boolean;
   /** Display-only project name, so the form shows where the record is filed. */
   projectName?: string;
   item?: Subproject;
@@ -94,7 +96,7 @@ export function SubprojectForm({
               void save.run(
                 async () => {
                   if (item) {
-                    return api.patch('/api/manager/subprojects/' + item.subprojectId, pending);
+                    return api.patch((memberEdit ? '/api/work/subprojects/' : '/api/manager/subprojects/') + item.subprojectId, pending);
                   }
                   return api.post('/api/manager/subprojects', { ...pending, projectId, idempotencyKey });
                 },
@@ -147,7 +149,7 @@ export function SubprojectForm({
             <SelectInput
               value={status}
               onChange={(value) => setStatus(value as Subproject['status'])}
-              options={['Planned', 'Active', 'On Hold', 'Completed', 'Cancelled', 'Archived'].map((value) => ({
+              options={['Planned', 'Active', 'On Hold', 'Completed', 'Cancelled', ...(memberEdit ? [] : ['Archived'])].map((value) => ({
                 value,
                 label: label('project.status', value)
               }))}

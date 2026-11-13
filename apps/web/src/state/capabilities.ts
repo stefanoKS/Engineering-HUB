@@ -17,8 +17,16 @@ export type Capabilities = {
   canCreateSubproject: boolean;
   canCreateTask: boolean;
   canEdit: boolean;
+  canEditWork: boolean;
   canArchive: boolean;
+  /** Permanent erasure of a project; a task/subproject erasure additionally needs `canPurgeRecord`. */
   canDelete: boolean;
+  /** Recoverable removal of a task or subproject; the record's own `canWrite` still decides where. */
+  canRecoverDelete: boolean;
+  /** Restoration of a recoverably removed record - an ADMIN correction. */
+  canRestoreDeleted: boolean;
+  /** Permanent erasure of a task or subproject - ADMIN only, never offered to a manager. */
+  canPurgeRecord: boolean;
   canReopenTask: boolean;
   canSubmitCompletionRequest: boolean;
   canSubmitExtensionRequest: boolean;
@@ -36,8 +44,14 @@ export function capabilitiesOf(actor: Pick<Actor, 'role'>): Capabilities {
     canCreateSubproject: member,
     canCreateTask: member,
     canEdit: manager,
+    canEditWork: member || manager,
     canArchive: manager,
     canDelete: admin,
+    // Recoverable removal is a manager capability; restoration and permanent erasure stay
+    // administrative. They are separate flags so widening one can never widen another.
+    canRecoverDelete: member || manager,
+    canRestoreDeleted: manager,
+    canPurgeRecord: admin,
     canReopenTask: admin,
     // A completion report may be filed for accessible work by any non-viewer; an extension
     // request stays limited to the assigned MEMBER, exactly as the server policy states.

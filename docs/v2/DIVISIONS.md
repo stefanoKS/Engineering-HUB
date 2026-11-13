@@ -621,3 +621,25 @@ hint (count, zero, non-ADMIN, invalid payload).
 Browser rendering, keyboard behaviour and live Workspace behaviour remain **NOT_RUN** here; the local
 suite is not live verification and `docs/PRODUCTION_READINESS.md` stays **NOT APPROVED FOR
 PRODUCTION**.
+
+
+## Member collaboration and manager recovery — 2026-11-13
+
+This user-approved policy supersedes earlier statements that members cannot edit/remove existing
+tasks or subprojects, and that restoration is ADMIN-only. MEMBER may edit ordinary task and
+subproject fields and recoverably delete either record regardless of owner, within a WORK division
+and an INTERNAL, non-archived project they may see. READ-only grants never allow a write.
+MANAGER may restore tasks/subprojects in WORK divisions; ADMIN retains cross-division recovery.
+Projects/responsibilities, approvals, direct completion, notification settings, permanent erasure
+and completed-task reopening retain their existing separate permissions. Members do not restore.
+
+The member opens a task detail to edit/delete it, or a project hierarchy to edit/delete a
+subproject. Editors fetch fresh narrow records and revisions; saves are partial patches. A red
+confirmation panel requires one explicit button and no typing. Deletion retains the row/history,
+children/dependencies and existing blockers; recovery restores the same ID and status. Completed
+work stays completed. Managers reach Deleted Items through the management navigation.
+
+Server authorization is repeated under the existing division/role advisory locks. Deleted Items
+filters both records and totals by writable divisions before pagination. Member edit APIs retain
+project visibility and field allowlists and do not expose manager-only history or settings.
+No schema change, operational migration, deployment or outbound activation is required or performed.

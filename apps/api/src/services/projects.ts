@@ -1,3 +1,4 @@
+import { authorizeWorkEdit, assertMemberEditFields } from './work-edit';
 ﻿/**
  * Project and subproject commands.
  *
@@ -419,10 +420,12 @@ export async function patchSubproject(
   subprojectId: string,
   body: z.infer<typeof PatchSubprojectBody>
 ): Promise<Subproject> {
-  requireRole(ctx.identity, WRITE_ROLES);
+  requireRole(ctx.identity, 'MEMBER');
+  assertMemberEditFields(ctx, 'subproject', body);
   const subproject = await getSubproject(ctx.db, subprojectId);
   if (!subproject) throw new DomainError('NOT_FOUND', `Subproject not found: ${subprojectId}`);
   const project = await writableProject(ctx, subproject.projectId);
+  await authorizeWorkEdit(ctx, subproject.projectId);
   if (body.revision !== subproject.revision) {
     throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved');
   }
@@ -483,7 +486,9 @@ export async function patchSubproject(
     // inside this transaction, and a retained owner is validated against the destination division.
     await lockDivisionMutation(tx);
     const fresh = await reauthorizeInTransaction(tx, ctx);
-    requireRole(fresh.identity, WRITE_ROLES);
+    requireRole(fresh.identity, 'MEMBER');
+    assertMemberEditFields({ ...ctx, identity: fresh.identity }, 'subproject', body);
+    await authorizeWorkEdit({ ...ctx, identity: fresh.identity, divisions: fresh.scope }, subproject.projectId, tx);
     const currentDivision = await divisionForWriteOfProject(tx, subproject.projectId);
     assertWritableDivision(fresh.scope, currentDivision.divisionId);
     let destinationDivisionId = currentDivision.divisionId;

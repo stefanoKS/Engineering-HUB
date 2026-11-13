@@ -121,15 +121,14 @@ export type ReopenProjectState = {
 export type ReopenInput = {
   task: ReopenTaskState;
   project: ReopenProjectState;
-  reason: string;
-  confirmation: string;
+  /** The explicit confirmation the red panel collected; there is no typed phrase. */
+  confirmed: boolean;
   actorRole: string;
   /** The caller's explicit acknowledgement that a Completed parent project reopens too. */
   reopenProject: boolean;
 };
 
 export type ReopenPlan = {
-  expectedConfirmation: string;
   /** True when the parent project must change from Completed back to Active in the same write. */
   projectReopenRequired: boolean;
 };
@@ -138,17 +137,19 @@ export type ReopenPlan = {
  * Validates a corrective reopening before the first mutation.
  *
  * Only an ADMIN may reverse a completion, only leaf work qualifies (a container's completion is
- * derived), the stored status must actually be Done, and the typed phrase is
- * `REOPEN <taskId>`. A parent project is never silently reactivated: `Completed` requires the
- * explicit acknowledgement that comes with this operation, while an archived or cancelled
- * project is refused with an actionable explanation, because that is a separate lifecycle act.
+ * derived), the stored status must actually be Done, and the caller must have confirmed the
+ * action. Confirmation is a clearly labelled button in a red panel, not a typed phrase: the
+ * interaction was simplified, the authority was not. A parent project is never silently
+ * reactivated: `Completed` requires the explicit acknowledgement that comes with this operation,
+ * while an archived or cancelled project is refused with an actionable explanation, because that
+ * is a separate lifecycle act.
  */
 export function assertReopenAllowed(input: ReopenInput): ReopenPlan {
   if (input.actorRole !== 'ADMIN') {
     throw new DomainError('AUTHORIZATION_DENIED', 'Only an ADMIN may reopen a completed task');
   }
-  if (!String(input.reason ?? '').trim()) {
-    throw new DomainError('VALIDATION_FAILED', 'A reason is required to reopen a completed task');
+  if (input.confirmed !== true) {
+    throw new DomainError('CONFIRMATION_REQUIRED', 'Reopening a completed task requires explicit confirmation');
   }
   if (input.task.container) {
     throw new DomainError(
@@ -175,20 +176,14 @@ export function assertReopenAllowed(input: ReopenInput): ReopenPlan {
       { projectId: input.project.projectId, projectStatus: input.project.status }
     );
   }
-  const expectedConfirmation = `REOPEN ${input.task.taskId}`;
-  if (String(input.confirmation ?? '').trim() !== expectedConfirmation) {
-    throw new DomainError('CONFIRMATION_REQUIRED', `Type exactly "${expectedConfirmation}" to confirm`, {
-      expected: expectedConfirmation
-    });
-  }
   const projectReopenRequired = input.project.status === 'Completed';
   if (projectReopenRequired && input.reopenProject !== true) {
     throw new DomainError(
       'CONFIRMATION_REQUIRED',
       'The parent project is completed; confirm that it becomes active again in the same correction',
-      { expected: expectedConfirmation, projectReopenRequired: true, projectId: input.project.projectId }
+      { projectReopenRequired: true, projectId: input.project.projectId }
     );
   }
-  return { expectedConfirmation, projectReopenRequired };
+  return { projectReopenRequired };
 }
 

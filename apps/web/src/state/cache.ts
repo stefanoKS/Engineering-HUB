@@ -263,6 +263,8 @@ export const keys = {
   myRequests: 'employee/requests/mine',
   reportEligibility: (taskId: string) => `employee/report-eligibility/${taskId}`,
   reopenEligibility: (taskId: string) => `manager/reopen-eligibility/${taskId}`,
+  /** Recoverably removed tasks and subprojects (ADMIN). */
+  deletedRecords: 'admin/deleted-records',
   /** The read-only project explorer and overview: one authorized scope, shared by member screens. */
   workProjects: 'work/projects',
   workOverview: 'work/overview',

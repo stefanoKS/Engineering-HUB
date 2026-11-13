@@ -507,6 +507,8 @@ export function TasksScreen({
           entityType="TASKS"
           entityId={deleteTarget.taskId}
           entityName={deleteTarget.taskName}
+          context={deleteTarget.projectName}
+          canPurge={capabilitiesOf(actor).canPurgeRecord}
           onClose={() => setDeleteTarget(null)}
           onDeleted={() => {
             const removed = deleteTarget;
@@ -522,6 +524,9 @@ export function TasksScreen({
               keys.employee,
               keys.parentOptions,
               keys.timeline,
+              keys.requests,
+              keys.workOverview,
+              keys.deletedRecords,
               'work/tasks',
               'work/project/',
               'work/projects'
@@ -616,18 +621,23 @@ function TaskTreeRows(props: TreeProps & { items: TaskSummary[] }): JSX.Element 
                                   </button>
                                 ) : null}
                                 {actor.role === 'ADMIN' ? (
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    className="menu-item"
+                                    onClick={() => {
+                                      close();
+                                      setAction({ kind: 'override', task });
+                                    }}
+                                  >
+                                    {t('tasks.override')}
+                                  </button>
+                                ) : null}
+                                {/* Recoverable removal follows the record: a manager needs write
+                                    access in that task's division, and the menu is never offered
+                                    for a record the server would refuse. */}
+                                {capabilities.canRecoverDelete ? (
                                   <>
-                                    <button
-                                      type="button"
-                                      role="menuitem"
-                                      className="menu-item"
-                                      onClick={() => {
-                                        close();
-                                        setAction({ kind: 'override', task });
-                                      }}
-                                    >
-                                      {t('tasks.override')}
-                                    </button>
                                     <div className="menu-separator" role="separator" />
                                     <button
                                       type="button"

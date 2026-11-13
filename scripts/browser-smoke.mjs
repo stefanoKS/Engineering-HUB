@@ -39,6 +39,99 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     expect(gap).toBeLessThanOrEqual(120);
   }
 
+  /**
+   * The task list action column must hold both controls inside its cell and inside the table.
+   *
+   * Asserted with real bounding rectangles, in both languages and at constrained viewports. The
+   * cell may wrap deliberately, but it may never hide an overflow, and no control may protrude past
+   * the table's right border (the reported defect at 1366 px and in Japanese).
+   */
+  async function expectTaskActionsContained(label) {
+    const taskTable = page.locator('.task-table').first();
+    await expect(taskTable).toBeVisible();
+    const geometry = await taskTable.evaluate((table) => {
+      const cell = table.querySelector('td.project-actions-cell');
+      if (!cell) return { missing: true };
+      const tableBox = table.getBoundingClientRect();
+      const cellBox = cell.getBoundingClientRect();
+      return {
+        missing: false,
+        tableLeft: tableBox.left,
+        tableRight: tableBox.right,
+        cellLeft: cellBox.left,
+        cellRight: cellBox.right,
+        hiddenOverflow: cell.scrollWidth - cell.clientWidth,
+        controls: [...cell.querySelectorAll('button')].map((button) => {
+          const box = button.getBoundingClientRect();
+          return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+        })
+      };
+    });
+    expect(geometry.missing, `${label}: an action cell exists`).toBe(false);
+    expect(geometry.controls.length, `${label}: Edit and the menu trigger render`).toBeGreaterThanOrEqual(2);
+    for (const control of geometry.controls) {
+      expect(control.left, `${label}: control starts inside its cell`).toBeGreaterThanOrEqual(geometry.cellLeft - 1);
+      expect(control.right, `${label}: control ends inside its cell`).toBeLessThanOrEqual(geometry.cellRight + 1);
+      expect(control.right, `${label}: control ends inside the table`).toBeLessThanOrEqual(geometry.tableRight + 1);
+      expect(control.left, `${label}: control stays inside the table`).toBeGreaterThanOrEqual(geometry.tableLeft - 1);
+    }
+    expect(geometry.hiddenOverflow, `${label}: the action cell hides no overflow`).toBeLessThanOrEqual(1);
+  }
+
+  /** The その他 / More popup stays reachable when the row sits at the right and bottom edge. */
+  async function expectMoreMenuReachable(label) {
+    const rows = page.locator('.task-table tbody tr[data-task-id]');
+    const count = await rows.count();
+    expect(count).toBeGreaterThan(0);
+    const row = rows.nth(count - 1);
+    await row.scrollIntoViewIfNeeded();
+    await row.getByRole('button', { name: /^(その他|More)$/ }).click();
+    const popup = page.locator('.task-table .menu-popup').first();
+    await expect(popup, `${label}: the menu opens`).toBeVisible();
+    const box = await popup.boundingBox();
+    const viewport = page.viewportSize();
+    expect(box).toBeTruthy();
+    expect(box.x, `${label}: the menu starts inside the viewport`).toBeGreaterThanOrEqual(-1);
+    expect(box.x + box.width, `${label}: the menu ends inside the viewport`).toBeLessThanOrEqual(viewport.width + 1);
+    expect(box.height, `${label}: the menu has a visible height`).toBeGreaterThan(20);
+    await page.keyboard.press('Escape');
+    await expect(popup).toHaveCount(0);
+    await expect(row.getByRole('button', { name: /^(その他|More)$/ })).toBeFocused();
+  }
+
+  async function expectTaskActionColumnAcrossViewports() {
+    const switcher = page.getByRole('button', { name: '日本語', exact: true });
+    // English first (the sign-in journey leaves the interface in English).
+    for (const [width, suffix] of [[1366, '1366'], [1100, '1100'], [900, '900']]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expectTaskActionsContained(`en ${suffix}px`);
+    }
+    // 125% and 150% zoom at 1366 px are equivalent to these CSS viewports.
+    for (const [width, suffix] of [[1093, '1366px@125%'], [911, '1366px@150%']]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expectTaskActionsContained(`en ${suffix}`);
+    }
+    await page.setViewportSize({ width: 1366, height: 800 });
+    await expectMoreMenuReachable('en 1366px right/bottom edge');
+    // Japanese labels are wider ("その他"); the same geometry must hold.
+    await switcher.click();
+    for (const [width, suffix] of [[1366, '1366'], [1100, '1100'], [900, '900']]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expectTaskActionsContained(`ja ${suffix}px`);
+    }
+    for (const [width, suffix] of [[1093, '1366px@125%'], [911, '1366px@150%']]) {
+      await page.setViewportSize({ width, height: 800 });
+      await expectTaskActionsContained(`ja ${suffix}`);
+    }
+    await page.setViewportSize({ width: 1366, height: 800 });
+    await expectMoreMenuReachable('ja 1366px right/bottom edge');
+    await mkdir('work/screenshots', { recursive: true });
+    await capture('work/screenshots/task-list-actions-ja-1366.png');
+    await page.getByRole('button', { name: 'English', exact: true }).click();
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    console.log('PASS  task list action column: Edit and その他 stay inside the cell at 1366/1100/900 px and at 125%/150% zoom, in both languages');
+  }
+
   async function signInAs(identity) {
     // A fresh language state so the Japanese login labels are deterministic; the page must be on
     // the application origin before localStorage is reachable. The desktop layout is restored so
@@ -91,7 +184,13 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await page.locator('.app-nav').getByRole('link', { name: 'Projects', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible();
     await expect(page.getByRole('searchbox', { name: 'Search by project name', exact: true })).toBeVisible();
-    await expect(page.getByRole('combobox', { name: 'Responsibility', exact: true })).toBeVisible();
+    // The responsibility filter is the first select of the explorer's filter row. Its option list
+    // is the authorized reference read; the project card asserted above already proves that read
+    // succeeded, so this step checks the control itself rather than a count that depends on the
+    // reader's own division.
+    const responsibilityFilter = page.locator('.filters select').first();
+    await expect(responsibilityFilter).toBeVisible();
+    await expect(responsibilityFilter.locator('option').first()).toBeAttached();
     await expect(page.getByRole('button', { name: 'New project', exact: true })).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'Browser edited project', exact: true })).toBeVisible();
     // The allowlisted project description reaches the card; nothing private does.
@@ -221,10 +320,12 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
   }
 
   /**
-   * Manager journey: a MANAGER manages the hierarchy in context but has no removal
-   * control anywhere, because only ADMIN may remove a record.
+   * Manager journey: a MANAGER manages the hierarchy in context and may *recoverably* remove a
+   * task or subproject inside a division where it holds WORK membership. The permanent erasure and
+   * every restoration stay ADMIN-only, so neither control is offered here.
    */
   async function managerJourney() {
+    const dialog = page.getByRole('dialog');
     await page.locator('.app-nav').getByRole('link', { name: 'Projects', exact: true }).click();
     // A project row is a real table row: the action buttons live inside a cell, never in a
     // flex container, so every column shares one separator line.
@@ -276,12 +377,23 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     const subprojectRow = page.locator('.hierarchy-row-subproject').filter({ hasText: 'Browser verified subproject' });
     await expect(subprojectRow.getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
     await expect(subprojectRow.getByRole('button', { name: 'New task', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: /^Delete / })).toHaveCount(0);
+    // The approved change: a manager may recoverably remove work inside a writable division ...
+    await expect(
+      subprojectRow.getByRole('button', { name: 'Delete Browser verified subproject', exact: true })
+    ).toBeVisible();
+    // ... while the permanent erasure is never offered to a manager.
+    await subprojectRow.getByRole('button', { name: 'Delete Browser verified subproject', exact: true }).click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Permanently erase mistaken record', exact: true })).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
     // A manager can still reach the completion action from a leaf task.
     await page.getByRole('link', { name: 'Browser child task', exact: true }).first().click();
     await expect(page.getByRole('button', { name: 'Mark done', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: /^Delete / })).toHaveCount(0);
-    console.log('PASS  manager journey: hierarchy in context, edit and complete allowed, removal absent');
+    await page.locator('.compact-toolbar .row-menu .menu-trigger').click();
+    await expect(page.getByRole('menuitem', { name: 'Delete', exact: true })).toBeVisible();
+    await page.keyboard.press('Escape');
+    console.log('PASS  manager journey: hierarchy in context, edit and complete allowed, recoverable removal offered, erasure absent');
 
     // Read-only timeline: the project-detail entry point preselects the project, the hierarchy
     // expands on demand, and the simplified single-bar chart carries no symbol legend.
@@ -293,7 +405,10 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
       await route.continue();
     };
     await page.route('**/api/work/timeline?*', delayTimeline);
-    await page.getByRole('link', { name: 'View in timeline', exact: true }).click();
+    // The timeline entry point lives in the project's その他 / More menu, so the menu is opened
+    // first - the same two steps a person takes. It is a menu item, not a bare link.
+    await page.locator('.page-heading .menu-trigger').click();
+    await page.getByRole('menuitem', { name: 'View in timeline', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Timeline', exact: true })).toBeVisible();
     await expect(page.locator('.tl-kind-subproject').filter({ hasText: 'Browser verified subproject' })).toBeVisible();
     await expect(page.locator('.tl-kind-task').filter({ hasText: 'Browser verified task' }).first()).toBeVisible();
@@ -351,6 +466,8 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
       await checkTimelineGeometry();
       await capture(`work/screenshots/timeline-${file}.png`);
     }
+    // A custom window needs the custom preset selected first: the two date fields only exist then.
+    await page.getByRole('button', { name: 'Custom', exact: true }).click();
     await page.getByLabel('Display start').fill('2026-01-01');
     await page.getByLabel('Display finish').fill('2028-12-31');
     await expect(page.getByRole('button', { name: 'Custom', exact: true })).toHaveAttribute('aria-pressed', 'true');
@@ -374,8 +491,8 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     console.log('PASS  Read-only timeline: project entry, hierarchy, single-bar chart, all-project summaries, responsive');
 
     // Workload: the axis states the unit and the date, and today carries its own marker.
-    await page.locator('.app-nav').getByRole('link', { name: 'Workload', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Workload report', exact: true })).toBeVisible();
+    await page.locator('.app-nav').getByRole('link', { name: 'Assignment & deadline report', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Assignment & deadline report', exact: true })).toBeVisible();
     await expect(page.getByText('Tasks due (count)', { exact: true })).toBeVisible();
     await expect(page.getByText(/^Date · /)).toBeVisible();
     await expect(page.locator('.timeline-bar.is-today')).toHaveCount(1);
@@ -443,6 +560,7 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await page.getByRole('button', { name: 'Expand subtasks of Browser verified task', exact: true }).click();
     await expect(page.getByRole('link', { name: 'Browser child task', exact: true })).toBeVisible();
     console.log('PASS  Task tree: child creation, nested placement, collapse and reopen');
+    await expectTaskActionColumnAcrossViewports();
 
     // Project detail: one expandable hierarchy with contextual creation and the ADMIN-only
     // administrative-removal workflow.
@@ -494,25 +612,51 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await subprojectRow.getByRole('button', { name: 'Delete Browser verified subproject', exact: true }).click();
     await expect(dialog.getByText('Browser verified subproject', { exact: true })).toBeVisible();
     await expect(dialog.getByText(/Tasks remain/)).toBeVisible();
-    await expect(dialog.getByRole('button', { name: 'Delete', exact: true })).toBeDisabled();
+    // A blocked record offers no confirmation button at all.
+    await expect(dialog.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
     await dialog.getByRole('button', { name: 'Show children', exact: true }).click();
     await expect(dialog).toHaveCount(0);
 
-    // An empty subproject can be removed by ADMIN through the simple logical-removal confirmation.
+    // An empty subproject can be removed by ADMIN through the no-typing confirmation: a red panel
+    // that names the record, one clearly labelled button, and no typed phrase or reason.
     await page.getByRole('button', { name: 'New subproject', exact: true }).click();
     await dialog.getByLabel('Subproject name', { exact: true }).fill('Browser deletable subproject');
     await dialog.getByRole('button', { name: 'Create', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Collapse Browser deletable subproject', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Delete Browser deletable subproject', exact: true }).click();
-    await expect(dialog.getByText('Remove this subproject?', { exact: true })).toBeVisible();
-    await expect(dialog.getByText('The operation history will be retained for audit.', { exact: true })).toBeVisible();
+    await expect(
+      dialog.getByText(
+        'Remove this subproject from normal application views. The record and its history are retained, and an administrator can restore it later.',
+        { exact: true }
+      )
+    ).toBeVisible();
+    // No input and no textarea: the confirmation is one button.
+    await expect(dialog.locator('input, textarea')).toHaveCount(0);
     await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect(page.getByText('Removed from active lists; audit history was retained.', { exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Collapse Browser deletable subproject', exact: true })).toHaveCount(0);
     await page.setViewportSize({ width: 1440, height: 1000 });
-    console.log('PASS  Project hierarchy: contextual creation, smart Back, blocked deletion, ADMIN-only logical removal');
+    console.log('PASS  Project hierarchy: contextual creation, smart Back, blocked removal, no-typing ADMIN removal');
+
+    // Deleted items (ADMIN): the recoverable removal is listed, and the *same* record is restored.
+    await page.locator('.app-nav').getByRole('link', { name: 'Deleted items', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Deleted items', exact: true })).toBeVisible();
+    await page.getByRole('searchbox', { name: 'Search by name or project', exact: true }).fill('Browser deletable');
+    const deletedRow = page.locator('tbody tr').filter({ hasText: 'Browser deletable subproject' });
+    await expect(deletedRow).toBeVisible();
+    await expect(deletedRow.getByText('Can be restored', { exact: true })).toBeVisible();
+    await deletedRow.getByRole('button', { name: 'Restore', exact: true }).click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('input, textarea')).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Restore', exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByText('Restored “Browser deletable subproject”.', { exact: true })).toBeVisible();
+    await page.locator('.app-nav').getByRole('link', { name: 'Projects', exact: true }).click();
+    await page.getByRole('link', { name: 'Browser edited project', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Collapse Browser deletable subproject', exact: true })).toBeVisible();
+    console.log('PASS  Deleted items: recoverable removal listed, no-typing restore of the same record');
 
     // Responsibility areas: a retired area leaves the default view, and ADMIN deletes an unused one.
     await page.locator('.app-nav').getByRole('link', { name: 'Responsibilities', exact: true }).click();

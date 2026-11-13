@@ -1,3 +1,4 @@
+import { MemberWorkEditor } from '../components/MemberWorkEditor';
 /**
  * Project detail.
  *
@@ -288,7 +289,8 @@ function TrashIcon(): JSX.Element {
 type HierarchyProps = {
   hierarchy: ProjectHierarchy;
   canManage: boolean;
-  canDelete: boolean;
+  canEditSubproject?: boolean;
+  canRemoveRecord: boolean;
   /** Creation is a separate capability: a MEMBER creates new work but never edits a record. */
   canCreateTask: boolean;
   canCreateSubproject: boolean;
@@ -308,7 +310,7 @@ type HierarchyProps = {
 
 export function ProjectHierarchy(props: HierarchyProps): JSX.Element {
   const { t } = useI18n();
-  const { hierarchy, canManage, canDelete, canCreateTask, canCreateSubproject } = props;
+  const { hierarchy, canManage, canRemoveRecord, canCreateTask, canCreateSubproject } = props;
   const [localCollapsed, setLocalCollapsed] = useState<Set<string>>(() => new Set());
   const collapsed = props.collapsed ?? localCollapsed;
 
@@ -384,9 +386,9 @@ export function ProjectHierarchy(props: HierarchyProps): JSX.Element {
             onEdit={props.onEditSubproject}
             onNewTask={props.onNewTask}
             onDelete={props.onDelete}
-            canManage={canManage}
+            canManage={props.canEditSubproject ?? canManage}
             canCreateTask={canCreateTask}
-            canDelete={canDelete}
+            canRemoveRecord={canRemoveRecord}
           />
         ))}
         <li className="hierarchy-direct">
@@ -432,7 +434,7 @@ export function ProjectHierarchy(props: HierarchyProps): JSX.Element {
                   collapsed={collapsed}
                   onToggle={toggle}
                   onDelete={props.onDelete}
-                  canDelete={canDelete}
+                  canRemoveRecord={canRemoveRecord}
                 />
               ))}
             </ul>
@@ -454,7 +456,7 @@ function SubprojectItem({
   onDelete,
   canManage,
   canCreateTask,
-  canDelete
+  canRemoveRecord
 }: {
   node: SubprojectNode;
   level: number;
@@ -465,7 +467,7 @@ function SubprojectItem({
   onDelete: (entityType: 'TASKS' | 'SUBPROJECTS', entityId: string, entityName: string) => void;
   canManage: boolean;
   canCreateTask: boolean;
-  canDelete: boolean;
+  canRemoveRecord: boolean;
 }): JSX.Element {
   const { t } = useI18n();
   const key = `sub:${node.subprojectId}`;
@@ -505,7 +507,7 @@ function SubprojectItem({
                 {t('action.edit')}
               </button>
             ) : null}
-            {canDelete ? (
+            {canRemoveRecord ? (
               <button
                 type="button"
                 className="icon-button danger"
@@ -544,7 +546,7 @@ function SubprojectItem({
                 collapsed={collapsed}
                 onToggle={onToggle}
                 onDelete={onDelete}
-                canDelete={canDelete}
+                canRemoveRecord={canRemoveRecord}
               />
             ))}
             {node.children.map((child) => (
@@ -559,7 +561,7 @@ function SubprojectItem({
                 onDelete={onDelete}
                 canManage={canManage}
                 canCreateTask={canCreateTask}
-                canDelete={canDelete}
+                canRemoveRecord={canRemoveRecord}
               />
             ))}
           </ul>
@@ -575,14 +577,14 @@ function TaskItem({
   collapsed,
   onToggle,
   onDelete,
-  canDelete
+  canRemoveRecord
 }: {
   node: TaskNode;
   level: number;
   collapsed: Set<string>;
   onToggle: (key: string) => void;
   onDelete: (entityType: 'TASKS' | 'SUBPROJECTS', entityId: string, entityName: string) => void;
-  canDelete: boolean;
+  canRemoveRecord: boolean;
 }): JSX.Element {
   const { t } = useI18n();
   const { task, children } = node;
@@ -615,7 +617,7 @@ function TaskItem({
         <DeadlineCell dueDate={task.dueDate} state={task.displayStatus} showLabel={false} />
         <TaskStatusBadge state={task.displayStatus} missing={task.scheduleMissing} showDetail />
         <WorkflowHint status={task.status} />
-        {canDelete ? (
+        {canRemoveRecord ? (
           <button
             type="button"
             className="icon-button danger"
@@ -636,7 +638,7 @@ function TaskItem({
               collapsed={collapsed}
               onToggle={onToggle}
               onDelete={onDelete}
-              canDelete={canDelete}
+              canRemoveRecord={canRemoveRecord}
             />
           ))}
         </ul>
@@ -672,7 +674,10 @@ export function ProjectDetailScreen({
   // additionally resolved per record: this project's division must allow a write for this account.
   const recordWritable = (detail.data as { canWrite?: boolean } | undefined)?.canWrite !== false;
   const canManage = !readOnly && capabilities.canEdit && recordWritable;
-  const canDelete = !readOnly && capabilities.canDelete && recordWritable;
+  // Recoverable removal of a task or subproject follows the record's division, never the shell's
+  // selected division. Permanent erasure is not offered here at all.
+  const canMemberEdit = actor.role === "MEMBER" && (detail.data as { canWrite?: boolean } | undefined)?.canWrite === true;
+  const canRemoveRecord = capabilities.canRecoverDelete && (canMemberEdit || (!readOnly && recordWritable));
   // A destination is required for creation: the account must be able to write in this division.
   const canCreateTask = (capabilities.canCreateTask || canManage) && recordWritable;
   const canCreateSubproject = (capabilities.canCreateSubproject || canManage) && recordWritable;
@@ -741,6 +746,8 @@ export function ProjectDetailScreen({
       keys.workProjects,
       keys.workOverview,
       keys.myProjects,
+      // A removal or restoration changes which records an ADMIN can recover.
+      keys.deletedRecords,
       // The read-only projection and the employee lists show the same records.
       'work/tasks',
       'work/project/',
@@ -997,7 +1004,8 @@ export function ProjectDetailScreen({
       <ProjectHierarchy
         hierarchy={hierarchy}
         canManage={canManage}
-        canDelete={canDelete}
+        canEditSubproject={canManage || canMemberEdit}
+        canRemoveRecord={canRemoveRecord}
         canCreateTask={canCreateTask}
         canCreateSubproject={canCreateSubproject}
         includeInactive={includeInactive}
@@ -1052,6 +1060,7 @@ export function ProjectDetailScreen({
         />
       ) : null}
 
+      {editingSubproject && canMemberEdit ? <MemberWorkEditor kind="subprojects" id={editingSubproject.subprojectId} projectId={projectId} onClose={() => setEditingSubproject(null)} onSaved={() => { setEditingSubproject(null); refresh(); }} /> : null}
       {editingSubproject && canManage ? (
         <SubprojectForm
           projectId={projectId}
@@ -1096,11 +1105,14 @@ export function ProjectDetailScreen({
         />
       ) : null}
 
-      {deleteTarget && canDelete ? (
+      {deleteTarget && canRemoveRecord ? (
         <DeleteEntityDialog
+          memberAction={actor.role === "MEMBER"}
           entityType={deleteTarget.entityType}
           entityId={deleteTarget.entityId}
           entityName={deleteTarget.entityName}
+          context={detail.data?.record.projectName ?? projectId}
+          canPurge={capabilities.canPurgeRecord}
           onClose={() => setDeleteTarget(null)}
           onRevealChildren={() => {
             const type = deleteTarget.entityType === 'TASKS' ? 'task' : 'sub';

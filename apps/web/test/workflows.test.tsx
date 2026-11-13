@@ -457,7 +457,7 @@ describe('collapsible task tree', () => {
     fireEvent.click(await screen.findByRole('button', { name: '削除する' }));
     await waitFor(() => {
       expect(fetcher.mock.calls.some(([url, init]) =>
-        url === '/api/admin/tasks/T-REMOVE/remove' && init?.method === 'POST'
+        url === '/api/manager/tasks/T-REMOVE/remove' && init?.method === 'POST'
       )).toBe(true);
     });
     expect(fetcher.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);

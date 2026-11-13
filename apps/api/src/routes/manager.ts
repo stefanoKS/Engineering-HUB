@@ -31,8 +31,10 @@ import {
   ProjectListQuery,
   RequestQueueQuery,
   PublishBody,
+  PurgeBody,
   ReconcileBody,
   RemoveBody,
+  RestoreBody,
   ReopenTaskBody,
   SaveDivisionBody,
   SaveMemberBody,
@@ -131,10 +133,13 @@ import { publicationStatus, publishNow } from '../services/publication';
 import {
   deleteEntity,
   deleteResponsibility,
+  listDeletedRecords,
   preflight,
   reconcileDeletions,
   removalPreflight,
   removeEntity,
+  restoreEntity,
+  restorePreflight,
   responsibilityPreflight
 } from '../services/deletion';
 import type { ServiceCtx } from '../services/common';
@@ -158,6 +163,16 @@ const ParentOptionsQuery = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
   selectedId: z.string().trim().max(64).optional()
 });
+
+/** The ADMIN Deleted Items query: one bounded page, an optional search and an optional type. */
+const DeletedRecordsQuery = z
+  .object({
+    entityType: z.enum(['ALL', 'TASKS', 'SUBPROJECTS']).default('ALL'),
+    query: z.string().trim().max(120).optional(),
+    page: z.coerce.number().int().min(1).max(10000).default(1),
+    pageSize: z.coerce.number().int().min(1).max(50).default(20)
+  })
+  .strict();
 
 /**
  * The division of every project the caller may read, from the request-local directory read.
@@ -362,7 +377,9 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
 
   app.delete('/api/manager/subprojects/:id', async (request, reply) => {
     try {
-      const body = DeleteBody.parse(request.body ?? {});
+      // A permanent erasure of a task/subproject uses the same no-typing confirmation as a
+      // recoverable removal; the ADMIN-only preflight, tombstone and audit intent are unchanged.
+      const body = PurgeBody.parse(request.body ?? {});
       const { id } = request.params as { id: string };
       return ok(reply, request, await deleteEntity(serviceCtx(request), 'SUBPROJECTS', id, body));
     } catch (error) {
@@ -372,7 +389,7 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
 
   app.post('/api/admin/subprojects/:id/purge', async (request, reply) => {
     try {
-      const body = DeleteBody.parse(request.body ?? {});
+      const body = PurgeBody.parse(request.body ?? {});
       const { id } = request.params as { id: string };
       return ok(reply, request, await deleteEntity(serviceCtx(request), 'SUBPROJECTS', id, body));
     } catch (error) {
@@ -380,11 +397,32 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
     }
   });
 
-  app.post('/api/admin/subprojects/:id/remove', async (request, reply) => {
+  // Recoverable removal: an ADMIN anywhere, a MANAGER inside a division where it may write.
+  app.post('/api/manager/subprojects/:id/remove', async (request, reply) => {
     try {
       const body = RemoveBody.parse(request.body ?? {});
       const { id } = request.params as { id: string };
       return ok(reply, request, await removeEntity(serviceCtx(request), 'SUBPROJECTS', id, body));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  app.get('/api/admin/subprojects/:id/restore-preflight', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      managerOf(request);
+      return ok(reply, request, await restorePreflight(serviceCtx(request), 'SUBPROJECTS', id));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  app.post('/api/admin/subprojects/:id/restore', async (request, reply) => {
+    try {
+      const body = RestoreBody.parse(request.body ?? {});
+      const { id } = request.params as { id: string };
+      return ok(reply, request, await restoreEntity(serviceCtx(request), 'SUBPROJECTS', id, body));
     } catch (error) {
       return sendError(reply, request.state, error);
     }
@@ -544,7 +582,7 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
 
   app.delete('/api/manager/tasks/:id', async (request, reply) => {
     try {
-      const body = DeleteBody.parse(request.body ?? {});
+      const body = PurgeBody.parse(request.body ?? {});
       const { id } = request.params as { id: string };
       return ok(reply, request, await deleteEntity(serviceCtx(request), 'TASKS', id, body));
     } catch (error) {
@@ -554,7 +592,7 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
 
   app.post('/api/admin/tasks/:id/purge', async (request, reply) => {
     try {
-      const body = DeleteBody.parse(request.body ?? {});
+      const body = PurgeBody.parse(request.body ?? {});
       const { id } = request.params as { id: string };
       return ok(reply, request, await deleteEntity(serviceCtx(request), 'TASKS', id, body));
     } catch (error) {
@@ -562,11 +600,46 @@ export function registerManagerRoutes(app: FastifyInstance, deps: AppDependencie
     }
   });
 
-  app.post('/api/admin/tasks/:id/remove', async (request, reply) => {
+  // Recoverable removal: an ADMIN anywhere, a MANAGER inside a division where it may write.
+  app.post('/api/manager/tasks/:id/remove', async (request, reply) => {
     try {
       const body = RemoveBody.parse(request.body ?? {});
       const { id } = request.params as { id: string };
       return ok(reply, request, await removeEntity(serviceCtx(request), 'TASKS', id, body));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  app.get('/api/admin/tasks/:id/restore-preflight', async (request, reply) => {
+    try {
+      const { id } = request.params as { id: string };
+      managerOf(request);
+      return ok(reply, request, await restorePreflight(serviceCtx(request), 'TASKS', id));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  app.post('/api/admin/tasks/:id/restore', async (request, reply) => {
+    try {
+      const body = RestoreBody.parse(request.body ?? {});
+      const { id } = request.params as { id: string };
+      return ok(reply, request, await restoreEntity(serviceCtx(request), 'TASKS', id, body));
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  /**
+   * The ADMIN Deleted Items view: recoverably removed tasks and subprojects, one bounded page at a
+   * time. A permanently erased record has no row left, so it is never a restore candidate here.
+   */
+  app.get('/api/admin/deleted-records', async (request, reply) => {
+    try {
+      managerOf(request);
+      const query = DeletedRecordsQuery.parse(request.query ?? {});
+      return ok(reply, request, await listDeletedRecords(serviceCtx(request), query));
     } catch (error) {
       return sendError(reply, request.state, error);
     }

@@ -1,3 +1,4 @@
+import { canWriteDivision } from '@eh/domain';
 /**
  * Read-only work browsing for every signed-in role.
  *
@@ -172,6 +173,7 @@ export async function readOnlyTaskDetail(ctx: ServiceCtx, taskId: string): Promi
       }))
   ];
   return {
+    canWrite: canWriteDivision(ctx.divisions, project.divisionId),
     record: {
       // Explicit allowlist: no recorded effort, duration, notification, note or audit-adjacent value
       // is copied from the stored row into a read-only response.
@@ -545,6 +547,7 @@ export async function readOnlyProjectDetail(ctx: WorkCtx, projectId: string): Pr
   );
 
   return {
+    canWrite: canWriteDivision(ctx.divisions, project.divisionId),
     record: {
       projectId: project.projectId,
       projectName: project.projectName,

@@ -14,6 +14,7 @@ export * from './roles';
 export * from './divisions';
 export * from './requests';
 export * from './completion';
+export * from './confirmation';
 export * from './lifecycle';
 export * from './notifications';
 export * from './publication';

@@ -65,6 +65,7 @@ function subprojectPathOf(subprojects: Reference[], subprojectId: string): strin
 
 export function TaskForm({
   task,
+  memberEdit = false,
   detail,
   initialProjectId,
   initialSubprojectId,
@@ -75,6 +76,7 @@ export function TaskForm({
   onSaved
 }: {
   task?: Task;
+  memberEdit?: boolean;
   detail?: TaskDetail;
   initialProjectId?: string;
   /** A contextual "new task" inside a subproject preselects it; the manager may still change it. */
@@ -120,10 +122,10 @@ export function TaskForm({
   // The name and the division are read for the selected project, including when the opening screen
   // already supplied the name: an assignment option depends on the division, not on a label.
   const projectRecord = useQuery<{ record: { projectId: string; projectName: string; divisionId?: string | null } }>(
-    `manager/project/${form.projectId}`,
+    `${memberEdit ? "work/editor" : "manager"}/project/${form.projectId}`,
     () =>
       api.get<{ record: { projectId: string; projectName: string; divisionId?: string | null } }>(
-        `/api/manager/projects/${form.projectId}`
+        `/api/${memberEdit ? "work/editor" : "manager"}/projects/${form.projectId}`
       ),
     { enabled: !!form.projectId }
   );
@@ -259,7 +261,7 @@ export function TaskForm({
             });
             return created.task;
           }
-          const updated = await api.patch<{ task: Task }>(`/api/manager/tasks/${task.taskId}`, pendingPatch);
+          const updated = await api.patch<{ task: Task }>(`/api/${memberEdit ? "work" : "manager"}/tasks/${task.taskId}`, pendingPatch);
           return updated.task;
         }, taskSaveKeys).then((outcome) => {
           // An answer from an ended session has no local effect; the caller must not treat it as a
@@ -327,6 +329,7 @@ export function TaskForm({
         <div className="field">
           <span className="field-label">{t('nav.projects')}</span>
           <ProjectPicker
+            scope={memberEdit ? "read" : "manager"}
             value={form.projectId}
             disabled={!!task || locationDisabled}
             onChange={(projectId) => {
@@ -388,7 +391,7 @@ export function TaskForm({
               pageSize: number;
               totalPages: number;
               selected: { id: string; name: string; path: string } | null;
-            }>('/api/manager/tasks/parent-options?' + params.toString());
+            }>((memberEdit ? '/api/work/editor/parent-options?' : '/api/manager/tasks/parent-options?') + params.toString());
             return {
               items: result.items.map((option) => ({ value: option.id, label: option.path })),
               total: result.total,

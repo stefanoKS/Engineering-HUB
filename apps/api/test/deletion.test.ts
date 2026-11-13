@@ -84,6 +84,21 @@ function administrativeRemove(headers: Headers, path: string, body: Record<strin
   return app.inject({ method: 'POST', url: path, headers, payload: body });
 }
 
+/** The recoverable removal of a task or a subproject (ADMIN anywhere, MANAGER inside its divisions). */
+function recoverableRemove(
+  headers: Headers,
+  entityType: 'tasks' | 'subprojects',
+  entityId: string,
+  body: Record<string, unknown>
+) {
+  return app.inject({
+    method: 'POST',
+    url: `/api/manager/${entityType}/${entityId}/remove`,
+    headers,
+    payload: body
+  });
+}
+
 function patchSubproject(headers: Headers, entityId: string, body: Record<string, unknown>) {
   return app.inject({
     method: 'PATCH',
@@ -100,7 +115,51 @@ async function revisionOf(table: 'tasks' | 'subprojects', id: string): Promise<n
 }
 
 describe('deletion authorization', () => {
-  it('refuses every non-admin role on the preflight and on the removal', async () => {
+  /** Waits until at least one connection is queued on the shared advisory lock. */
+  async function waitForLockWaiter(timeoutMs = 10_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const row = await db.one<{ waiting: string }>(
+        "SELECT count(*)::text AS waiting FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
+      );
+      if (Number(row?.waiting ?? 0) > 0) return;
+      if (Date.now() > deadline) throw new Error('the request never queued on the division membership lock');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+
+  it('rechecks the role while the removal waits for the division lock', async () => {
+    await db.query(
+      "INSERT INTO tasks(task_id,project_id,task_name,status) VALUES('T-RACE','PRJ-PRIV','Racy removal','Not Started')"
+    );
+    const manager = await login('0002');
+    const revision = await revisionOf('tasks', 'T-RACE');
+    const blocker = await pool.connect();
+    await blocker.query('BEGIN');
+    await blocker.query('SELECT pg_advisory_xact_lock(hashtext($1))', ['member-divisions']);
+    let response: Awaited<ReturnType<typeof recoverableRemove>> | null = null;
+    try {
+      const pending = recoverableRemove(manager, 'tasks', 'T-RACE', { revision, confirmed: true });
+      await waitForLockWaiter();
+      // The demotion commits while the request is queued: the transaction-time re-read must see it.
+      await blocker.query("UPDATE members SET role = 'VIEWER' WHERE member_id = 'MEM-MANAGER'");
+      await blocker.query('COMMIT');
+      response = await pending;
+    } finally {
+      await blocker.query('ROLLBACK').catch(() => undefined);
+      blocker.release();
+    }
+    expect(response!.statusCode, response!.body).toBe(403);
+    expect(response!.json().error.code).toBe('AUTHORIZATION_DENIED');
+    expect(
+      await db.one("SELECT 1 FROM tasks WHERE task_id = 'T-RACE' AND deleted_at IS NULL")
+    ).toBeTruthy();
+    expect(
+      await db.one("SELECT 1 FROM audit_log WHERE entity_id = 'T-RACE' AND action = 'RECORD_REMOVED'")
+    ).toBeFalsy();
+  });
+
+  it('keeps the permanent erasure ADMIN-only for every other role', async () => {
     await db.query(
       "INSERT INTO tasks(task_id,project_id,task_name,status,due_date) VALUES('T-SOLO','PRJ-PRIV','Lonely work','In Progress','2026-12-01')"
     );
@@ -116,14 +175,145 @@ describe('deletion authorization', () => {
       expect((blocked.json() as { error: { code: string } }).error.code).toBe('AUTHORIZATION_DENIED');
       const refused = await remove(headers, '/api/manager/tasks/T-SOLO', {
         revision: await revisionOf('tasks', 'T-SOLO'),
-        confirmed: true,
-        reason: 'Mistake',
-        confirmation: 'DELETE T-SOLO'
+        confirmed: true
       });
       expect(refused.statusCode, `${employeeId}: ${refused.body}`).toBe(403);
+      const permanentlyRefused = await administrativeRemove(headers, '/api/admin/tasks/T-SOLO/purge', {
+        revision: await revisionOf('tasks', 'T-SOLO'),
+        confirmed: true
+      });
+      expect(permanentlyRefused.statusCode, `${employeeId}: ${permanentlyRefused.body}`).toBe(403);
       const still = await db.one('SELECT 1 FROM tasks WHERE task_id = $1 AND deleted_at IS NULL', ['T-SOLO']);
       expect(still, `task survived a ${employeeId} attempt`).toBeTruthy();
     }
+  });
+
+  it('lets a MANAGER recoverably remove work inside a writable division only', async () => {
+    await db.query(
+      `INSERT INTO projects(project_id,project_name,status,dashboard_visibility,division_id) VALUES
+        ('PRJ-OTHER','Other division project','Active','RESTRICTED','DIV-ENG')`
+    );
+    await db.query(
+      `INSERT INTO tasks(task_id,project_id,task_name,status,due_date) VALUES
+        ('T-OWN','PRJ-PRIV','Own division work','In Progress','2026-12-01'),
+        ('T-FOREIGN','PRJ-OTHER','Foreign division work','In Progress','2026-12-01')`
+    );
+    const manager = await login('0002');
+    // Inside a division where the manager holds WORK membership.
+    const checked = await app.inject({
+      url: '/api/manager/removal/preflight?entityType=TASKS&entityId=T-OWN',
+      headers: { cookie: manager.cookie! }
+    });
+    expect(checked.statusCode, checked.body).toBe(200);
+    expect(checked.json().data.deletable).toBe(true);
+    const removed = await recoverableRemove(manager, 'tasks', 'T-OWN', {
+      revision: await revisionOf('tasks', 'T-OWN'),
+      confirmed: true
+    });
+    expect(removed.statusCode, removed.body).toBe(200);
+    expect(await db.one("SELECT 1 FROM tasks WHERE task_id = 'T-OWN' AND deleted_at IS NOT NULL")).toBeTruthy();
+
+    // A division where the manager has no grant is not even readable.
+    const foreign = await app.inject({
+      url: '/api/manager/removal/preflight?entityType=TASKS&entityId=T-FOREIGN',
+      headers: { cookie: manager.cookie! }
+    });
+    expect(foreign.statusCode, foreign.body).toBe(404);
+    const refused = await recoverableRemove(manager, 'tasks', 'T-FOREIGN', {
+      revision: await revisionOf('tasks', 'T-FOREIGN'),
+      confirmed: true
+    });
+    expect(refused.statusCode, refused.body).toBe(404);
+    expect(await db.one("SELECT 1 FROM tasks WHERE task_id = 'T-FOREIGN' AND deleted_at IS NULL")).toBeTruthy();
+  });
+
+  it('refuses a manager whose access in that division is READ-only', async () => {
+    await db.query(
+      `INSERT INTO projects(project_id,project_name,status,dashboard_visibility,division_id) VALUES
+        ('PRJ-READONLY','Read-only division project','Active','RESTRICTED','DIV-ENG')`
+    );
+    await db.query(
+      "INSERT INTO tasks(task_id,project_id,task_name,status,due_date) VALUES('T-READONLY','PRJ-READONLY','Observed work','In Progress','2026-12-01')"
+    );
+    await db.query(
+      `INSERT INTO member_divisions(relationship_id,member_id,division_id,access_kind,assigned_by)
+       VALUES('MD-READ-MGR','MEM-MANAGER','DIV-ENG','READ','MEM-ADMIN')`
+    );
+    const manager = await login('0002');
+    const checked = await app.inject({
+      url: '/api/manager/removal/preflight?entityType=TASKS&entityId=T-READONLY',
+      headers: { cookie: manager.cookie! }
+    });
+    expect(checked.statusCode, checked.body).toBe(403);
+    expect(checked.json().error.code).toBe('AUTHORIZATION_DENIED');
+    const refused = await recoverableRemove(manager, 'tasks', 'T-READONLY', {
+      revision: await revisionOf('tasks', 'T-READONLY'),
+      confirmed: true
+    });
+    expect(refused.statusCode, refused.body).toBe(403);
+    expect(await db.one("SELECT 1 FROM tasks WHERE task_id = 'T-READONLY' AND deleted_at IS NULL")).toBeTruthy();
+  });
+
+  it('refuses MEMBER, VIEWER and GENERAL_MANAGER on removal, restoration and reopening', async () => {
+    await db.query(
+      "INSERT INTO members(member_id,name,role) VALUES('MEM-GM','General manager','GENERAL_MANAGER')"
+    );
+    await db.query(
+      "INSERT INTO local_accounts(member_id,employee_id,password_hash,must_change_password) VALUES('MEM-GM','0003',$1,false)",
+      [hash]
+    );
+    await db.query(
+      `INSERT INTO tasks(task_id,project_id,task_name,status,due_date) VALUES
+        ('T-ROLES','PRJ-PRIV','Role probe','In Progress','2026-12-01'),
+        ('T-ROLES-DONE','PRJ-PRIV','Role probe done','Done','2026-12-01')`
+    );
+    await db.query("UPDATE tasks SET deleted_at = now() WHERE task_id = 'T-ROLES-DONE'");
+    for (const employeeId of ['0003', '0010', '0020']) {
+      const headers = await login(employeeId);
+      const removal = await recoverableRemove(headers, 'tasks', 'T-ROLES', {
+        revision: await revisionOf('tasks', 'T-ROLES'),
+        confirmed: true
+      });
+      expect(removal.statusCode, `${employeeId}: ${removal.body}`).toBe(403);
+      const restore = await administrativeRemove(headers, '/api/admin/tasks/T-ROLES-DONE/restore', {
+        revision: await revisionOf('tasks', 'T-ROLES-DONE'),
+        confirmed: true
+      });
+      expect(restore.statusCode, `${employeeId}: ${restore.body}`).toBe(403);
+      const list = await app.inject({ url: '/api/admin/deleted-records', headers: { cookie: headers.cookie! } });
+      expect(list.statusCode, `${employeeId}: ${list.body}`).toBe(403);
+      const reopen = await administrativeRemove(headers, '/api/manager/tasks/T-ROLES-DONE/reopen', {
+        idempotencyKey: `roles-${employeeId}-123456`,
+        revision: await revisionOf('tasks', 'T-ROLES-DONE'),
+        confirmed: true
+      });
+      expect(reopen.statusCode, `${employeeId}: ${reopen.body}`).toBe(403);
+    }
+    expect(await db.one("SELECT 1 FROM tasks WHERE task_id = 'T-ROLES' AND deleted_at IS NULL")).toBeTruthy();
+    expect(await db.one("SELECT 1 FROM tasks WHERE task_id = 'T-ROLES-DONE' AND deleted_at IS NOT NULL")).toBeTruthy();
+  });
+
+  it('does not let a forged browser capability authorize a server write', async () => {
+    await db.query(
+      `INSERT INTO projects(project_id,project_name,status,dashboard_visibility,division_id) VALUES
+        ('PRJ-FOREIGN','Foreign project','Active','RESTRICTED','DIV-ENG')`
+    );
+    await db.query(
+      "INSERT INTO tasks(task_id,project_id,task_name,status,due_date) VALUES('T-FORGED','PRJ-FOREIGN','Forged probe','In Progress','2026-12-01')"
+    );
+    const manager = await login('0002');
+    const refused = await app.inject({
+      method: 'POST',
+      url: '/api/manager/tasks/T-FORGED/remove',
+      headers: manager,
+      payload: { revision: 1, confirmed: true, role: 'ADMIN', canDelete: true, divisionId: 'DIV-DEV' }
+    });
+    expect(refused.statusCode, refused.body).toBe(400);
+    expect(refused.json().error.code).toBe('VALIDATION_FAILED');
+    // Without the forged fields the same manager is refused by the division boundary.
+    const honest = await recoverableRemove(manager, 'tasks', 'T-FORGED', { revision: 1, confirmed: true });
+    expect(honest.statusCode, honest.body).toBe(404);
+    expect(await db.one("SELECT 1 FROM tasks WHERE task_id = 'T-FORGED' AND deleted_at IS NULL")).toBeTruthy();
   });
 });
 
@@ -163,19 +353,11 @@ describe('administrative logical removal', () => {
             headers: { cookie: admin.cookie! }
           });
           expect(checked.statusCode, checked.body).toBe(200);
-          expect(checked.json().data).toMatchObject({ deletable: true, blockers: [], requiresReason: true, revision: 4 });
+          expect(checked.json().data).toMatchObject({ deletable: true, blockers: [], retainedHistory: true, revision: 4 });
 
-          const missingReason = await administrativeRemove(admin, '/api/admin/tasks/T-LOGICAL/remove', {
+          const removed = await recoverableRemove(admin, 'tasks', 'T-LOGICAL', {
             revision: 4,
             confirmed: true
-          });
-          expect(missingReason.statusCode, missingReason.body).toBe(400);
-          expect(missingReason.json().error.code).toBe('VALIDATION_FAILED');
-
-          const removed = await administrativeRemove(admin, '/api/admin/tasks/T-LOGICAL/remove', {
-            revision: 4,
-            confirmed: true,
-            reason: 'Created by mistake'
           });
           expect(removed.statusCode, removed.body).toBe(200);
           expect(removed.json().data).toMatchObject({ alreadyRemoved: false, revision: 5 });
@@ -195,31 +377,31 @@ describe('administrative logical removal', () => {
           expect(active.json().data.items).toEqual([]);
         });
 
-        it('is ADMIN-only and treats a repeated successful removal as idempotent', async () => {
+        it('refuses MEMBER and VIEWER and treats a repeated successful removal as idempotent', async () => {
           await db.query(
             "INSERT INTO tasks(task_id,project_id,task_name,status) VALUES('T-IDEMPOTENT','PRJ-PRIV','Duplicate','Not Started')"
           );
-          for (const employeeId of ['0002', '0010', '0020']) {
+          for (const employeeId of ['0010', '0020']) {
             const headers = await login(employeeId);
-            const refused = await administrativeRemove(headers, '/api/admin/tasks/T-IDEMPOTENT/remove', {
+            const refused = await recoverableRemove(headers, 'tasks', 'T-IDEMPOTENT', {
               revision: 1,
               confirmed: true
             });
             expect(refused.statusCode, `${employeeId}: ${refused.body}`).toBe(403);
           }
-          const anonymous = await administrativeRemove({}, '/api/admin/tasks/T-IDEMPOTENT/remove', {
+          const anonymous = await recoverableRemove({}, 'tasks', 'T-IDEMPOTENT', {
             revision: 1,
             confirmed: true
           });
           expect(anonymous.statusCode).toBe(401);
 
-          const admin = await login('0001');
-          const first = await administrativeRemove(admin, '/api/admin/tasks/T-IDEMPOTENT/remove', {
+          const manager = await login('0002');
+          const first = await recoverableRemove(manager, 'tasks', 'T-IDEMPOTENT', {
             revision: 1,
             confirmed: true
           });
           expect(first.statusCode, first.body).toBe(200);
-          const second = await administrativeRemove(admin, '/api/admin/tasks/T-IDEMPOTENT/remove', {
+          const second = await recoverableRemove(manager, 'tasks', 'T-IDEMPOTENT', {
             revision: 1,
             confirmed: true
           });
@@ -229,6 +411,15 @@ describe('administrative logical removal', () => {
             "SELECT count(*)::text AS count FROM audit_log WHERE entity_id = 'T-IDEMPOTENT' AND action = 'RECORD_REMOVED'"
           );
           expect(Number(evidence!.count)).toBe(1);
+          const recorded = await db.one<{ new_value: Record<string, unknown> }>(
+            "SELECT new_value FROM audit_log WHERE entity_id = 'T-IDEMPOTENT' AND action = 'RECORD_REMOVED'"
+          );
+          expect(recorded!.new_value).toMatchObject({
+            removedBy: 'MEM-MANAGER',
+            removedByRole: 'MANAGER',
+            confirmationSource: 'BUTTON',
+            userNote: null
+          });
         });
 
         it('blocks child work, active dependencies, pending requests/jobs and stale revisions', async () => {
@@ -265,12 +456,12 @@ describe('administrative logical removal', () => {
             url: '/api/manager/removal/preflight?entityType=TASKS&entityId=T-DONE',
             headers: { cookie: admin.cookie! }
           });
-          expect(done.json().data).toMatchObject({ deletable: true, blockers: [], requiresReason: true });
+          expect(done.json().data).toMatchObject({ deletable: true, blockers: [], retainedHistory: true });
 
           await db.query(
             "INSERT INTO tasks(task_id,project_id,task_name,status,revision) VALUES('T-STALE-REMOVE','PRJ-PRIV','Stale task','Not Started',3)"
           );
-          const stale = await administrativeRemove(admin, '/api/admin/tasks/T-STALE-REMOVE/remove', {
+          const stale = await recoverableRemove(admin, 'tasks', 'T-STALE-REMOVE', {
             revision: 2,
             confirmed: true
           });
@@ -291,7 +482,7 @@ describe('administrative logical removal', () => {
             "INSERT INTO audit_log(entity_type,entity_id,action,actor_member_id) VALUES('SUBPROJECTS','SUB-SOFT','SUBPROJECT_UPDATED','MEM-ADMIN')"
           );
           const admin = await login('0001');
-          const removed = await administrativeRemove(admin, '/api/admin/subprojects/SUB-SOFT/remove', {
+          const removed = await recoverableRemove(admin, 'subprojects', 'SUB-SOFT', {
             revision: 5,
             confirmed: true
           });
@@ -348,9 +539,7 @@ describe('eligible removals', () => {
 
     const purged = await administrativeRemove(admin, '/api/admin/tasks/T-PURGE/purge', {
       revision: body.revision,
-      confirmed: true,
-      reason: 'Mistaken duplicate',
-      confirmation: body.confirmationText
+      confirmed: true
     });
     expect(purged.statusCode, purged.body).toBe(200);
     expect(await db.one("SELECT 1 FROM tasks WHERE task_id = 'T-PURGE'")).toBeFalsy();
@@ -380,9 +569,7 @@ describe('eligible removals', () => {
 
     const deleted = await remove(admin, '/api/manager/subprojects/SUB-EMPTY', {
       revision: preflightBody.revision,
-      confirmed: true,
-      reason: 'Created by mistake',
-      confirmation: preflightBody.confirmationText
+      confirmed: true
     });
     expect(deleted.statusCode, deleted.body).toBe(200);
     const tombstoneId = (deleted.json() as { data: { tombstoneId: string } }).data.tombstoneId;
@@ -400,7 +587,9 @@ describe('eligible removals', () => {
     );
     expect(tombstone).toBeTruthy();
     expect(tombstone!.tombstone_id).toBe(tombstoneId);
-    expect(tombstone!.reason).toBe('Created by mistake');
+    expect(tombstone!.reason).toBe(
+      'Permanent erasure confirmed with the in-application confirmation button (no typed phrase and no free-text reason were collected)'
+    );
     expect(tombstone!.last_revision).toBe(preflightBody.revision);
     expect(tombstone!.snapshot).toMatchObject({
       subprojectId: 'SUB-EMPTY',
@@ -444,9 +633,7 @@ describe('eligible removals', () => {
     expect(body.blockers).toEqual([]);
     const deleted = await remove(admin, `/api/manager/subprojects/${id}`, {
       revision: body.revision,
-      confirmed: true,
-      reason: 'Mistaken empty structure',
-      confirmation: body.confirmationText
+      confirmed: true
     });
     expect(deleted.statusCode, deleted.body).toBe(200);
 
@@ -476,9 +663,7 @@ describe('eligible removals', () => {
 
     const deleted = await remove(admin, '/api/manager/tasks/T-MISTAKE', {
       revision: body.revision,
-      confirmed: true,
-      reason: 'Duplicate of T-KEEP',
-      confirmation: body.confirmationText
+      confirmed: true
     });
     expect(deleted.statusCode, deleted.body).toBe(200);
     expect(await db.one('SELECT 1 FROM tasks WHERE task_id = $1', ['T-MISTAKE'])).toBeFalsy();
@@ -488,9 +673,7 @@ describe('eligible removals', () => {
     // A removed identifier is never reused and stays traceable.
     const reused = await remove(admin, '/api/manager/tasks/T-MISTAKE', {
       revision: body.revision,
-      confirmed: true,
-      reason: 'Again',
-      confirmation: body.confirmationText
+      confirmed: true
     });
     expect(reused.statusCode).toBe(409);
     expect((reused.json() as { error: { details: { blockers: { code: string }[] } } }).error.details.blockers.map((entry) => entry.code)).toContain(
@@ -515,9 +698,7 @@ describe('deletion blockers', () => {
 
     const refused = await remove(admin, '/api/manager/subprojects/SUB-WORK', {
       revision: await revisionOf('subprojects', 'SUB-WORK'),
-      confirmed: true,
-      reason: 'Try anyway',
-      confirmation: 'DELETE SUB-WORK'
+      confirmed: true
     });
     expect(refused.statusCode, refused.body).toBe(409);
     expect((refused.json() as { error: { details: { blockers: { code: string }[] } } }).error.details.blockers.map((entry) => entry.code)).toContain('HAS_TASKS');
@@ -666,9 +847,7 @@ describe('deletion confirmation and revision', () => {
     const stale = (await revisionOf('tasks', 'T-STALE')) + 5;
     const refused = await remove(admin, '/api/manager/tasks/T-STALE', {
       revision: stale,
-      confirmed: true,
-      reason: 'Stale',
-      confirmation: 'DELETE T-STALE'
+      confirmed: true
     });
     expect(refused.statusCode, refused.body).toBe(409);
     expect((refused.json() as { error: { code: string } }).error.code).toBe('EDIT_CONFLICT');
@@ -676,29 +855,24 @@ describe('deletion confirmation and revision', () => {
     expect(await db.one("SELECT 1 FROM record_deletions WHERE entity_id = 'T-STALE'")).toBeFalsy();
   });
 
-  it('refuses a wrong confirmation phrase or a missing reason', async () => {
+  it('needs an explicit confirmation but no typed phrase and no reason', async () => {
     await db.query(
       "INSERT INTO tasks(task_id,project_id,task_name,status,due_date) VALUES('T-CONF','PRJ-PRIV','Confirmation work','In Progress','2026-12-01')"
     );
     const admin = await login('0001');
     const revision = await revisionOf('tasks', 'T-CONF');
-    const wrongPhrase = await remove(admin, '/api/manager/tasks/T-CONF', {
-      revision,
-      confirmed: true,
-      reason: 'Mistake',
-      confirmation: 'delete t-conf'
-    });
-    expect(wrongPhrase.statusCode, wrongPhrase.body).toBe(400);
-    expect((wrongPhrase.json() as { error: { code: string } }).error.code).toBe('CONFIRMATION_REQUIRED');
+    // A missing confirmation flag is refused by the contract before anything is read.
+    const unconfirmed = await remove(admin, '/api/manager/tasks/T-CONF', { revision });
+    expect(unconfirmed.statusCode, unconfirmed.body).toBe(400);
+    expect((unconfirmed.json() as { error: { code: string } }).error.code).toBe('VALIDATION_FAILED');
 
-    const noReason = await remove(admin, '/api/manager/tasks/T-CONF', {
+    const confirmed = await remove(admin, '/api/manager/tasks/T-CONF', {
       revision,
-      confirmed: true,
-      reason: '   ',
-      confirmation: 'DELETE T-CONF'
+      confirmed: true
     });
-    expect(noReason.statusCode, noReason.body).toBe(400);
-    expect(await db.one("SELECT 1 FROM tasks WHERE task_id = 'T-CONF' AND deleted_at IS NULL")).toBeTruthy();
+    expect(confirmed.statusCode, confirmed.body).toBe(200);
+    expect(await db.one("SELECT 1 FROM tasks WHERE task_id = 'T-CONF'")).toBeFalsy();
+    expect(await db.one("SELECT 1 FROM record_deletions WHERE entity_id = 'T-CONF'")).toBeTruthy();
   });
 
   it('refuses a subproject changed after preflight and preserves the new revision', async () => {
@@ -718,9 +892,7 @@ describe('deletion confirmation and revision', () => {
 
     const refused = await remove(admin, '/api/manager/subprojects/SUB-RACE', {
       revision: before.revision,
-      confirmed: true,
-      reason: 'Stale delete attempt',
-      confirmation: before.confirmationText
+      confirmed: true
     });
     expect(refused.statusCode, refused.body).toBe(409);
     expect((refused.json() as { error: { code: string } }).error.code).toBe('EDIT_CONFLICT');

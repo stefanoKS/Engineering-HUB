@@ -43,7 +43,8 @@ export const APP_ROUTES = {
   automation: 'manager',
   status: 'manager',
   accounts: 'admin',
-  divisions: 'admin'
+  divisions: 'admin',
+  'deleted-items': 'manager'
 } as const satisfies Record<string, RouteAccess>;
 
 export type AppRoute = keyof typeof APP_ROUTES;

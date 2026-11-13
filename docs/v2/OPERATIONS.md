@@ -1,5 +1,37 @@
 # Operations Runbook (V2)
 
+## Manager recoverable removal, deleted items and restoration — 2026-11-12
+
+No migration is part of this change: schema 12 stays as applied, no column, table or Script-style
+setting is added, and the operational database is not touched by the release itself.
+
+* **A manager may now remove a task or a subproject recoverably.** The removal is offered only inside
+  a division where that manager holds a `WORK` membership, and the server refuses a read-only
+  division, a foreign division and every non-manager role. A user who reports "the delete option is
+  missing" is usually looking at a record in a division where they hold only `READ` access.
+* **Nothing is physically removed.** The row keeps its identifier, status, dates, assignments,
+  requests, approvals, notifications and history; only `deleted_at` is stamped and the revision moves.
+  A record that still has children, dependants, pending requests or queued notification work is
+  refused with the blockers listed.
+* **削除した記録 / Deleted items is the recovery screen.** An ADMIN finds every recoverably removed
+  task and subproject there, searches by name or project, and restores one with a single button. The
+  list is paged and shows the deletion time, the recorded deleting manager (or 記録なし when the audit
+  row is missing), the recorded reason and whether a restoration is currently possible.
+* **A restoration returns the same record.** The identifier, status, dates, assignments and history
+  are preserved and `RECORD_RESTORED` is appended. A removed parent, an archived or cancelled project
+  or a hierarchy that no longer fits is reported as a blocker; nothing is repaired, moved or restored
+  automatically. A completed task comes back completed — reopening it is a separate ADMIN action.
+* **A permanent erasure is still separate and irreversible.** Only an ADMIN may erase a demonstrably
+  mistaken, empty record, the preflight and tombstone are unchanged, and an erased record is not
+  listed on 削除した記録 and cannot be restored. Treat it as a last resort, not as "delete".
+* **Confirmations no longer ask for typing.** A removal, a restoration, a reopening and a permanent
+  task/subproject erasure ask for one clearly labelled button in a red panel that names the record.
+  Project and responsibility erasure keep their typed `DELETE <id>` confirmation. If an operator asks
+  "what do I type?", the answer is nothing: review the named record and the stated consequence.
+* **An unclear outcome is not a failure and is not retried automatically.** Reload the screen and the
+  list to see the actual state; a repeated delivery of the same attempt replays the stored answer
+  rather than applying a second effect.
+
 ## Division corrections and V2 branding — 2026-11-11
 
 No migration is part of this change: schema 12 stays as applied, and the operational database was not
@@ -364,3 +396,25 @@ Nothing below happens automatically, and no step is scheduled.
 Restoring a backup after a failed or unwanted mapping is a separate, explicit operation
 ([BACKUP_RESTORE.md](../BACKUP_RESTORE.md)); the mapping tool never restores and has no undo
 command. Live execution of this procedure and its Workspace behaviour are **NOT_RUN** here.
+
+
+## Member collaboration and manager recovery — 2026-11-13
+
+This user-approved policy supersedes earlier statements that members cannot edit/remove existing
+tasks or subprojects, and that restoration is ADMIN-only. MEMBER may edit ordinary task and
+subproject fields and recoverably delete either record regardless of owner, within a WORK division
+and an INTERNAL, non-archived project they may see. READ-only grants never allow a write.
+MANAGER may restore tasks/subprojects in WORK divisions; ADMIN retains cross-division recovery.
+Projects/responsibilities, approvals, direct completion, notification settings, permanent erasure
+and completed-task reopening retain their existing separate permissions. Members do not restore.
+
+The member opens a task detail to edit/delete it, or a project hierarchy to edit/delete a
+subproject. Editors fetch fresh narrow records and revisions; saves are partial patches. A red
+confirmation panel requires one explicit button and no typing. Deletion retains the row/history,
+children/dependencies and existing blockers; recovery restores the same ID and status. Completed
+work stays completed. Managers reach Deleted Items through the management navigation.
+
+Server authorization is repeated under the existing division/role advisory locks. Deleted Items
+filters both records and totals by writable divisions before pagination. Member edit APIs retain
+project visibility and field allowlists and do not expose manager-only history or settings.
+No schema change, operational migration, deployment or outbound activation is required or performed.

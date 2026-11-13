@@ -1,3 +1,4 @@
+import { authorizeWorkEdit, assertMemberEditFields } from './work-edit';
 ﻿/**
  * Task commands and the task detail read model.
  *
@@ -50,6 +51,7 @@ import {
   assertReopenAllowed,
   assertWritableDivision,
   assignmentChanged,
+  confirmationRecord,
   createCalendar,
   requireRole,
   validateTaskParent,
@@ -335,9 +337,11 @@ export async function createTask(
 }
 
 export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<typeof PatchTaskBody>): Promise<Task> {
-  requireRole(ctx.identity, WRITE_ROLES);
+  requireRole(ctx.identity, 'MEMBER');
+  assertMemberEditFields(ctx, 'task', body);
   // Both the task's current division and the project must authorize the write.
   const { task, project } = await writableTask(ctx, taskId);
+  await authorizeWorkEdit(ctx, task.projectId);
   if (body.revision !== task.revision) {
     throw new DomainError('EDIT_CONFLICT', 'Reload and review; your draft is preserved', {
       expected: body.revision,
@@ -478,7 +482,9 @@ export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<t
     // request started therefore cannot be bypassed by a write that was already in flight.
     await lockDivisionMutation(tx);
     const fresh = await reauthorizeInTransaction(tx, ctx);
-    requireRole(fresh.identity, WRITE_ROLES);
+    requireRole(fresh.identity, 'MEMBER');
+    assertMemberEditFields({ ...ctx, identity: fresh.identity }, 'task', body);
+    await authorizeWorkEdit({ ...ctx, identity: fresh.identity, divisions: fresh.scope }, task.projectId, tx);
     const currentDivision = await divisionForWriteOfProject(tx, task.projectId);
     assertWritableDivision(fresh.scope, currentDivision.divisionId);
     await assertAssignmentEligibility(
@@ -510,7 +516,7 @@ export async function patchTask(ctx: ServiceCtx, taskId: string, body: z.infer<t
         newDueDate: body.deadline ?? null,
         previousPlannedStart: task.plannedStart,
         newPlannedStart: next.plannedStart,
-        reason: 'Manager edit',
+        reason: ctx.identity.role === 'MEMBER' ? 'Member edit' : 'Manager edit',
         changedBy: ctx.identity.email,
         source: 'MANAGER_EDIT'
       });
@@ -751,8 +757,6 @@ export type ReopenEligibility = {
   taskId: string;
   eligible: boolean;
   reasons: ReopenBlockReason[];
-  /** The exact phrase the ADMIN must type; it never becomes authority on its own. */
-  confirmationText: string;
   projectId: string;
   projectName: string;
   projectStatus: string;
@@ -797,7 +801,6 @@ export async function reopenEligibility(ctx: ServiceCtx, taskId: string): Promis
     taskId,
     eligible: reasons.length === 0,
     reasons,
-    confirmationText: `REOPEN ${taskId}`,
     projectId: project.projectId,
     projectName: project.projectName,
     projectStatus: project.status,
@@ -855,11 +858,11 @@ export async function reopenTask(
     });
   }
   const children = await countTaskChildren(ctx.db, taskId);
+  const confirmation = confirmationRecord('REOPEN', body.note);
   assertReopenAllowed({
     task: { taskId, status: task.status, container: children > 0 },
     project: { projectId: project.projectId, status: project.status, archived: !!project.archivedAt },
-    reason: body.reason,
-    confirmation: body.confirmation,
+    confirmed: body.confirmed === true,
     actorRole: ctx.identity.role,
     reopenProject: body.reopenProject === true
   });
@@ -902,7 +905,12 @@ export async function reopenTask(
           entityId: project.projectId,
           action: 'PROJECT_REOPENED',
           previousValue: { status: project.status },
-          newValue: { status: reopenedProject.status, reason: body.reason, reopenedTaskId: taskId }
+          newValue: {
+            status: reopenedProject.status,
+            reason: confirmation.confirmationDescription,
+            ...confirmation,
+            reopenedTaskId: taskId
+          }
         });
       }
       await audit(tx, ctx, {
@@ -918,7 +926,8 @@ export async function reopenTask(
           taskId,
           actorMemberId: ctx.identity.memberId,
           actorRole: ctx.identity.role,
-          reason: body.reason,
+          reason: confirmation.confirmationDescription,
+          ...confirmation,
           status: next.status,
           progressPercent: next.progressPercent,
           completedAt: next.completedAt,
@@ -967,7 +976,8 @@ export async function parentTaskOptions(
     selectedId?: string;
   }
 ): Promise<{ items: ParentTaskOption[]; total: number; page: number; pageSize: number; totalPages: number; selected: ParentTaskOption | null }> {
-  requireRole(ctx.identity, WRITE_ROLES);
+  requireRole(ctx.identity, 'MEMBER');
+  await authorizeWorkEdit(ctx, input.projectId);
   const pageSize = Math.min(Math.max(input.pageSize ?? 25, 1), 100);
   // The picker may only offer parents in a project this manager may write in.
   const project = await getProject(ctx.db, input.projectId);

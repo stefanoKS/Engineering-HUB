@@ -234,7 +234,14 @@ describe('role authorization', () => {
       (await app.inject({ method: 'PATCH', url: '/api/manager/tasks/TSK-A', headers: member, payload: { revision: 1, taskName: 'Changed' } })).statusCode
     ).toBe(403);
     expect(
-      (await app.inject({ method: 'DELETE', url: '/api/manager/tasks/TSK-A', headers: member, payload: { revision: 1, confirmed: true, reason: 'x', confirmation: 'DELETE TSK-A' } })).statusCode
+      (await app.inject({ method: 'DELETE', url: '/api/manager/tasks/TSK-A', headers: member, payload: { revision: 1, confirmed: true } })).statusCode
+    ).toBe(403);
+    // The recoverable removal and the restoration are separate endpoints with the same refusal.
+    expect(
+      (await app.inject({ method: 'POST', url: '/api/manager/tasks/TSK-A/remove', headers: member, payload: { revision: 1, confirmed: true } })).statusCode
+    ).toBe(403);
+    expect(
+      (await app.inject({ method: 'POST', url: '/api/admin/tasks/TSK-A/restore', headers: member, payload: { revision: 1, confirmed: true } })).statusCode
     ).toBe(403);
     // A member may not name another assignee; the self-service contract has no such field.
     expect(
@@ -694,10 +701,32 @@ describe('member project explorer', () => {
             method: 'DELETE',
             url: '/api/manager/subprojects/SUB-G',
             headers,
-            payload: { revision: 1, confirmed: true, reason: 'x', confirmation: 'DELETE SUB-G' }
+            payload: { revision: 1, confirmed: true }
           })
         ).statusCode,
         `${employeeId} delete subproject`
+      ).toBe(403);
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/api/manager/subprojects/SUB-G/remove',
+            headers,
+            payload: { revision: 1, confirmed: true }
+          })
+        ).statusCode,
+        `${employeeId} recoverable removal of a subproject`
+      ).toBe(403);
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/api/admin/subprojects/SUB-G/restore',
+            headers,
+            payload: { revision: 1, confirmed: true }
+          })
+        ).statusCode,
+        `${employeeId} restore a subproject`
       ).toBe(403);
       // The read-only projection is not a write path.
       expect(

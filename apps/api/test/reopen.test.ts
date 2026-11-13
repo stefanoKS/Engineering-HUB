@@ -110,14 +110,13 @@ async function taskRow(taskId: string) {
 }
 
 describe('reopening a completed task', () => {
-  it('lets an ADMIN reopen a completed leaf task with a reason and a typed confirmation', async () => {
+  it('lets an ADMIN reopen a completed leaf task without typing a phrase or a reason', async () => {
     await seedDone('TSK-1');
     const admin = await login('0001');
     const response = await reopen(admin, 'TSK-1', {
       idempotencyKey: 'reopen-1',
       revision: 1,
-      reason: '完了操作が誤りでした',
-      confirmation: 'REOPEN TSK-1'
+      confirmed: true
     });
     expect(response.statusCode, response.body).toBe(200);
     const stored = await taskRow('TSK-1');
@@ -125,12 +124,36 @@ describe('reopening a completed task', () => {
     expect(stored?.progress_percent).toBe(0);
     expect(stored?.completed_at).toBeNull();
 
-    const audited = await db.one<{ actor_member_id: string; new_value: { reason: string } }>(
+    const audited = await db.one<{
+      actor_member_id: string;
+      new_value: { reason: string; confirmationSource: string; userNote: string | null };
+    }>(
       "SELECT actor_member_id, new_value FROM audit_log WHERE action = 'TASK_REOPENED' AND entity_id = $1",
       ['TSK-1']
     );
     expect(audited?.actor_member_id).toBe('MEM-ADMIN');
-    expect(audited?.new_value.reason).toBe('完了操作が誤りでした');
+    // The audit never claims a person wrote a reason: it records the confirmation source and an
+    // application-generated description, with no user note.
+    expect(audited?.new_value.confirmationSource).toBe('BUTTON');
+    expect(audited?.new_value.userNote).toBeNull();
+    expect(audited?.new_value.reason).toContain('no typed phrase and no free-text reason were collected');
+  });
+
+  it('keeps an optional note the ADMIN did write', async () => {
+    await seedDone('TSK-NOTE');
+    const admin = await login('0001');
+    const response = await reopen(admin, 'TSK-NOTE', {
+      idempotencyKey: 'reopen-note',
+      revision: 1,
+      confirmed: true,
+      note: '完了操作が誤りでした'
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    const audited = await db.one<{ new_value: { userNote: string | null } }>(
+      "SELECT new_value FROM audit_log WHERE action = 'TASK_REOPENED' AND entity_id = $1",
+      ['TSK-NOTE']
+    );
+    expect(audited?.new_value.userNote).toBe('完了操作が誤りでした');
   });
 
   it('refuses a MANAGER, a MEMBER and a VIEWER', async () => {
@@ -144,8 +167,7 @@ describe('reopening a completed task', () => {
       const response = await reopen(headers, 'TSK-1', {
         idempotencyKey: `reopen-${role}`,
         revision: 1,
-        reason: 'Attempt',
-        confirmation: 'REOPEN TSK-1'
+        confirmed: true
       });
       expect(response.statusCode, `${role}: ${response.body}`).toBe(403);
       expect(response.json().error.code).toBe('AUTHORIZATION_DENIED');
@@ -159,8 +181,7 @@ describe('reopening a completed task', () => {
     const stale = await reopen(admin, 'TSK-1', {
       idempotencyKey: 'reopen-stale',
       revision: 99,
-      reason: 'Correction',
-      confirmation: 'REOPEN TSK-1'
+      confirmed: true
     });
     expect(stale.json().error.code).toBe('EDIT_CONFLICT');
 
@@ -172,14 +193,13 @@ describe('reopening a completed task', () => {
     const open = await reopen(admin, 'TSK-OPEN', {
       idempotencyKey: 'reopen-open',
       revision: 1,
-      reason: 'Correction',
-      confirmation: 'REOPEN TSK-OPEN'
+      confirmed: true
     });
     expect(open.statusCode, open.body).toBe(409);
     expect(open.json().error.code).toBe('INVALID_TRANSITION');
   });
 
-  it('refuses a container task and a missing confirmation phrase', async () => {
+  it('refuses a container task and an unconfirmed reopen', async () => {
     await seedDone('TSK-PARENT');
     await insertTask(
       db,
@@ -197,20 +217,19 @@ describe('reopening a completed task', () => {
     const container = await reopen(admin, 'TSK-PARENT', {
       idempotencyKey: 'reopen-container',
       revision: 1,
-      reason: 'Correction',
-      confirmation: 'REOPEN TSK-PARENT'
+      confirmed: true
     });
     expect(container.statusCode, container.body).toBe(409);
     expect(container.json().error.code).toBe('CONTAINER_NOT_COMPLETABLE');
 
     await seedDone('TSK-2');
-    const wrongPhrase = await reopen(admin, 'TSK-2', {
+    const unconfirmed = await reopen(admin, 'TSK-2', {
       idempotencyKey: 'reopen-phrase',
-      revision: 1,
-      reason: 'Correction',
-      confirmation: 'REOPEN'
+      revision: 1
     });
-    expect(wrongPhrase.json().error.code).toBe('CONFIRMATION_REQUIRED');
+    // The contract has no typed phrase; the confirmation flag itself is required.
+    expect(unconfirmed.statusCode, unconfirmed.body).toBe(400);
+    expect(unconfirmed.json().error.code).toBe('VALIDATION_FAILED');
     expect((await taskRow('TSK-2'))?.status).toBe('Done');
     expect((await taskRow('TSK-PARENT'))?.status).toBe('Done');
   });
@@ -221,8 +240,7 @@ describe('reopening a completed task', () => {
     const payload = {
       idempotencyKey: 'reopen-replay',
       revision: 1,
-      reason: 'Correction',
-      confirmation: 'REOPEN TSK-1'
+      confirmed: true
     };
     expect((await reopen(admin, 'TSK-1', payload)).statusCode).toBe(200);
     const replay = await reopen(admin, 'TSK-1', payload);
@@ -242,8 +260,7 @@ describe('reopening a completed task', () => {
     const withoutAcknowledgement = await reopen(admin, 'TSK-1', {
       idempotencyKey: 'reopen-project-1',
       revision: 1,
-      reason: 'Completion correction',
-      confirmation: 'REOPEN TSK-1'
+      confirmed: true
     });
     expect(withoutAcknowledgement.json().error.code).toBe('CONFIRMATION_REQUIRED');
     expect((await taskRow('TSK-1'))?.status).toBe('Done');
@@ -259,8 +276,7 @@ describe('reopening a completed task', () => {
     const acknowledged = await reopen(admin, 'TSK-1', {
       idempotencyKey: 'reopen-project-2',
       revision: 1,
-      reason: 'Completion correction',
-      confirmation: 'REOPEN TSK-1',
+      confirmed: true,
       reopenProject: true
     });
     expect(acknowledged.statusCode, acknowledged.body).toBe(200);
@@ -279,8 +295,7 @@ describe('reopening a completed task', () => {
     const response = await reopen(admin, 'TSK-1', {
       idempotencyKey: 'reopen-archived',
       revision: 1,
-      reason: 'Correction',
-      confirmation: 'REOPEN TSK-1',
+      confirmed: true,
       reopenProject: true
     });
     expect(response.statusCode, response.body).toBe(409);
@@ -302,8 +317,7 @@ describe('reopening a completed task', () => {
     const reopened = await reopen(admin, 'TSK-1', {
       idempotencyKey: 'reopen-history',
       revision: 1,
-      reason: 'Correction',
-      confirmation: 'REOPEN TSK-1'
+      confirmed: true
     });
     expect(reopened.statusCode, reopened.body).toBe(200);
     const audited = await db.one<{ new_value: { reversedCompletionRequestId: string | null } }>(
@@ -366,8 +380,7 @@ describe('reopening a completed task', () => {
     const response = await reopen(admin, 'TSK-LEGACY', {
       idempotencyKey: 'reopen-legacy',
       revision: 1,
-      reason: 'Legacy completion was wrong',
-      confirmation: 'REOPEN TSK-LEGACY'
+      confirmed: true
     });
     expect(response.statusCode, response.body).toBe(200);
     expect((await taskRow('TSK-LEGACY'))?.status).toBe('In Progress');
@@ -384,8 +397,7 @@ describe('reopening a completed task', () => {
     await reopen(admin, 'TSK-1', {
       idempotencyKey: 'reopen-counts',
       revision: 1,
-      reason: 'Correction',
-      confirmation: 'REOPEN TSK-1'
+      confirmed: true
     });
 
     const after = await app.inject({ method: 'GET', url: '/api/manager/overview', headers: admin });

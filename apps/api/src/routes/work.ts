@@ -1,3 +1,4 @@
+import { registerWorkEditRoutes } from './work-edit';
 /**
  * Read-only work and project endpoints.
  *
@@ -74,6 +75,7 @@ const TimelineQuery = z.object({
 });
 
 export function registerWorkRoutes(app: FastifyInstance, _deps: AppDependencies): void {
+  registerWorkEditRoutes(app);
   app.get('/api/work/task-assignees', async (request, reply) => {
     try {
       const identity = requireRole(actorOf(request), 'VIEWER');

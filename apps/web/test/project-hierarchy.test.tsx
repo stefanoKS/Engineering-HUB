@@ -213,13 +213,13 @@ describe('project hierarchy model', () => {
 describe('project hierarchy tree', () => {
   const emptyReferences = { responsibilities: [], subprojects: [], skills: [], members: [] };
 
-  function renderTree(canDelete: boolean, canManage = true) {
+  function renderTree(canRemoveRecord: boolean, canManage = true) {
     return render(
       <I18nProvider>
         <ProjectHierarchy
           hierarchy={hierarchyFixture()}
           canManage={canManage}
-          canDelete={canDelete}
+          canRemoveRecord={canRemoveRecord}
           canCreateTask={canManage}
           canCreateSubproject={canManage}
           includeInactive={false}
@@ -248,7 +248,7 @@ describe('project hierarchy tree', () => {
         <ProjectHierarchy
           hierarchy={hierarchyFixture()}
           canManage
-          canDelete
+          canRemoveRecord
           canCreateTask
           canCreateSubproject
           includeInactive={false}
@@ -269,7 +269,7 @@ describe('project hierarchy tree', () => {
         <ProjectHierarchy
           hierarchy={hierarchyFixture()}
           canManage
-          canDelete
+          canRemoveRecord
           canCreateTask
           canCreateSubproject
           includeInactive={false}
@@ -303,7 +303,7 @@ describe('project hierarchy tree', () => {
         <ProjectHierarchy
           hierarchy={buildProjectHierarchy({ subprojects: [], tasks: [], includeInactive: false })}
           canManage
-          canDelete
+          canRemoveRecord
           canCreateTask
           canCreateSubproject
           includeInactive={false}
@@ -352,7 +352,7 @@ describe('project hierarchy tree', () => {
 });
 
 describe('delete dialog', () => {
-  it('uses a simple confirmation and submits the loaded revision to logical removal', async () => {
+  it('confirms a recoverable removal with one button and the loaded revision', async () => {
     const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'POST') return response({ removed: true });
       if (url.includes('removal/preflight')) {
@@ -363,7 +363,7 @@ describe('delete dialog', () => {
           blockers: [],
           dependencyCount: 0,
           descendantCount: 0,
-          confirmationText: 'DELETE T-A1',
+          confirmationText: '',
           revision: 7
         });
       }
@@ -373,21 +373,34 @@ describe('delete dialog', () => {
     const onDeleted = vi.fn();
     render(
       <I18nProvider>
-        <DeleteEntityDialog entityType="TASKS" entityId="T-A1" entityName="Area A work" onClose={() => undefined} onDeleted={onDeleted} />
+        <DeleteEntityDialog
+          entityType="TASKS"
+          entityId="T-A1"
+          entityName="Area A work"
+          context="Alpha"
+          canPurge={false}
+          onClose={() => undefined}
+          onDeleted={onDeleted}
+        />
       </I18nProvider>
     );
-    expect(await screen.findByText('Area A work')).toBeTruthy();
-    expect(await screen.findByText('このタスクを一覧から削除しますか？')).toBeTruthy();
+    expect(
+      await screen.findByText('このタスクを通常の一覧から削除します。記録と履歴は保持され、管理者は後から復元できます。')
+    ).toBeTruthy();
+    // The approved interaction collects no typed phrase and no reason.
+    expect(document.querySelector('.modal input[type="text"], .modal textarea')).toBeNull();
     const submit = screen.getByRole('button', { name: '削除する' }) as HTMLButtonElement;
     await waitFor(() => expect(submit.disabled).toBe(false));
     fireEvent.click(submit);
     await waitFor(() => expect(onDeleted).toHaveBeenCalled());
     const call = fetcher.mock.calls.find(([, init]) => init?.method === 'POST')!;
-    expect(call[0]).toBe('/api/admin/tasks/T-A1/remove');
+    expect(call[0]).toBe('/api/manager/tasks/T-A1/remove');
     expect(JSON.parse(String(call[1]!.body))).toEqual({
       revision: 7,
       confirmed: true
     });
+    // A manager is never offered the permanent-erasure control.
+    expect(screen.queryByRole('button', { name: '誤作成記録を完全に消去' })).toBeNull();
   });
 
   it('keeps permanent erasure separate and displays the exact erase plan', async () => {
@@ -424,22 +437,27 @@ describe('delete dialog', () => {
     const onDeleted = vi.fn();
     render(
       <I18nProvider>
-        <DeleteEntityDialog entityType="TASKS" entityId="T-A1" entityName="Area A work" onClose={() => undefined} onDeleted={onDeleted} />
+        <DeleteEntityDialog
+          entityType="TASKS"
+          entityId="T-A1"
+          entityName="Area A work"
+          canPurge
+          onClose={() => undefined}
+          onDeleted={onDeleted}
+        />
       </I18nProvider>
     );
     fireEvent.click(await screen.findByRole('button', { name: '誤作成記録を完全に消去' }));
     expect(await screen.findByText('Task row T-A1')).toBeTruthy();
     expect(screen.getByText('2 task assignee relationship row(s)')).toBeTruthy();
-    fireEvent.change(screen.getByLabelText('理由（必須）'), { target: { value: 'Created by mistake' } });
-    fireEvent.change(screen.getByLabelText(/DELETE T-A1/), { target: { value: 'DELETE T-A1' } });
-    fireEvent.click(screen.getByRole('button', { name: '確認' }));
+    // The permanent erasure uses the same no-typing confirmation as every other corrective action.
+    expect(document.querySelector('.modal input[type="text"], .modal textarea')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '完全に消去する' }));
     await waitFor(() => expect(onDeleted).toHaveBeenCalled());
     const call = fetcher.mock.calls.find(([url, init]) => url === '/api/admin/tasks/T-A1/purge' && init?.method === 'POST')!;
     expect(JSON.parse(String(call[1]!.body))).toEqual({
       revision: 7,
-      confirmed: true,
-      reason: 'Created by mistake',
-      confirmation: 'DELETE T-A1'
+      confirmed: true
     });
   });
 
@@ -452,7 +470,7 @@ describe('delete dialog', () => {
         blockers: [{ code: 'HAS_TASKS', detail: '2 task(s) are attached' }],
         dependencyCount: 0,
         descendantCount: 0,
-        confirmationText: 'DELETE SUB-A',
+        confirmationText: '',
         revision: 3
       })
     ));
@@ -463,6 +481,7 @@ describe('delete dialog', () => {
           entityType="SUBPROJECTS"
           entityId="SUB-A"
           entityName="Area A"
+          canPurge={false}
           onClose={() => undefined}
           onDeleted={() => undefined}
           onRevealChildren={reveal}
@@ -471,12 +490,12 @@ describe('delete dialog', () => {
     );
     expect(await screen.findByText('タスクが残っています')).toBeTruthy();
     expect(screen.getByText(/2 task\(s\) are attached/)).toBeTruthy();
-    expect((screen.getByRole('button', { name: '削除する' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: '削除する' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '子を表示' }));
     expect(reveal).toHaveBeenCalled();
   });
 
-  it('reports a stale revision as a reload request instead of retrying blindly', async () => {
+  it('reports a conflict as an explicit reload request instead of retrying blindly', async () => {
     const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
       if (init?.method === 'POST') {
         return new Response(
@@ -494,20 +513,29 @@ describe('delete dialog', () => {
         blockers: [],
         dependencyCount: 0,
         descendantCount: 0,
-        confirmationText: 'DELETE T-A1',
+        confirmationText: '',
         revision: 4
       });
     });
     vi.stubGlobal('fetch', fetcher);
     render(
       <I18nProvider>
-        <DeleteEntityDialog entityType="TASKS" entityId="T-A1" entityName="Area A work" onClose={() => undefined} onDeleted={() => undefined} />
+        <DeleteEntityDialog
+          entityType="TASKS"
+          entityId="T-A1"
+          entityName="Area A work"
+          canPurge={false}
+          onClose={() => undefined}
+          onDeleted={() => undefined}
+        />
       </I18nProvider>
     );
     const submit = await screen.findByRole('button', { name: '削除する' }) as HTMLButtonElement;
     await waitFor(() => expect(submit.disabled).toBe(false));
     await act(async () => { fireEvent.click(submit); });
-    expect(await screen.findByText(/他の更新により内容が変わりました/)).toBeTruthy();
+    expect(await screen.findByText('The record changed')).toBeTruthy();
+    // A conflict offers an explicit reload; it never retries the write by itself.
+    expect(screen.getByRole('button', { name: '最新の内容を読み込む' })).toBeTruthy();
     expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
   });
 });
@@ -549,9 +577,20 @@ describe('project detail roles', () => {
     phases: []
   };
 
+  const emptyPreflight = {
+    entityType: 'TASKS',
+    entityId: 'T-A1',
+    deletable: false,
+    blockers: [{ code: 'NOT_FOUND_OR_DELETED', detail: 'The record is not available' }],
+    dependencyCount: 0,
+    descendantCount: 0,
+    confirmationText: '',
+    revision: 1
+  };
+
   function stubManagerApi() {
     vi.stubGlobal('fetch', vi.fn(async (url: string) =>
-      url.includes('removal/preflight') ? response({}) : url.includes('/references') ? response({ responsibilities: [], subprojects: [], skills: [], members: [] }) : response(detailPayload)
+      url.includes('removal/preflight') ? response(emptyPreflight) : url.includes('/references') ? response({ responsibilities: [], subprojects: [], skills: [], members: [] }) : response(detailPayload)
     ));
   }
 
@@ -564,12 +603,17 @@ describe('project detail roles', () => {
     expect(screen.getAllByRole('button', { name: '新規タスク' }).length).toBeGreaterThan(0);
   });
 
-  it('gives MANAGER edit and create but never a permanent delete', async () => {
+  it('gives MANAGER recoverable removal and creation but never a permanent erasure', async () => {
     stubManagerApi();
     render(<I18nProvider><ProjectDetailScreen actor={MANAGER_ACTOR as never} projectId="PRJ-A" /></I18nProvider>);
     expect(await screen.findByText('Area A work')).toBeTruthy();
     expect(screen.getAllByRole('button', { name: '編集' }).length).toBeGreaterThan(0);
-    expect(screen.queryAllByRole('button', { name: /を削除/ })).toHaveLength(0);
+    // The approved change: a manager removes work inside a division it may write in ...
+    expect(screen.getAllByRole('button', { name: /を削除/ }).length).toBeGreaterThan(0);
+    // ... and the permanent erasure stays an ADMIN control.
+    fireEvent.click(screen.getAllByRole('button', { name: /を削除/ })[0]!);
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '誤作成記録を完全に消去' })).toBeNull();
   });
 
   it('renders MEMBER and VIEWER a read-only hierarchy without actions', async () => {
@@ -619,4 +663,21 @@ describe('project detail roles', () => {
     await waitFor(() => expect(subprojectSelect.value).toBe('SUB-A'));
     expect(within(dialog).getByRole('button', { name: 'この作成先のまま' })).toBeTruthy();
   });
+});
+
+
+it('offers member subproject editing and recoverable deletion only in a writable project', async () => {
+  const project={record:{projectId:'PRJ-A',projectName:'Alpha',description:'',responsibilityName:'Area',projectOwnerName:'Other',status:'Active',schedule:{state:'IN_PROGRESS',missing:'NONE'},priority:'Medium',committedDeadline:null,progressPercent:null,health:''},canWrite:true,progress:{percent:0,leaves:1,doneLeaves:0,unknownEffort:0},subprojects:[subproject('SUB-A','Colleague subproject')],tasks:[]};
+  const fetcher=vi.fn(async(url:string)=>{
+    if(url.includes('/api/work/projects/PRJ-A'))return response(project);
+    if(url.includes('/api/work/editor/subprojects/SUB-A'))return response({record:{subprojectId:'SUB-A',projectId:'PRJ-A',subprojectName:'Colleague subproject',description:'',ownerId:null,status:'Active',estimatedHours:null,nextAction:'',revision:7}});
+    if(url.includes('/references'))return response({members:[],skills:[],subprojects:[]});
+    return response({});
+  });
+  vi.stubGlobal('fetch',fetcher);
+  render(<I18nProvider><ProjectDetailScreen actor={MEMBER_ACTOR} projectId="PRJ-A" readOnly /></I18nProvider>);
+  const edit=await screen.findByRole('button',{name:'編集'});
+  fireEvent.click(edit);
+  expect(await screen.findByDisplayValue('Colleague subproject')).toBeTruthy();
+  expect(fetcher.mock.calls.some(([url])=>url.includes('/api/work/editor/subprojects/SUB-A'))).toBe(true);
 });

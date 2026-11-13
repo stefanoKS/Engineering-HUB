@@ -524,6 +524,17 @@ select[multiple] {
   border-color: #efc7c5;
 }
 
+/* The no-typing confirmation panel. The colour is decoration: the panel always says, in words,
+ * what the action does, so it is never the only signal. */
+.confirm-warning {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border-left: 4px solid var(--red);
+  line-height: 1.45;
+}
+
 .banner.info {
   background: var(--blue-soft);
   border-color: #c6d9ea;
@@ -2576,16 +2587,21 @@ input[type='search'] {
   width: 7.5rem;
 }
 
+/* The action column holds two controls side by side - Edit and the その他 / More menu trigger -
+ * plus the cell padding and the .35rem flex gap. At 7.5rem the trigger protruded past the table's
+ * right border; 10.5rem is the measured width that fits "その他" (the wider label) with slack. */
 .task-table .col-actions {
-  width: 7.5rem;
+  width: 10.5rem;
 }
 
+/* Wrapping is deliberate: if a translated label is wider than expected, the two controls move
+ * onto a second line inside the cell instead of escaping the table. */
 .task-table td.project-actions-cell {
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .task-table td.project-actions-cell .actions {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 
 /* Text that must wrap rather than be clipped: a long project, owner or task name is readable. */

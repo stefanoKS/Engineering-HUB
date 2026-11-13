@@ -2,8 +2,11 @@ import { useEffect, useState } from 'react';
 import type { DeletionPreflight } from '@eh/contracts';
 import { api, ApiFailure } from '../api/client';
 import { useI18n } from '../i18n';
-import { ConfirmDialog } from './forms';
+import { ActionConfirmDialog } from './ActionConfirmDialog';
 import { ErrorBox, Modal } from './ui';
+import type { ReloadOutcome } from './forms';
+import { keys } from '../state/cache';
+import { commitMutation } from '../state/mutation';
 
 const BLOCKER_LABELS: Record<string, string> = {
   HAS_DESCENDANTS: 'delete.blocker.HAS_DESCENDANTS',
@@ -40,6 +43,13 @@ function Blockers({ preflight }: { preflight: DeletionPreflight }): JSX.Element 
   );
 }
 
+/**
+ * The guarded permanent erasure.
+ *
+ * ADMIN only, and exposed only to an administrator: it is never part of a manager's action set.
+ * The confirmation is the same red-panel button used everywhere else, while the eligibility
+ * safeguards (blockers, revision, tombstone, audit intent) stay exactly as they were.
+ */
 function PermanentEraseDialog({
   entityType,
   entityId,
@@ -100,14 +110,14 @@ function PermanentEraseDialog({
   }
 
   return (
-    <ConfirmDialog
+    <ActionConfirmDialog
       title={t('delete.permanentTitle')}
-      destructive
-      confirmText={preflight.confirmationText}
-      reasonRequired
-      message={
+      recordName={entityName}
+      context={entityId}
+      warning={t('delete.permanentWarning', { name: entityName })}
+      confirmLabel={t('delete.permanentConfirm')}
+      details={
         <div className="stack">
-          <p>{t('delete.permanentWarning', { name: entityName })}</p>
           <strong>{t('delete.erasePlan')}</strong>
           <ul>
             {(preflight.erasePlan ?? []).map((entry) => (
@@ -118,31 +128,52 @@ function PermanentEraseDialog({
         </div>
       }
       onCancel={onBack}
-      onConfirm={async ({ confirmation, reason }) => {
+      onConfirm={async () => {
         const path = entityType === 'TASKS' ? 'tasks' : 'subprojects';
-        await api.post(`/api/admin/${path}/${entityId}/purge`, {
-          revision: preflight.revision,
-          confirmed: true,
-          reason,
-          confirmation
-        });
+        // A confirmed write updates the session's cache even if this dialog is already gone, and a
+        // session that ended while the request was in flight runs no follow-up effect at all.
+        const outcome = await commitMutation(
+          () =>
+            api.post(`/api/admin/${path}/${entityId}/purge`, {
+              revision: preflight.revision,
+              confirmed: true
+            }),
+          [keys.deletedRecords]
+        );
+        if (outcome.status !== 'committed') return;
         onErased();
       }}
     />
   );
 }
 
+/**
+ * The recoverable removal of a task or a subproject.
+ *
+ * The preflight the server returns decides whether the action is offered at all, and the red panel
+ * says plainly that the record leaves the normal lists while the row and its history stay. A
+ * manager sees no permanent-erasure control, and the removal endpoint itself re-checks the role
+ * and the record's division.
+ */
 export function DeleteEntityDialog({
+  memberAction = false,
   entityType,
   entityId,
   entityName,
+  context,
+  canPurge,
   onClose,
   onDeleted,
   onRevealChildren
 }: {
+  memberAction?: boolean;
   entityType: 'TASKS' | 'SUBPROJECTS';
   entityId: string;
   entityName: string;
+  /** A readable location (project or subproject path) shown beside the record name. */
+  context?: string;
+  /** Permanent erasure is an ADMIN action and is never offered to a manager. */
+  canPurge: boolean;
   onClose: () => void;
   onDeleted: () => void;
   onRevealChildren?: () => void;
@@ -150,19 +181,21 @@ export function DeleteEntityDialog({
   const { t } = useI18n();
   const [preflight, setPreflight] = useState<DeletionPreflight | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<unknown>(null);
   const [permanent, setPermanent] = useState(false);
-  const [reason, setReason] = useState('Created by mistake');
+  const removalPath = `/api/${memberAction ? "work" : "manager"}/removal/preflight?entityType=${entityType}&entityId=${encodeURIComponent(entityId)}`;
+
+  const load = async (): Promise<DeletionPreflight> => {
+    const value = await api.get<DeletionPreflight>(removalPath);
+    setPreflight(value);
+    return value;
+  };
 
   useEffect(() => {
     let current = true;
     setPreflight(null);
     setLoadError(null);
     api
-      .get<DeletionPreflight>(
-        `/api/manager/removal/preflight?entityType=${entityType}&entityId=${encodeURIComponent(entityId)}`
-      )
+      .get<DeletionPreflight>(removalPath)
       .then((value) => {
         if (current) setPreflight(value);
       })
@@ -172,9 +205,9 @@ export function DeleteEntityDialog({
     return () => {
       current = false;
     };
-  }, [entityType, entityId]);
+  }, [removalPath]);
 
-  if (permanent) {
+  if (permanent && canPurge) {
     return (
       <PermanentEraseDialog
         entityType={entityType}
@@ -186,92 +219,90 @@ export function DeleteEntityDialog({
     );
   }
 
-  const deletable = preflight?.deletable === true;
-  const canSubmit = deletable && !!preflight && !busy;
-  const requiresReason = preflight?.requiresReason === true;
-
-  const submit = async (): Promise<void> => {
-    if (!canSubmit || !preflight) return;
-    setBusy(true);
-    setFailure(null);
-    try {
-      const path = entityType === 'TASKS' ? 'tasks' : 'subprojects';
-      await api.post(`/api/admin/${path}/${entityId}/remove`, {
-        revision: preflight.revision,
-        confirmed: true,
-        reason: requiresReason ? reason.trim() : undefined
-      });
-      onDeleted();
-    } catch (error) {
-      setFailure(error);
-    } finally {
-      setBusy(false);
-    }
-  };
+  if (!preflight || !preflight.deletable) {
+    return (
+      <Modal
+        title={t('delete.confirmTitle')}
+        onClose={onClose}
+        footer={
+          <>
+            <button type="button" className="button secondary" onClick={onClose}>
+              {t('action.cancel')}
+            </button>
+            {onRevealChildren && preflight && !preflight.deletable ? (
+              <button type="button" className="button secondary" onClick={onRevealChildren}>
+                {t('delete.revealChildren')}
+              </button>
+            ) : null}
+          </>
+        }
+      >
+        <div className="stack">
+          <p>
+            <span className="muted">{t('delete.target')}: </span>
+            <strong>{entityName}</strong>
+            {context ? <span className="muted small"> · {context}</span> : null}
+          </p>
+          {!preflight && !loadError ? <p role="status">{t('delete.checking')}</p> : null}
+          <ErrorBox error={loadError} />
+          {preflight ? <Blockers preflight={preflight} /> : null}
+          {preflight ? <p className="muted small">{t('delete.blockedHint')}</p> : null}
+        </div>
+      </Modal>
+    );
+  }
 
   return (
-    <Modal
-      title={t(requiresReason ? 'delete.completedTitle' : 'delete.confirmTitle')}
-      onClose={onClose}
-      footer={
-        <>
-          <button type="button" className="button secondary" onClick={onClose} disabled={busy}>
-            {t('action.cancel')}
-          </button>
-          {onRevealChildren && preflight && !deletable ? (
-            <button type="button" className="button secondary" onClick={onRevealChildren}>
-              {t('delete.revealChildren')}
+    <ActionConfirmDialog
+      title={t('delete.confirmTitle')}
+      recordName={entityName}
+      context={context}
+      warning={t(entityType === 'TASKS' ? 'delete.confirmTask' : 'delete.confirmSubproject')}
+      confirmLabel={t('delete.submit')}
+      details={
+        <div className="stack">
+          {preflight.retainedHistory ? (
+            <div className="banner warning">{t('delete.retainedHistory')}</div>
+          ) : null}
+          {canPurge ? (
+            <button type="button" className="link-button danger" onClick={() => setPermanent(true)}>
+              {t('delete.permanentAction')}
             </button>
           ) : null}
-          <button type="button" className="button secondary danger" onClick={() => setPermanent(true)} disabled={busy}>
-            {t('delete.permanentAction')}
-          </button>
-          <button
-            type="button"
-            className="button danger"
-            disabled={!canSubmit || (requiresReason && !reason.trim())}
-            onClick={() => void submit()}
-          >
-            {busy ? t('state.saving') : t('delete.submit')}
-          </button>
-        </>
+        </div>
       }
-    >
-      <div className="stack">
-        <p className="small">
-          <span className="muted">{t('delete.target')}: </span>
-          <strong>{entityName}</strong>
-        </p>
-        {!preflight && !loadError ? <p role="status">{t('delete.checking')}</p> : null}
-        <ErrorBox error={loadError} />
-        {preflight ? (
-          deletable ? (
-            <>
-              {requiresReason ? (
-                <>
-                  <p>{t('delete.completedTask')}</p>
-                  <label className="field">
-                    <span className="field-label">{t('confirm.deleteReason')}</span>
-                    <textarea value={reason} onChange={(event) => setReason(event.target.value)} rows={3} />
-                  </label>
-                </>
-              ) : (
-                <p>{t(entityType === 'TASKS' ? 'delete.confirmTask' : 'delete.confirmSubproject')}</p>
-              )}
-              <div className="banner info">{t('delete.allowed')}</div>
-            </>
-          ) : (
-            <>
-              <Blockers preflight={preflight} />
-              <p className="muted small">{t('delete.blockedHint')}</p>
-            </>
-          )
-        ) : null}
-        <ErrorBox error={failure} />
-        {failure instanceof ApiFailure && failure.isConflict ? (
-          <p className="muted small">{t('delete.staleRevision')}</p>
-        ) : null}
-      </div>
-    </Modal>
+      onCancel={onClose}
+      onReload={async (): Promise<ReloadOutcome> => {
+        try {
+          const fresh = await load();
+          if (!fresh.deletable) {
+            return { status: 'ineligible', message: t('delete.reloadIneligible') };
+          }
+          return { status: 'fresh' };
+        } catch (error) {
+          return {
+            status: 'failed',
+            message: error instanceof ApiFailure ? error.message : t('error.title')
+          };
+        }
+      }}
+      onConfirm={async () => {
+        // The revision the dialog loaded is submitted; a newer stored revision is a conflict the
+        // caller must review, never a silent overwrite.
+        const path = entityType === 'TASKS' ? 'tasks' : 'subprojects';
+        // A confirmed write updates the session's cache even if this dialog is already gone, and a
+        // session that ended while the request was in flight runs no follow-up effect at all.
+        const outcome = await commitMutation(
+          () =>
+            api.post(`/api/${memberAction ? "work" : "manager"}/${path}/${entityId}/remove`, {
+              revision: preflight.revision,
+              confirmed: true
+            }),
+          [keys.deletedRecords]
+        );
+        if (outcome.status !== 'committed') return;
+        onDeleted();
+      }}
+    />
   );
 }

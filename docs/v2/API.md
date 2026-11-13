@@ -48,24 +48,26 @@ for active responsibilities only. It exists so a member form never receives the 
 | `GET` | `/api/manager/tasks/:id/reopen-eligibility` | ADMIN |
 | `POST` | `/api/manager/tasks/:id/reopen` | ADMIN |
 
-`ReopenEligibility` answers `{ taskId, eligible, reasons, confirmationText, projectId, projectName,
-projectStatus, projectReopenRequired, completedAt, completionRequestId }`; `reasons` may contain
-`CONTAINER`, `NOT_COMPLETED`, `PROJECT_ARCHIVED` or `PROJECT_CANCELLED`, and `confirmationText` is
-`REOPEN <taskId>`. The capability answer never grants authority.
+`ReopenEligibility` answers `{ taskId, eligible, reasons, projectId, projectName, projectStatus,
+projectReopenRequired, completedAt, completionRequestId }`; `reasons` may contain `CONTAINER`,
+`NOT_COMPLETED`, `PROJECT_ARCHIVED` or `PROJECT_CANCELLED`. There is no confirmation phrase: the
+interface asks for one clearly labelled button. The capability answer never grants authority.
 
 `POST …/reopen` takes `ReopenTaskBody`:
-`{ idempotencyKey, revision, reason, confirmation, reopenProject? }`. In one transaction it:
+`{ idempotencyKey, revision, confirmed: true, reopenProject?, note? }`. In one transaction it:
 
 - requires ADMIN (`AUTHORIZATION_DENIED` for MANAGER, MEMBER and VIEWER),
 - refuses a stale `revision` (`EDIT_CONFLICT`), a non-`Done` task and a container
   (`INVALID_TRANSITION` / `CONTAINER_NOT_COMPLETABLE`), and an archived or cancelled parent project
   (`INVALID_TRANSITION`, with the reason stated),
-- requires the exact phrase (`CONFIRMATION_REQUIRED`) and a reason,
+- requires the explicit confirmation flag (`CONFIRMATION_REQUIRED`) and collects no reason; `note`
+  is optional and is recorded only when a person wrote it,
 - writes `status = "In Progress"`, `progress_percent = 0`, `completed_at = null` — no historical
   progress is invented,
 - with `reopenProject: true` only, and only when the parent is `Completed`, writes the project back
   to `Active` in the same transaction and audits `PROJECT_REOPENED`,
-- audits one `TASK_REOPENED` row with the actor, task, reason, before/after state and the approved
+- audits one `TASK_REOPENED` row with the actor, `confirmationSource: 'BUTTON'`, the
+  application-generated description, `userNote`, the before/after state and the approved
   completion request it reverses,
 - replays the stored answer for a repeated idempotency key (so a retried delivery cannot repeat the
   effect) and leaves the original request, approval and audit rows untouched.
@@ -399,8 +401,10 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | PATCH | `/api/manager/subprojects/:id` | `revision` + partial fields; an omitted `description` keeps the stored text |
 | POST | `/api/manager/subprojects/:id/archive` \| `/reactivate` | `revision`, `confirmed`, `reason?` |
 | DELETE | `/api/manager/subprojects/:id` | Compatibility physical-purge route; as projects |
-| POST | `/api/admin/subprojects/:id/remove` | ADMIN logical removal: `revision`, `confirmed: true`; sets `deleted_at`, increments the revision and writes `RECORD_REMOVED` without deleting history |
-| POST | `/api/admin/subprojects/:id/purge` | ADMIN advanced permanent erasure: `revision`, `confirmed`, required `reason`, `confirmation: "DELETE <id>"` |
+| POST | `/api/manager/subprojects/:id/remove` | **Recoverable removal**: ADMIN anywhere, MANAGER inside a writable division. `revision`, `confirmed: true`, optional `reason`; sets `deleted_at`, increments the revision and writes `RECORD_REMOVED` without deleting history |
+| POST | `/api/admin/subprojects/:id/purge` | ADMIN advanced permanent erasure: `revision`, `confirmed: true`, optional `reason` |
+| GET | `/api/admin/subprojects/:id/restore-preflight` | ADMIN: restore eligibility, blockers and the current revision |
+| POST | `/api/admin/subprojects/:id/restore` | ADMIN: `revision`, `confirmed: true`; restores the same row and identifier (`RECORD_RESTORED`) |
 | POST | `/api/manager/tasks` | `idempotencyKey`, `projectId`, `taskName`, `deadline`, optional planning fields, `assigneeIds`, `dependencyIds` |
 | PATCH | `/api/manager/tasks/:id` | `revision` + fields, `confirmDeadlineChange`, `acknowledgeNonWorking` |
 | POST | `/api/manager/tasks/:id/approve` | `revision`, `confirmed` |
@@ -408,8 +412,11 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | POST | `/api/manager/tasks/:id/complete` | MANAGER/ADMIN: `revision`, `confirmed: true`, `note?`. Direct completion; the container, cancelled and already-done refusals still apply, and a pending completion report is withdrawn |
 | POST | `/api/manager/tasks/:id/override-complete` | ADMIN: `revision`, `reason`, `confirmation: "COMPLETE <id>"` |
 | DELETE | `/api/manager/tasks/:id` | Compatibility physical-purge route; ADMIN, as projects |
-| POST | `/api/admin/tasks/:id/remove` | ADMIN logical removal: `revision`, `confirmed: true`, `reason?`; removes the task from normal views while preserving requests, completion/approval/schedule/audit/effort history and queues A/B publication reconciliation. `reason` is required when retained completion or approval evidence exists. |
-| POST | `/api/admin/tasks/:id/purge` | ADMIN advanced permanent erasure: `revision`, `confirmed`, required `reason`, `confirmation: "DELETE <id>"` |
+| POST | `/api/manager/tasks/:id/remove` | **Recoverable removal**: ADMIN anywhere, MANAGER inside a division where it holds `WORK` membership. `revision`, `confirmed: true`, optional `reason`. Stamps `deleted_at`, keeps the row and all history, queues A/B publication reconciliation. No typed phrase and no mandatory reason |
+| POST | `/api/admin/tasks/:id/purge` | ADMIN advanced permanent erasure: `revision`, `confirmed: true`, optional `reason`. Every physical-erasure preflight safeguard is unchanged |
+| GET | `/api/admin/tasks/:id/restore-preflight` | ADMIN: `{ entityType, entityId, name, restorable, blockers, revision }` for a recoverably removed task |
+| POST | `/api/admin/tasks/:id/restore` | ADMIN: `revision`, `confirmed: true`. Restores the same row and identifier, clears `deleted_at`, increments the revision and audits `RECORD_RESTORED` |
+| GET | `/api/admin/deleted-records` | ADMIN: bounded, searchable page of recoverably removed tasks and subprojects (`entityType`, `query`, `page`, `pageSize`) |
 | POST | `/api/manager/members` | ADMIN for `role`/`active` |
 | PATCH | `/api/manager/members/:id` | `revision` + fields (role/active ADMIN only) |
 | POST | `/api/manager/responsibilities` | `name`, `divisionId` (nullable; `null` is ADMIN-only), `ownerMemberId`, `additionalMemberIds`, `colorHex`, `sortOrder`, `idempotencyKey?`; the owner and every member must hold an active `WORK` membership in that division |
@@ -427,22 +434,42 @@ Every non-safe request must send `x-csrf-token` with the session token. When a b
 | POST | `/api/manager/reports/refresh` | MANAGER |
 | POST | `/api/manager/deletion/reconcile` | ADMIN, `confirmed`, `confirmation: "RECONCILE DELETIONS"` |
 
-The normal Delete action in All Work and Project Detail always uses
-`POST /api/admin/.../remove`; it is a simple explicit confirmation and never asks for a typed task
-ID. The separate **Permanently erase mistaken record** advanced action uses
-`POST /api/admin/.../purge`. The older physical `DELETE` routes remain compatibility aliases, are
-not used by the normal UI, and have the same strict policy. A physical purge is ADMIN-only, re-runs
-the preflight under a row lock inside the same transaction, and answers the stored `tombstoneId`
-only after `RECORD_DELETE_PREPARED`, the row removal and `RECORD_DELETED` all succeed.
+The normal Delete action in All Work, Task Detail and Project Detail uses
+`POST /api/manager/.../remove`; it is one explicit button confirmation and never asks for a typed
+task ID or a free-text reason. The separate **Permanently erase mistaken record** advanced action
+(ADMIN only, never offered to a manager) uses `POST /api/admin/.../purge` with the same no-typing
+confirmation. The older physical `DELETE` routes remain compatibility aliases, are not used by the
+normal UI, and have the same strict policy. A physical purge is ADMIN-only, re-runs the preflight
+under a row lock inside the same transaction, and answers the stored `tombstoneId` only after
+`RECORD_DELETE_PREPARED`, the row removal and `RECORD_DELETED` all succeed.
 
-The POST `/api/admin/.../remove` commands are deliberately separate from these physical DELETE
-commands. Ordinary administrative removal keeps the task/subproject row and all foreign-key
-evidence, stamps `deleted_at`, increments `revision`, and records the verified actor and the
-standard mistaken-record reason in `RECORD_REMOVED`. A repeat after success returns
-`alreadyRemoved: true` and does not append another audit event. Child tasks/subprojects, active
-dependants, pending/processing requests, pending or leased notification/calendar jobs, current
-assignment approval, completed work and recorded effort block task removal. Routine edits, audit
-rows, deadline history, historical assignees, decided requests and prior publication do not.
+The `POST /api/manager/.../remove` commands are deliberately separate from these physical
+`DELETE` commands. Recoverable removal keeps the task/subproject row and all foreign-key evidence,
+stamps `deleted_at`, increments `revision`, and records the verified actor, that actor's role, the
+previous and resulting state and `confirmationSource: 'BUTTON'` in `RECORD_REMOVED`. `reason` is
+optional: when nobody wrote one the audit carries the application-generated description and
+`userNote: null`, so the evidence never claims a person explained the action. A repeat after
+success returns `alreadyRemoved: true` and does not append another audit event. Child
+tasks/subprojects, active dependants, pending/processing requests, pending or leased
+notification/calendar jobs still block task removal; routine edits, audit rows, deadline history,
+historical assignees, decided requests and prior publication do not.
+
+Authorization for recoverable removal is resolved twice: a request-level pre-check and the
+authoritative transaction-time re-read of the actor's role, activation and division relationships
+under the canonical lock order. A record in a division the caller may not read answers `NOT_FOUND`;
+a readable division without `WORK` membership answers `AUTHORIZATION_DENIED`. A general manager, a
+member and a viewer never pass.
+
+`GET /api/admin/deleted-records` and `POST /api/admin/:type/:id/restore` are the ADMIN restoration
+workflow. The list is one bounded page with an optional search over the record name and its project;
+each row reports the type, name, project, subproject location, deletion time, the recorded deleting
+actor (a display name, `null` when the audit row is missing), the recorded removal note, whether the
+confirmation came from the dialog button, and the current restore availability with its blockers.
+A restoration returns the *same* row and identifier: only `deleted_at` is cleared, the revision is
+incremented and `RECORD_RESTORED` is appended. A removed parent, an archived or cancelled project or
+a hierarchy that no longer fits is reported as a blocker instead of being repaired silently; a
+completed task comes back completed, and a permanently erased record answers `NOT_FOUND` with an
+explicit "cannot be restored" message.
 `GET /api/manager/deletion/preflight` is the read-only physical-purge companion. It reports
 `deletable`, exact blocker details, `confirmationText` and `erasePlan`. For a task, `erasePlan`
 enumerates the task row plus the task's assignee and outgoing-dependency relationship rows; audit
@@ -800,3 +827,35 @@ The idempotency contract is unchanged: a replay with the same `clientRequestId` 
 returns the stored receipt (`DUPLICATE`); the same key with different content answers
 `IDEMPOTENCY_REPLAY`. A refusal raised before the idempotency step (validation, eligibility,
 authorization) reserves no key, so a corrected attempt may use a new identity.
+
+
+## Member collaboration and manager recovery — 2026-11-13
+
+This user-approved policy supersedes earlier statements that members cannot edit/remove existing
+tasks or subprojects, and that restoration is ADMIN-only. MEMBER may edit ordinary task and
+subproject fields and recoverably delete either record regardless of owner, within a WORK division
+and an INTERNAL, non-archived project they may see. READ-only grants never allow a write.
+MANAGER may restore tasks/subprojects in WORK divisions; ADMIN retains cross-division recovery.
+Projects/responsibilities, approvals, direct completion, notification settings, permanent erasure
+and completed-task reopening retain their existing separate permissions. Members do not restore.
+
+The member opens a task detail to edit/delete it, or a project hierarchy to edit/delete a
+subproject. Editors fetch fresh narrow records and revisions; saves are partial patches. A red
+confirmation panel requires one explicit button and no typing. Deletion retains the row/history,
+children/dependencies and existing blockers; recovery restores the same ID and status. Completed
+work stays completed. Managers reach Deleted Items through the management navigation.
+
+Server authorization is repeated under the existing division/role advisory locks. Deleted Items
+filters both records and totals by writable divisions before pagination. Member edit APIs retain
+project visibility and field allowlists and do not expose manager-only history or settings.
+No schema change, operational migration, deployment or outbound activation is required or performed.
+
+Member editing uses GET /api/work/editor/tasks/:id and /api/work/editor/subprojects/:id,
+GET /api/work/editor/projects/:id, GET /api/work/editor/references?projectId=...,
+and GET /api/work/editor/parent-options. PATCH /api/work/tasks/:id and
+PATCH /api/work/subprojects/:id reuse the domain patch services with MEMBER authorization.
+GET /api/work/removal/preflight and POST /api/work/{tasks|subprojects}/:id/remove reuse the
+recoverable removal workflow. Ordinary fields only; forbidden workflow/settings patches refuse.
+The existing /api/admin/deleted-records and /api/admin/{tasks|subprojects}/:id/restore[-preflight]
+URLs are retained for compatibility but now authorize MANAGER with WORK scope as well as ADMIN.
+Their historical URL prefix is not the authorization boundary.

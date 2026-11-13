@@ -108,8 +108,30 @@ describe('oversight capabilities', () => {
     expect(capabilities.canCreateProject).toBe(false);
     expect(capabilities.canArchive).toBe(false);
     expect(capabilities.canDelete).toBe(false);
+    // The separated capabilities follow the same rule: oversight never inherits a removal,
+    // restoration, erasure or reopening right.
+    expect(capabilities.canRecoverDelete).toBe(false);
+    expect(capabilities.canRestoreDeleted).toBe(false);
+    expect(capabilities.canPurgeRecord).toBe(false);
     expect(capabilities.canReopenTask).toBe(false);
     expect(capabilities.canSubmitCompletionRequest).toBe(false);
+  });
+
+  it('separates recoverable removal from restoration and erasure', () => {
+    const manager = capabilitiesOf({ role: 'MANAGER' });
+    expect(manager.canRecoverDelete).toBe(true);
+    expect(manager.canRestoreDeleted).toBe(true);
+    expect(manager.canPurgeRecord).toBe(false);
+    expect(manager.canDelete).toBe(false);
+    const admin = capabilitiesOf({ role: 'ADMIN' });
+    expect(admin.canRecoverDelete).toBe(true);
+    expect(admin.canRestoreDeleted).toBe(true);
+    expect(admin.canPurgeRecord).toBe(true);
+    expect(admin.canReopenTask).toBe(true);
+    const member = capabilitiesOf({ role: 'MEMBER' });
+    expect(member.canRecoverDelete).toBe(true);
+    expect(member.canRestoreDeleted).toBe(false);
+    expect(member.canPurgeRecord).toBe(false);
   });
 });
 

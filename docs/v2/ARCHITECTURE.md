@@ -119,11 +119,24 @@ fetches anything itself.
 
 **Capabilities are separate flags, not one `canManage`.** `state/capabilities.ts` derives
 `canCreateProject`, `canCreateSubproject`, `canCreateTask`, `canEdit`, `canArchive`, `canDelete`,
-`canReopenTask`, `canSubmitCompletionRequest` and `canSubmitExtensionRequest` from the role. A
-MEMBER is add-only: it may file a project, a subproject and a task through the member endpoints, and
-never edit, archive, delete or reopen a record — including one it created. A VIEWER gains nothing.
-The manager screens compose `canCreateTask || canEdit` so their existing creation paths stay intact.
-Every flag only decides what is rendered; the server re-checks the role on each command.
+`canRecoverDelete`, `canRestoreDeleted`, `canPurgeRecord`, `canReopenTask`,
+`canSubmitCompletionRequest` and `canSubmitExtensionRequest` from the role. A MEMBER is add-only: it
+may file a project, a subproject and a task through the member endpoints, and never edit, archive,
+remove, restore, purge or reopen a record — including one it created. A VIEWER gains nothing. A
+MANAGER may recoverably remove a task or subproject inside a division where it holds `WORK`
+membership, which is why the per-record `canWrite` flag gates every removal control in a mixed list.
+Restoration, permanent erasure and reopening stay ADMIN. The manager screens compose
+`canCreateTask || canEdit` so their existing creation paths stay intact. Every flag only decides what
+is rendered; the server re-checks the role on each command.
+
+**One confirmation surface, no typing.** `components/ActionConfirmDialog.tsx` is the single
+confirmation for a recoverable removal, a restoration, a corrective reopening and a permanent
+task/subproject erasure: it names the record, states the real consequence in a red panel, and offers
+Cancel plus one labelled action button. It owns the synchronous duplicate-submit guard, the busy
+state, the conflict-reload protocol and the unobservable-outcome wording, so no screen re-implements
+them. `DeleteEntityDialog` composes it for removal and for the ADMIN-only permanent erasure, and the
+deleted-items screen composes it for restoration. Project and responsibility erasure keep their typed
+confirmation.
 
 **Member creation is a narrow command.** `createMyProject` mirrors `createMySubproject`: the owner
 is the verified session, the lifecycle is `Active`, the visibility is `INTERNAL`, the responsibility
@@ -137,9 +150,18 @@ responsibility filter to a `TaskScope` pass before counting, listing or cutting 
 so a container is never counted as work, completed and cancelled work are reported separately, and an
 archived branch contributes nothing. The member payload carries no private project field.
 
+**A removal, a restoration and a reopen are one transaction each.** `removeEntity` takes the
+canonical lock order, re-reads the actor's role, activation and division relationships through the
+transaction handle, resolves the record's project division from authoritative data, locks the row and
+then re-evaluates the blockers and the revision, so a role, membership or division change committed
+while the request waited is honoured before the mutation. It stamps `deleted_at`, increments the
+revision and writes one `RECORD_REMOVED` row; nothing cascades. `restoreEntity` performs the mirror
+operation for an ADMIN: it clears `deleted_at`, re-validates the project, parent chain and depth, and
+writes one `RECORD_RESTORED` row — the record is restored, never recreated.
+
 **A reopen is one corrective transaction.** `reopenTask` validates the role, revision, lifecycle,
-container status, parent project, typed phrase and reason before mutating, then reverses the current
-completion, optionally returns a `Completed` parent to `Active`, and writes exactly one
+container status, parent project and the explicit confirmation before mutating, then reverses the
+current completion, optionally returns a `Completed` parent to `Active`, and writes exactly one
 `TASK_REOPENED` audit row plus one `PROJECT_REOPENED` row when the parent changed. The status becomes
 `In Progress` and the progress `0`, because no reliable pre-completion value exists; the derived
 display status (for example late) follows from the stored dates. The original request, approval and
@@ -842,3 +864,25 @@ directly.
 **Synchronisation separates the three audiences.** The cache effect runs only inside the session that
 started the import; the feedback is applied only while its own scope and render are current; the busy
 flag always settles, so a scope change cannot leave the control permanently disabled.
+
+
+## Member collaboration and manager recovery — 2026-11-13
+
+This user-approved policy supersedes earlier statements that members cannot edit/remove existing
+tasks or subprojects, and that restoration is ADMIN-only. MEMBER may edit ordinary task and
+subproject fields and recoverably delete either record regardless of owner, within a WORK division
+and an INTERNAL, non-archived project they may see. READ-only grants never allow a write.
+MANAGER may restore tasks/subprojects in WORK divisions; ADMIN retains cross-division recovery.
+Projects/responsibilities, approvals, direct completion, notification settings, permanent erasure
+and completed-task reopening retain their existing separate permissions. Members do not restore.
+
+The member opens a task detail to edit/delete it, or a project hierarchy to edit/delete a
+subproject. Editors fetch fresh narrow records and revisions; saves are partial patches. A red
+confirmation panel requires one explicit button and no typing. Deletion retains the row/history,
+children/dependencies and existing blockers; recovery restores the same ID and status. Completed
+work stays completed. Managers reach Deleted Items through the management navigation.
+
+Server authorization is repeated under the existing division/role advisory locks. Deleted Items
+filters both records and totals by writable divisions before pagination. Member edit APIs retain
+project visibility and field allowlists and do not expose manager-only history or settings.
+No schema change, operational migration, deployment or outbound activation is required or performed.

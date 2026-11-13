@@ -26,6 +26,7 @@ const RequestsScreen = lazy(() => import('./screens/Requests').then(module => ({
 const WorkloadScreen = lazy(() => import('./screens/Workload').then(module => ({ default: module.WorkloadScreen })));
 const AutomationScreen = lazy(() => import('./screens/Automation').then(module => ({ default: module.AutomationScreen })));
 const DivisionsScreen = lazy(() => import('./screens/Divisions').then(module => ({ default: module.DivisionsScreen })));
+const DeletedItemsScreen = lazy(() => import('./screens/DeletedItems').then(module => ({ default: module.DeletedItemsScreen })));
 const StatusScreen = lazy(() => import('./screens/Status').then(module => ({ default: module.StatusScreen })));
 const TimelineScreen = lazy(() => import('./screens/Timeline').then(module => ({ default: module.TimelineScreen })));
 import { LanguageSwitch, Menu } from './components/ui';
@@ -205,7 +206,9 @@ export function App(): JSX.Element {
     // Divisions are administrator-managed data, so the screen is ADMIN only and the route re-checks.
     if (signedIn?.role === 'ADMIN') {
       all.push({ path: 'divisions', label: t('division.manage'), group: 'management' });
+
     }
+    if (isManager) all.push({ path: 'deleted-items', label: t('nav.deletedItems'), group: 'management' });
     const headings: Record<string, string> = {
       daily: t('nav.group.daily'),
       team: t('nav.group.team'),
@@ -489,6 +492,8 @@ function renderScreen(route: Route, actor: Actor, isManager: boolean): JSX.Eleme
       return actor.role === 'ADMIN' ? <LocalAccountsScreen /> : <OverviewScreen actor={actor} />;
     case 'divisions':
       return actor.role === 'ADMIN' ? <DivisionsScreen /> : <OverviewScreen actor={actor} />;
+    case 'deleted-items':
+      return (actor.role === 'ADMIN' || actor.role === 'MANAGER') ? <DeletedItemsScreen actor={actor} /> : <OverviewScreen actor={actor} />;
     case 'overview':
       return <OverviewScreen actor={actor} />;
     case 'projects':

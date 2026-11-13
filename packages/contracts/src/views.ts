@@ -395,7 +395,11 @@ export const DeletionPreflight = z.object({
   })).optional(),
   dependencyCount: z.number().int().min(0),
   descendantCount: z.number().int().min(0),
-  requiresReason: z.boolean().optional(),
+  /**
+   * Informational only: completion, approval, effort or schedule evidence exists and stays
+   * retained after a recoverable removal. It never demands a typed reason.
+   */
+  retainedHistory: z.boolean().optional(),
   confirmationText: z.string(),
   revision: Revision.nullable()
 });
@@ -431,6 +435,61 @@ export const ResponsibilityDeletionPreflight = z.object({
   revision: Revision.nullable()
 });
 export type ResponsibilityDeletionPreflight = z.infer<typeof ResponsibilityDeletionPreflight>;
+
+/**
+ * One recoverably removed task or subproject in the ADMIN Deleted Items view.
+ *
+ * The row still exists in its table, so the record identity, its name and its location are read
+ * from the stored row. Deletion metadata comes from the audit row that recorded the removal: when
+ * that evidence is missing the field stays `null` and the interface says it is unavailable rather
+ * than inventing a person, a reason or a timestamp.
+ */
+export const DeletedRecord = z.object({
+  entityType: z.enum(['TASKS', 'SUBPROJECTS']),
+  entityId: z.string(),
+  /** Readable name, never the stored status enum. */
+  name: z.string(),
+  projectId: z.string(),
+  projectName: z.string(),
+  /** The subproject path beneath the project, blank when the record sits directly on the project. */
+  location: z.string(),
+  deletedAt: IsoTimestamp.nullable(),
+  deletedByMemberId: z.string().nullable(),
+  deletedByName: z.string().nullable(),
+  /** The recorded removal note when one exists; never a description this service invented. */
+  reason: z.string().nullable(),
+  confirmationSource: z.string().nullable(),
+  revision: Revision,
+  /** Whether an ADMIN could restore it right now, and why not when they could not. */
+  restorable: z.boolean(),
+  blockers: z.array(z.object({ code: z.string(), detail: z.string() }))
+});
+export type DeletedRecord = z.infer<typeof DeletedRecord>;
+
+export const DeletedRecordPage = z.object({
+  items: z.array(DeletedRecord),
+  total: z.number().int().min(0),
+  page: z.number().int().min(1),
+  pageSize: z.number().int().min(1),
+  totalPages: z.number().int().min(0)
+});
+export type DeletedRecordPage = z.infer<typeof DeletedRecordPage>;
+
+/**
+ * ADMIN-only eligibility answer for restoring a recoverably removed record.
+ *
+ * The answer carries the revision the restore command must echo, so a stale confirmation is
+ * refused instead of overwriting a newer change.
+ */
+export const RestorePreflight = z.object({
+  entityType: z.enum(['TASKS', 'SUBPROJECTS']),
+  entityId: z.string(),
+  name: z.string(),
+  restorable: z.boolean(),
+  blockers: z.array(z.object({ code: z.string(), detail: z.string() })),
+  revision: Revision.nullable()
+});
+export type RestorePreflight = z.infer<typeof RestorePreflight>;
 
 export const EmployeeTask = z.object({
   taskId: z.string(),
@@ -735,6 +794,7 @@ export const WorkSubproject = z.object({
 export type WorkSubproject = z.infer<typeof WorkSubproject>;
 
 export const WorkProjectDetail = z.object({
+  canWrite: z.boolean().optional(),
   record: WorkProject,
   progress: ProgressRollup,
   subprojects: z.array(WorkSubproject),
@@ -834,10 +894,11 @@ export const WorkOverviewQuery = z
 export type WorkOverviewQuery = z.infer<typeof WorkOverviewQuery>;
 
 /**
- * The ADMIN-only capability behind "Reopen task / 完亁E��取り消す".
+ * The ADMIN-only capability behind "Reopen task / 完了を取り消す".
  *
  * The answer never grants authority: the command re-reads the task, the project and the revision
- * inside its own transaction. A missing or failed answer keeps the action unavailable.
+ * inside its own transaction. A missing or failed answer keeps the action unavailable. There is no
+ * confirmation phrase to type: the interface asks for one clearly labelled button confirmation.
  */
 export const ReopenEligibility = z.object({
   taskId: z.string(),
@@ -845,7 +906,6 @@ export const ReopenEligibility = z.object({
   reasons: z.array(
     z.enum(['CONTAINER', 'NOT_COMPLETED', 'PROJECT_ARCHIVED', 'PROJECT_CANCELLED'])
   ),
-  confirmationText: z.string(),
   projectId: z.string(),
   projectName: z.string(),
   projectStatus: z.string(),

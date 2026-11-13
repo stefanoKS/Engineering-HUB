@@ -619,3 +619,65 @@ nothing above; they make rules 174-194 true for the paths that still bypassed th
 202. **Record evidence.** Update `docs/v2/DIVISIONS.md`, `ARCHITECTURE.md`, `API.md`, `SECURITY.md`,
      `OPERATIONS.md`, `docs/v2/ACCEPTANCE.md` and the branding documentation, keep earlier gate
      records unchanged, and keep `docs/PRODUCTION_READINESS.md` **NOT APPROVED FOR PRODUCTION**.
+
+## V2 corrective rules (manager recoverable removal, ADMIN restoration, no-typing confirmations)
+
+These rules record a **user-approved, narrowly scoped** change. They supersede two earlier
+statements *only* for the four actions named below: that ordinary task/subproject removal is
+ADMIN-only, and that the confirmation for those actions must be a typed phrase plus a free-text
+reason. Nothing else is widened, and no other confirmation is weakened.
+
+203. **Four separated capabilities, never one flag.** Recoverable removal of a task or subproject is
+     `canRecoverablyDeleteRecord` (ADMIN, or a MANAGER inside a division where it holds `WORK`
+     membership). Restoration of a removed record is `canRestoreDeletedRecord` (ADMIN). Reopening a
+     completed task is `canReopenTask` (ADMIN). Permanent erasure stays `canPurgeRecord` (ADMIN)
+     with every existing safeguard. Widening one function must never widen another, and project or
+     responsibility removal keeps its previous ADMIN-only permission.
+204. **A manager's removal is scoped by the record's division.** The server resolves the record's
+     project division from authoritative data, refuses a record outside the caller's readable
+     divisions like an unknown one, refuses a read-only division, and repeats the role, activation,
+     membership, division and lifecycle checks through the transaction handle under the canonical
+     lock order before the first mutation. A browser-supplied role, capability or division is data.
+205. **Recoverable removal keeps the record.** Only `deleted_at` and the revision change. Children,
+     dependencies, requests, approvals, notifications and history are never removed automatically,
+     an existing blocker still refuses the action, a repeated delivery returns `alreadyRemoved`
+     without a second audit row, and `RECORD_REMOVED` records the actor, the role, the previous and
+     resulting state and the confirmation source.
+206. **Restoration returns the same row.** Only an ADMIN restores, only the stored row and its
+     identifier come back (`deleted_at` cleared, revision incremented, `RECORD_RESTORED`), the
+     original status, dates, assignments, completion history and relationships are preserved, a
+     completed task stays completed, and a removed parent, an inactive project or a hierarchy that no
+     longer fits blocks the restoration with an explanation instead of repairing anything silently.
+     A permanently erased record is never a restore candidate. Restoring a historical assignment is
+     never a new membership grant.
+207. **No-typing confirmation.** Recoverable removal, restoration, corrective reopening and permanent
+     task/subproject erasure use one red warning panel that names the record and states the real
+     consequence, plus Cancel and one clearly labelled action button. No typed phrase and no
+     mandatory free-text reason are collected. The authority is unchanged: the server still requires
+     the explicit confirmation flag, the role, the division, the current revision and the blockers,
+     and the audit row records `confirmationSource: 'BUTTON'` with an application-generated
+     description and a `userNote` only when a person actually wrote one. Never claim a person typed a
+     phrase or wrote a reason that was generated. Project and responsibility erasure keep their
+     existing typed confirmation.
+208. **One attempt, one identity.** A corrective command's idempotency key is created once when the
+     confirmation dialog opens and is reused by every submission of that attempt; a new attempt gets
+     a new key. An uncertain outcome is never retried automatically, and a conflict requires a fresh
+     authoritative read, the current revision and a deliberate new confirmation.
+209. **Record evidence.** Update `docs/v2/API.md`, `SECURITY.md`, `ARCHITECTURE.md`, `OPERATIONS.md`,
+     `UI_CONVENTIONS.md` and `docs/v2/ACCEPTANCE.md`, keep every earlier gate record unchanged, and
+     keep `docs/PRODUCTION_READINESS.md` **NOT APPROVED FOR PRODUCTION**.
+
+
+## V2 member collaboration and manager recovery (2026-11-13)
+
+User-approved exception to the earlier own-task/member-no-edit rules and ADMIN-only restoration:
+210. MEMBER may edit ordinary task/subproject fields and recoverably remove these records regardless
+     of ownership, only in a WORK division and a project visible to the member. READ grants never
+     authorize writes. Project/responsibility editing, approvals, direct completion, notifications,
+     completed-task reopening and permanent erasure retain their separate existing permissions.
+211. MANAGER may restore removed tasks/subprojects in WORK divisions. Deleted Items results and
+     totals are scoped before pagination. ADMIN retains cross-division recovery. Re-read authority
+     under the canonical locks, preserve revision checks, same-row restoration, audit and blockers.
+212. Member editors read fresh allowlisted values through /api/work/editor; never reuse a read-only
+     placeholder as an editable stored value or expose manager-only history/settings. No typing
+     is required for deletion/restoration confirmation. No migration or deployment is implied.

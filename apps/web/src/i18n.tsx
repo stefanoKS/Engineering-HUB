@@ -28,18 +28,23 @@ export const V2_LABELS = {
  'hierarchy.hiddenTasks': { ja: '非表示のタスク: {n} 件', en: '{n} hidden tasks' },
  'delete.target': { ja: '対象', en: 'Target' },
  'delete.confirmTitle': { ja: 'タスクを削除', en: 'Remove task' },
- 'delete.completedTitle': { ja: '完了済みタスクを削除', en: 'Remove completed task' },
  'delete.checking': { ja: '削除できるか確認しています…', en: 'Checking whether this can be removed…' },
- 'delete.allowed': {
-   ja: '操作履歴は監査用に保持されます。',
-   en: 'The operation history will be retained for audit.'
+ 'delete.confirmTask': {
+   ja: 'このタスクを通常の一覧から削除します。記録と履歴は保持され、管理者は後から復元できます。',
+   en: 'Remove this task from normal application views. The record and its history are retained, and an administrator can restore it later.'
  },
- 'delete.confirmTask': { ja: 'このタスクを一覧から削除しますか？', en: 'Remove this task from normal application views?' },
- 'delete.completedTask': {
-   ja: 'このタスクには完了・承認履歴があります。削除後は通常の一覧に表示されませんが、履歴は監査用に保持されます。',
-   en: 'This task has completion or approval history. It will disappear from normal views, but its historical evidence will be retained.'
+ 'delete.confirmSubproject': {
+   ja: 'このサブプロジェクトを通常の一覧から削除します。記録と履歴は保持され、管理者は後から復元できます。',
+   en: 'Remove this subproject from normal application views. The record and its history are retained, and an administrator can restore it later.'
  },
- 'delete.confirmSubproject': { ja: 'このサブプロジェクトを削除しますか？', en: 'Remove this subproject?' },
+ 'delete.retainedHistory': {
+   ja: 'この記録には完了・承認・日程などの履歴があります。削除しても履歴は保持されます。',
+   en: 'This record has completion, approval or schedule history. That history is retained after the removal.'
+ },
+ 'delete.reloadIneligible': {
+   ja: '最新の状態では削除できなくなりました。内容を確認してください。',
+   en: 'In the latest state this record can no longer be removed. Review it again.'
+ },
  'delete.blocked': { ja: 'この記録は削除できません。', en: 'This record cannot be removed.' },
  'delete.blockedHint': {
    ja: '表示された進行中の関係またはワークフローを先に解決してください。子タスクや子サブプロジェクトは自動では削除されません。',
@@ -47,10 +52,6 @@ export const V2_LABELS = {
  },
  'delete.revealChildren': { ja: '子を表示', en: 'Show children' },
  'delete.submit': { ja: '削除する', en: 'Delete' },
- 'delete.staleRevision': {
-   ja: '他の更新により内容が変わりました。画面を再読み込みしてから、もう一度お試しください。',
-   en: 'The record changed after you loaded it. Reload the page and try again.'
- },
  'delete.done': { ja: '一覧から削除しました。監査履歴は保持されています。', en: 'Removed from active lists; audit history was retained.' },
  'delete.blocker.HAS_DESCENDANTS': { ja: '子サブプロジェクトまたは子タスクが残っています', en: 'Child subprojects or tasks remain' },
  'delete.blocker.HAS_TASKS': { ja: 'タスクが残っています', en: 'Tasks remain' },
@@ -69,6 +70,7 @@ export const V2_LABELS = {
  'delete.blocker.NOT_FOUND_OR_DELETED': { ja: '既に削除されています', en: 'Already removed' },
  'delete.blocker.generic': { ja: '削除できません', en: 'Removal is not allowed' },
  'delete.permanentAction': { ja: '誤作成記録を完全に消去', en: 'Permanently erase mistaken record' },
+ 'delete.permanentConfirm': { ja: '完全に消去する', en: 'Erase permanently' },
  'delete.permanentTitle': { ja: '誤作成記録の完全消去', en: 'Permanently erase mistaken record' },
  'delete.checkingPermanent': { ja: '完全消去の適格性を確認しています…', en: 'Checking permanent-erasure eligibility…' },
  'delete.permanentWarning': { ja: '{name} を物理的に消去します。この操作は元に戻せません。', en: 'Physically erase {name}. This cannot be undone.' },
@@ -461,6 +463,7 @@ export const V2_LABELS = {
   'nav.workload': { ja: '担当・期限レポート', en: 'Assignment & deadline report' },
   'nav.automation': { ja: '自動化設定', en: 'Automation' },
   'nav.status': { ja: '状態・公開', en: 'Status & publication' },
+  'nav.deletedItems': { ja: '削除した記録', en: 'Deleted items' },
   'nav.signOut': { ja: 'サインアウト', en: 'Sign out' },
   'login.title': { ja: 'シゴトモにサインイン', en: 'Sign in to SHIGOTOMO' },
   'login.google': { ja: 'Google でサインイン', en: 'Sign in with Google' },
@@ -790,6 +793,10 @@ export const V2_LABELS = {
   'action.cancel': { ja: 'キャンセル', en: 'Cancel' },
   'action.edit': { ja: '編集', en: 'Edit' },
   'action.confirm': { ja: '確認', en: 'Confirm' },
+  'action.unknownOutcomeHelp': {
+    ja: '結果を確認できていません。自動では再実行しません。一覧とこの画面を再読み込みして、実際の状態を確認してください。',
+    en: 'The outcome could not be confirmed. Nothing is retried automatically; reload this page and the list to see the actual state.'
+  },
   'action.search': { ja: '検索', en: 'Search' },
   'action.next': { ja: '次へ', en: 'Next' },
   'action.previous': { ja: '前へ', en: 'Previous' },
@@ -1172,6 +1179,11 @@ export const V2_LABELS = {
 
   'reopen.action': { ja: '完了を取り消す', en: 'Reopen task' },
   'reopen.title': { ja: '完了を取り消して再開', en: 'Reopen the completed task' },
+  'reopen.warning': {
+    ja: 'このタスクの現在の完了を取り消します。過去の申請・承認・監査の記録は保持されます。',
+    en: 'Reverses the current completion of this task. Earlier requests, approvals and audit records are retained.'
+  },
+  'reopen.confirm': { ja: '完了を取り消す', en: 'Reopen task' },
   'reopen.body': {
     ja: '現在の完了を取り消し、タスクを進行中に戻します。過去の申請・承認・監査の記録は変更せずに保持されます。',
     en: 'The current completion is reversed and the task returns to an open state. Earlier requests, approvals and audit records are retained unchanged.'
@@ -1203,6 +1215,51 @@ export const V2_LABELS = {
     ja: '親プロジェクトが取消済みです。別の手順で再有効化してください。',
     en: 'The parent project is cancelled; reactivate it in a separate step.'
   },
+  // ---- Deleted Items (ADMIN) -------------------------------------------------------------
+  'deleted.title': { ja: '削除した記録', en: 'Deleted items' },
+  'deleted.hint': {
+    ja: '削除したタスクとサブプロジェクトを確認し、記録をそのまま復元できます。マネージャーは担当課の記録を、管理者は全課の記録を復元できます。',
+    en: 'Review removed tasks and subprojects and restore the record itself. Managers can restore within their writable divisions; administrators can restore across divisions.'
+  },
+  'deleted.permanentHint': {
+    ja: '完全に消去した記録はこの画面に表示されず、アプリケーションから復元できません。',
+    en: 'Permanently erased records are not listed here and cannot be restored through the application.'
+  },
+  'deleted.filterType': { ja: '種類', en: 'Type' },
+  'deleted.search': { ja: '名前・案件で検索', en: 'Search by name or project' },
+  'deleted.type.ALL': { ja: 'すべて', en: 'All' },
+  'deleted.type.TASKS': { ja: 'タスク', en: 'Task' },
+  'deleted.type.SUBPROJECTS': { ja: 'サブプロジェクト', en: 'Subproject' },
+  'deleted.column.type': { ja: '種類', en: 'Type' },
+  'deleted.column.name': { ja: '名前', en: 'Name' },
+  'deleted.column.location': { ja: '所属', en: 'Location' },
+  'deleted.column.deletedAt': { ja: '削除日時', en: 'Deleted at' },
+  'deleted.column.deletedBy': { ja: '削除した担当', en: 'Deleted by' },
+  'deleted.column.evidence': { ja: '記録された理由', en: 'Recorded reason' },
+  'deleted.column.state': { ja: '復元の可否', en: 'Restorable' },
+  'deleted.unavailable': { ja: '記録なし', en: 'Not recorded' },
+  'deleted.confirmedWithButton': { ja: '確認ボタンで確定', en: 'Confirmed with the dialog button' },
+  'deleted.restorable': { ja: '復元できます', en: 'Can be restored' },
+  'deleted.blocked': { ja: '復元できません', en: 'Cannot be restored' },
+  'deleted.restore': { ja: '復元', en: 'Restore' },
+  'deleted.restoreTitle': { ja: '記録を復元', en: 'Restore record' },
+  'deleted.restoreWarning': {
+    ja: 'この記録を元の場所に復元します。識別子・状態・日付・担当・履歴は保持されたまま、通常の一覧に戻ります。',
+    en: 'Restores this record to its original place. The identifier, status, dates, assignments and history are kept and it returns to the normal lists.'
+  },
+  'deleted.restoreConfirm': { ja: '復元する', en: 'Restore' },
+  'deleted.restored': { ja: '「{name}」を復元しました。', en: 'Restored “{name}”.' },
+  'deleted.reloadIneligible': {
+    ja: '最新の状態では復元できません。ブロッカーを確認してください。',
+    en: 'In the latest state this record cannot be restored. Review the blockers.'
+  },
+  'deleted.empty': { ja: '削除した記録はありません。', en: 'No deleted records.' },
+  'deleted.blocker.PROJECT_DELETED': { ja: '所属する案件が削除されています', en: 'The project of this record is removed' },
+  'deleted.blocker.PROJECT_INACTIVE': { ja: '所属する案件がアーカイブまたは取消済みです', en: 'The project is archived or cancelled' },
+  'deleted.blocker.PARENT_DELETED': { ja: '親の記録が削除されています', en: 'The parent record is removed' },
+  'deleted.blocker.HIERARCHY_DEPTH': { ja: '階層の上限を超えています', en: 'The hierarchy limit would be exceeded' },
+  'deleted.blocker.NOT_DELETED': { ja: '削除されていないため復元できません', en: 'This record is not removed' },
+  'deleted.blocker.generic': { ja: '復元できません', en: 'Restoration is not allowed' },
   // ---- Unmapped-work division mapping (ADMIN) -------------------------------------------
   'mapping.title': { ja: '未分類の案件と分野の割り当て', en: 'Unmapped work and division mapping' },
   'mapping.hint': {
