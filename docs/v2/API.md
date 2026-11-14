@@ -1,5 +1,39 @@
 # V2 HTTP API
 
+## Project structure reveal, attention filters and timeline inspection — 2026-11-14
+
+One additive read-only endpoint and two additive timeline fields. Every route keeps the existing
+role, division and visibility checks; nothing here writes.
+
+### `GET /api/work/projects/:id/attention`
+
+| Property | Value |
+|---|---|
+| Role | any signed-in role (`VIEWER` or above) |
+| Query | `divisionId?` — the same display narrowing as every other read; an unauthorized or foreign project is `NOT_FOUND` |
+| Response | `ProjectAttention` |
+
+`ProjectAttention` carries `projectId`, the server's `today` (Asia/Tokyo), the explicit seven-date
+interval `dueSoon: { from, to }` (`today … today + 6`, inclusive), `includesOutsideChart: true`, and
+one bucket per filter (`ALL`, `OVERDUE`, `DUE_SOON`, `REVIEW`, `MISSING_DATES`). Each bucket carries
+`count`, the matching leaf `taskIds`, and the `contextTaskIds` / `contextSubprojectIds` a filtered
+view needs to explain where a match lives. A container is organisation: it is context and is never
+counted or matched. The counts are resolved from the whole authorized project scope before any
+paging or hierarchy presentation, so they never depend on a page, an expanded folder or the visible
+chart period. `ALL` counts open leaf work in active work. `MISSING_DATES` covers the four stored
+conditions (no dates, start missing, finish missing, start after deadline).
+
+### Timeline fields
+
+`TimelineTaskRow` now also carries `assigneeNames` (display names only) and `reviewState`
+(`NONE|PENDING|APPROVED|STALE`), so the inspection panel can show the assignee and review state
+without a second request. No member identifier, e-mail address or role is published.
+
+`GET /api/work/timeline?projectId=…` accepts the same optional `divisionId` narrows as the overview;
+a readable project in another division is `NOT_FOUND`, so a selected-division label can never
+describe another division's work. With `includeCompleted=false`, a completed container that still
+explains an unfinished child is retained (it is organisation, not completed work).
+
 ## Member creation, shared presentation, ADMIN reopening and request dialogs — 2026-11-05
 
 Member creation now reaches the project screens, both roles share one presentation built from
@@ -564,6 +598,10 @@ Visibility is resolved on the server before a page is cut:
   `tasks[].subprojectId`, `tasks[].parentTaskId`) so a reader rebuilds the same tree the manager
   sees. Completed work inside a visible project stays readable so the completed count is real; the
   tasks of an archived branch are withheld entirely instead of being re-attached as direct work.
+- The active/completed presentation is built in the browser from this same payload. No field was
+  added: `TaskSummary.container`, `status`, `parentTaskId` and `subprojectId` already describe the
+  split, and the browser remains a presentation layer. The server keeps the authorization,
+  counting and completion authority.
 
 Managers use `/api/manager/tasks` and `/api/manager/projects` for the same data with management
 controls; the server refuses every manager write for MEMBER and VIEWER.

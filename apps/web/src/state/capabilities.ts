@@ -3,8 +3,8 @@
  *
  * These flags decide what the interface renders - never what it is allowed to do. Every command
  * re-checks the verified role on the server, so a hidden button is a usability decision and a
- * forged flag grants nothing. The capabilities are deliberately separate: a MEMBER may create new
- * work but never edit, archive, delete or reopen an existing record, including one they created.
+ * forged flag grants nothing. A MEMBER may edit and recoverably remove tasks and subprojects in
+ * authorized work divisions; archive, restore, purge and reopen remain separate capabilities.
  *
  * `GENERAL_MANAGER` (次長) is cross-division read-only oversight: it is given no create, edit,
  * archive, delete, reopen or request capability here, and the server refuses those commands even
@@ -23,7 +23,7 @@ export type Capabilities = {
   canDelete: boolean;
   /** Recoverable removal of a task or subproject; the record's own `canWrite` still decides where. */
   canRecoverDelete: boolean;
-  /** Restoration of a recoverably removed record - an ADMIN correction. */
+  /** Restoration of a recoverably removed record by an ADMIN or authorized MANAGER. */
   canRestoreDeleted: boolean;
   /** Permanent erasure of a task or subproject - ADMIN only, never offered to a manager. */
   canPurgeRecord: boolean;
@@ -47,8 +47,7 @@ export function capabilitiesOf(actor: Pick<Actor, 'role'>): Capabilities {
     canEditWork: member || manager,
     canArchive: manager,
     canDelete: admin,
-    // Recoverable removal is a manager capability; restoration and permanent erasure stay
-    // administrative. They are separate flags so widening one can never widen another.
+    // These capabilities remain separate so widening one cannot widen the others.
     canRecoverDelete: member || manager,
     canRestoreDeleted: manager,
     canPurgeRecord: admin,

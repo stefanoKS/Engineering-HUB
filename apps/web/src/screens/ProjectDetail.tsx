@@ -1,17 +1,19 @@
-import { MemberWorkEditor } from '../components/MemberWorkEditor';
 /**
  * Project detail.
  *
- * One expandable hierarchy: a subproject is a header, its tasks sit immediately beneath it, nested
- * subprojects follow, and project-direct tasks live in their own section. Nesting comes only from
+ * The structure has two presentations built from the same authorized project read: an active table
+ * (unfinished leaf work, with containers only as context and empty subprojects kept for creation)
+ * and one collapsed completed section below it. Nesting comes only from the stored
  * `subprojects.parent_subproject_id`, `tasks.subproject_id` and `tasks.parent_task_id` - never from
  * names, visual order or a grouping heuristic.
  *
- * MANAGER and ADMIN edit and create in context. Only ADMIN gets an administrative-removal control,
- * and it always goes through the reviewed preflight; MANAGER, MEMBER and VIEWER never see it. A MEMBER or
- * VIEWER reads the narrow `/api/work/projects/:id` projection with no actions at all.
+ * ADMIN and MANAGER edit and create in context; a MEMBER with a writable, visible division may edit
+ * and recoverably remove tasks and subprojects, and a VIEWER stays read-only. Permanent erasure is
+ * never offered here. Every row action still goes through the reviewed preflight, revision check,
+ * confirmation and audit path; hiding a control is a usability decision, never authorization.
  */
-import { useCallback, useMemo, useState } from 'react';
+import { MemberWorkEditor } from '../components/MemberWorkEditor';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ProjectForm } from './Projects';
 import { SubprojectForm } from './SubprojectForm';
 import { TaskForm } from './TaskForm';
@@ -29,8 +31,9 @@ import { keys, queryCache, useQuery } from '../state/cache';
 import { useI18n } from '../i18n';
 import { Badge, Breadcrumbs, DescriptionText, EmptyState, ErrorBox, Menu, ProgressBar, Section } from '../components/ui';
 import { TaskStatusBadge, WorkflowHint } from '../components/task-status';
-import { projectColor } from '@eh/domain';
-import { BackButton, useRouteMemoryState } from '../state/navigation';
+import { TaskAssigneePicker } from '../components/TaskAssigneePicker';
+import { isCancelledStatus, isCompletedStatus, isOpenStatus, projectColor, rollup } from '@eh/domain';
+import { BackButton, takeCompletedTask, useRouteMemoryState } from '../state/navigation';
 import { useBusinessDate } from '../state/business-date';
 import { DeleteEntityDialog } from '../components/DeleteEntityDialog';
 import { MemberSubprojectForm } from '../components/member-subproject-form';
@@ -107,22 +110,67 @@ export type HierarchySubproject = {
   revision?: number | null;
 };
 
+/**
+ * Leaf counts only. A container is organisation, never an extra unit of work, and `Cancelled`
+ * work is reported separately from active and completed work - so it is never part of `total`.
+ */
 export type TaskCounts = { active: number; done: number; total: number };
 
 export type TaskNode = { task: TaskSummary; children: TaskNode[]; counts: TaskCounts };
 
 export type SubprojectNode = HierarchySubproject & {
   revision: number | null;
+  /** The full visible task tree (including cancelled work when it is shown). */
   tasks: TaskNode[];
+  /** The active presentation tree: unfinished leaves plus the containers that lead to them. */
+  activeTasks: TaskNode[];
+  /** The completed presentation tree: done leaves plus the containers that lead to them. */
+  completedTasks: TaskNode[];
   children: SubprojectNode[];
+  /** Canonical leaf counts for the whole visible bucket. */
   counts: TaskCounts;
+  /** Leaf counts of the displayed (possibly filtered) active tree. */
+  activeCounts: TaskCounts;
+  /** Done leaves in the displayed (possibly filtered) completed tree. */
+  completedCount: number;
 };
+
+export type CompletedGroup = {
+  /** Stable key: `sub:<subproject_id>` or `direct`. */
+  key: string;
+  subprojectId: string | null;
+  /** Stored subproject name, or an empty string for the project-direct group. */
+  name: string;
+  tasks: TaskNode[];
+  count: number;
+};
+
+export type StructureFilter = { query?: string; assigneeId?: string };
 
 export type ProjectHierarchy = {
   subprojects: SubprojectNode[];
   directTasks: TaskNode[];
   counts: TaskCounts;
   hiddenTasks: number;
+  cancelledLeaves: number;
+  filterActive: boolean;
+  active: {
+    subprojects: SubprojectNode[];
+    directTasks: TaskNode[];
+    directCounts: TaskCounts;
+    showDirect: boolean;
+    counts: TaskCounts;
+  };
+  completed: {
+    /** Completed leaf work in the visible scope. */
+    count: number;
+    /** Completed leaf work that matches the current filter (equal to `count` without a filter). */
+    matches: number;
+    directTasks: TaskNode[];
+    directCount: number;
+    groups: CompletedGroup[];
+  };
+  matchedTasks: number;
 };
 
 const EMPTY_COUNTS: TaskCounts = { active: 0, done: 0, total: 0 };
@@ -135,30 +183,210 @@ function addCounts(left: TaskCounts, right: TaskCounts): TaskCounts {
   };
 }
 
+/**
+ * A container is organisation. The server marks it in `TaskSummary.container`; the structural
+ * check keeps a container a container when its only children are hidden by the inactive-work
+ * control (a stored `Done` on such a task never makes it completed work).
+ */
+function isOrganisational(node: TaskNode): boolean {
+  return node.children.length > 0 || node.task.container === true;
+}
+
+function ownCount(task: TaskSummary): TaskCounts {
+  if (isCompletedStatus(task.status)) return { active: 0, done: 1, total: 1 };
+  if (isOpenStatus(task.status)) return { active: 1, done: 0, total: 1 };
+  return EMPTY_COUNTS;
+}
+
+/** Leaf counts of a rendered tree. Containers and cancelled leaves contribute nothing. */
 function countsOfNodes(nodes: readonly TaskNode[]): TaskCounts {
-  return nodes.reduce((total, node) => addCounts(total, node.counts), EMPTY_COUNTS);
+  let active = 0;
+  let done = 0;
+  const walk = (list: readonly TaskNode[]): void => {
+    for (const node of list) {
+      if (node.children.length > 0) {
+        walk(node.children);
+        continue;
+      }
+      if (node.task.container === true) continue;
+      const own = ownCount(node.task);
+      active += own.active;
+      done += own.done;
+    }
+  };
+  walk(nodes);
+  return { active, done, total: active + done };
 }
 
-function isDone(status: string): boolean {
-  return status === 'Done';
+/** Displayed work rows in a tree, including cancelled work, for a filter summary. */
+function countWorkRows(nodes: readonly TaskNode[]): number {
+  let total = 0;
+  const walk = (list: readonly TaskNode[]): void => {
+    for (const node of list) {
+      if (node.children.length > 0) walk(node.children);
+      else if (node.task.container !== true) total += 1;
+    }
+  };
+  walk(nodes);
+  return total;
 }
 
-function isOpen(status: string): boolean {
-  return status !== 'Done' && status !== 'Cancelled';
+/**
+ * Canonical leaf counts for one bucket.
+ *
+ * `rollup` is the same domain function the server uses for progress: it excludes containers and
+ * counts each leaf exactly once, so a screen counter can never become a second definition of
+ * "open" or "completed".
+ */
+function bucketCounts(tasks: readonly TaskSummary[]): { counts: TaskCounts; cancelled: number } {
+  const value = rollup(
+    tasks.map((task) => ({
+      taskId: task.taskId,
+      status: task.status,
+      progressPercent: task.progressPercent ?? null,
+      estimatedHours: null,
+      parentTaskId: task.parentTaskId
+    }))
+  );
+  const done = value.doneLeaves;
+  const cancelled = value.cancelledLeaves;
+  const active = Math.max(0, value.leaves - done - cancelled);
+  return { counts: { active, done, total: active + done }, cancelled };
+}
+
+function activeTree(nodes: readonly TaskNode[], includeInactive: boolean): TaskNode[] {
+  const result: TaskNode[] = [];
+  for (const node of nodes) {
+    const children = activeTree(node.children, includeInactive);
+    if (isOrganisational(node)) {
+      if (children.length > 0) {
+        result.push({ task: node.task, children, counts: countsOfNodes(children) });
+      }
+      continue;
+    }
+    // A completed leaf belongs to the completed presentation; a cancelled leaf is not completed
+    // work and honours the existing inactive-work control.
+    if (isCompletedStatus(node.task.status)) continue;
+    if (isCancelledStatus(node.task.status) && !includeInactive) continue;
+    result.push({ task: node.task, children: [], counts: ownCount(node.task) });
+  }
+  return result;
+}
+
+function completedTree(nodes: readonly TaskNode[]): TaskNode[] {
+  const result: TaskNode[] = [];
+  for (const node of nodes) {
+    const children = completedTree(node.children);
+    if (isOrganisational(node)) {
+      if (children.length > 0) {
+        result.push({ task: node.task, children, counts: countsOfNodes(children) });
+      }
+      continue;
+    }
+    // Only the authoritative `Done` status is completed. A container's stored status is never
+    // read here, and progress = 100 % is never inferred as completion.
+    if (isCompletedStatus(node.task.status)) {
+      result.push({ task: node.task, children: [], counts: ownCount(node.task) });
+    }
+  }
+  return result;
+}
+
+/** Keeps the matches and the containers that lead to them; a container itself never matches. */
+function filterTree(nodes: readonly TaskNode[], match: (task: TaskSummary) => boolean): TaskNode[] {
+  const result: TaskNode[] = [];
+  for (const node of nodes) {
+    const children = filterTree(node.children, match);
+    if (isOrganisational(node)) {
+      if (children.length > 0) {
+        result.push({ task: node.task, children, counts: countsOfNodes(children) });
+      }
+      continue;
+    }
+    if (match(node.task)) {
+      result.push({ task: node.task, children: [], counts: ownCount(node.task) });
+    }
+  }
+  return result;
+}
+
+/** The first displayed work leaf, used to reveal a group rather than its heading. */
+export function firstLeafTaskId(nodes: readonly TaskNode[]): string | null {
+  for (const node of nodes) {
+    if (node.children.length === 0 && node.task.container !== true) return node.task.taskId;
+    const child = firstLeafTaskId(node.children);
+    if (child) return child;
+  }
+  return null;
+}
+
+/**
+ * Resolves a task in the authorized project model, with the presentation it belongs to and the
+ * expansion keys its row needs. Stable IDs only: no index, no rendered order and no name match.
+ * A task whose row is filtered out is not found here, which is what makes the caller clear the
+ * filters deliberately instead of silently showing nothing.
+ */
+export type TaskLocation = {
+  presentation: 'active' | 'completed';
+  /** Group and ancestor task keys that must be open for the row to be rendered. */
+  expandKeys: string[];
+};
+
+function findTask(
+  nodes: readonly TaskNode[],
+  taskId: string,
+  ancestors: readonly string[]
+): string[] | null {
+  for (const node of nodes) {
+    if (node.task.taskId === taskId) return [...ancestors];
+    const found = findTask(node.children, taskId, [...ancestors, `task:${node.task.taskId}`]);
+    if (found) return found;
+  }
+  return null;
+}
+
+export function locateTask(hierarchy: ProjectHierarchy, taskId: string): TaskLocation | null {
+  const active = (): TaskLocation | null => {
+    for (const subproject of hierarchy.active.subprojects) {
+      const keys = findTask(subproject.activeTasks, taskId, []);
+      if (keys) return { presentation: 'active', expandKeys: [`sub:${subproject.subprojectId}`, ...keys] };
+    }
+    const direct = findTask(hierarchy.active.directTasks, taskId, []);
+    if (direct) return { presentation: 'active', expandKeys: ['direct', ...direct] };
+    return null;
+  };
+  const completed = (): TaskLocation | null => {
+    for (const group of hierarchy.completed.groups) {
+      if (findTask(group.tasks, taskId, [])) return { presentation: 'completed', expandKeys: [] };
+    }
+    return null;
+  };
+  const completedIn = (nodes: readonly TaskNode[]): boolean =>
+    nodes.some(
+      (node) =>
+        (node.task.taskId === taskId && isCompletedStatus(node.task.status)) ||
+        completedIn(node.children)
+    );
+  // A completed leaf belongs to the completed presentation; everything else is looked up in the
+  // active one first, so a container that appears as context in both is revealed where it works.
+  const done = completedIn(hierarchy.directTasks) || hierarchy.subprojects.some((subproject) => completedIn(subproject.tasks));
+  return done ? completed() ?? active() : active() ?? completed();
 }
 
 /**
  * Builds the render model.
  *
  * A task is placed only by its stored `subproject_id`; a task whose subproject is hidden (archived
- * ancestor) is hidden with it instead of being moved to the project-direct section. Completed work
- * stays visible on this page (it is part of the project record and is counted), while `Cancelled`
- * work and archived subprojects stay hidden unless the manager asks for them.
+ * ancestor) is hidden with it instead of being moved to the project-direct section. The model keeps
+ * the full visible tree, the active tree (unfinished work) and the completed tree (done work)
+ * separately: a leaf appears in exactly one of them, while a container may appear in both as
+ * context. Nothing is moved, archived, deleted or reparented.
  */
 export function buildProjectHierarchy(input: {
   subprojects: readonly HierarchySubproject[];
   tasks: readonly TaskSummary[];
   includeInactive: boolean;
+  filter?: StructureFilter;
 }): ProjectHierarchy {
   const byId = new Map(input.subprojects.map((subproject) => [subproject.subprojectId, subproject]));
   const ancestorArchived = (subprojectId: string): boolean => {
@@ -179,18 +407,15 @@ export function buildProjectHierarchy(input: {
   let hiddenTasks = 0;
   const buckets = new Map<string, TaskSummary[]>();
   for (const task of input.tasks) {
-    if (!input.includeInactive && task.status === 'Cancelled') {
+    if (task.subprojectId && !visibleSubprojectIds.has(task.subprojectId)) {
+      // Never silently reassign a subproject's task to the project-direct bucket.
       hiddenTasks += 1;
       continue;
     }
+    if (!input.includeInactive && isCancelledStatus(task.status)) hiddenTasks += 1;
+    // Cancelled work stays in the bucket even while it is hidden, so canonical container
+    // detection and the rollup still see the whole shape of the branch.
     const key = task.subprojectId ?? '__direct__';
-    if (task.subprojectId) {
-      if (!visibleSubprojectIds.has(task.subprojectId)) {
-        // Never silently reassign a subproject's task to the project-direct bucket.
-        hiddenTasks += 1;
-        continue;
-      }
-    }
     const list = buckets.get(key) ?? [];
     list.push(task);
     buckets.set(key, list);
@@ -212,42 +437,145 @@ export function buildProjectHierarchy(input: {
     }
     const build = (task: TaskSummary, guard: number): TaskNode => {
       const children = guard > 8 ? [] : (byParent.get(task.taskId) ?? []).map((child) => build(child, guard + 1));
-      const own: TaskCounts = { active: isOpen(task.status) ? 1 : 0, done: isDone(task.status) ? 1 : 0, total: 1 };
-      return { task, children, counts: addCounts(own, countsOfNodes(children)) };
+      const node: TaskNode = { task, children, counts: EMPTY_COUNTS };
+      node.counts = isOrganisational(node) ? countsOfNodes(children) : ownCount(task);
+      return node;
     };
     return roots.map((task) => build(task, 0));
   };
 
-  const taskTreeOf = (subprojectId: string | null): TaskNode[] =>
-    buildTaskTree(buckets.get(subprojectId ?? '__direct__') ?? []);
+  const query = (input.filter?.query ?? '').trim().toLocaleLowerCase();
+  const assigneeId = input.filter?.assigneeId ?? '';
+  const filterActive = !!(query || assigneeId);
+  const matches = (task: TaskSummary): boolean => {
+    if (task.container) return false;
+    if (query && !task.taskName.toLocaleLowerCase().includes(query)) return false;
+    if (assigneeId) {
+      const ids =
+        Array.isArray(task.assigneeIds) && task.assigneeIds.length > 0
+          ? task.assigneeIds
+          : task.ownerMemberId
+            ? [task.ownerMemberId]
+            : [];
+      if (!ids.includes(assigneeId)) return false;
+    }
+    return true;
+  };
+
+  const buildBucket = (key: string) => {
+    const all = buckets.get(key) ?? [];
+    const display = input.includeInactive ? all : all.filter((task) => !isCancelledStatus(task.status));
+    const tree = buildTaskTree(display);
+    const { counts, cancelled } = bucketCounts(all);
+    const activeBase = activeTree(tree, input.includeInactive);
+    const completedBase = completedTree(tree);
+    return {
+      tree,
+      counts,
+      cancelled,
+      activeTasks: filterActive ? filterTree(activeBase, matches) : activeBase,
+      completedTasks: filterActive ? filterTree(completedBase, matches) : completedBase
+    };
+  };
 
   const byName = (a: HierarchySubproject, b: HierarchySubproject): number =>
     a.subprojectName.localeCompare(b.subprojectName, 'ja') || a.subprojectId.localeCompare(b.subprojectId);
 
-  const buildSubproject = (subproject: HierarchySubproject): SubprojectNode => {
-    const tasks = taskTreeOf(subproject.subprojectId);
-    const children: SubprojectNode[] = [];
-    const counts = countsOfNodes(tasks);
-    return {
-      ...subproject,
-      revision: subproject.revision ?? null,
-      tasks,
-      children,
-      counts
-    };
-  };
-
+  let cancelledLeaves = 0;
+  const subprojects: SubprojectNode[] = visibleSubprojects
+    .slice()
+    .sort(byName)
+    .map((subproject) => {
+      const bucket = buildBucket(subproject.subprojectId);
+      cancelledLeaves += bucket.cancelled;
+      return {
+        ...subproject,
+        revision: subproject.revision ?? null,
+        tasks: bucket.tree,
+        activeTasks: bucket.activeTasks,
+        completedTasks: bucket.completedTasks,
+        children: [],
+        counts: bucket.counts,
+        activeCounts: countsOfNodes(bucket.activeTasks),
+        completedCount: countsOfNodes(bucket.completedTasks).done
+      };
+    });
   // Legacy parent links remain stored for archival eligibility, but normal navigation is flat.
-  const subprojects = visibleSubprojects.slice().sort(byName).map(buildSubproject);
-  const directTasks = taskTreeOf(null);
+  const direct = buildBucket('__direct__');
+  cancelledLeaves += direct.cancelled;
+
+  const counts = addCounts(
+    subprojects.reduce((total, node) => addCounts(total, node.counts), EMPTY_COUNTS),
+    direct.counts
+  );
+
+  const activeSubprojects = subprojects.filter((node) =>
+    filterActive
+      ? node.activeTasks.length > 0
+      : node.activeTasks.length > 0 || node.completedTasks.length === 0
+  );
+  const directActive = direct.activeTasks;
+  const directActiveCounts = countsOfNodes(directActive);
+  const showDirect = filterActive
+    ? directActive.length > 0
+    : directActive.length > 0 || subprojects.length > 0 || direct.tree.length > 0;
+
+  const completedGroups: CompletedGroup[] = [];
+  for (const node of subprojects) {
+    const completedCount = countsOfNodes(node.completedTasks).done;
+    if (completedCount > 0) {
+      completedGroups.push({
+        key: `sub:${node.subprojectId}`,
+        subprojectId: node.subprojectId,
+        name: node.subprojectName,
+        tasks: node.completedTasks,
+        count: completedCount
+      });
+    }
+  }
+  const directCompletedCount = countsOfNodes(direct.completedTasks).done;
+  if (directCompletedCount > 0) {
+    completedGroups.push({
+      key: 'direct',
+      subprojectId: null,
+      name: '',
+      tasks: direct.completedTasks,
+      count: directCompletedCount
+    });
+  }
+
+  const activeCounts = addCounts(
+    activeSubprojects.reduce((total, node) => addCounts(total, node.activeCounts), EMPTY_COUNTS),
+    directActiveCounts
+  );
+  const completedMatches = completedGroups.reduce((total, group) => total + group.count, 0);
+  const matchedTasks =
+    countWorkRows(activeSubprojects.flatMap((node) => node.activeTasks)) +
+    countWorkRows(directActive) +
+    completedMatches;
+
   return {
     subprojects,
-    directTasks,
-    counts: addCounts(
-      subprojects.reduce((total, node) => addCounts(total, node.counts), EMPTY_COUNTS),
-      countsOfNodes(directTasks)
-    ),
-    hiddenTasks
+    directTasks: direct.tree,
+    counts,
+    hiddenTasks,
+    cancelledLeaves,
+    filterActive,
+    active: {
+      subprojects: activeSubprojects,
+      directTasks: directActive,
+      directCounts: directActiveCounts,
+      showDirect,
+      counts: activeCounts
+    },
+    completed: {
+      count: counts.done,
+      matches: completedMatches,
+      directTasks: direct.completedTasks,
+      directCount: directCompletedCount,
+      groups: completedGroups
+    },
+    matchedTasks
   };
 }
 
@@ -269,17 +597,6 @@ function TasksIcon(): JSX.Element {
   return (
     <svg className="tree-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <path d="M4 5h16v3H4zm0 6h16v3H4zm0 6h10v3H4z" fill="currentColor" opacity="0.7" />
-    </svg>
-  );
-}
-
-function TrashIcon(): JSX.Element {
-  return (
-    <svg className="icon-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path
-        d="M9 3h6l1 2h4v2H4V5h4l1-2zm-3 6h12l-1 12H7L6 9zm4 2v8h1v-8h-1zm3 0v8h1v-8h-1z"
-        fill="currentColor"
-      />
     </svg>
   );
 }
@@ -306,17 +623,62 @@ type HierarchyProps = {
    */
   collapsed?: Set<string>;
   onToggle?: (key: string) => void;
+  /** Expands the listed keys. Used only by an explicit reveal request. */
+  onExpand?: (keys: string[]) => void;
+  /** Task-name search. Controlled by the screen so it survives a language change. */
+  searchQuery?: string;
+  onSearchQueryChange?: (value: string) => void;
+  /** Stable member id. Controlled for the same reason. */
+  assigneeId?: string;
+  onAssigneeChange?: (value: string) => void;
+  completedOpen?: boolean;
+  onCompletedOpenChange?: (open: boolean) => void;
+  /** A task confirmed as completed elsewhere; shown once with a reveal action. */
+  completionNotice?: { taskId: string; taskName: string } | null;
+  onCompletionNoticeDismiss?: () => void;
+  /** `?task=<id>`: reveal a completed task's context, or scroll to an active one. */
+  focusTaskId?: string;
 };
+
+type FlatRow =
+  | {
+      kind: 'group';
+      key: string;
+      name: string;
+      level: number;
+      open: boolean;
+      node: SubprojectNode | null;
+      direct: boolean;
+      active: number;
+      done: number;
+    }
+  | { kind: 'description'; key: string; level: number; text: string; groupKey: string }
+  | { kind: 'completedGroup'; key: string; name: string; count: number; firstTaskId: string | null; direct: boolean }
+  | { kind: 'task'; key: string; node: TaskNode; level: number; open: boolean }
+  | { kind: 'empty'; key: string; level: number; text: string };
 
 export function ProjectHierarchy(props: HierarchyProps): JSX.Element {
   const { t } = useI18n();
   const { hierarchy, canManage, canRemoveRecord, canCreateTask, canCreateSubproject } = props;
+  const canEditSubproject = props.canEditSubproject ?? canManage;
   const [localCollapsed, setLocalCollapsed] = useState<Set<string>>(() => new Set());
   const collapsed = props.collapsed ?? localCollapsed;
 
   // Expansion is keyed by stable IDs, so a save or a delete keeps every other branch as left.
+  // While a filter is active, matching branches start expanded but a toggle changes a temporary
+  // filter-scoped set; no keystroke writes the persistent expansion state.
+  const [filterCollapsed, setFilterCollapsed] = useState<Set<string>>(() => new Set());
   const toggle = useCallback(
     (key: string) => {
+      if (hierarchy.filterActive) {
+        setFilterCollapsed((current) => {
+          const next = new Set(current);
+          if (next.has(key)) next.delete(key);
+          else next.add(key);
+          return next;
+        });
+        return;
+      }
       if (props.onToggle) {
         props.onToggle(key);
         return;
@@ -328,10 +690,273 @@ export function ProjectHierarchy(props: HierarchyProps): JSX.Element {
         return next;
       });
     },
-    [props.onToggle]
+    [hierarchy.filterActive, props.onToggle]
+  );
+  const isOpen = useCallback(
+    (key: string): boolean =>
+      hierarchy.filterActive ? !filterCollapsed.has(key) : !collapsed.has(key),
+    [hierarchy.filterActive, filterCollapsed, collapsed]
+  );
+  useEffect(() => {
+    if (hierarchy.filterActive) return;
+    setFilterCollapsed((current) => (current.size > 0 ? new Set() : current));
+  }, [hierarchy.filterActive]);
+
+  const [localQuery, setLocalQuery] = useState('');
+  const [localAssignee, setLocalAssignee] = useState('');
+  const [localCompletedOpen, setLocalCompletedOpen] = useState(false);
+  const query = props.searchQuery ?? localQuery;
+  const assigneeId = props.assigneeId ?? localAssignee;
+  const completedOpen = props.completedOpen ?? localCompletedOpen;
+  const filtersEnabled = typeof props.onSearchQueryChange === 'function';
+  const setQuery = useCallback(
+    (value: string) => {
+      if (props.onSearchQueryChange) props.onSearchQueryChange(value);
+      else setLocalQuery(value);
+    },
+    [props.onSearchQueryChange]
+  );
+  const setAssignee = useCallback(
+    (value: string) => {
+      if (props.onAssigneeChange) props.onAssigneeChange(value);
+      else setLocalAssignee(value);
+    },
+    [props.onAssigneeChange]
+  );
+  const setCompletedOpen = useCallback(
+    (value: boolean) => {
+      if (props.onCompletedOpenChange) props.onCompletedOpenChange(value);
+      else setLocalCompletedOpen(value);
+    },
+    [props.onCompletedOpenChange]
   );
 
+  const clearFilters = useCallback(() => {
+    setQuery('');
+    setAssignee('');
+  }, [setQuery, setAssignee]);
+
+  /**
+   * One reveal operation, shared by the completion notice, a completed-count button and
+   * `?task=<id>`. It resolves the row through stable IDs, opens the presentation it belongs to,
+   * expands the ancestors it needs, clears a filter that would hide it (with a notice), and only
+   * then scrolls and focuses the rendered row. A background refresh never requests a reveal, so it
+   * can never steal focus.
+   */
+  const [revealRequest, setRevealRequest] = useState<{ taskId: string; clearedFilters: boolean } | null>(null);
+  const [revealMessage, setRevealMessage] = useState<'' | 'filters' | 'missing'>('');
+  // The expansion side of a request runs once per request; the focus retry may restart on a
+  // re-render, but it never re-applies state and therefore can never loop.
+  const revealApplied = useRef('');
+  const requestReveal = useCallback((taskId: string) => {
+    revealApplied.current = '';
+    setRevealMessage('');
+    setRevealRequest({ taskId, clearedFilters: false });
+  }, []);
+  const expandKeys = props.onExpand;
+  const expandForReveal = useCallback(
+    (keys: string[]) => {
+      if (keys.length === 0) return;
+      if (hierarchy.filterActive) {
+        // Filter mode starts expanded; a reveal clears the temporary collapses it needs.
+        setFilterCollapsed((current) => {
+          const next = new Set(current);
+          let changed = false;
+          for (const key of keys) if (next.delete(key)) changed = true;
+          return changed ? next : current;
+        });
+        return;
+      }
+      if (expandKeys) {
+        expandKeys(keys);
+        return;
+      }
+      setLocalCollapsed((current) => {
+        const next = new Set(current);
+        let changed = false;
+        for (const key of keys) if (next.delete(key)) changed = true;
+        return changed ? next : current;
+      });
+    },
+    [hierarchy.filterActive, expandKeys]
+  );
+  useEffect(() => {
+    if (!revealRequest) return undefined;
+    const location = locateTask(hierarchy, revealRequest.taskId);
+    if (!location) {
+      if (hierarchy.filterActive && !revealRequest.clearedFilters) {
+        clearFilters();
+        setRevealMessage('filters');
+        setRevealRequest({ taskId: revealRequest.taskId, clearedFilters: true });
+        return undefined;
+      }
+      if (!hierarchy.filterActive) {
+        setRevealMessage('missing');
+        setRevealRequest(null);
+      }
+      return undefined;
+    }
+    const appliedKey = `${revealRequest.taskId}|${revealRequest.clearedFilters}`;
+    if (revealApplied.current !== appliedKey) {
+      revealApplied.current = appliedKey;
+      if (location.presentation === 'completed') setCompletedOpen(true);
+      expandForReveal(location.expandKeys);
+    }
+    let frame = 0;
+    let tries = 0;
+    const tick = (): void => {
+      const target = document.getElementById(
+        `hierarchy-${location.presentation}-${revealRequest.taskId}`
+      );
+      if (target) {
+        target.scrollIntoView?.({ block: 'center' });
+        target.focus?.({ preventScroll: true });
+        setRevealRequest(null);
+        return;
+      }
+      if (++tries > 30) {
+        setRevealRequest(null);
+        return;
+      }
+      frame = window.requestAnimationFrame(tick);
+    };
+    frame = window.requestAnimationFrame(tick);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [revealRequest, hierarchy, clearFilters, expandForReveal, setCompletedOpen]);
+
+  // A completed-count button reveals the group heading itself rather than guessing a row.
+  const [groupReveal, setGroupReveal] = useState<string | null>(null);
+  const revealGroup = useCallback(
+    (key: string) => {
+      setCompletedOpen(true);
+      setGroupReveal(key);
+    },
+    [setCompletedOpen]
+  );
+  useEffect(() => {
+    if (!groupReveal) return undefined;
+    let frame = 0;
+    let tries = 0;
+    const tick = (): void => {
+      const target = document.getElementById(`hierarchy-completed-group-${groupReveal}`);
+      if (target) {
+        target.scrollIntoView?.({ block: 'center' });
+        target.focus?.({ preventScroll: true });
+        setGroupReveal(null);
+        return;
+      }
+      if (++tries > 30) {
+        setGroupReveal(null);
+        return;
+      }
+      frame = window.requestAnimationFrame(tick);
+    };
+    frame = window.requestAnimationFrame(tick);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, [groupReveal]);
+
+  // A route that names a task reveals its context once per addressed task id. A later refresh of
+  // the same project has the same id and therefore never re-steals focus.
+  const deepLinkRevealed = useRef('');
+  useEffect(() => {
+    const taskId = props.focusTaskId;
+    if (!taskId || deepLinkRevealed.current === taskId) return;
+    deepLinkRevealed.current = taskId;
+    requestReveal(taskId);
+  }, [props.focusTaskId, requestReveal]);
+
+  const activeFilters = !!(query || assigneeId);
   const isEmpty = hierarchy.subprojects.length === 0 && hierarchy.directTasks.length === 0;
+  // "No matches" is a filtered non-empty project; a genuinely empty project says so instead.
+  const noMatches = hierarchy.filterActive && hierarchy.matchedTasks === 0 && !isEmpty;
+  const [expandedDescriptions, setExpandedDescriptions] = useState<Set<string>>(() => new Set());
+  const panelId = useRef(`hierarchy-completed-${Math.random().toString(36).slice(2)}`);
+
+  const pushTasks = (out: FlatRow[], nodes: readonly TaskNode[], level: number): void => {
+    for (const node of nodes) {
+      const key = `task:${node.task.taskId}`;
+      const open = isOpen(key);
+      out.push({ kind: 'task', key, node, level, open });
+      if (node.children.length > 0 && open) pushTasks(out, node.children, level + 1);
+    }
+  };
+
+  const rows = useMemo<FlatRow[]>(() => {
+    const out: FlatRow[] = [];
+    for (const node of hierarchy.active.subprojects) {
+      const key = `sub:${node.subprojectId}`;
+      const open = isOpen(key);
+      out.push({
+        kind: 'group',
+        key,
+        name: node.subprojectName,
+        level: 1,
+        open,
+        node,
+        direct: false,
+        active: node.activeCounts.active,
+        done: node.completedCount
+      });
+      const description = (node.description ?? '').trim();
+      if (description) out.push({ kind: 'description', key: `desc:${key}`, level: 1, text: description, groupKey: key });
+      if (!open) continue;
+      if (node.activeTasks.length === 0) {
+        out.push({ kind: 'empty', key: `empty:${node.subprojectId}`, level: 2, text: t('hierarchy.emptySubproject') });
+      } else {
+        pushTasks(out, node.activeTasks, 2);
+      }
+    }
+    if (hierarchy.active.showDirect) {
+      const key = 'direct';
+      const open = isOpen(key);
+      out.push({
+        kind: 'group',
+        key,
+        name: t('hierarchy.directTasks'),
+        level: 1,
+        open,
+        node: null,
+        direct: true,
+        active: hierarchy.active.directCounts.active,
+        done: hierarchy.completed.directCount
+      });
+      if (open) {
+        if (hierarchy.active.directTasks.length === 0) {
+          out.push({ kind: 'empty', key: 'empty:direct', level: 2, text: t('hierarchy.emptyDirect') });
+        } else {
+          pushTasks(out, hierarchy.active.directTasks, 2);
+        }
+      }
+    }
+    return out;
+  }, [hierarchy, collapsed, isOpen, t]);
+
+  const completedRows = useMemo<FlatRow[]>(() => {
+    const out: FlatRow[] = [];
+    for (const group of hierarchy.completed.groups) {
+      out.push({
+        kind: 'completedGroup',
+        key: group.key,
+        name: group.name || t('hierarchy.directTasks'),
+        count: group.count,
+        firstTaskId: firstLeafTaskId(group.tasks),
+        direct: group.subprojectId === null
+      });
+      pushTasks(out, group.tasks, 2);
+    }
+    return out;
+  }, [hierarchy, collapsed, isOpen, t]);
+
+  const revealNotice = (): void => {
+    const notice = props.completionNotice;
+    if (!notice) return;
+    requestReveal(notice.taskId);
+    props.onCompletionNoticeDismiss?.();
+  };
 
   return (
     <Section
@@ -370,280 +995,552 @@ export function ProjectHierarchy(props: HierarchyProps): JSX.Element {
         </div>
       }
     >
-      {isEmpty ? <EmptyState text={t('hierarchy.empty')} /> : null}
+      {props.completionNotice ? (
+        <div className="banner ok hierarchy-completion-notice" role="status" aria-live="polite">
+          <span>{t('hierarchy.completedNotice', { name: props.completionNotice.taskName })}</span>
+          <button type="button" className="link-button" onClick={revealNotice}>
+            {t('hierarchy.completedNoticeAction')}
+          </button>
+        </div>
+      ) : null}
+      {revealMessage === 'filters' ? (
+        <div className="banner info hierarchy-reveal-notice" role="status">
+          {t('hierarchy.filtersCleared')}
+        </div>
+      ) : null}
+      {revealMessage === 'missing' ? (
+        <div className="banner warning hierarchy-reveal-notice" role="status">
+          {t('hierarchy.taskUnavailable')}
+        </div>
+      ) : null}
+
+      {filtersEnabled ? (
+        <div className="hierarchy-filters" role="search" aria-label={t('hierarchy.filterLabel')}>
+          <label className="field grow search-field">
+            <span className="field-label">{t('myWork.filter.task')}</span>
+            <input
+              type="search"
+              aria-label={t('myWork.filter.task')}
+              placeholder={t('myWork.filter.task')}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          <span className="field hierarchy-assignee-filter">
+            <span className="field-label">{t('tasks.assigneeFilter')}</span>
+            <TaskAssigneePicker value={assigneeId} onChange={setAssignee} />
+          </span>
+          {activeFilters ? (
+            <button type="button" className="link-button" onClick={clearFilters}>
+              {t('hierarchy.clearFilters')}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {hierarchy.filterActive ? (
+        <p className="hierarchy-filter-summary muted small" role="status" aria-live="polite">
+          {t('hierarchy.filterSummary', {
+            matched: hierarchy.matchedTasks,
+            active: hierarchy.active.counts.active,
+            done: hierarchy.completed.matches,
+            total: hierarchy.counts.total
+          })}
+        </p>
+      ) : null}
       {hierarchy.hiddenTasks > 0 ? (
         <p className="muted small">{t('hierarchy.hiddenTasks', { n: hierarchy.hiddenTasks })}</p>
       ) : null}
-      {isEmpty ? null : (
-      <ul className="hierarchy" role="list">
-        {hierarchy.subprojects.map((node) => (
-          <SubprojectItem
-            key={node.subprojectId}
-            node={node}
-            level={1}
-            collapsed={collapsed}
-            onToggle={toggle}
-            onEdit={props.onEditSubproject}
-            onNewTask={props.onNewTask}
-            onDelete={props.onDelete}
-            canManage={props.canEditSubproject ?? canManage}
-            canCreateTask={canCreateTask}
-            canRemoveRecord={canRemoveRecord}
-          />
-        ))}
-        <li className="hierarchy-direct">
-          <div className="hierarchy-row hierarchy-row-direct">
-            <button
-              type="button"
-              className="tree-toggle"
-              aria-expanded={!collapsed.has('direct')}
-              aria-label={t(collapsed.has('direct') ? 'hierarchy.expand' : 'hierarchy.collapse', {
-                name: t('hierarchy.directTasks')
-              })}
-              onClick={() => toggle('direct')}
-            >
-              {collapsed.has('direct') ? '▸' : '▾'}
-            </button>
-            <span className="tree-icon-slot">
-              <TasksIcon />
+
+      {isEmpty ? <EmptyState text={t('hierarchy.empty')} /> : null}
+      {noMatches ? (
+        <div className="empty hierarchy-no-match" role="status">
+          <p>{t('hierarchy.noMatches')}</p>
+          <button type="button" className="link-button" onClick={clearFilters}>
+            {t('hierarchy.clearFilters')}
+          </button>
+        </div>
+      ) : null}
+      {!isEmpty && !noMatches && rows.length === 0 ? (
+        <p className="muted small">
+          {hierarchy.filterActive ? t('hierarchy.noActiveMatches') : t('hierarchy.noActiveTasks')}
+        </p>
+      ) : null}
+      {!isEmpty && !noMatches && rows.length > 0 ? (
+        <HierarchyTable
+          rows={rows}
+          presentation="active"
+          completed={false}
+          expandedDescriptions={expandedDescriptions}
+          onToggleDescription={(key) =>
+            setExpandedDescriptions((current) => {
+              const next = new Set(current);
+              if (next.has(key)) next.delete(key);
+              else next.add(key);
+              return next;
+            })
+          }
+          onRevealGroup={revealGroup}
+          onRevealTask={requestReveal}
+          toggle={toggle}
+          canEditSubproject={canEditSubproject}
+          canCreateTask={canCreateTask}
+          canRemoveRecord={canRemoveRecord}
+          onNewTask={props.onNewTask}
+          onEditSubproject={props.onEditSubproject}
+          onDelete={props.onDelete}
+        />
+      ) : null}
+
+      {hierarchy.completed.count > 0 ? (
+        <section className="hierarchy-completed" aria-label={t('hierarchy.completedSection')}>
+          <button
+            type="button"
+            className="hierarchy-completed-toggle"
+            aria-expanded={completedOpen}
+            aria-controls={panelId.current}
+            onClick={() => setCompletedOpen(!completedOpen)}
+          >
+            <span aria-hidden="true">{completedOpen ? '▼' : '▶'}</span>
+            <span>
+              {hierarchy.filterActive
+                ? t('hierarchy.completedMatches', {
+                    n: hierarchy.completed.matches,
+                    total: hierarchy.completed.count
+                  })
+                : t('hierarchy.completedHeading', { n: hierarchy.completed.count })}
             </span>
-            <span className="hierarchy-name">{t('hierarchy.directTasks')}</span>
-            <span className="hierarchy-counts">
-              {t('hierarchy.counts', {
-                active: countsOfNodes(hierarchy.directTasks).active,
-                done: countsOfNodes(hierarchy.directTasks).done
-              })}
+          </button>
+          {hierarchy.filterActive && !completedOpen ? (
+            <span className="hierarchy-completed-hint">
+              {t('hierarchy.completedMatchHint', { n: hierarchy.completed.matches })}
+              <button type="button" className="link-button" onClick={() => setCompletedOpen(true)}>
+                {t('hierarchy.showCompleted')}
+              </button>
             </span>
-            {canCreateTask ? (
-              <span className="hierarchy-actions">
-                <button type="button" className="link-button" onClick={() => props.onNewTask(null)}>
-                  {t('tasks.new')}
-                </button>
-              </span>
+          ) : null}
+          <div id={panelId.current} hidden={!completedOpen}>
+            {completedOpen ? (
+              hierarchy.completed.groups.length === 0 ? (
+                <p className="muted small">{t('hierarchy.noCompletedMatches')}</p>
+              ) : (
+                <HierarchyTable
+                  rows={completedRows}
+                  presentation="completed"
+                  completed
+                  expandedDescriptions={expandedDescriptions}
+                  onToggleDescription={() => undefined}
+                  onRevealGroup={revealGroup}
+                  onRevealTask={requestReveal}
+                  toggle={toggle}
+                  canEditSubproject={false}
+                  canCreateTask={false}
+                  canRemoveRecord={false}
+                  onNewTask={() => undefined}
+                  onEditSubproject={() => undefined}
+                  onDelete={() => undefined}
+                />
+              )
             ) : null}
           </div>
-          {collapsed.has('direct') ? null : hierarchy.directTasks.length === 0 ? (
-            <p className="hierarchy-empty muted small">{t('hierarchy.emptyDirect')}</p>
-          ) : (
-            <ul className="hierarchy-children" role="list">
-              {hierarchy.directTasks.map((node) => (
-                <TaskItem
-                  key={node.task.taskId}
-                  node={node}
-                  level={2}
-                  collapsed={collapsed}
-                  onToggle={toggle}
-                  onDelete={props.onDelete}
-                  canRemoveRecord={canRemoveRecord}
-                />
-              ))}
-            </ul>
-          )}
-        </li>
-      </ul>
-      )}
+        </section>
+      ) : null}
     </Section>
   );
 }
 
-function SubprojectItem({
-  node,
-  level,
-  collapsed,
-  onToggle,
-  onEdit,
-  onNewTask,
-  onDelete,
-  canManage,
+function HierarchyTable({
+  rows,
+  presentation,
+  completed,
+  expandedDescriptions,
+  onToggleDescription,
+  onRevealGroup,
+  onRevealTask,
+  toggle,
+  canEditSubproject,
   canCreateTask,
-  canRemoveRecord
+  canRemoveRecord,
+  onNewTask,
+  onEditSubproject,
+  onDelete
 }: {
-  node: SubprojectNode;
-  level: number;
-  collapsed: Set<string>;
-  onToggle: (key: string) => void;
-  onEdit: (subproject: SubprojectNode) => void;
-  onNewTask: (subprojectId: string | null) => void;
-  onDelete: (entityType: 'TASKS' | 'SUBPROJECTS', entityId: string, entityName: string) => void;
-  canManage: boolean;
+  rows: readonly FlatRow[];
+  presentation: 'active' | 'completed';
+  completed: boolean;
+  expandedDescriptions: Set<string>;
+  onToggleDescription: (key: string) => void;
+  onRevealGroup: (key: string) => void;
+  onRevealTask: (taskId: string) => void;
+  toggle: (key: string) => void;
+  canEditSubproject: boolean;
   canCreateTask: boolean;
   canRemoveRecord: boolean;
+  onNewTask: (subprojectId: string | null) => void;
+  onEditSubproject: (subproject: SubprojectNode) => void;
+  onDelete: (entityType: 'TASKS' | 'SUBPROJECTS', entityId: string, entityName: string) => void;
 }): JSX.Element {
   const { t } = useI18n();
-  const key = `sub:${node.subprojectId}`;
-  const open = !collapsed.has(key);
-  const description = (node.description ?? '').trim();
-  const [expanded, setExpanded] = useState(false);
   return (
-    <li className="hierarchy-node" id={`hierarchy-${node.subprojectId}`}>
-      <div className="hierarchy-row hierarchy-row-subproject" style={{ ['--level' as string]: level }}>
-        <button
-          type="button"
-          className="tree-toggle"
-          aria-expanded={open}
-          aria-label={t(open ? 'hierarchy.collapse' : 'hierarchy.expand', { name: node.subprojectName })}
-          onClick={() => onToggle(key)}
-        >
-          {open ? '▾' : '▸'}
-        </button>
-        <span className="tree-icon-slot">
-          <FolderIcon />
-        </span>
-        <span className="hierarchy-name">{node.subprojectName}</span>
-        <ScheduleBadge schedule={node.schedule} />
-        {node.deadline ? (
-          <DeadlineCell dueDate={node.deadline} state={deadlineStateOf(node.schedule)} showLabel={false} />
-        ) : null}
-        <span className="hierarchy-counts">{t('hierarchy.counts', { active: node.counts.active, done: node.counts.done })}</span>
-        {canManage || canCreateTask ? (
-          <span className="hierarchy-actions">
-            {canCreateTask ? (
-              <button type="button" className="link-button" onClick={() => onNewTask(node.subprojectId)}>
-                {t('tasks.new')}
-              </button>
-            ) : null}
-            {canManage ? (
-              <button type="button" className="link-button" onClick={() => onEdit(node)}>
-                {t('action.edit')}
-              </button>
-            ) : null}
-            {canRemoveRecord ? (
-              <button
-                type="button"
-                className="icon-button danger"
-                aria-label={t('hierarchy.deleteSubproject', { name: node.subprojectName })}
-                onClick={() => onDelete('SUBPROJECTS', node.subprojectId, node.subprojectName)}
-              >
-                <TrashIcon />
-              </button>
-            ) : null}
-          </span>
-        ) : null}
-      </div>
-      {description ? (
-        <div className="hierarchy-description" style={{ ['--level' as string]: level }}>
-          <p className={expanded ? 'description-text' : 'description-preview'}>{description}</p>
-          <button
-            type="button"
-            className="link-button"
-            aria-expanded={expanded}
-            onClick={() => setExpanded((current) => !current)}
-          >
-            {t(expanded ? 'subprojects.hideDetails' : 'subprojects.details')}
-          </button>
-        </div>
-      ) : null}
-      {open ? (
-        node.tasks.length === 0 && node.children.length === 0 ? (
-          <p className="hierarchy-empty muted small">{t('hierarchy.emptySubproject')}</p>
-        ) : (
-          <ul className="hierarchy-children" role="list">
-            {node.tasks.map((task) => (
-              <TaskItem
-                key={task.task.taskId}
-                node={task}
-                level={level + 1}
-                collapsed={collapsed}
-                onToggle={onToggle}
-                onDelete={onDelete}
-                canRemoveRecord={canRemoveRecord}
-              />
-            ))}
-            {node.children.map((child) => (
-              <SubprojectItem
-                key={child.subprojectId}
-                node={child}
-                level={level + 1}
-                collapsed={collapsed}
-                onToggle={onToggle}
-                onEdit={onEdit}
-                onNewTask={onNewTask}
-                onDelete={onDelete}
-                canManage={canManage}
+    <table className={`hierarchy-table${completed ? ' hierarchy-table-completed' : ''}`} aria-label={t('hierarchy.columnsLabel')}>
+      <colgroup>
+        <col className="hierarchy-col-name" />
+        <col className="hierarchy-col-assignee" />
+        <col className="hierarchy-col-due" />
+        <col className="hierarchy-col-status" />
+        <col className="hierarchy-col-actions" />
+      </colgroup>
+      <thead>
+        <tr>
+          <th scope="col">{t('hierarchy.columnTask')}</th>
+          <th scope="col">{t('hierarchy.columnAssignee')}</th>
+          <th scope="col">{t('hierarchy.columnDue')}</th>
+          <th scope="col">{t('hierarchy.columnStatus')}</th>
+          <th scope="col" className="visually-hidden">
+            {t('hierarchy.columnActions')}
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => {
+          if (row.kind === 'group') {
+            return (
+              <GroupRow
+                key={row.key}
+                row={row}
+                presentation={presentation}
+                toggle={toggle}
+                canEditSubproject={canEditSubproject}
                 canCreateTask={canCreateTask}
                 canRemoveRecord={canRemoveRecord}
+                onNewTask={onNewTask}
+                onEditSubproject={onEditSubproject}
+                onDelete={onDelete}
+                onRevealGroup={onRevealGroup}
               />
-            ))}
-          </ul>
-        )
-      ) : null}
-    </li>
+            );
+          }
+          if (row.kind === 'description') {
+            const expanded = expandedDescriptions.has(row.groupKey);
+            return (
+              <tr className="hierarchy-description-row" key={row.key}>
+                <td colSpan={5} style={{ ['--level' as string]: row.level }}>
+                  <div className="hierarchy-description">
+                    <p className={expanded ? 'description-text' : 'description-preview'}>{row.text}</p>
+                    <button
+                      type="button"
+                      className="link-button"
+                      aria-expanded={expanded}
+                      onClick={() => onToggleDescription(row.groupKey)}
+                    >
+                      {t(expanded ? 'subprojects.hideDetails' : 'subprojects.details')}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          }
+          if (row.kind === 'completedGroup') {
+            return (
+              <CompletedGroupRow
+                key={row.key}
+                row={row}
+                onRevealGroup={onRevealGroup}
+                onRevealTask={onRevealTask}
+              />
+            );
+          }
+          if (row.kind === 'task') {
+            return (
+              <TaskRow
+                key={row.key}
+                row={row}
+                presentation={presentation}
+                toggle={toggle}
+                canRemoveRecord={canRemoveRecord}
+                onDelete={onDelete}
+              />
+            );
+          }
+          return (
+            <tr className="hierarchy-empty-row" key={row.key}>
+              <td colSpan={5} className="hierarchy-empty muted small" style={{ ['--level' as string]: row.level }}>
+                {row.text}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }
 
-function TaskItem({
-  node,
-  level,
-  collapsed,
-  onToggle,
+function GroupRow({
+  row,
+  presentation,
+  toggle,
+  canEditSubproject,
+  canCreateTask,
+  canRemoveRecord,
+  onNewTask,
+  onEditSubproject,
   onDelete,
-  canRemoveRecord
+  onRevealGroup
 }: {
-  node: TaskNode;
-  level: number;
-  collapsed: Set<string>;
-  onToggle: (key: string) => void;
-  onDelete: (entityType: 'TASKS' | 'SUBPROJECTS', entityId: string, entityName: string) => void;
+  row: Extract<FlatRow, { kind: 'group' }>;
+  presentation: 'active' | 'completed';
+  toggle: (key: string) => void;
+  canEditSubproject: boolean;
+  canCreateTask: boolean;
   canRemoveRecord: boolean;
+  onNewTask: (subprojectId: string | null) => void;
+  onEditSubproject: (subproject: SubprojectNode) => void;
+  onDelete: (entityType: 'TASKS' | 'SUBPROJECTS', entityId: string, entityName: string) => void;
+  onRevealGroup: (key: string) => void;
 }): JSX.Element {
   const { t } = useI18n();
-  const { task, children } = node;
-  const key = `task:${task.taskId}`;
-  const hasChildren = children.length > 0;
-  const open = !collapsed.has(key);
-  const assignees = task.assigneeNames.length ? task.assigneeNames.join(', ') : task.ownerName;
+  const name = row.name;
+  // A missing schedule boundary is a quiet value on a subproject header, exactly as it is on a
+  // task row; the derived schedule badge already states the condition.
+  const quietDates =
+    !!row.node && row.node.schedule?.missing !== undefined && row.node.schedule.missing !== 'NONE';
   return (
-    <li className="hierarchy-node" id={`hierarchy-${task.taskId}`}>
-      <div className="hierarchy-row hierarchy-row-task" style={{ ['--level' as string]: level }}>
-        {hasChildren ? (
+    <tr
+      className={`hierarchy-group-row${row.direct ? ' is-direct hierarchy-direct' : ''}`}
+      id={`hierarchy-${presentation}-group-${row.key}`}
+      tabIndex={-1}
+      style={{ ['--level' as string]: row.level }}
+    >
+      <th scope="rowgroup" colSpan={5}>
+        <div className="hierarchy-group-inner">
           <button
             type="button"
             className="tree-toggle"
-            aria-expanded={open}
-            aria-label={t(open ? 'hierarchy.collapse' : 'hierarchy.expand', { name: task.taskName })}
-            onClick={() => onToggle(key)}
+            aria-expanded={row.open}
+            aria-label={t(row.open ? 'hierarchy.collapse' : 'hierarchy.expand', { name })}
+            onClick={() => toggle(row.key)}
           >
-            {open ? '▾' : '▸'}
+            {row.open ? '▾' : '▸'}
           </button>
-        ) : (
-          <span className="tree-spacer" aria-hidden="true" />
-        )}
-        <a className="hierarchy-name task-link" href={`#/task/${task.taskId}`}>
-          {task.taskName}
-        </a>
-        {task.container ? <Badge>{t('hierarchy.container')}</Badge> : null}
-        {task.reviewState === 'PENDING' ? <Badge tone="warn">{t('tasks.review')}</Badge> : null}
-        <span className="hierarchy-assignees muted small">{assignees || t('common.unset')}</span>
-        <DeadlineCell dueDate={task.dueDate} state={task.displayStatus} showLabel={false} />
-        <TaskStatusBadge state={task.displayStatus} missing={task.scheduleMissing} showDetail />
+          <span className="tree-icon-slot">{row.direct ? <TasksIcon /> : <FolderIcon />}</span>
+          <span className="hierarchy-name">{name}</span>
+          {row.node ? <ScheduleBadge schedule={row.node.schedule} /> : null}
+          {row.node?.deadline ? (
+            quietDates ? (
+              <span className="muted small hierarchy-dates-quiet">{row.node.deadline}</span>
+            ) : (
+              <DeadlineCell dueDate={row.node.deadline} state={deadlineStateOf(row.node.schedule)} showLabel={false} />
+            )
+          ) : quietDates ? (
+            <span className="muted small hierarchy-dates-quiet">{t('common.unset')}</span>
+          ) : null}
+          <span className="hierarchy-counts" aria-label={t('hierarchy.counts', { active: row.active, done: row.done })}>
+            <span>{t('hierarchy.activeCount', { n: row.active })}</span>
+            <span aria-hidden="true"> · </span>
+            {row.done > 0 ? (
+              <button
+                type="button"
+                className="hierarchy-count-link"
+                aria-label={t('hierarchy.showCompletedGroup', { name, n: row.done })}
+                onClick={() => onRevealGroup(row.key)}
+              >
+                {t('hierarchy.doneCount', { n: row.done })}
+              </button>
+            ) : (
+              <span>{t('hierarchy.doneCount', { n: 0 })}</span>
+            )}
+          </span>
+          <span className="hierarchy-actions">
+            {canCreateTask ? (
+              <button type="button" className="link-button" onClick={() => onNewTask(row.node?.subprojectId ?? null)}>
+                {t('tasks.new')}
+              </button>
+            ) : null}
+            {row.node && (canEditSubproject || canRemoveRecord) ? (
+              <Menu
+                label="⋯"
+                ariaLabel={t('hierarchy.subprojectMenu', { name })}
+                className="row-menu"
+              >
+                {(close) => (
+                  <>
+                    {canEditSubproject ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="menu-item"
+                        onClick={() => {
+                          close();
+                          onEditSubproject(row.node!);
+                        }}
+                      >
+                        {t('action.edit')}
+                      </button>
+                    ) : null}
+                    {canRemoveRecord ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="menu-item danger"
+                        onClick={() => {
+                          close();
+                          onDelete('SUBPROJECTS', row.node!.subprojectId, row.node!.subprojectName);
+                        }}
+                      >
+                        {t('hierarchy.removeRecord')}
+                      </button>
+                    ) : null}
+                  </>
+                )}
+              </Menu>
+            ) : null}
+          </span>
+        </div>
+      </th>
+    </tr>
+  );
+}
+
+function CompletedGroupRow({
+  row,
+  onRevealGroup,
+  onRevealTask
+}: {
+  row: Extract<FlatRow, { kind: 'completedGroup' }>;
+  onRevealGroup: (key: string) => void;
+  onRevealTask: (taskId: string) => void;
+}): JSX.Element {
+  const { t } = useI18n();
+  return (
+    <tr
+      className="hierarchy-group-row hierarchy-group-row-completed"
+      id={`hierarchy-completed-group-${row.key}`}
+      tabIndex={-1}
+    >
+      <th scope="rowgroup" colSpan={5}>
+        <div className="hierarchy-group-inner">
+          <span className="tree-icon-slot">{row.direct ? <TasksIcon /> : <FolderIcon />}</span>
+          <span className="hierarchy-name">{row.name}</span>
+          <span className="hierarchy-counts">{t('hierarchy.doneCount', { n: row.count })}</span>
+          <span className="hierarchy-actions">
+            <button
+              type="button"
+              className="link-button"
+              onClick={() =>
+                row.firstTaskId ? onRevealTask(row.firstTaskId) : onRevealGroup(row.key)
+              }
+            >
+              {t('hierarchy.showCompleted')}
+            </button>
+          </span>
+        </div>
+      </th>
+    </tr>
+  );
+}
+
+function TaskRow({
+  row,
+  presentation,
+  toggle,
+  canRemoveRecord,
+  onDelete
+}: {
+  row: Extract<FlatRow, { kind: 'task' }>;
+  presentation: 'active' | 'completed';
+  toggle: (key: string) => void;
+  canRemoveRecord: boolean;
+  onDelete: (entityType: 'TASKS' | 'SUBPROJECTS', entityId: string, entityName: string) => void;
+}): JSX.Element {
+  const { t } = useI18n();
+  const { task, children } = row.node;
+  const hasChildren = children.length > 0;
+  const assignees = Array.isArray(task.assigneeNames) && task.assigneeNames.length
+    ? task.assigneeNames.join(', ')
+    : task.ownerName;
+  // A repeated "dates not set" badge is noise in a long list. The missing schedule stays readable
+  // as quiet text, and the due-date cell still says 未設定.
+  const quietStatus = task.displayStatus === 'DATES_NOT_SET' || task.displayStatus === 'START_NOT_SET';
+  return (
+    <tr
+      className={`hierarchy-task-row${isCompletedStatus(task.status) ? ' is-done' : ''}`}
+      // A container can be context in both presentations, so the presentation is part of the id.
+      id={`hierarchy-${presentation}-${task.taskId}`}
+      tabIndex={-1}
+      style={{ ['--level' as string]: row.level }}
+    >
+      <th scope="row" className="hierarchy-cell-name">
+        <span className="hierarchy-level">
+          {hasChildren ? (
+            <button
+              type="button"
+              className="tree-toggle"
+              aria-expanded={row.open}
+              aria-label={t(row.open ? 'hierarchy.collapse' : 'hierarchy.expand', { name: task.taskName })}
+              onClick={() => toggle(row.key)}
+            >
+              {row.open ? '▾' : '▸'}
+            </button>
+          ) : (
+            <span className="tree-spacer" aria-hidden="true" />
+          )}
+          <a className="hierarchy-name task-link" href={`#/task/${task.taskId}`}>
+            {task.taskName}
+          </a>
+          {task.container ? <Badge>{t('hierarchy.container')}</Badge> : null}
+          {task.reviewState === 'PENDING' ? <Badge tone="warn">{t('tasks.review')}</Badge> : null}
+        </span>
         <WorkflowHint status={task.status} />
+      </th>
+      <td className="hierarchy-cell-assignee">
+        <span className="hierarchy-assignees" title={assignees || undefined}>
+          {assignees || t('common.unset')}
+        </span>
+      </td>
+      <td className="hierarchy-cell-due">
+        <DeadlineCell dueDate={task.dueDate} state={task.displayStatus} showLabel={false} showStateBadge={false} />
+      </td>
+      <td className="hierarchy-cell-status">
+        {task.container ? (
+          // A container is organisation. Its stored Done status is never shown as completed work.
+          <span className="muted small">{t('hierarchy.containerDerived')}</span>
+        ) : quietStatus ? (
+          <span className="muted small">{t(`taskStatus.${task.displayStatus}`)}</span>
+        ) : (
+          <TaskStatusBadge state={task.displayStatus} missing={task.scheduleMissing} />
+        )}
+      </td>
+      <td className="hierarchy-cell-actions">
         {canRemoveRecord ? (
-          <button
-            type="button"
-            className="icon-button danger"
-            aria-label={t('hierarchy.deleteTask', { name: task.taskName })}
-            onClick={() => onDelete('TASKS', task.taskId, task.taskName)}
+          <Menu
+            label="⋯"
+            ariaLabel={t('hierarchy.taskMenu', { name: task.taskName })}
+            className="row-menu"
+            align="end"
           >
-            <TrashIcon />
-          </button>
+            {(close) => (
+              <>
+                <a className="menu-item" role="menuitem" href={`#/task/${task.taskId}`} onClick={close}>
+                  {t('action.open')}
+                </a>
+                <div className="menu-separator" role="separator" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="menu-item danger"
+                  onClick={() => {
+                    close();
+                    onDelete('TASKS', task.taskId, task.taskName);
+                  }}
+                >
+                  {t('hierarchy.removeRecord')}
+                </button>
+              </>
+            )}
+          </Menu>
         ) : null}
-      </div>
-      {hasChildren && open ? (
-        <ul className="hierarchy-children" role="list">
-          {children.map((child) => (
-            <TaskItem
-              key={child.task.taskId}
-              node={child}
-              level={level + 1}
-              collapsed={collapsed}
-              onToggle={onToggle}
-              onDelete={onDelete}
-              canRemoveRecord={canRemoveRecord}
-            />
-          ))}
-        </ul>
-      ) : null}
-    </li>
+      </td>
+    </tr>
   );
 }
 
@@ -652,11 +1549,14 @@ function TaskItem({
 export function ProjectDetailScreen({
   actor,
   projectId,
-  readOnly = false
+  readOnly = false,
+  routeSearch = ''
 }: {
   actor: Actor;
   projectId: string;
   readOnly?: boolean;
+  /** The hash query string, used to reveal an explicitly addressed task. */
+  routeSearch?: string;
 }): JSX.Element {
   const { t, label } = useI18n();
   const endpoint = readOnly ? `/api/work/projects/${projectId}` : `/api/manager/projects/${projectId}`;
@@ -692,6 +1592,16 @@ export function ProjectDetailScreen({
     `project:${projectId}:collapsed`,
     () => new Set()
   );
+  // Search, filter and disclosure state live in page memory only, keyed by the stable project id.
+  // A data refresh or a language change therefore keeps them; nothing is persisted in the browser.
+  const [taskQuery, setTaskQuery] = useRouteMemoryState(`project:${projectId}:task-query`, '');
+  const [assigneeId, setAssigneeId] = useRouteMemoryState(`project:${projectId}:assignee`, '');
+  const [completedOpen, setCompletedOpen] = useRouteMemoryState(`project:${projectId}:completed`, false);
+  const [completionNotice, setCompletionNotice] = useState<{ taskId: string; taskName: string } | null>(null);
+  useEffect(() => {
+    const pending = takeCompletedTask(projectId);
+    if (pending) setCompletionNotice(pending);
+  }, [projectId]);
   const toggleCollapsed = useCallback((key: string) => {
     setCollapsed((current) => {
       const next = new Set(current);
@@ -771,9 +1681,17 @@ export function ProjectDetailScreen({
         revision: (subproject as Subproject).revision
       })),
       tasks: source.tasks,
-      includeInactive
+      includeInactive,
+      filter: { query: taskQuery, assigneeId }
     });
-  }, [detail.data, includeInactive]);
+  }, [detail.data, includeInactive, taskQuery, assigneeId]);
+
+  // `?task=<id>` is an explicit address of one record: a completed one opens the completed
+  // section, an active one is scrolled to in place. The value is a stable task id, never an index.
+  const focusTaskId = useMemo(() => {
+    const params = new URLSearchParams(routeSearch);
+    return params.get('task') ?? '';
+  }, [routeSearch]);
 
   if (detail.error) return <ErrorBox error={detail.error} onRetry={() => detail.refresh()} />;
   if (!detail.data || !hierarchy) return <p className="muted">{t('state.loading')}</p>;
@@ -788,7 +1706,7 @@ export function ProjectDetailScreen({
   };
 
   return (
-    <div className="screen" style={{ ['--project-accent' as string]: projectColor(record.projectId) }}>
+    <div className="screen project-detail-screen" style={{ ['--project-accent' as string]: projectColor(record.projectId) }}>
       <BackButton
         actor={actor}
         fallback="projects"
@@ -813,11 +1731,6 @@ export function ProjectDetailScreen({
           {record.projectName}
         </h2>
         <div className="compact-toolbar">
-          {canCreateTask ? (
-            <button type="button" className="button" onClick={() => setMemberTaskSubproject(null)}>
-              {t('myWork.newTask')}
-            </button>
-          ) : null}
           {canManage ? (
             <button type="button" className="button secondary" onClick={() => setEditProject(true)}>
               {t('projects.edit')}
@@ -918,12 +1831,17 @@ export function ProjectDetailScreen({
             />
           </dd>
         </div>
-        <div>
+        <div className="project-summary-progress">
           <dt>{t('projects.progress')}</dt>
           <dd>
             <ProgressBar value={view.progress.percent} />
+            {/* Weighted progress and the completed-task count are different facts, both stated. */}
             <span className="muted small">
-              {view.progress.doneLeaves}/{view.progress.leaves}
+              {t('projects.progressSummary', {
+                percent: Math.round(view.progress.percent ?? 0),
+                done: view.progress.doneLeaves,
+                total: view.progress.leaves
+              })}
             </span>
           </dd>
         </div>
@@ -1011,6 +1929,7 @@ export function ProjectDetailScreen({
         includeInactive={includeInactive}
         collapsed={collapsed}
         onToggle={toggleCollapsed}
+        onExpand={expandKeys}
         onToggleInactive={(value) => setIncludeInactive(value)}
         onNewTask={(subprojectId) =>
           canManage ? setNewTaskSubproject(subprojectId) : setMemberTaskSubproject(subprojectId)
@@ -1018,6 +1937,15 @@ export function ProjectDetailScreen({
         onNewSubproject={() => (canManage ? setNewSubprojectParent(null) : setMemberSubproject(true))}
         onEditSubproject={(node) => setEditingSubproject(editTarget(node))}
         onDelete={(entityType, entityId, entityName) => setDeleteTarget({ entityType, entityId, entityName })}
+        searchQuery={taskQuery}
+        onSearchQueryChange={setTaskQuery}
+        assigneeId={assigneeId}
+        onAssigneeChange={setAssigneeId}
+        completedOpen={completedOpen}
+        onCompletedOpenChange={setCompletedOpen}
+        completionNotice={completionNotice}
+        onCompletionNoticeDismiss={() => setCompletionNotice(null)}
+        focusTaskId={focusTaskId}
       />
 
       <details className="disclosure">
@@ -1039,12 +1967,14 @@ export function ProjectDetailScreen({
         </p>
       )}
 
-      <Section title={t('projects.progress')}>
-        <ProgressBar value={view.progress.percent} />
-        <p className="muted small">
-          {t('projects.tasks')}: {view.progress.leaves} · {t('overview.completed')}: {view.progress.doneLeaves}
-        </p>
-      </Section>
+      <p className="muted small project-scope-counts">
+        {/* The structure counters and the completed disclosure both come from the same leaf scan. */}
+        {t('hierarchy.scopeCounts', {
+          active: hierarchy.counts.active,
+          done: hierarchy.counts.done,
+          cancelled: hierarchy.cancelledLeaves
+        })}
+      </p>
 
 
       {editProject && canManage ? (
@@ -1120,7 +2050,7 @@ export function ProjectDetailScreen({
             setDeleteTarget(null);
             // The expanded children render on the next frame; scroll to the row afterwards.
             window.setTimeout(() => {
-              document.getElementById(`hierarchy-${deleteTarget.entityId}`)?.scrollIntoView?.({ block: 'center' });
+              document.getElementById(`hierarchy-active-${deleteTarget.entityId}`)?.scrollIntoView?.({ block: 'center' });
             }, 0);
           }}
           onDeleted={() => {

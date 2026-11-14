@@ -1,5 +1,44 @@
 # V2 Architecture
 
+## Project structure reveal and timeline inspection — 2026-11-14
+
+The release is client presentation plus one read-only server projection; it changes no stored data,
+schema, migration, authorization or counting rule.
+
+**One reveal operation.** `ProjectDetail.tsx` resolves a task with `locateTask(hierarchy, taskId)`
+over the already-authorized hierarchy model (stable IDs only), which returns the presentation
+(`active` or `completed`) and the expansion keys it needs. A request either opens the completed
+section, expands ancestors, or does both; if the current filters exclude the task, the filters are
+cleared once and an explicit notice explains it. Focus and scroll run in a bounded
+`requestAnimationFrame` retry that ends as soon as the row exists (or after a bounded number of
+frames). The expansion side runs once per request (a ref keyed by task + cleared-filter state), so a
+re-render can never loop. Only an explicit action sets a request, so a background refresh cannot
+steal focus. Rows carry a presentation-scoped id (`hierarchy-<presentation>-<taskId>`), which keeps
+a container that is context in both presentations unique.
+
+**Server attention projection.** `projectAttention()` reuses the same authorized project scope as
+the read-only detail (division, visibility, archived branches, manager-only cancelled work), builds
+one `createScope` in memory and answers every bucket from that single pass: `OVERDUE` (open leaf with
+a deadline before today), `DUE_SOON` (today through today+6), `REVIEW` (open leaf with a pending
+completion report) and `MISSING_DATES` (no deadline, no start, or start after deadline). Context is
+the bounded parent-task and subproject chain of each match. Nothing is read per task and nothing is
+derived from a page or a rendered row. The client validates the payload with `ProjectAttention`
+(`INVALID_RESPONSE` on a contract break) and selects rows from the server-provided IDs; an active
+attention filter shows all matches and their context instead of hiding them under a collapsed
+folder.
+
+**Timeline correctness.** Row adapters keep `plannedStart`/`plannedEnd`, `deadline` and
+`completedAt` separate (a project deadline comes from `committedDeadline`, a subproject from
+`deadline`, a task from `dueDate`). The chart draws a solid bar for a schedule span, an outlined
+bracket for `dateSource = DERIVED`, a diamond for a deadline-only record, a diamond marker for a
+deadline, a check for a completion and a labelled line for today; a 24 px transparent hit area
+carries the accessible control over a 3 px point mark. `calendarMonthWindow`/`calendarQuarterWindow`
+and `navigateWindow`/`todayWindow` give explicit calendar semantics (month ends, leap years) and
+keep the zoom when today is brought into view. The branch request carries the selected division and
+the server refuses a foreign one; cache keys include the division, so a superseded answer cannot
+paint. The phone presentation is an agenda built from the same scoped rows, with honest totals and
+paging; the chart/agenda choice is page memory only.
+
 ## Division corrections and V2 branding — 2026-11-11
 
 This is a client-and-write-path corrective release. Schema 12, the migrations, the employee contract
@@ -660,6 +699,30 @@ endpoint. A recursive SQL ancestor projection is bounded by the domain MAX_TASK_
 search/filter ancestry before paging. Parent_Task_ID is unchanged; collapse changes only page-memory
 expansion state. Child queries share the normal task-cache invalidation prefix and reopening uses
 cached rows. Nested expansion survives collapsing and reopening its parent within the screen.
+
+## Active and completed project structure
+
+The project detail builds both presentations in the browser from the one authorized project read
+(`GET /api/manager/projects/:id` or `GET /api/work/projects/:id`). `buildProjectHierarchy` keeps the
+full visible tree, an active tree and a completed tree:
+
+* a **leaf** is work; a **container** is organisation and is never counted or presented as a
+  completed unit. A container's stored `Done` status is ignored for completion, and its unfinished
+  descendants stay in the active tree;
+* `Cancelled` work is separate from completed work and honours the existing inactive-work control;
+  an archived branch keeps the ancestor-aware visibility rule;
+* `rollup` supplies the leaf counts, so the header counters, the completed disclosure and the
+  progress panel share `TaskScope` semantics; the per-bucket `rollup` inputs include hidden
+  cancelled tasks so a container stays a container when its children are not displayed;
+* filtering and the stable-id assignee filter run over the already-authorized project payload,
+  which is bounded by the project. No endpoint, contract, migration, schema, authorization rule,
+  publication rule or counting function was added or changed.
+
+The active/completed split, the filters, the completed disclosure and the expansion state live in
+page/route memory keyed by stable ids; the only browser storage remains the language preference and
+the non-sensitive request receipts. A confirmed direct completion leaves one page-memory notice,
+and a failed or uncertain completion leaves nothing. The task row links to the same task detail in
+both presentations, and `?task=<id>` reveals a completed task's context on return.
 
 ## Member project explorer (read-only browsing)
 

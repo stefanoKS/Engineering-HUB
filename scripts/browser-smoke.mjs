@@ -374,15 +374,20 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
       const centres = toolbar.items.map(item => item.centre);
       expect(Math.max(...centres) - Math.min(...centres)).toBeLessThan(3);
     }
-    const subprojectRow = page.locator('.hierarchy-row-subproject').filter({ hasText: 'Browser verified subproject' });
-    await expect(subprojectRow.getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
+    const subprojectRow = page.locator('.hierarchy-group-row').filter({ hasText: 'Browser verified subproject' });
+    const subprojectMenu = subprojectRow.getByRole('button', {
+      name: 'Actions for Browser verified subproject',
+      exact: true
+    });
+    await expect(subprojectMenu).toBeVisible();
     await expect(subprojectRow.getByRole('button', { name: 'New task', exact: true })).toBeVisible();
+    // Edit and removal live in the row's accessible menu, not in the scan path.
+    await subprojectMenu.click();
+    await expect(page.getByRole('menuitem', { name: 'Edit', exact: true })).toBeVisible();
     // The approved change: a manager may recoverably remove work inside a writable division ...
-    await expect(
-      subprojectRow.getByRole('button', { name: 'Delete Browser verified subproject', exact: true })
-    ).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Remove from list', exact: true })).toBeVisible();
     // ... while the permanent erasure is never offered to a manager.
-    await subprojectRow.getByRole('button', { name: 'Delete Browser verified subproject', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Remove from list', exact: true }).click();
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Permanently erase mistaken record', exact: true })).toHaveCount(0);
     await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -569,7 +574,7 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await expect(page.getByRole('heading', { name: 'Browser edited project', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Collapse Browser verified subproject', exact: true })).toBeVisible();
     // Direct project tasks live in their own section, never inside a subproject.
-    const directSection = page.locator('li.hierarchy-direct');
+    const directSection = page.locator('tr#hierarchy-direct');
     await expect(directSection.getByRole('link', { name: 'Browser verified task', exact: true })).toBeVisible();
     await directSection.getByRole('link', { name: 'Browser verified task', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Browser verified task', exact: true })).toBeVisible();
@@ -579,7 +584,7 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
 
     // Contextual creation inside the subproject preselects it. The location is summarised until the
     // manager asks to change it, so the retained value is asserted after expanding that section.
-    const subprojectRow = page.locator('.hierarchy-row-subproject').filter({ hasText: 'Browser verified subproject' });
+    const subprojectRow = page.locator('.hierarchy-group-row').filter({ hasText: 'Browser verified subproject' });
     await subprojectRow.getByRole('button', { name: 'New task', exact: true }).click();
     await expect(dialog.getByText('Browser edited project / Browser verified subproject', { exact: true })).toBeVisible();
     await expect(dialog.getByRole('button', { name: 'Change location', exact: true })).toBeVisible();
@@ -589,8 +594,7 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await dialog.getByLabel('Finish date', { exact: true }).fill('2026-11-07');
     await dialog.getByRole('button', { name: 'Create', exact: true }).click();
     await expect(dialog).toHaveCount(0);
-    const subprojectBranch = page.locator('li.hierarchy-node').filter({ has: page.getByRole('button', { name: 'Collapse Browser verified subproject', exact: true }) });
-    await expect(subprojectBranch.getByRole('link', { name: 'Subproject browser task', exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Subproject browser task', exact: true })).toBeVisible();
     await page.setViewportSize({ width: 1920, height: 1280 });
     await mkdir('work/screenshots', { recursive: true });
     await page.screenshot({ path: 'work/screenshots/project-hierarchy-1920.png', fullPage: true });
@@ -609,7 +613,8 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await expect(dialog).toHaveCount(0);
 
     // A subproject that still owns a task is refused, with the reason and a route to its children.
-    await subprojectRow.getByRole('button', { name: 'Delete Browser verified subproject', exact: true }).click();
+    await subprojectMenu.click();
+    await page.getByRole('menuitem', { name: 'Remove from list', exact: true }).click();
     await expect(dialog.getByText('Browser verified subproject', { exact: true })).toBeVisible();
     await expect(dialog.getByText(/Tasks remain/)).toBeVisible();
     // A blocked record offers no confirmation button at all.
@@ -624,7 +629,11 @@ export async function browserSmoke(origin, email, local = null, roleFixtures = n
     await dialog.getByRole('button', { name: 'Create', exact: true }).click();
     await expect(dialog).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Collapse Browser deletable subproject', exact: true })).toBeVisible();
-    await page.getByRole('button', { name: 'Delete Browser deletable subproject', exact: true }).click();
+    const deletableRow = page.locator('.hierarchy-group-row').filter({ hasText: 'Browser deletable subproject' });
+    await deletableRow
+      .getByRole('button', { name: 'Actions for Browser deletable subproject', exact: true })
+      .click();
+    await page.getByRole('menuitem', { name: 'Remove from list', exact: true }).click();
     await expect(
       dialog.getByText(
         'Remove this subproject from normal application views. The record and its history are retained, and an administrator can restore it later.',

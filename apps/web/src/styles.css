@@ -925,34 +925,141 @@ input[type=checkbox] { min-height: auto; width: 17px; height: 17px; accent-color
   .assignee-list { max-height: 9rem; }
 }.chip-inactive { font-size: 0.7rem; padding: 0 0.25rem; border-radius: 4px; background: #f1f3f5; color: #6b7280; }
 
-/* Unified project hierarchy: subproject headers, their tasks, nested subprojects and direct tasks. */
-.hierarchy { list-style: none; margin: 0; padding: 0; }
-.hierarchy-children { list-style: none; margin: 0; padding: 0; }
-.hierarchy-node { margin: 0; }
-.hierarchy-row {
+/* Project structure: one aligned task table, a completed section, and compact filters.
+ *
+ * The active and completed presentations share the same columns, so a task does not move between
+ * two different layouts when it is completed. Only palette/state tokens are used; a project accent
+ * marks identity, never a status.
+ */
+.hierarchy-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  margin: 0.15rem 0 0.35rem;
+}
+.hierarchy-table col.hierarchy-col-name { width: auto; }
+.hierarchy-table col.hierarchy-col-assignee { width: 12rem; }
+.hierarchy-table col.hierarchy-col-due { width: 8rem; }
+.hierarchy-table col.hierarchy-col-status { width: 10rem; }
+.hierarchy-table col.hierarchy-col-actions { width: 5.5rem; }
+.hierarchy-table thead th {
+  text-align: left;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #5b6472;
+  padding: 0.25rem 0.45rem;
+  border-bottom: 1px solid var(--border, #d8dde4);
+  white-space: nowrap;
+}
+.hierarchy-table tbody th,
+.hierarchy-table tbody td {
+  padding: 0.3rem 0.45rem;
+  border-bottom: 1px solid #eef1f5;
+  vertical-align: middle;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.hierarchy-table tbody tr:hover { background: var(--tint, #f4f6f9); }
+.hierarchy-group-row th {
+  padding: 0.3rem 0.45rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border, #d8dde4);
+  border-left: 3px solid var(--project-accent, #3b6ea5);
+  background: color-mix(in srgb, var(--project-accent, #3b6ea5) 6%, transparent);
+  font-weight: 600;
+}
+.hierarchy-group-row.is-direct th { border-left-color: var(--border, #d8dde4); }
+.hierarchy-group-row-completed th { background: #f7f9fc; }
+.hierarchy-group-inner {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem 0.6rem;
-  padding: 0.35rem 0.5rem;
-  padding-left: calc(0.5rem + (var(--level, 1) - 1) * 1.35rem);
-  border-radius: 6px;
-  border-left: 3px solid transparent;
   min-width: 0;
+  padding-left: calc((var(--level, 1) - 1) * 1.1rem);
 }
-.hierarchy-row:hover { background: var(--tint, #f4f6f9); }
-.hierarchy-row-subproject {
-  border-left-color: var(--project-accent, #3b6ea5);
-  font-weight: 600;
-  background: color-mix(in srgb, var(--project-accent, #3b6ea5) 6%, transparent);
-}
-.hierarchy-row-task { font-weight: 400; }
-.hierarchy-row-direct { border-left-color: var(--border, #d8dde4); }
 .hierarchy-name { min-width: 0; overflow-wrap: anywhere; }
-.hierarchy-assignees { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hierarchy-assignees { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hierarchy-counts { font-size: 0.8rem; color: #5b6472; white-space: nowrap; }
+.hierarchy-count-link,
+.hierarchy-completed-toggle {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.hierarchy-count-link:focus-visible,
+.hierarchy-completed-toggle:focus-visible {
+  outline: 2px solid var(--project-accent, #3b6ea5);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
 .hierarchy-actions { display: inline-flex; align-items: center; gap: 0.35rem; margin-left: auto; flex-wrap: wrap; }
-.hierarchy-empty { margin: 0.15rem 0 0.5rem; padding-left: 2.6rem; }
+.hierarchy-cell-name { font-weight: 400; text-align: left; }
+.hierarchy-level {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  min-width: 0;
+  padding-left: calc((var(--level, 1) - 1) * 1.1rem);
+}
+.hierarchy-cell-name .task-link { font-weight: 650; }
+.hierarchy-cell-assignee { color: #4b5563; font-size: 0.85rem; }
+.hierarchy-cell-due { font-size: 0.85rem; white-space: nowrap; }
+.hierarchy-cell-status { font-size: 0.85rem; }
+.hierarchy-cell-actions { text-align: right; white-space: nowrap; }
+.hierarchy-cell-actions .hierarchy-actions { justify-content: flex-end; }
+.hierarchy-task-row:focus,
+.hierarchy-group-row:focus { outline: 2px solid var(--project-accent, #3b6ea5); outline-offset: -2px; }
+.hierarchy-empty-row td { font-size: 0.85rem; }
+.hierarchy-empty { padding-left: calc(2.4rem + (var(--level, 1) - 1) * 1.1rem) !important; }
+.hierarchy-description-row td { padding-top: 0; padding-bottom: 0.35rem; }
+.hierarchy-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.4rem 0.75rem;
+  margin: 0.1rem 0 0.4rem;
+}
+.hierarchy-filters .search-field { flex: 1 1 16rem; min-width: 0; }
+.hierarchy-assignee-filter { flex: 0 1 18rem; min-width: 12rem; max-width: 22rem; }
+.hierarchy-assignee-control { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+.hierarchy-assignee-control select { max-width: 100%; }
+.hierarchy-filter-summary { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; }
+.hierarchy-no-match { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; }
+.hierarchy-completion-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.hierarchy-completed {
+  margin-top: 0.85rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--border, #d8dde4);
+}
+.hierarchy-completed-toggle { display: inline-flex; align-items: center; gap: 0.35rem; font-weight: 650; }
+.hierarchy-completed-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: 0.6rem;
+  color: #5b6472;
+  font-size: 0.85rem;
+}
+.hierarchy-table-completed .hierarchy-cell-name .task-link { color: inherit; }
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
 .tree-toggle {
   border: none;
   background: transparent;
@@ -1013,9 +1120,96 @@ input[type=checkbox] { min-height: auto; width: 17px; height: 17px; accent-color
 .task-link { color: inherit; text-decoration: underline; }
 .task-link:focus-visible { outline: 2px solid var(--project-accent, #3b6ea5); outline-offset: 2px; }
 @media (max-width: 900px) {
-  .hierarchy-row { padding-left: calc(0.4rem + (var(--level, 1) - 1) * 0.9rem); }
-  .hierarchy-assignees { max-width: 10rem; }
-  .hierarchy-actions { margin-left: 0; width: 100%; }
+  /* Stacked metadata, never a horizontally scrolling table. The header row stays in the
+   * accessibility tree while its column labels are visually redundant on a stacked layout. */
+  .hierarchy-table,
+  .hierarchy-table thead,
+  .hierarchy-table tbody,
+  .hierarchy-table tr,
+  .hierarchy-table th,
+  .hierarchy-table td {
+    display: block;
+  }
+  .hierarchy-table colgroup {
+    display: none;
+  }
+  .hierarchy-table thead {
+    position: absolute !important;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .hierarchy-table tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.1rem 0.6rem;
+    padding: 0.35rem 0.45rem;
+    border-bottom: 1px solid #eef1f5;
+  }
+  .hierarchy-table tbody th,
+  .hierarchy-table tbody td {
+    border: 0;
+    padding: 0.1rem 0;
+  }
+  .hierarchy-table .hierarchy-cell-name {
+    grid-column: 1 / -1;
+  }
+  .hierarchy-table .hierarchy-cell-assignee {
+    grid-column: 1 / 2;
+    white-space: normal;
+  }
+  .hierarchy-table .hierarchy-cell-due {
+    grid-column: 2 / 3;
+    text-align: right;
+  }
+  .hierarchy-table .hierarchy-cell-status {
+    grid-column: 1 / -1;
+  }
+  .hierarchy-table .hierarchy-cell-actions {
+    grid-column: 1 / -1;
+    text-align: left;
+  }
+  .hierarchy-group-row,
+  .hierarchy-empty-row,
+  .hierarchy-description-row {
+    display: block;
+  }
+  .hierarchy-group-row th,
+  .hierarchy-description-row td {
+    display: block;
+    border: 0;
+  }
+  .hierarchy-group-row {
+    border-left: 3px solid var(--project-accent, #3b6ea5);
+  }
+  .hierarchy-group-inner {
+    padding-left: 0;
+  }
+  .hierarchy-assignees {
+    max-width: none;
+    white-space: normal;
+  }
+  .hierarchy-actions {
+    margin-left: 0;
+  }
+  .hierarchy-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  /* In a column flex container `flex-basis` is a height: reset it so a search field is its
+   * natural height instead of a 16rem gap above the next control. */
+  .hierarchy-filters .search-field {
+    flex: 0 0 auto;
+  }
+  .hierarchy-assignee-filter {
+    flex: 0 0 auto;
+    max-width: none;
+  }
 }
 /* ------------------------------------------------------------------ read-only explorer */
 
@@ -2554,12 +2748,6 @@ input[type='search'] {
   flex: 1 1 auto;
 }
 
-/* The task rows of the hierarchy keep one name / assignee / deadline / status alignment. */
-.hierarchy-row-task .hierarchy-name {
-  flex: 1 1 16rem;
-}
-
-
 /* Task list column widths: ONE canonical rule per table.
  *
  * The task name takes every remaining pixel, and only the columns that must not reflow keep a
@@ -2758,4 +2946,306 @@ input[type='search'] {
 
 .row-highlight {
   background: var(--ui-accent-soft);
+}
+
+/* ================================================================== V2.2 usability
+ *
+ * Project structure and timeline usability release. These rules refine the current shell: a
+ * quieter project summary, compact phone rows, one attention filter row, one legend, one
+ * inspection panel and the agenda presentation. Nothing here introduces a second colour system;
+ * project hue stays identity, and status keeps the semantic palette.
+ * ---------------------------------------------------------------------------------------- */
+
+/* --- project detail --------------------------------------------------------------- */
+
+.hierarchy-dates-quiet { color: var(--ui-muted); }
+.hierarchy-reveal-notice { margin: 0 0 var(--space-2); }
+.project-scope-counts { margin: 0; }
+.project-summary .project-summary-progress dd { flex-wrap: wrap; row-gap: 2px; }
+.project-summary .project-summary-progress dd .muted { width: 100%; }
+.hierarchy-assignee-filter .project-picker { gap: 0.35rem; }
+.hierarchy-assignee-filter .project-picker input { min-height: 32px; }
+.hierarchy-assignee-filter .project-picker .pagination { margin-top: 0; }
+
+/* --- timeline toolbar, attention filters ------------------------------------------ */
+
+.timeline-nav { align-items: center; }
+.timeline-nav-buttons { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); }
+.timeline-preset-hint { margin: 0; }
+.timeline-view-switch { align-items: center; justify-content: space-between; }
+.timeline-view-note { margin: 0; }
+.timeline-custom { align-items: flex-end; }
+
+.attention-filter-row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.attention-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 36px;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--ui-border);
+  border-radius: 999px;
+  background: var(--ui-surface);
+  font: inherit;
+  cursor: pointer;
+}
+.attention-filter:hover { border-color: var(--ui-accent); }
+.attention-filter.active { border-color: var(--ui-accent); background: var(--ui-accent-soft); font-weight: 650; }
+.attention-filter:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; }
+.attention-count { font-variant-numeric: tabular-nums; color: var(--ui-muted); }
+.attention-filter.active .attention-count { color: var(--ui-accent); }
+.attention-empty { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); }
+.attention-applied { margin: 0; }
+
+/* --- chart marks ------------------------------------------------------------------ */
+
+/* The visible bar is decoration; a separate transparent hit area carries the accessible control,
+   so a 3px point mark still has a comfortable pointer target. */
+.tl-hit {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.tl-hit:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; border-radius: 4px; }
+.tl-bar.is-group {
+  background: transparent;
+  border: 1.5px solid var(--project-accent, #4a7fb5);
+  border-radius: 6px;
+  height: 16px;
+}
+.tl-bar.is-done { background: transparent; border: 1.5px solid var(--project-accent, #4a7fb5); }
+.tl-bar.is-deadline-only { background: transparent; }
+.tl-bar-diamond {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 11px;
+  height: 11px;
+  margin: -5.5px 0 0 -5.5px;
+  background: var(--project-accent, #4a7fb5);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+.tl-marker { position: absolute; top: 50%; pointer-events: none; z-index: 1; }
+.tl-marker-deadline {
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  background: #b4453c;
+  border: 1px solid #fff;
+  transform: rotate(45deg);
+}
+.tl-marker-completed {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  background: #2f7d4f;
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+}
+.tl-marker-start {
+  width: 3px;
+  height: 14px;
+  margin: -7px 0 0 -1.5px;
+  border-radius: 1px;
+  background: var(--project-accent, #4a7fb5);
+}
+.tl-today-label {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  padding: 0 0.2rem;
+  background: #fff;
+  color: #b4453c;
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+  z-index: 2;
+}
+
+/* --- legend ----------------------------------------------------------------------- */
+
+.timeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+  font-size: 0.78rem;
+  color: var(--ui-muted);
+}
+.timeline-legend li { display: inline-flex; align-items: center; gap: 0.35rem; }
+.legend-mark { display: inline-block; width: 18px; height: 10px; flex: 0 0 auto; }
+.legend-schedule { background: var(--project-accent, #4a7fb5); border-radius: 3px; }
+.legend-group { background: transparent; border: 1.5px solid var(--project-accent, #4a7fb5); border-radius: 4px; height: 12px; }
+.legend-deadline { width: 10px; height: 10px; background: #b4453c; transform: rotate(45deg); }
+.legend-completed {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #2f7d4f;
+  color: #fff;
+  font-size: 9px;
+}
+.legend-today { width: 2px; height: 14px; background: #b4453c; }
+
+/* --- outside the period, undated work --------------------------------------------- */
+
+.tl-row.is-outside .tl-cell-track {
+  background: repeating-linear-gradient(135deg, #f9fafc, #f9fafc 6px, #eef1f5 6px, #eef1f5 12px);
+}
+.tl-show { white-space: nowrap; }
+.tl-branch-state { padding: 0.35rem 0.75rem; }
+.undated-work h3,
+.agenda-undated h3 { margin: 0; font-size: 0.95rem; }
+.undated-list { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.undated-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.75rem; }
+.undated-name { font-weight: 600; }
+
+/* --- inspection panel ------------------------------------------------------------- */
+
+.tl-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(26rem, 100vw);
+  padding: var(--space-3);
+  overflow-y: auto;
+  background: var(--ui-surface);
+  border-left: 1px solid var(--ui-border);
+  box-shadow: -8px 0 24px #1f293726;
+}
+.tl-panel-header { display: flex; align-items: center; gap: var(--space-2); }
+.tl-panel-header h3 { flex: 1 1 auto; margin: 0; font-size: 1.05rem; overflow-wrap: anywhere; }
+.tl-panel-header h3:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; }
+.tl-panel-body { grid-template-columns: max-content minmax(0, 1fr); gap: 0.35rem 0.75rem; }
+.tl-panel-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.tl-panel-note { margin: 0; }
+
+/* --- agenda ----------------------------------------------------------------------- */
+
+.timeline-agenda { gap: var(--space-2); }
+.agenda-list { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.agenda-group { display: grid; gap: 0.25rem; }
+.agenda-date { margin: 0; font-size: 0.82rem; color: var(--ui-muted); font-variant-numeric: tabular-nums; }
+.agenda-group ul,
+.agenda-undated ul { display: grid; gap: 0.3rem; margin: 0; padding: 0; list-style: none; }
+.agenda-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.6rem;
+  padding: 0.45rem 0.55rem;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+}
+.agenda-kind {
+  padding: 0 0.4rem;
+  border: 1px solid var(--ui-border);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ui-muted);
+}
+.agenda-due .agenda-kind { color: #b4453c; border-color: #e3b4b0; }
+.agenda-completed .agenda-kind { color: #2f7d4f; border-color: #b7d6c2; }
+.agenda-name { font-weight: 650; text-align: left; }
+.agenda-context { flex: 1 1 100%; }
+.agenda-undated { display: grid; gap: 0.25rem; padding-top: var(--space-2); border-top: 1px solid var(--ui-border); }
+.agenda-undated li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.6rem; }
+
+/* --- phone layout ----------------------------------------------------------------- */
+
+@media (max-width: 900px) {
+  /* The phone summary is two columns; progress spans both and owner/priority stay readable. */
+  .project-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-2) var(--space-3);
+  }
+  .project-summary .project-summary-progress { grid-column: 1 / -1; }
+}
+
+@media (max-width: 720px) {
+  /* Less distance from the heading to the first task, without hiding any content. */
+  .project-detail-screen,
+  .timeline-screen { gap: var(--space-2); }
+  .page-heading { margin-bottom: 0; }
+  .timeline-nav { align-items: stretch; }
+  .timeline-nav-buttons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .timeline-view-switch { align-items: flex-start; }
+  .timeline-range { width: 100%; }
+  .tl-label { flex-basis: auto; }
+  .tl-details-toggle { margin-left: 0; }
+  .tl-panel {
+    top: auto;
+    left: 0;
+    width: 100vw;
+    max-height: 85dvh;
+    border-left: 0;
+    border-top: 1px solid var(--ui-border);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -8px 24px #1f293726;
+  }
+  /* One compact meta line per task instead of four stacked lines. */
+  .hierarchy-table tbody tr.hierarchy-task-row { grid-template-columns: minmax(0, 1fr) auto auto auto; }
+  .hierarchy-table .hierarchy-cell-name { grid-column: 1 / -1; }
+  .hierarchy-table .hierarchy-cell-assignee { grid-column: 1 / 2; }
+  .hierarchy-table .hierarchy-cell-due { grid-column: 2 / 3; text-align: left; }
+  .hierarchy-table .hierarchy-cell-status { grid-column: 3 / 4; }
+  .hierarchy-table .hierarchy-cell-actions { grid-column: 4 / 5; text-align: right; }
+}
+
+/* --- phone toolbar density --------------------------------------------------------- */
+
+@media (max-width: 720px) {
+  /* One scrollable preset row instead of a wrapped block; the read-only hint moves below the
+     toolbar's essential controls and is omitted on the smallest screens because the intro already
+     states that nothing here changes a stored schedule. */
+  .timeline-nav { gap: 0.4rem; }
+  .timeline-nav-buttons { grid-column: 1 / -1; }
+  .timeline-nav .segmented {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: 100%;
+    scrollbar-width: thin;
+  }
+  .timeline-nav .segmented-button { padding: 0.35rem 0.6rem; white-space: nowrap; }
+  .timeline-preset-hint { display: none; }
+  .timeline-view-switch { gap: 0.4rem; }
+  .timeline-view-note { line-height: 1.35; }
+
+  /* Filters keep their inputs but not their repeated labels: each control already has an
+     accessible name, so the vertical space belongs to the task list. */
+  .hierarchy-filters .field-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .hierarchy-toolbar { row-gap: 0.25rem; }
+  .hierarchy-toolbar .hierarchy-counts { margin-right: auto; }
+  .hierarchy-toolbar-buttons .button { min-height: 34px; padding: 0.3rem 0.65rem; }
+}
+
+@media (max-width: 720px) {
+  /* The label column shrinks on a phone so the date track keeps a usable width. */
+  .tl-row { grid-template-columns: minmax(0, 10.5rem) minmax(0, 1fr); }
+  .tl-label { font-size: 0.85rem; }
 }

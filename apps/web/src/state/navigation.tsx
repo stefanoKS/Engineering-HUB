@@ -102,6 +102,35 @@ export function rememberedScroll(path: string): number {
   return Number(routeMemory.get(`scroll:${path}`) ?? 0);
 }
 
+export type CompletedTaskNotice = { taskId: string; taskName: string };
+
+/**
+ * A completion the server has already confirmed on another screen.
+ *
+ * It is page memory, not browser storage: the project page reads it once, explains where the task
+ * moved and then forgets it. `resetRouteMemory()` clears it with the rest of the session's memory,
+ * and a failed or uncertain completion never writes it.
+ */
+export function rememberCompletedTask(
+  projectId: string,
+  taskId: string,
+  taskName: string,
+  epoch: number = memoryEpoch
+): void {
+  // A completion that resolves after sign-out never reaches the next session's memory, even when
+  // the project id happens to match.
+  if (epoch !== memoryEpoch) return;
+  routeMemory.set(`completed-task:${projectId}`, { taskId, taskName });
+}
+
+export function takeCompletedTask(projectId: string): CompletedTaskNotice | null {
+  const key = `completed-task:${projectId}`;
+  const value = routeMemory.get(key);
+  if (!value) return null;
+  routeMemory.delete(key);
+  return value as CompletedTaskNotice;
+}
+
 /**
  * Ends the signed-in session's navigation memory.
  *

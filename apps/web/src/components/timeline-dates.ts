@@ -6,7 +6,7 @@
  */
 
 export type TimelineWindow = { from: string; to: string; days: number };
-export type TimelinePreset = 'week' | 'fortnight' | 'month' | 'custom';
+export type TimelinePreset = 'week' | 'fortnight' | 'month' | 'quarter' | 'custom';
 
 const DAY_MS = 86_400_000;
 
@@ -86,15 +86,89 @@ export function calendarMonthWindow(anchor = todayJst()): TimelineWindow {
   return { from: toDate(from), to: toDate(to), days: dayDiff(from, to) + 1 };
 }
 
+/** A calendar quarter: three whole months, so a leap February never shifts the boundary. */
+export function calendarQuarterWindow(anchor = todayJst()): TimelineWindow {
+  const base = parseDate(anchor) ?? (parseDate(todayJst()) as number);
+  const from = startOfQuarter(base);
+  const to = endOfQuarter(base);
+  return { from: toDate(from), to: toDate(to), days: dayDiff(from, to) + 1 };
+}
+
 export function presetFinish(start: string, preset: Exclude<TimelinePreset, 'custom'>): string | null {
   const value = parseDate(start);
   if (value === null) return null;
   if (preset === 'week' || preset === 'fortnight') return toDate(addDays(value, preset === 'week' ? 6 : 13));
   const date = new Date(value);
-  const nextMonth = addMonths(value, 1);
-  const last = endOfMonth(nextMonth);
-  const sameDay = addDays(nextMonth, date.getUTCDate() - 1);
+  const months = preset === 'month' ? 1 : 3;
+  const target = addMonths(value, months);
+  const last = endOfMonth(target);
+  const sameDay = addDays(target, date.getUTCDate() - 1);
   return toDate(sameDay <= last ? addDays(sameDay, -1) : last);
+}
+
+/**
+ * The window a preset means when it is selected.
+ *
+ * Week and fortnight are day spans from the anchor. Month and quarter are the calendar unit that
+ * contains the anchor, which makes their navigation unambiguous at a month end or in a leap year.
+ */
+export function presetWindow(
+  anchor: string,
+  preset: Exclude<TimelinePreset, 'custom'>
+): TimelineWindow | null {
+  if (parseDate(anchor) === null) return null;
+  if (preset === 'month') return calendarMonthWindow(anchor);
+  if (preset === 'quarter') return calendarQuarterWindow(anchor);
+  const finish = presetFinish(anchor, preset);
+  return finish ? windowOf(anchor, finish) : null;
+}
+
+function windowFrom(startMs: number, endMs: number): TimelineWindow {
+  return { from: toDate(startMs), to: toDate(endMs), days: dayDiff(startMs, endMs) + 1 };
+}
+
+/**
+ * Moves the visible window one unit. `week`/`fortnight` shift by days and `custom` shifts by its
+ * own length; `month`/`quarter` snap to the containing calendar unit and step by that unit. Only
+ * the viewport changes - a stored date is never touched.
+ */
+export function navigateWindow(
+  window: TimelineWindow,
+  preset: TimelinePreset,
+  direction: -1 | 1
+): TimelineWindow {
+  const from = parseDate(window.from);
+  const to = parseDate(window.to);
+  if (from === null || to === null) return window;
+  if (preset === 'month' || preset === 'quarter') {
+    const base = preset === 'month' ? startOfMonth(from) : startOfQuarter(from);
+    const next = preset === 'month' ? addMonths(base, direction) : addQuarters(base, direction);
+    return windowFrom(next, preset === 'month' ? endOfMonth(next) : endOfQuarter(next));
+  }
+  const shift = preset === 'week' ? 7 : preset === 'fortnight' ? 14 : window.days;
+  return windowFrom(addDays(from, shift * direction), addDays(to, shift * direction));
+}
+
+/**
+ * Brings the Tokyo business date into view without changing the zoom.
+ *
+ * A dedicated period preset means the calendar unit that contains today. A day-span preset keeps
+ * its length; when today is already visible the window is returned unchanged instead of jumping.
+ */
+export function todayWindow(
+  window: TimelineWindow,
+  preset: TimelinePreset,
+  today: string = todayJst()
+): TimelineWindow {
+  if (preset === 'month') return calendarMonthWindow(today);
+  if (preset === 'quarter') return calendarQuarterWindow(today);
+  const day = parseDate(today);
+  const from = parseDate(window.from);
+  const to = parseDate(window.to);
+  if (day === null || from === null || to === null) return window;
+  if (day >= from && day <= to) return window;
+  const start = addDays(day, -Math.floor((window.days - 1) / 2));
+  return windowFrom(start, addDays(start, window.days - 1));
 }
 
 export function dateToPixel(value: string, window: TimelineWindow, pixelsPerDay: number): number | null {

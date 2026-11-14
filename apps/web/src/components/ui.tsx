@@ -45,12 +45,15 @@ const MENU_ITEMS = 'button:not([disabled]), a[href], [role="menuitem"]:not([disa
  */
 export function Menu({
   label,
+  ariaLabel,
   className = '',
   align = 'end',
   onOpenChange,
   children
 }: {
   label: ReactNode;
+  /** A specific accessible name; the visible label stays short (for example "その他"). */
+  ariaLabel?: string;
   className?: string;
   align?: 'start' | 'end';
   onOpenChange?: (open: boolean) => void;
@@ -116,6 +119,7 @@ export function Menu({
         className="menu-trigger"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={ariaLabel}
         onClick={() => {
           const next = !open;
           setOpen(next);

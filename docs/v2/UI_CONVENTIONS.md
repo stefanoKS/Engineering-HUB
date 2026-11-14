@@ -203,3 +203,137 @@ Server authorization is repeated under the existing division/role advisory locks
 filters both records and totals by writable divisions before pagination. Member edit APIs retain
 project visibility and field allowlists and do not expose manager-only history or settings.
 No schema change, operational migration, deployment or outbound activation is required or performed.
+
+## Project structure: active and completed work — 2026-11-13
+
+The project detail presents unfinished work first and one completed section below it. This is a
+presentation change only: no record is moved, archived, deleted or reparented, and no workflow or
+authorization rule changed.
+
+- **Active presentation.** Unfinished leaf work stays under its stored subproject, and
+  project-direct work keeps its own group. A subproject with no visible work stays visible so work
+  can be added. A fully completed subproject appears only in the completed section. Empty active
+  subprojects are never mistaken for completed ones.
+- **Containers.** A task with children is organisation, never an extra unit of work. It appears as
+  the path to its leaves, is never counted, and its stored `Done` status is never treated as
+  completed work. A container with unfinished descendants stays in the active presentation even
+  when its stored status is `Done`; the status column says 子タスクから集計 / Derived from child
+  tasks instead of showing a completion badge. A task that already carries recorded effort,
+  approval or completion is not converted into a container by this presentation.
+- **Completed presentation.** One disclosure immediately below the active structure, labelled
+  完了したタスク (N) / Completed tasks (N), collapsed on a first visit. `N` is completed leaf work
+  in the current authorized scope. When expanded it groups completed work by the original
+  subproject plus the project-direct group; a container may appear in both presentations as
+  context, but a leaf appears in exactly one and is counted once. The disclosure is hidden when the
+  project has no completed work.
+- **Counting.** `N active · M completed` sits beside every subproject and the direct group. The
+  counts are leaf-based and use the same domain status helpers and `rollup` as `TaskScope` and
+  progress, so a screen counter is not a second definition of open/completed. `Cancelled` work is
+  reported separately and is never completed work. The progress panel repeats the visible-scope
+  counts and labels them 表示中の構成 / Visible structure, so a counter is never presented as an
+  exhaustive project total when a filter or the inactive-work control is hiding work.
+- **Reveal and navigation.** `M` is an accessible button when it is non-zero: it opens the
+  completed disclosure and focuses that subproject's group. A completed-only subproject has the
+  same reveal action inside the completed section. `?task=<id>` on the project route reveals a
+  task's context: a completed task opens and focuses its completed row, an active task is scrolled
+  to. The TaskDetail breadcrumb carries the task id back to the project.
+- **Search and assignee filter.** Compact task-name search and a stable-member-id assignee filter
+  sit above the structure. Both filter the one authorized project payload in page memory; they do
+  not add a request per keystroke and do not download a whole task table. The assignee options are
+  read lazily from the existing bounded member-option endpoint when the control is focused or a
+  remembered id must be resolved, and the primary owner plus active additional assignees are
+  matched. Matching branches are expanded for the duration of the filter without writing expansion
+  state. A filtered view reports matching counts next to the full visible total and distinguishes
+  "no matching tasks" from a genuinely empty project; Clear filters restores the normal structure.
+- **State.** The disclosure, the filters and the expanded branches live in page/route memory keyed
+  by stable project/subproject/task ids. They survive a data refresh and a language change, and a
+  background refresh never reopens a collapsed section. Nothing private is written to
+  `localStorage`, `sessionStorage` or IndexedDB.
+- **Completion feedback.** A direct completion that the server confirmed leaves one page-memory
+  notice, 「…」を完了しました。 / "…" was completed., with a View completed task action that reveals
+  the row. A refused, pending, superseded or uncertain completion writes nothing and never moves
+  the task. The existing completion endpoints, the approval workflow, revision checks and cache
+  invalidation are unchanged; no Undo/Reopen action is added.
+- **Rows and actions.** The structure is a real table with Task / Assignee / Due date / Status /
+  Actions column headers. The task name takes the flexible width and wraps; dates and statuses stay
+  aligned on a wide screen and stack without horizontal overflow on a narrow one. A repeated
+  unseen schedule is quiet text, not a loud badge. Removal and subproject editing live in the
+  row's ⋯ menu with a specific accessible name; the ⋯ trigger is always visible to keyboard and
+  touch users and is never hover-only. The removal preflight, revision check, confirmation,
+  recovery, audit and role/division capabilities are unchanged.
+- **Completion dates.** The project task projection does not carry a recorded completion timestamp,
+  so the column is labelled 期限 / Due date and no completion date is substituted for it. The
+  recorded value remains available on the task detail and the reopen eligibility read.
+
+## Project structure reveal, attention filters and timeline inspection — 2026-11-14
+
+### Reveal
+
+- One operation serves the completion notice, a subproject's completed-count button and
+  `?task=<id>`. It resolves the row by stable ID, opens the active or completed presentation,
+  expands the ancestors it needs, and focuses the row only after it exists.
+- If the current filter would hide the target, the filter is cleared once and the page states
+  `選択したタスクを表示するため、絞り込みを解除しました。` / `Showing the selected task; the filters were
+  cleared.` A task that is not part of this project's authorized data is reported
+  (`このタスクはこのプロジェクトで表示できません。`), never retried and never claimed as success.
+- Every row id includes its presentation: `hierarchy-active-<taskId>` and
+  `hierarchy-completed-<taskId>`; group rows use `hierarchy-<presentation>-group-<key>`. A container
+  used as context in both presentations therefore has two unique ids, never a duplicate.
+- A background refresh never sets a reveal request, so it never moves focus. Ordinary expansion
+  state is untouched except for the ancestors a requested reveal needs.
+
+### Assignee filter
+
+The project-specific assignee filter is the shared searchable, paginated picker
+(`TaskAssigneePicker`). Options are read from the bounded `/api/work/task-assignees` endpoint with a
+debounced query and one page at a time; the selected value is the stable member ID, the current
+selection is resolved and kept while searching or paging, and a raw identifier is never rendered as
+a label. Loading, error with retry, and empty states are explicit.
+
+### Project detail density
+
+- One summary strip states status, deadline, `進捗 52% · 完了 3 / 9 タスク` (weighted progress and
+  the completed leaf count are different facts), owner and priority. The duplicate progress section
+  below the structure is gone; one muted line keeps the active/completed/cancelled leaf counts.
+- Creation controls are contextual: one per group row plus the section header for an empty project.
+  The page-level task button is not repeated.
+- A missing schedule value stays quiet on a subproject header as well as on a task row; the derived
+  schedule badge still states the condition. Overdue and completion-review signals stay prominent.
+- On a phone the summary is two columns (progress spans both), the filter labels are visually hidden
+  while each control keeps its accessible name, and a task row uses one compact meta line
+  (assignee · due · status · actions). No layout may produce horizontal overflow.
+
+### Timeline marks
+
+| Fact | Mark |
+|---|---|
+| Schedule span (`EXPLICIT`) | solid bar |
+| Descendant-derived span (`DERIVED`) | outlined bracket |
+| Deadline-only record | diamond (no schedule bar) |
+| Committed deadline | diamond marker |
+| Recorded completion | check marker |
+| Today | labelled vertical line |
+
+Project hue stays identity; overdue/review/completed use a text badge or an outline, never a hue
+change. The legend names each mark. A derived span is never drawn as a plan or a deadline, and
+percentage progress is never drawn as elapsed time. Non-working-day shading is not drawn in this
+release because no authorized business-calendar projection exists.
+
+### Toolbar, attention and inspection
+
+- The toolbar keeps previous / today / next, `7日間 / 2週間 / 1か月 / 3か月 / カスタム` and fit.
+  Month and quarter snap to the containing calendar unit; today keeps the selected zoom. Secondary
+  scope controls live behind one disclosure.
+- For a selected project, the attention filters (`すべての予定 / 期限超過 / 7日以内 / 確認待ち /
+  日付の不備`) show server counts. The seven-day interval is `today … today+6` in Tokyo dates, the
+  counts are for the whole authorized project (not the visible period) and the interface says so.
+  A filter shows matches and their ancestor context; a no-match state offers one step back to all
+  schedules.
+- A task bar or its `内容` control opens a non-modal inspection panel (side panel on desktop, bottom
+  sheet on phones) with the authorized context, schedule and its source, deadline, status, review
+  state, completion and an `Open task` action. Focus starts on the panel heading, Escape and Close
+  dismiss it, and focus returns to the invoker. The viewport, filters and expansion are preserved.
+- Work without dates is listed with its real condition. Work outside the visible period shows an
+  outside-view marker and a `表示` action that deliberately adjusts the viewport.
+- A phone starts on the agenda, keeps the chosen presentation in page memory, and the Chart/Agenda
+  switch never changes the selected scope or dates. Nothing here is persisted in the browser.

@@ -83,8 +83,8 @@ export function canCreateOwnTask(identity: Identity | null): boolean {
  * Creating a project, a subproject or a task from the member project screens.
  *
  * A MEMBER files new work immediately; the server still decides the owner, the status, the
- * visibility and the hierarchy. Editing, archiving, deleting and reopening an existing record
- * stays a manager or ADMIN capability, including for a record the member created.
+ * visibility and the hierarchy. Editing and recoverably removing existing tasks and subprojects
+ * also requires a writable, visible division; archiving and reopening have separate capabilities.
  */
 export function canCreateOwnProject(identity: Identity | null): boolean {
   return !!identity && identity.verified && identity.active && identity.role === 'MEMBER';

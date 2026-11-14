@@ -3,12 +3,17 @@ import {
   axisTicks,
   axisContext,
   barGeometry,
+  calendarMonthWindow,
+  calendarQuarterWindow,
   dateToPixel,
   markerOf,
+  navigateWindow,
   pixelToDate,
   presetFinish,
+  presetWindow,
   spanOf,
   TIMELINE_BAR,
+  todayWindow,
   windowOf
 } from '../src/components/timeline-dates';
 
@@ -107,5 +112,58 @@ describe('timeline bar geometry', () => {
     // never depends on the row height that a wrapped name produces.
     const geometry = barGeometry('2026-11-02', '2026-11-05', week, pixelsPerDay)!;
     expect(Object.keys(geometry).sort()).toEqual(['clampedEnd', 'clampedStart', 'left', 'point', 'width']);
+  });
+});
+
+describe('timeline period navigation', () => {
+  it('steps a day span by its own length and never changes a stored date', () => {
+    const week = windowOf('2026-11-01', '2026-11-07')!;
+    expect(navigateWindow(week, 'week', 1)).toEqual({ from: '2026-11-08', to: '2026-11-14', days: 7 });
+    expect(navigateWindow(week, 'week', -1)).toEqual({ from: '2026-10-25', to: '2026-10-31', days: 7 });
+    const fortnight = windowOf('2026-11-01', '2026-11-14')!;
+    expect(navigateWindow(fortnight, 'fortnight', 1)).toMatchObject({ from: '2026-11-15', to: '2026-11-28' });
+    const custom = windowOf('2026-11-01', '2026-11-20')!;
+    expect(navigateWindow(custom, 'custom', 1)).toEqual({ from: '2026-11-21', to: '2026-12-10', days: 20 });
+    expect(navigateWindow(custom, 'custom', -1)).toEqual({ from: '2026-10-12', to: '2026-10-31', days: 20 });
+  });
+
+  it('moves a month to the whole adjacent calendar month, including leap February', () => {
+    const november = windowOf('2026-11-05', '2026-12-04')!;
+    expect(navigateWindow(november, 'month', 1)).toEqual({ from: '2026-12-01', to: '2026-12-31', days: 31 });
+    expect(navigateWindow(november, 'month', -1)).toEqual({ from: '2026-10-01', to: '2026-10-31', days: 31 });
+    const leapFebruary = windowOf('2028-02-10', '2028-03-09')!;
+    expect(navigateWindow(leapFebruary, 'month', -1)).toEqual({ from: '2028-01-01', to: '2028-01-31', days: 31 });
+    expect(navigateWindow(leapFebruary, 'month', 1)).toEqual({ from: '2028-03-01', to: '2028-03-31', days: 31 });
+    // From inside February the previous month is January and the window itself is the whole month.
+    expect(calendarMonthWindow('2028-02-29')).toEqual({ from: '2028-02-01', to: '2028-02-29', days: 29 });
+  });
+
+  it('moves a quarter to the whole adjacent calendar quarter', () => {
+    const q4 = windowOf('2026-11-05', '2026-12-31')!;
+    expect(navigateWindow(q4, 'quarter', 1)).toEqual({ from: '2027-01-01', to: '2027-03-31', days: 90 });
+    expect(navigateWindow(q4, 'quarter', -1)).toEqual({ from: '2026-07-01', to: '2026-09-30', days: 92 });
+    expect(calendarQuarterWindow('2026-02-28')).toEqual({ from: '2026-01-01', to: '2026-03-31', days: 90 });
+    expect(calendarQuarterWindow('2028-02-29')).toEqual({ from: '2028-01-01', to: '2028-03-31', days: 91 });
+  });
+
+  it('computes a preset window from the anchor without inventing a range', () => {
+    expect(presetWindow('2026-11-05', 'week')).toEqual({ from: '2026-11-05', to: '2026-11-11', days: 7 });
+    expect(presetWindow('2026-11-05', 'month')).toEqual({ from: '2026-11-01', to: '2026-11-30', days: 30 });
+    expect(presetWindow('2026-11-05', 'quarter')).toEqual({ from: '2026-10-01', to: '2026-12-31', days: 92 });
+    expect(presetWindow('2026-02-30', 'week')).toBeNull();
+  });
+
+  it('brings today into view while preserving the selected zoom', () => {
+    // Today is already visible: the window is returned unchanged.
+    const visible = windowOf('2026-11-01', '2026-11-07')!;
+    expect(todayWindow(visible, 'week', '2026-11-05')).toEqual(visible);
+    // Outside: a day span keeps its length and centres today.
+    const far = windowOf('2026-01-01', '2026-01-07')!;
+    expect(todayWindow(far, 'week', '2026-11-14')).toEqual({ from: '2026-11-11', to: '2026-11-17', days: 7 });
+    const wide = windowOf('2026-01-01', '2026-01-14')!;
+    expect(todayWindow(wide, 'fortnight', '2026-11-14')).toEqual({ from: '2026-11-08', to: '2026-11-21', days: 14 });
+    // A calendar preset snaps to the unit that contains today.
+    expect(todayWindow(far, 'month', '2028-02-29')).toEqual({ from: '2028-02-01', to: '2028-02-29', days: 29 });
+    expect(todayWindow(far, 'quarter', '2028-02-29')).toEqual({ from: '2028-01-01', to: '2028-03-31', days: 91 });
   });
 });

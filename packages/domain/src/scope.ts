@@ -47,6 +47,25 @@ export type TaskScope = {
   activeWork(): ScopeTask[];
 };
 
+/**
+ * The one status classification every figure uses.
+ *
+ * `Done` is the only completed value; `Cancelled` is reported separately and is never work.
+ * Everything else is open. Presentation code imports these instead of comparing literals, so a
+ * screen cannot invent a second definition of "open" or "completed".
+ */
+export function isCompletedStatus(status: string): boolean {
+  return status === 'Done';
+}
+
+export function isCancelledStatus(status: string): boolean {
+  return status === 'Cancelled';
+}
+
+export function isOpenStatus(status: string): boolean {
+  return !isCompletedStatus(status) && !isCancelledStatus(status);
+}
+
 export function emptyCounts(): ScopeCounts {
   return {
     workItems: 0,
@@ -90,11 +109,11 @@ export function createScope(
       return;
     }
     target.workItems += 1;
-    if (task.status === 'Done') {
+    if (isCompletedStatus(task.status)) {
       target.completedWork += 1;
       return;
     }
-    if (task.status === 'Cancelled') {
+    if (isCancelledStatus(task.status)) {
       target.cancelledWork += 1;
       return;
     }

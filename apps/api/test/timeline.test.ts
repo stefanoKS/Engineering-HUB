@@ -16,6 +16,7 @@ import {
   insertSubproject,
   insertTask
 } from '@eh/db';
+import { businessDate } from '@eh/domain';
 import { buildApp } from '../src/app';
 import { loadConfig } from '../src/config';
 import { NullInboxSource } from '../src/inbox';
@@ -399,5 +400,174 @@ describe('one project branch', () => {
     await seed();
     const response = await app.inject({ method: 'GET', url: '/api/work/timeline' });
     expect(response.statusCode).toBe(401);
+  });
+});
+
+function addCalendarDays(value: string, days: number): string {
+  const [year, month, day] = value.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(year, month - 1, day) + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+async function seedAttention(): Promise<{ today: string }> {
+  const today = businessDate();
+  await insertResponsibility(db, { name: 'Focus area' }, 'RSP-F');
+  await insertProject(
+    db,
+    {
+      projectName: 'Attention project',
+      responsibilityId: 'RSP-F',
+      status: 'Active',
+      dashboardVisibility: 'INTERNAL'
+    },
+    'PRJ-AT'
+  );
+  // A container with an overdue child: the child is work, the container is context only.
+  await db.query(`INSERT INTO tasks (task_id, project_id, task_name, status, priority)
+    VALUES ('AT-BOX', 'PRJ-AT', 'Phase box', 'In Progress', 'Medium')`);
+  await insertTask(
+    db,
+    { projectId: 'PRJ-AT', parentTaskId: 'AT-BOX', taskName: 'Late child', dueDate: addCalendarDays(today, -3), status: 'In Progress' },
+    'AT-OVER'
+  );
+  await insertTask(
+    db,
+    { projectId: 'PRJ-AT', taskName: 'Due soon', dueDate: addCalendarDays(today, 3), status: 'Assigned' },
+    'AT-SOON'
+  );
+  // The seven-date interval is inclusive: today + 6 is inside it, today + 7 is not.
+  await insertTask(
+    db,
+    { projectId: 'PRJ-AT', taskName: 'Boundary in', dueDate: addCalendarDays(today, 6), status: 'Assigned' },
+    'AT-BOUND'
+  );
+  await insertTask(
+    db,
+    { projectId: 'PRJ-AT', taskName: 'Boundary out', dueDate: addCalendarDays(today, 7), status: 'Assigned' },
+    'AT-OUT'
+  );
+  await db.query(`INSERT INTO tasks (task_id, project_id, task_name, status, priority)
+    VALUES ('AT-NONE', 'PRJ-AT', 'No dates', 'Not Started', 'Medium')`);
+  await insertTask(
+    db,
+    { projectId: 'PRJ-AT', taskName: 'Awaiting review', dueDate: addCalendarDays(today, 2), status: 'In Progress' },
+    'AT-REVIEW'
+  );
+  await db.query(
+    `INSERT INTO task_requests (request_id, request_type, task_id, project_id, status, submitted_at)
+     VALUES ('REQ-RV', 'COMPLETION_REPORT', 'AT-REVIEW', 'PRJ-AT', 'PENDING', now())`
+  );
+  // A completed container still explains an unfinished child when completed work is hidden.
+  await db.query(`INSERT INTO tasks (task_id, project_id, task_name, status, priority)
+    VALUES ('AT-DBOX', 'PRJ-AT', 'Done box', 'Done', 'Medium')`);
+  await insertTask(
+    db,
+    { projectId: 'PRJ-AT', parentTaskId: 'AT-DBOX', taskName: 'Open under done', dueDate: addCalendarDays(today, 1), status: 'In Progress' },
+    'AT-DOPEN'
+  );
+  await insertTask(db, { projectId: 'PRJ-AT', taskName: 'Finished leaf', dueDate: addCalendarDays(today, -10), status: 'Done' }, 'AT-DONE');
+  await db.query("UPDATE tasks SET completed_at = now() WHERE task_id = 'AT-DONE'");
+  await db.query(
+    `INSERT INTO task_assignees (assignment_id, task_id, member_id, assigned_by)
+     VALUES ('TA-AT', 'AT-SOON', 'MEM-MEMBER', 'MEM-MANAGER')`
+  );
+  // Every dated record except AT-NONE carries a consistent plan, so only AT-NONE is missing dates.
+  await db.query(
+    `UPDATE tasks SET planned_start = due_date - 2
+      WHERE project_id = 'PRJ-AT' AND due_date IS NOT NULL AND task_id <> 'AT-NONE'`
+  );
+  return { today };
+}
+
+function attentionRead(auth: Auth, projectId: string, query: Record<string, string> = {}) {
+  const search = new URLSearchParams(query).toString();
+  return app.inject({
+    method: 'GET',
+    url: `/api/work/projects/${projectId}/attention` + (search ? `?${search}` : ''),
+    headers: { cookie: auth.cookie }
+  });
+}
+
+describe('project attention filters', () => {
+  it('counts leaf work on the server, keeps the seven-day boundary and never counts a container', async () => {
+    const { today } = await seedAttention();
+    const member = await signIn(MEMBER);
+    const response = await attentionRead(member, 'PRJ-AT');
+    expect(response.statusCode, response.body).toBe(200);
+    const data = response.json().data as {
+      today: string;
+      dueSoon: { from: string; to: string };
+      includesOutsideChart: boolean;
+      buckets: {
+        key: string;
+        count: number;
+        taskIds: string[];
+        contextTaskIds: string[];
+        contextSubprojectIds: string[];
+      }[];
+    };
+    expect(data.today).toBe(today);
+    expect(data.dueSoon).toEqual({ from: today, to: addCalendarDays(today, 6) });
+    expect(data.includesOutsideChart).toBe(true);
+    const bucket = (key: string) => data.buckets.find((entry) => entry.key === key)!;
+    expect(bucket('OVERDUE').count).toBe(1);
+    expect(bucket('OVERDUE').taskIds).toEqual(['AT-OVER']);
+    // The container explains the match and is context, never counted work.
+    expect(bucket('OVERDUE').contextTaskIds).toEqual(['AT-BOX']);
+    expect(bucket('DUE_SOON').taskIds.sort()).toEqual(['AT-BOUND', 'AT-DOPEN', 'AT-REVIEW', 'AT-SOON']);
+    expect(bucket('DUE_SOON').taskIds).not.toContain('AT-OUT');
+    expect(bucket('REVIEW').taskIds).toEqual(['AT-REVIEW']);
+    expect(bucket('MISSING_DATES').taskIds).toEqual(['AT-NONE']);
+  });
+
+  it('is unaffected by pagination or expansion and refuses a foreign division', async () => {
+    await seedAttention();
+    const member = await signIn(MEMBER);
+    const first = await attentionRead(member, 'PRJ-AT');
+    const second = await attentionRead(member, 'PRJ-AT', { page: '2' });
+    expect(second.statusCode).toBe(200);
+    const counts = (value: typeof first) =>
+      (value.json().data.buckets as { key: string; count: number }[]).map((entry) => [entry.key, entry.count]);
+    expect(counts(second)).toEqual(counts(first));
+    // A readable project in another division is not part of the selected scope.
+    expect((await attentionRead(member, 'PRJ-AT', { divisionId: 'DIV-ENG' })).statusCode).toBe(404);
+    expect((await attentionRead(member, 'PRJ-AT', { divisionId: 'DIV-DEV' })).statusCode).toBe(200);
+    expect((await attentionRead(member, 'PRJ-UNKNOWN')).statusCode).toBe(404);
+    // A VIEWER may read the counts; an unauthenticated caller may not.
+    const viewer = await signIn(VIEWER);
+    expect((await attentionRead(viewer, 'PRJ-AT')).statusCode).toBe(200);
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/work/projects/PRJ-AT/attention' })).statusCode
+    ).toBe(401);
+  });
+});
+
+describe('timeline branch consistency', () => {
+  it('keeps a completed container that explains an unfinished child', async () => {
+    const { today } = await seedAttention();
+    const member = await signIn(MEMBER);
+    const active = await branch(member, 'PRJ-AT', { includeCompleted: 'false' });
+    expect(active.statusCode, active.body).toBe(200);
+    const ids = (active.json().data.tasks as { taskId: string }[]).map((task) => task.taskId);
+    expect(ids).toContain('AT-DBOX');
+    expect(ids).toContain('AT-DOPEN');
+    expect(ids).not.toContain('AT-DONE');
+    // The marker is still reachable in the full branch and never renamed.
+    expect(today).toBeTruthy();
+  });
+
+  it('publishes display-only assignee names with the branch', async () => {
+    await seedAttention();
+    const member = await signIn(MEMBER);
+    const response = await branch(member, 'PRJ-AT');
+    const tasks = response.json().data.tasks as { taskId: string; assigneeNames: string[]; reviewState: string }[];
+    expect(tasks.find((task) => task.taskId === 'AT-SOON')?.assigneeNames).toEqual(['Member']);
+    expect(tasks.find((task) => task.taskId === 'AT-REVIEW')?.reviewState).toBe('PENDING');
+  });
+
+  it('applies the selected division to a branch request', async () => {
+    await seedAttention();
+    const member = await signIn(MEMBER);
+    expect((await branch(member, 'PRJ-AT', { divisionId: 'DIV-ENG' })).statusCode).toBe(404);
+    expect((await branch(member, 'PRJ-AT', { divisionId: 'DIV-DEV' })).statusCode).toBe(200);
   });
 });

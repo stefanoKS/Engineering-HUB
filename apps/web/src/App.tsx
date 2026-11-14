@@ -477,14 +477,23 @@ function renderScreen(route: Route, actor: Actor, isManager: boolean): JSX.Eleme
   // The timeline is a read-only projection available to every signed-in role.
   if (first === 'timeline') {
     const from = new URLSearchParams(route.search).get('from') ?? undefined;
-    return <TimelineScreen actor={actor} initialProjectId={second} initialAnchor={from} />;
+    // `#/timeline/<project>/<subproject>` names both scope segments, so a shared link opens the
+    // branch it points at instead of silently showing every subproject.
+    return (
+      <TimelineScreen
+        actor={actor}
+        initialProjectId={second}
+        initialSubprojectId={route.segments[2]}
+        initialAnchor={from}
+      />
+    );
   }
   // MEMBER and VIEWER browse permitted projects through the read-only explorer, never through the
   // management list (which reads `/api/manager/projects`). A MEMBER may create new work there.
   if (first === 'projects' && !isManager) return <WorkProjectsScreen actor={actor} />;
   // Read-only project detail stays reachable for MEMBER and VIEWER (the task detail links here).
   if (first === 'project' && second && !isManager) {
-    return <ProjectDetailScreen actor={actor} projectId={second} readOnly />;
+    return <ProjectDetailScreen actor={actor} projectId={second} readOnly routeSearch={route.search} />;
   }
   if (!isManager) return <OverviewScreen actor={actor} />;
   switch (first) {
@@ -499,7 +508,11 @@ function renderScreen(route: Route, actor: Actor, isManager: boolean): JSX.Eleme
     case 'projects':
       return <ProjectsScreen actor={actor} />;
     case 'project':
-      return second ? <ProjectDetailScreen actor={actor} projectId={second} /> : <ProjectsScreen actor={actor} />;
+      return second ? (
+        <ProjectDetailScreen actor={actor} projectId={second} routeSearch={route.search} />
+      ) : (
+        <ProjectsScreen actor={actor} />
+      );
     case 'responsibilities':
       return <ResponsibilitiesScreen actor={actor} />;
     case 'members':

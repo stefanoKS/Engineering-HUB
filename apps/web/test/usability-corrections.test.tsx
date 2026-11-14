@@ -436,7 +436,8 @@ describe('read-only timeline', () => {
     render(<I18nProvider><TimelineScreen actor={MEMBER as never} /></I18nProvider>);
     await waitFor(() => expect(document.querySelectorAll('.tl-kind-project').length).toBe(1));
     expect(document.querySelector('.tl-kind-project .tl-label')?.textContent).toBe('Visible project');
-    expect(document.querySelector('.timeline-legend')).toBeNull();
+    // The legend is part of the chart's visual language and is present before a branch loads.
+    expect(document.querySelector('.timeline-legend')).not.toBeNull();
     expect(fetcher.mock.calls.some(([url]) => String(url).includes('projectId=PRJ-V'))).toBe(false);
 
     fireEvent.click(screen.getByRole('button', { name: '展開' }));

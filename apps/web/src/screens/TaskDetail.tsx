@@ -22,7 +22,7 @@ import { ActionConfirmDialog } from '../components/ActionConfirmDialog';
 import { blockedReasonLabel, RequestDialog, type RequestKind } from '../components/request-dialog';
 import { TaskForm } from './TaskForm';
 import { formatSkillGrade, projectColor } from '@eh/domain';
-import { BackButton } from '../state/navigation';
+import { BackButton, currentMemoryEpoch, rememberCompletedTask } from '../state/navigation';
 import { DeleteEntityDialog } from '../components/DeleteEntityDialog';
 import { DeadlineCell } from '../components/deadline';
 import { TaskStatusBadge } from '../components/task-status';
@@ -120,9 +120,13 @@ export function TaskDetailScreen({
       <Breadcrumbs
         items={[
           { label: t('nav.projects'), href: '#/projects' },
-          { label: context.projectName || context.projectId, href: `#/project/${context.projectId}` },
+          {
+            label: context.projectName || context.projectId,
+            // Naming the task lets the project page reveal a completed task's context on return.
+            href: `#/project/${context.projectId}?task=${record.taskId}`
+          },
           ...(subprojectPath
-            ? [{ label: subprojectPath, href: `#/project/${context.projectId}` }]
+            ? [{ label: subprojectPath, href: `#/project/${context.projectId}?task=${record.taskId}` }]
             : []),
           { label: record.taskName }
         ]}
@@ -131,7 +135,9 @@ export function TaskDetailScreen({
         <div>
           <h2>{record.taskName}</h2>
           <p className="muted small">
-            <a href={`#/project/${record.projectId}`}>{context.projectName || record.projectId}</a>
+            <a href={`#/project/${record.projectId}?task=${record.taskId}`}>
+              {context.projectName || record.projectId}
+            </a>
             {subprojectPath ? ` · ${subprojectPath}` : ''} · {record.taskId}
           </p>
         </div>
@@ -611,6 +617,8 @@ export function TaskDetailScreen({
           destructive={action === 'override'}
           onCancel={() => setAction(null)}
           onConfirm={async ({ confirmation, reason }) => {
+            const memoryEpoch = currentMemoryEpoch();
+            let completed = false;
             if (action === 'approve') {
               await api.post(`/api/manager/tasks/${record.taskId}/approve`, { revision: record.revision, confirmed: true });
             } else if (action === 'confirm') {
@@ -624,12 +632,19 @@ export function TaskDetailScreen({
                 confirmed: true,
                 note: reason || undefined
               });
+              completed = true;
             } else {
               await api.post(`/api/manager/tasks/${record.taskId}/override-complete`, {
                 revision: record.revision,
                 reason,
                 confirmation
               });
+              completed = true;
+            }
+            // The notice is written only after the server confirmed the write. A refusal, a
+            // timeout or an uncertain outcome throws above and never reaches this line.
+            if (completed) {
+              rememberCompletedTask(record.projectId, record.taskId, record.taskName, memoryEpoch);
             }
             setAction(null);
             queryCache.invalidate([keys.task(record.taskId), keys.tasks, keys.taskIndex, keys.overview, keys.project(record.projectId), keys.myWork, keys.timeline]);

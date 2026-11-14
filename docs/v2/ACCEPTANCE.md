@@ -1,5 +1,142 @@
 # V2 Acceptance Record
 
+## Project structure reveal and timeline usability — 2026-11-14
+
+**Local implementation and verification only.** No operational database was migrated, initialized,
+mapped or reset; nothing was deployed; no outbound service (mail, Calendar, publication) was
+activated; and no account or authentication setting was changed. **Schema 12 is unchanged and no
+migration is added.** Authorization, counting, completion/approval, revision, audit and publication
+rules are unchanged; this release adds one read-only projection and presentation behaviour.
+
+User-visible outcome:
+
+- One reveal operation (completion notice, a subproject's completed-count button and `?task=<id>`)
+  resolves a task by stable ID, opens the active or completed presentation, expands the ancestors it
+  needs, clears a filter that would hide it (stating that it did), waits for the row, then focuses
+  it. A background refresh never requests a reveal and therefore never steals focus. DOM ids are
+  scoped by presentation (`hierarchy-active-…` / `hierarchy-completed-…`), so a container used as
+  context in both is addressable once.
+- The project-specific assignee filter is the shared searchable, paginated picker: every authorized
+  member is reachable beyond the first page, the selected value survives searching and paging, and a
+  raw member id is never shown as a loading label.
+- The project page states weighted progress and the completed-task count together
+  (`進捗 52% · 完了 3 / 9 タスク`), drops the duplicated progress section below, and keeps one
+  contextual creation control per group. Missing schedule values are quiet on subproject headers as
+  well as task rows. The phone layout uses a two-column summary, compact meta lines and no
+  horizontal overflow.
+- Timeline rows keep four separate facts: the schedule span, the committed deadline, the recorded
+  completion and a descendant-derived group span. A deadline-only record is a diamond, a completed
+  record a check, a group span an outlined bracket, one-day work a point mark and today a labelled
+  line, with a compact legend. A derived group span is never drawn as a plan or a deadline.
+- A compact toolbar provides previous/today/next, week / two weeks / month / quarter / custom and
+  fit; month and quarter navigation snap to the containing calendar unit (month ends and leap years
+  covered by unit tests) and today keeps the selected zoom.
+- Project-level attention filters (all schedules, overdue, due in 7 days, awaiting review, missing
+  dates) are counted on the server from the whole authorized project scope with the canonical
+  `TaskScope` rules; only leaf work is matched and ancestors are returned once as context. The
+  seven-day interval is explicitly `today … today+6` in Tokyo dates and the counts state that they
+  are not limited to the visible chart period.
+- An inspection panel (side panel on desktop, bottom sheet on phones) shows the authorized context,
+  schedule and its source, deadline, status, review state and completion. It is non-modal: Escape and
+  Close dismiss it and focus returns to the invoking control. The phone presentation has an explicit
+  Chart / Agenda switch (agenda preferred initially) with the same scope, filters and dates.
+- Work with missing dates is listed with its real condition (no dates, start missing, finish
+  missing, inconsistent) and never assigned a date; work outside the visible period shows an
+  "outside view" marker with a deliberate `Show in timeline` action.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| New reveal and assignee tests | PASS | `apps/web/test/project-reveal.test.tsx` — **8 tests**: reveal expands collapsed ancestors and focuses an active row; a completed leaf opens the completed presentation; a filter that excludes the target is cleared with a notice; an unavailable task reports instead of pretending; a background refresh never steals focus; a container present in both presentations has unique DOM ids; a member beyond the first page is reachable; the current selection survives a search. |
+| New timeline usability tests | PASS | `apps/web/test/timeline-usability.test.tsx` — **13 tests**: separate plan/deadline/completion cells; panel deadline and date source; deadline-only marker and derived bracket; server counts invariant under expansion with match+context filtering and one-step return; real undated condition; panel keyboard open/Escape/focus restoration; offscreen `Show in timeline`; month previous/next; agenda scope and language preservation; branch error with working retry; selected division sent with every scoped request; a superseded division answer never paints; subproject deep link initializes the filter. |
+| Calendar navigation unit tests | PASS | `apps/web/test/timeline-dates.test.ts` — **14 tests** (5 new): week/fortnight/custom stepping, calendar month and quarter stepping including 2026-12-31→2027-01-30, leap February 2028, quarter boundaries, `presetWindow`, and `todayWindow` preserving the zoom. |
+| Attention projection tests | PASS | `apps/api/test/timeline.test.ts` — **15 tests** (3 new): server counts on the whole project with the seven-date inclusive boundary, container excluded and returned as context; counts invariant under paging and `DIV-ENG` refused; completed container retained for an unfinished child; assignee display names and review state; division narrowing on a branch. Real PostgreSQL 18. |
+| `npm run test:v2` | PASS | **76 files, 889 passed, 1 skipped**, 0 failed. |
+| `npm run test:v1` | 775/776 (pre-existing) | `tests/v1_6_1-counting.test.js` "a container task is never an extra unit of work in an area card" fails on its fixed fixture due date (2026-11-10, in the past). Unchanged by this release; recorded, not silenced. |
+| `npm run typecheck` | PASS | Every V2 workspace compiles. |
+| `npm run lint` | PASS | `lint:v1` and `lint:v2` exit 0. |
+| `npm run validate` | PASS | V1 source and 989 translation keys, V2 validation (**250 files**) and the deployment templates. |
+| `npm run build` | PASS | API, web, worker and migration CLI artifacts. |
+| Local browser verification | PASS | `work/verify-timeline-usability.mjs`: isolated embedded PostgreSQL 18, migration CLI, a seeded fixture (2 divisions, 5 members, long Japanese names, two assignees, nested open/completed work, a completed subproject, an empty subproject, overdue and review-pending work, missing dates, a deadline-only record and a schedule 75 days out), the built API and built web, and real headless Chromium as a MEMBER. **14 checks**: summary wording, completed reveal focus, assignee search/selection, quiet subproject dates, no horizontal overflow at 1024/390, attention counts and filtered matching work, panel keyboard open/Escape/focus return, month previous/next, agenda across a language switch, chart/agenda at 390 px, and no browser page errors. Screenshots: `work/screenshots/v22-project-detail-1440.png`, `v22-project-detail-revealed-1440.png`, `v22-project-detail-1024.png`, `v22-project-detail-390.png`, `v22-timeline-chart-1440.png`, `v22-timeline-attention-1440.png`, `v22-timeline-panel-1440.png`, `v22-timeline-1024.png`, `v22-timeline-agenda-390.png`, `v22-timeline-chart-390.png`. |
+| Repository browser smoke script | NOT_RUN | `scripts/browser-smoke.mjs` carries pre-existing journey expectations from earlier releases; it was not executed for this release. The dedicated verification above is the browser evidence for this change. |
+| Live Workspace / deployment | NOT_RUN | Nothing was deployed, migrated, initialized or activated. No live Workspace or production data was used. |
+| Production approval | **NOT APPROVED** | `docs/PRODUCTION_READINESS.md` is unchanged. |
+
+Remaining limitations, stated rather than hidden:
+
+- No non-working-day shading is drawn: the timeline has no authorized business-calendar projection,
+  and assuming Saturday/Sunday would be wrong. The limitation is deliberate, not a hidden feature.
+- The all-projects chart draws only the current page of project summaries (honest `total`, paging
+  preserves the scope); an expanded project loads its own authorized branch. The agenda states the
+  same page and total rather than presenting loaded rows as exhaustive.
+- A phone starts on the agenda; the in-memory choice is kept for the session and is never persisted.
+- Attention counts include work outside the visible chart period by design and the interface says so.
+- The drag-to-reschedule interaction is not part of this release (inspection only).
+
+## Active and completed project structure — 2026-11-13
+
+**Local implementation and verification only.** No operational database was migrated, initialized,
+mapped or reset; nothing was deployed, committed or pushed; no outbound service (mail, Calendar,
+publication) was activated; and no account or authentication setting was changed. **Schema 12 is
+unchanged and no migration is added.** No API endpoint, contract, authorization rule, counting
+function or publication rule changed.
+
+The project detail now keeps unfinished leaf work in the active structure and moves completed leaf
+work into one collapsed section below it. The change is presentation-only: no record is moved,
+archived, deleted or reparented. Containers are organisation and are never counted or treated as
+completed from their stored status; cancelled work remains separate behind the existing
+inactive-work control; the `N active · M completed` counters use the same domain status helpers and
+`rollup` as `TaskScope`; the completed count opens and focuses the right group; `?task=<id>` reveals
+a completed task; task-name search and a stable-member-id assignee filter cover both presentations;
+and a confirmed direct completion leaves one page-memory notice. Removal and subproject editing are
+in the row ⋯ menu with the existing capabilities, preflight, revision, confirmation, recovery and
+audit behaviour unchanged. See [UI_CONVENTIONS.md](./UI_CONVENTIONS.md) "Project structure: active
+and completed work" and [ARCHITECTURE.md](./ARCHITECTURE.md).
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| New behavior tests | PASS | `apps/web/test/project-completed-work.test.tsx` — **26 tests**. Mixed unfinished/completed work in one subproject, collapsed-by-default disclosure, correct completed leaf count, completed-only subproject, empty active subproject, project-direct groups, nested branch context in both presentations, a container with a misleading stored `Done` and unfinished descendants, no container double counting, cancelled work hidden/shown and never completed, completed-count reveal, task-detail links, disclosure across a language change, an explicit `?task=<id>` focus, search for hidden completed work, additional-assignee filtering through the bounded option endpoint, clear/no-match states, role menu visibility, the completion notice, a refused completion that writes no notice, and a completion notice that an ended session cannot carry into the next one. |
+| Existing hierarchy and role tests | PASS | `project-hierarchy.test.tsx` (25), `member-explorer.test.tsx` (8) and `capability-and-scope.test.tsx` — PASS after updating the intentional DOM changes (group rows are table rows; edit/removal live in the ⋯ menu; a completed-only subproject is in the completed section). |
+| Focused web/domain/contracts suite | PASS | `npx vitest run apps/web/test packages/domain/test packages/contracts/test` — **45 files, 435 passed**, 0 failed. |
+| `npm run test:v2` | PASS | **74 files, 858 passed, 1 skipped**, 0 failed. An earlier full-suite run reported one timing failure in `deleted-items.test.tsx` ("reports an unobservable outcome without retrying or closing" — the action button was still labelled 保存中 when queried); the file passed twice in isolation and the full suite passed on every re-run. Recorded as an observed flake rather than a settled pass. |
+| `npm run test:v1` | 775/776 (pre-existing) | `tests/v1_6_1-counting.test.js` "a container task is never an extra unit of work in an area card" fails on its fixed fixture due date (2026-11-10, now in the past). Unchanged by this release; recorded, not silenced. |
+| `npm run typecheck` | PASS | Every V2 workspace compiles (`api`, `web`, `worker`, `contracts`, `db`, `domain`, `i18n`). |
+| `npm run lint` | PASS | `lint:v1` and `lint:v2` exit 0. |
+| `npm run validate` | PASS | V1 source and 989 translation keys, V2 validation (**248 files**) and the deployment templates. |
+| `npm run build` | PASS | API, web, worker and migration CLI artifacts. |
+| Local browser verification | PASS | `work/verify-project-completed.mjs`: isolated embedded PostgreSQL 18, migration CLI, a seeded project with unfinished, completed, cancelled and container work, the built API and built web, and real headless Chromium as a MEMBER and an ADMIN. It verified the active structure, the collapsed completed section, the subproject completed-count reveal, grouping by original subproject, container context in both presentations, search for hidden completed work, match-versus-total counts, Clear filters, the language switch, **1440 px and 390 px with no horizontal overflow and no filter-layout gap**, the ⋯ menu (Edit / Remove from list) and the cancelled-work control, with no browser page errors. Screenshots: `work/screenshots/project-completed-active-ja-1440.png`, `-expanded-ja-1440.png`, `-search-ja-1440.png`, `-en-1440.png`, `-narrow-ja-390.png`, `-inactive-ja-1440.png`, `-menu-ja-1440.png`. |
+| Repository browser smoke script | NOT_RUN | `scripts/browser-smoke.mjs` was updated to the new accessible hierarchy structure (group rows, ⋯ menu items, `#hierarchy-direct`) but was not executed for this release. It also contains pre-existing journey expectations unrelated to this change (documented in the 2026-11-12 entry). The dedicated local verification above is the browser evidence for this change. |
+| Live Workspace / deployment | NOT_RUN | Nothing was deployed, migrated, initialized or activated. No live Workspace or production data was used. |
+| Production approval | **NOT APPROVED** | `docs/PRODUCTION_READINESS.md` is unchanged. |
+
+Remaining limitations, stated rather than hidden:
+
+- The project task summary does not carry a recorded completion timestamp, so the structure shows
+  the due date only and never substitutes it for a completion date. The recorded value remains on
+  the task detail and the reopen eligibility read.
+- Repeated ancestor context is intentional: a container may appear in both presentations as a path
+  to its leaves, but a leaf appears once and container counts are never added.
+- The structure filters run over the project-scoped payload. That payload is bounded by the project,
+  not by a page; no whole-table browser download, per-keystroke request or filtered-page count is
+  introduced. If a future project read becomes paginated, the filters and the completed total must
+  move with that server scope before they can be described as exhaustive.
+- Local browser and mock evidence is not live Workspace verification; the live-only criteria remain
+  NOT_RUN/BLOCKED.
+
+## Member collaboration verification — 2026-11-13
+
+The existing member editing, recoverable removal and manager restoration implementation was
+rechecked locally. The removal audit now records the actor's role re-read under the division lock,
+including when a manager becomes a member while a removal waits. No deployment or migration was run.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Collaboration and recovery regressions | PASS | Six targeted API and UI test files passed (82 tests), including PostgreSQL-backed member edits, removals, manager restoration and scoped list totals. |
+| Authorization and audit follow-up | PASS | `REQUIRE_DATABASE=1` with `member-work-edit.test.ts` and `deletion.test.ts`: 34 tests passed, including task and subproject READ/restricted refusals and a role change while removal waits for the lock. |
+| Type checking | PASS | `npm run typecheck` passed for all workspaces. |
+| Lint | PASS | ESLint passed for the four affected TypeScript files. |
+| Validation | PASS | `npm run validate` passed V1, V2 and deployment-template validation. |
+| Live verification | NOT_RUN | No live deployment or Workspace verification was performed. |
+
 ## Manager recoverable removal, ADMIN restoration and no-typing confirmations — 2026-11-12
 
 **Local implementation and verification only.** No operational database was migrated, initialized,

@@ -590,8 +590,8 @@ export async function removalPreflight(
  *
  * Two independent questions are asked against authoritative data: the verified role may remove a
  * task or a subproject at all, and the caller may write in the division of the project that
- * carries the record. A manager with read-only access in that division, a GENERAL_MANAGER and a
- * MEMBER all stop here. The read is a pre-check; `removeEntity` repeats it through the transaction
+ * carries the record. A caller with read-only access in that division or a GENERAL_MANAGER stops
+ * here. The read is a pre-check; `removeEntity` repeats it through the transaction
  * handle before the first mutation.
  */
 async function assertRemovableRecord(
@@ -601,7 +601,7 @@ async function assertRemovableRecord(
   db: DbLike = ctx.db
 ): Promise<{ divisionId: string | null; projectId: string; revision: number; deletedAt: string | null }> {
   if (!canRecoverablyDeleteRecord(ctx.identity)) {
-    throw new DomainError('AUTHORIZATION_DENIED', 'Removing this record requires a manager account');
+    throw new DomainError('AUTHORIZATION_DENIED', 'Removing this record requires a member or manager account');
   }
   const row = await db.one<{
     revision: number;
@@ -897,7 +897,7 @@ export async function restoreEntity(
 }
 
 /**
- * One bounded page of the ADMIN Deleted Items view.
+ * One bounded page of the division-scoped Deleted Items view.
  *
  * Only tasks and subprojects appear here: those are the records a manager may remove recoverably.
  * A permanently erased record has no row left, so it is not a restore candidate and is never
@@ -1077,7 +1077,7 @@ export async function removeEntity(
       newValue: {
         ...confirmationRecord('REMOVE', input.reason),
         removedBy: ctx.identity.memberId,
-        removedByRole: ctx.identity.role,
+        removedByRole: fresh.identity.role,
         previousStatus: entityType === 'TASKS' ? previous.status : undefined,
         previousRevision: input.revision,
         revision: updated.revision

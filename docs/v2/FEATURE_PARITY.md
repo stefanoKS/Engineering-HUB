@@ -1,6 +1,55 @@
 # V1 → V2 Feature Parity
 
+## Project structure reveal and timeline usability — 2026-11-14
+
+The project detail keeps one reveal operation for a completion notice, a subproject's completed
+count and `?task=<id>`: a task is resolved by stable ID, the active or completed presentation is
+opened, the ancestors it needs are expanded, a filter that would hide it is cleared with an explicit
+notice, and focus moves only after the row exists. A background refresh never requests a reveal.
+DOM ids are scoped by presentation, so a container that appears as context in both presentations is
+addressable once. The project-specific assignee filter is the shared searchable, paginated picker
+(every member reachable, selection preserved, no raw id labels). The summary states weighted
+progress together with the completed-task count. The read-only timeline keeps the schedule span, the
+committed deadline, the recorded completion and a derived group span as separate facts, draws each
+with its own restrained mark and a legend, offers previous/today/next plus week / two weeks / month /
+quarter / custom and fit, and resolves project-level attention filters (overdue, due in seven days,
+awaiting review, missing dates) on the server from the whole authorized project scope. A non-modal
+inspection panel and a phone agenda share the same scope, filters and dates. One additive read-only
+endpoint (`GET /api/work/projects/:id/attention`) and two additive timeline fields (`assigneeNames`,
+`reviewState`) are added; no migration, schema, authorization, counting, completion, notification or
+publication rule changes. See [UI_CONVENTIONS.md](UI_CONVENTIONS.md) "Project structure reveal,
+attention filters and timeline inspection", [API.md](API.md) and
+[ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Active and completed project structure — 2026-11-13
+
+The project detail keeps unfinished leaf work in the active structure and moves completed leaf work
+into one collapsed section below it. Nothing is moved, archived, deleted or reparented. Container
+tasks remain organisation (never an extra unit of work, and never completed from their stored
+status), cancelled work stays separate and behind the existing inactive-work control, and the
+`N active · M completed` counters use the same leaf counting as `TaskScope`/progress. The completed
+count is an accessible button that opens and focuses the right group; `?task=<id>` reveals a
+completed task's context; task-name search and a stable-member-id assignee filter find work in both
+presentations; and a confirmed direct completion leaves one page-memory notice that reveals the
+row. Row removal and subproject editing are in the ⋯ menu, with the existing role/division
+capabilities, preflight, revision, confirmation, recovery and audit behaviour unchanged. No API,
+contract, migration, schema, authorization, counting or publication change is involved. See
+[UI_CONVENTIONS.md](UI_CONVENTIONS.md) "Project structure: active and completed work" and
+[ARCHITECTURE.md](ARCHITECTURE.md) "Active and completed project structure".
+
+## Member collaboration and manager recovery — 2026-11-13
+
+Members may edit and recoverably remove tasks and subprojects, including colleagues' work, in a
+visible project within a WORK division. READ access never authorizes a write. Managers may restore
+removed tasks and subprojects in their WORK divisions; administrators may restore across divisions.
+Removal and restoration require a confirmation button, not typed text. Permanent erasure and
+reopening completed tasks remain ADMIN-only. See [SECURITY.md](SECURITY.md) and
+[API.md](API.md) for the authorization and recovery safeguards.
+
 ## Member creation, shared presentation and corrective reopening — 2026-11-05
+
+The following table is historical; the member editing and removal restrictions were superseded by
+the member collaboration update above.
 
 | Capability | V1 (Apps Script) | V2 now |
 |---|---|---|

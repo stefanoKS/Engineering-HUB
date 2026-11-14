@@ -14,6 +14,9 @@
  * No date is ever invented from `createdAt`, today or an effort figure.
  */
 import type {
+  ProjectAttention,
+  ProjectAttentionBucket,
+  ProjectAttentionFilter,
   TimelineChildRange,
   TimelineProjectBranch,
   TimelineProjectPage,
@@ -33,6 +36,7 @@ import {
   assertReadableDivision,
   canIncludeArchivedWork,
   canSeeRestrictedWork,
+  createScope,
   projectScheduleStatus,
   readableDivisionIds,
   requireRole,
@@ -278,12 +282,23 @@ export async function timelineProjects(
 export async function timelineBranch(
   ctx: WorkCtx,
   projectId: string,
-  options: { includeCompleted?: boolean; subprojectId?: string } = {}
+  options: {
+    includeCompleted?: boolean;
+    subprojectId?: string;
+    /** The narrowed division scope of the request; the project must belong to it. */
+    divisionIds?: readonly string[];
+  } = {}
 ): Promise<TimelineProjectBranch> {
   requireRole(ctx.identity, 'VIEWER');
   const project = await getProject(ctx.db, projectId);
   if (!project) throw new DomainError('NOT_FOUND', `Project not found: ${projectId}`);
   assertReadableDivision(ctx.divisions, project.divisionId);
+  // A selected division narrows the read: a readable project from another division must not be
+  // shown under the wrong division label. A blank (unmapped) project is ADMIN-only, so a
+  // division-scoped request never reaches it.
+  if (options.divisionIds && !(project.divisionId && options.divisionIds.includes(project.divisionId))) {
+    throw new DomainError('NOT_FOUND', `Project not found: ${projectId}`);
+  }
   if (!projectVisibleTo(ctx, project)) {
     throw new DomainError('NOT_FOUND', `Project not found: ${projectId}`);
   }
@@ -339,11 +354,43 @@ export async function timelineBranch(
     ? visibleSubprojects.filter((subproject) => descendants.has(subproject.subprojectId))
     : visibleSubprojects;
   const visibleSubprojectIds = new Set(visibleSubprojects.map((subproject) => subproject.subprojectId));
-  const visibleTasks = allTasks
+  const baseTasks = allTasks
     .filter((task) => !task.subprojectId || visibleSubprojectIds.has(task.subprojectId))
     .filter((task) => !selectedSubproject || (!!task.subprojectId && descendants.has(task.subprojectId)))
-    .filter((task) => manager || task.status !== 'Cancelled')
-    .filter((task) => options.includeCompleted !== false || task.status !== 'Done');
+    .filter((task) => manager || task.status !== 'Cancelled');
+  /**
+   * Hiding completed work never removes a container that explains unfinished children. A container
+   * is organisation, so its stored `Done` status is irrelevant while any descendant is still open;
+   * a completed leaf (and a container whose whole subtree is completed) is what the control hides.
+   */
+  const childrenByParent = new Map<string, string[]>();
+  for (const task of baseTasks) {
+    if (!task.parentTaskId) continue;
+    childrenByParent.set(task.parentTaskId, [...(childrenByParent.get(task.parentTaskId) ?? []), task.taskId]);
+  }
+  const byTaskId = new Map(baseTasks.map((task) => [task.taskId, task]));
+  const unfinishedMemo = new Map<string, boolean>();
+  const hasUnfinishedDescendant = (taskId: string, seen = new Set<string>()): boolean => {
+    const cached = unfinishedMemo.get(taskId);
+    if (cached !== undefined) return cached;
+    if (seen.has(taskId)) return false;
+    seen.add(taskId);
+    let found = false;
+    for (const childId of childrenByParent.get(taskId) ?? []) {
+      const child = byTaskId.get(childId);
+      if (!child) continue;
+      if (child.status !== 'Done' || hasUnfinishedDescendant(childId, seen)) {
+        found = true;
+        break;
+      }
+    }
+    unfinishedMemo.set(taskId, found);
+    return found;
+  };
+  const visibleTasks =
+    options.includeCompleted === false
+      ? baseTasks.filter((task) => task.status !== 'Done' || hasUnfinishedDescendant(task.taskId))
+      : baseTasks;
   const tasks = visibleTasks;
 
   const allChildrenOf = new Map<string, string[]>();
@@ -486,6 +533,8 @@ export async function timelineBranch(
     plannedStart: task.plannedStart,
     dueDate: task.dueDate,
     completedAt: completedAt.get(task.taskId) ?? null,
+    assigneeNames: task.assigneeNames ?? [],
+    reviewState: task.reviewState,
     container: !!allChildrenOf.get(task.taskId)?.length,
     depth: task.depth,
     progressPercent: task.progressPercent,
@@ -503,5 +552,137 @@ export async function timelineBranch(
     truncated: false,
     taskTotal: visibleTasks.length,
     fitRange: fitRange(rangeOfSchedules([projectSchedule, ...subprojects, ...taskRows]))
+  };
+}
+
+/** Seven Tokyo business dates including today: today through today + 6. */
+export const ATTENTION_DUE_SOON_DAYS = 7;
+
+function addCalendarDays(value: string, days: number): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return value;
+  const ms = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) + days * 86_400_000;
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/**
+ * Project-level attention counts and the matching work.
+ *
+ * The authorized project scope is resolved first (division, visibility, archived branch), then one
+ * in-memory scope scan answers every bucket, so a count never depends on a page, an expanded folder
+ * or the chart's visible period. Only leaf work is matched: a container is organisation, and its
+ * ancestors are returned as context so a filtered view can still explain where a match lives.
+ */
+export async function projectAttention(
+  ctx: WorkCtx,
+  projectId: string,
+  options: { divisionIds?: readonly string[] } = {}
+): Promise<ProjectAttention> {
+  requireRole(ctx.identity, 'VIEWER');
+  const project = await getProject(ctx.db, projectId);
+  if (!project) throw new DomainError('NOT_FOUND', `Project not found: ${projectId}`);
+  assertReadableDivision(ctx.divisions, project.divisionId);
+  if (options.divisionIds && !(project.divisionId && options.divisionIds.includes(project.divisionId))) {
+    throw new DomainError('NOT_FOUND', `Project not found: ${projectId}`);
+  }
+  if (!projectVisibleTo(ctx, project)) {
+    throw new DomainError('NOT_FOUND', `Project not found: ${projectId}`);
+  }
+  const manager = canSeeRestrictedWork(ctx.identity);
+  const [allTasks, allSubprojects] = await Promise.all([
+    listTaskSummariesForProject(ctx.db, projectId),
+    listSubprojects(ctx.db, projectId)
+  ]);
+  const subprojectById = new Map(allSubprojects.map((subproject) => [subproject.subprojectId, subproject]));
+  const archivedBranch = (subprojectId: string | null): boolean => {
+    if (!subprojectId) return false;
+    let node = subprojectById.get(subprojectId);
+    const seen = new Set<string>();
+    let guard = 0;
+    while (node) {
+      if (seen.has(node.subprojectId) || node.status === 'Archived' || guard++ > 20) return true;
+      seen.add(node.subprojectId);
+      node = node.parentSubprojectId ? subprojectById.get(node.parentSubprojectId) : undefined;
+    }
+    return false;
+  };
+  const tasks = allTasks.filter((task) => {
+    if (task.subprojectId && (manager ? false : archivedBranch(task.subprojectId))) return false;
+    if (!manager && task.status === 'Cancelled') return false;
+    return true;
+  });
+  const scope = createScope(
+    tasks,
+    new Map([[project.projectId, { status: project.status }]]),
+    new Map(
+      allSubprojects.map((subproject) => [
+        subproject.subprojectId,
+        {
+          subprojectId: subproject.subprojectId,
+          projectId: subproject.projectId,
+          parentSubprojectId: subproject.parentSubprojectId,
+          status: subproject.status
+        }
+      ])
+    ),
+    ctx.today
+  );
+  const tasksById = new Map(tasks.map((task) => [task.taskId, task]));
+  const leaves = tasks.filter((task) => !scope.isContainer(task.taskId));
+  const dueSoonFrom = ctx.today;
+  const dueSoonTo = addCalendarDays(ctx.today, ATTENTION_DUE_SOON_DAYS - 1);
+  const active = leaves.filter((task) => scope.inActiveWork(task));
+  const open = (task: (typeof active)[number]): boolean => scope.inActiveWork(task);
+  const definitions: Record<Exclude<ProjectAttentionFilter, 'ALL'>, (task: (typeof active)[number]) => boolean> = {
+    OVERDUE: (task) => open(task) && !!task.dueDate && task.dueDate < ctx.today,
+    DUE_SOON: (task) =>
+      open(task) && !!task.dueDate && task.dueDate >= dueSoonFrom && task.dueDate <= dueSoonTo,
+    REVIEW: (task) => open(task) && task.reviewState === 'PENDING',
+    MISSING_DATES: (task) =>
+      open(task) && (!task.dueDate || !task.plannedStart || task.plannedStart > task.dueDate)
+  };
+  const contextOf = (task: (typeof active)[number]): { taskIds: string[]; subprojectIds: string[] } => {
+    const taskIds: string[] = [];
+    let parentId = task.parentTaskId;
+    let guard = 0;
+    while (parentId && tasksById.has(parentId) && guard++ < 8) {
+      taskIds.push(parentId);
+      parentId = tasksById.get(parentId)?.parentTaskId ?? null;
+    }
+    const subprojectIds: string[] = [];
+    let subprojectId = task.subprojectId;
+    guard = 0;
+    while (subprojectId && guard++ < 24) {
+      subprojectIds.push(subprojectId);
+      subprojectId = subprojectById.get(subprojectId)?.parentSubprojectId ?? null;
+    }
+    return { taskIds, subprojectIds };
+  };
+  const bucket = (key: ProjectAttentionFilter): ProjectAttentionBucket => {
+    if (key === 'ALL') {
+      return { key, count: active.length, taskIds: [], contextTaskIds: [], contextSubprojectIds: [] };
+    }
+    const matches = active.filter(definitions[key]);
+    const contextTaskIds = new Set<string>();
+    const contextSubprojectIds = new Set<string>();
+    for (const task of matches) {
+      const context = contextOf(task);
+      for (const id of context.taskIds) contextTaskIds.add(id);
+      for (const id of context.subprojectIds) contextSubprojectIds.add(id);
+    }
+    return {
+      key,
+      count: matches.length,
+      taskIds: matches.map((task) => task.taskId),
+      contextTaskIds: [...contextTaskIds],
+      contextSubprojectIds: [...contextSubprojectIds]
+    };
+  };
+  return {
+    projectId,
+    today: ctx.today,
+    dueSoon: { from: dueSoonFrom, to: dueSoonTo },
+    includesOutsideChart: true,
+    buckets: (['ALL', 'OVERDUE', 'DUE_SOON', 'REVIEW', 'MISSING_DATES'] as const).map(bucket)
   };
 }

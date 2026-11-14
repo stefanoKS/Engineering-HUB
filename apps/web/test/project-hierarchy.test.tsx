@@ -168,13 +168,16 @@ describe('project hierarchy model', () => {
     expect(seen).not.toContain('T-CANCELLED');
   });
 
-  it('counts active and completed work through flat legacy folders without double counting', () => {
+  it('counts active and completed leaves through flat legacy folders without double counting', () => {
     const model = hierarchyFixture();
     const areaA = model.subprojects.find((node) => node.subprojectId === 'SUB-A')!;
-    expect(areaA.counts).toEqual({ active: 2, done: 0, total: 2 });
-    expect(model.counts).toEqual({ active: 4, done: 1, total: 5 });
-    // The parent task counts itself plus its derived child once.
-    expect(areaA.tasks[0]!.counts).toEqual({ active: 2, done: 0, total: 2 });
+    // T-A1 is a container: only its leaf T-A1-CHILD is work. The hidden cancelled task is not work.
+    expect(areaA.counts).toEqual({ active: 1, done: 0, total: 1 });
+    expect(model.counts).toEqual({ active: 2, done: 1, total: 3 });
+    // The parent carries its derived child's count once and adds no unit of its own.
+    expect(areaA.tasks[0]!.counts).toEqual({ active: 1, done: 0, total: 1 });
+    expect(areaA.tasks[0]!.task.container).toBe(false);
+    expect(areaA.completedCount).toBe(0);
   });
 
   it('hides cancelled work by default and reveals it on request', () => {
@@ -236,10 +239,17 @@ describe('project hierarchy tree', () => {
   it('renders a subproject header with its tasks directly underneath', () => {
     renderTree(true);
     const header = screen.getByRole('button', { name: 'Area A を閉じる' });
-    const branch = header.closest('li')!;
-    expect(within(branch).getByText('Area A work')).toBeTruthy();
-    expect(within(branch).getByText('Area A child')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Area A1 を閉じる' })).toBeTruthy();
+    const groupRow = header.closest('tr')!;
+    expect(within(groupRow).getByText('Area A')).toBeTruthy();
+    expect(screen.getByText('Area A work')).toBeTruthy();
+    expect(screen.getByText('Area A child')).toBeTruthy();
+    // Area A1 has only completed work, so it belongs to the collapsed completed section.
+    const completed = screen.getByRole('button', { name: '完了したタスク (1)' });
+    expect(completed.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByText('Area A1 work')).toBeNull();
+    fireEvent.click(completed);
+    expect(screen.getByText('Area A1')).toBeTruthy();
+    expect(screen.getByText('Area A1 work')).toBeTruthy();
   });
 
   it('keeps expansion state when the hierarchy object is replaced by a refresh', () => {
@@ -287,14 +297,16 @@ describe('project hierarchy tree', () => {
     expect(emptyReferences.members).toEqual([]);
   });
 
-  it('shows action buttons for a manager and delete icons only when allowed', () => {
+  it('keeps removal out of the scan path and offers it only in the row menu when allowed', () => {
     const manager = renderTree(false);
     expect(screen.getAllByRole('button', { name: '新規タスク' }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: '編集' }).length).toBeGreaterThan(0);
-    expect(screen.queryAllByRole('button', { name: /を削除/ })).toHaveLength(0);
+    fireEvent.click(screen.getAllByRole('button', { name: /の操作/ })[0]!);
+    expect(screen.getAllByRole('menuitem', { name: '編集' }).length).toBeGreaterThan(0);
+    expect(screen.queryAllByRole('menuitem', { name: /一覧から削除/ })).toHaveLength(0);
     manager.unmount();
     renderTree(true);
-    expect(screen.getAllByRole('button', { name: /を削除/ }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole('button', { name: /の操作/ })[0]!);
+    expect(screen.getAllByRole('menuitem', { name: /一覧から削除/ }).length).toBeGreaterThan(0);
   });
 
   it('offers exactly one New task action for an empty project', () => {
@@ -599,19 +611,21 @@ describe('project detail roles', () => {
     render(<I18nProvider><ProjectDetailScreen actor={ADMIN_ACTOR as never} projectId="PRJ-A" /></I18nProvider>);
     expect(await screen.findByRole('heading', { name: /Alpha/ })).toBeTruthy();
     expect(await screen.findByText('Area A work')).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: /を削除/ }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: '新規タスク' }).length).toBeGreaterThan(0);
+    // Removal lives behind the row menu, not in the scan path.
+    fireEvent.click(screen.getAllByRole('button', { name: /の操作/ })[0]!);
+    expect(screen.getAllByRole('menuitem', { name: /一覧から削除/ }).length).toBeGreaterThan(0);
   });
 
   it('gives MANAGER recoverable removal and creation but never a permanent erasure', async () => {
     stubManagerApi();
     render(<I18nProvider><ProjectDetailScreen actor={MANAGER_ACTOR as never} projectId="PRJ-A" /></I18nProvider>);
     expect(await screen.findByText('Area A work')).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: '編集' }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole('button', { name: /の操作/ })[0]!);
+    expect(screen.getAllByRole('menuitem', { name: '編集' }).length).toBeGreaterThan(0);
     // The approved change: a manager removes work inside a division it may write in ...
-    expect(screen.getAllByRole('button', { name: /を削除/ }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole('menuitem', { name: /一覧から削除/ })[0]!);
     // ... and the permanent erasure stays an ADMIN control.
-    fireEvent.click(screen.getAllByRole('button', { name: /を削除/ })[0]!);
     expect(await screen.findByRole('dialog')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '誤作成記録を完全に消去' })).toBeNull();
   });
@@ -653,8 +667,8 @@ describe('project detail roles', () => {
       return response(detailPayload);
     }));
     render(<I18nProvider><ProjectDetailScreen actor={ADMIN_ACTOR as never} projectId="PRJ-A" /></I18nProvider>);
-    const subprojectBranch = (await screen.findByRole('button', { name: 'Area A を閉じる' })).closest('li')!;
-    fireEvent.click(within(subprojectBranch).getByRole('button', { name: '新規タスク' }));
+    const subprojectHeader = (await screen.findByRole('button', { name: 'Area A を閉じる' })).closest('tr')!;
+    fireEvent.click(within(subprojectHeader).getByRole('button', { name: '新規タスク' }));
     const dialog = await screen.findByRole('dialog');
     // The contextual location is shown as a readable path; no reselect is required.
     expect(within(dialog).getByText('Alpha / Area A')).toBeTruthy();
@@ -676,8 +690,8 @@ it('offers member subproject editing and recoverable deletion only in a writable
   });
   vi.stubGlobal('fetch',fetcher);
   render(<I18nProvider><ProjectDetailScreen actor={MEMBER_ACTOR} projectId="PRJ-A" readOnly /></I18nProvider>);
-  const edit=await screen.findByRole('button',{name:'編集'});
-  fireEvent.click(edit);
+  fireEvent.click(await screen.findByRole('button', { name: /の操作/ }));
+  fireEvent.click(await screen.findByRole('menuitem', { name: '編集' }));
   expect(await screen.findByDisplayValue('Colleague subproject')).toBeTruthy();
   expect(fetcher.mock.calls.some(([url])=>url.includes('/api/work/editor/subprojects/SUB-A'))).toBe(true);
 });

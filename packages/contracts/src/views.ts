@@ -14,6 +14,7 @@ import {
   ProjectSummary,
   RequestQueue,
   ResponsibilityCard,
+  ReviewState,
   Skill,
   TaskRequest,
   TaskSummary
@@ -1010,6 +1011,10 @@ export const TimelineTaskRow = z.object({
   plannedStart: IsoDate.nullable(),
   dueDate: IsoDate.nullable(),
   completedAt: IsoTimestamp.nullable(),
+  /** Display names only; a member identifier or e-mail address never leaves the server here. */
+  assigneeNames: z.array(z.string()).default([]),
+  /** The completion-report review state; a state, never a note or a reporter identity. */
+  reviewState: ReviewState.default('NONE'),
   container: z.boolean(),
   depth: z.number().int().min(1),
   progressPercent: z.number().min(0).max(100).nullable(),
@@ -1040,3 +1045,41 @@ export const TimelineProjectPage = paged(TimelineProjectRow).extend({
   fitRange: TimelineRange.nullable()
 });
 export type TimelineProjectPage = z.infer<typeof TimelineProjectPage>;
+
+/**
+ * Project-level attention filters.
+ *
+ * Counts and the matching work are calculated on the server from the authorized project scope,
+ * before any pagination or hierarchy presentation. `contextTaskIds`/`contextSubprojectIds` are the
+ * ancestors a filtered view needs to explain a match; they are context only and never counted as
+ * work. `includesOutsideChart` states that the counts are not limited to the visible chart period.
+ */
+export const ProjectAttentionFilter = z.enum([
+  'ALL',
+  'OVERDUE',
+  'DUE_SOON',
+  'REVIEW',
+  'MISSING_DATES'
+]);
+export type ProjectAttentionFilter = z.infer<typeof ProjectAttentionFilter>;
+
+export const ProjectAttentionBucket = z.object({
+  key: ProjectAttentionFilter,
+  /** Matching leaf work only: a container is organisation and is never counted. */
+  count: z.number().int().min(0),
+  taskIds: z.array(z.string()),
+  contextTaskIds: z.array(z.string()),
+  contextSubprojectIds: z.array(z.string())
+});
+export type ProjectAttentionBucket = z.infer<typeof ProjectAttentionBucket>;
+
+export const ProjectAttention = z.object({
+  projectId: z.string(),
+  /** The Asia/Tokyo business date the counts were resolved with. */
+  today: IsoDate,
+  /** The explicit seven-day interval; both endpoints are Tokyo business dates, inclusive. */
+  dueSoon: z.object({ from: IsoDate, to: IsoDate }),
+  includesOutsideChart: z.boolean(),
+  buckets: z.array(ProjectAttentionBucket)
+});
+export type ProjectAttention = z.infer<typeof ProjectAttention>;

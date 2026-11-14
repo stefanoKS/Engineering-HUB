@@ -14,7 +14,7 @@ export const V2_LABELS = {
  'nav.back': { ja: '← 戻る', en: '← Back' },
  'hierarchy.title': { ja: 'プロジェクト構成', en: 'Project structure' },
  'hierarchy.directTasks': { ja: 'プロジェクト直下のタスク', en: 'Direct project tasks' },
- 'hierarchy.counts': { ja: '進行中 {active} · 完了 {done}', en: '{active} active · {done} done' },
+ 'hierarchy.counts': { ja: '進行中 {active} · 完了 {done}', en: '{active} active · {done} completed' },
  'hierarchy.expand': { ja: '{name} を開く', en: 'Expand {name}' },
  'hierarchy.collapse': { ja: '{name} を閉じる', en: 'Collapse {name}' },
  'hierarchy.newSubproject': { ja: '子サブプロジェクト', en: 'Nested subproject' },
@@ -25,7 +25,73 @@ export const V2_LABELS = {
  'hierarchy.emptyDirect': { ja: 'プロジェクト直下のタスクはありません。', en: 'No direct project tasks.' },
  'hierarchy.showInactive': { ja: '取消・アーカイブを表示', en: 'Show cancelled and archived' },
  'hierarchy.container': { ja: '作業単位外', en: 'Container' },
+ 'hierarchy.containerDerived': { ja: '子タスクから集計', en: 'Derived from child tasks' },
  'hierarchy.hiddenTasks': { ja: '非表示のタスク: {n} 件', en: '{n} hidden tasks' },
+ 'hierarchy.activeCount': { ja: '進行中 {n}', en: '{n} active' },
+ 'hierarchy.doneCount': { ja: '完了 {n}', en: '{n} completed' },
+ 'hierarchy.showCompletedGroup': {
+   ja: '{name} の完了タスク {n} 件を表示',
+   en: 'Show {n} completed tasks in {name}'
+ },
+ 'hierarchy.completedHeading': { ja: '完了したタスク ({n})', en: 'Completed tasks ({n})' },
+ 'hierarchy.completedMatches': {
+   ja: '完了したタスク（一致 {n} / 全 {total}）',
+   en: 'Completed tasks ({n} of {total} match)'
+ },
+ 'hierarchy.completedMatchHint': {
+   ja: '完了したタスクに {n} 件一致しています。',
+   en: '{n} completed matches.'
+ },
+ 'hierarchy.completedSection': { ja: '完了したタスク', en: 'Completed tasks' },
+ 'hierarchy.showCompleted': { ja: '表示', en: 'Show' },
+ 'hierarchy.noCompletedMatches': {
+   ja: '条件に一致する完了タスクはありません。',
+   en: 'No completed tasks match the filters.'
+ },
+ 'hierarchy.noActiveTasks': { ja: '進行中のタスクはありません。', en: 'No active tasks.' },
+ 'hierarchy.noActiveMatches': {
+   ja: '条件に一致する進行中のタスクはありません。',
+   en: 'No active tasks match the filters.'
+ },
+ 'hierarchy.filterLabel': { ja: 'プロジェクト構成の絞り込み', en: 'Filter the project structure' },
+ 'hierarchy.clearFilters': { ja: '絞り込みを解除', en: 'Clear filters' },
+ 'hierarchy.filterSummary': {
+   ja: '一致 {matched} 件（進行中 {active} · 完了 {done}）/ 全体 {total} 件',
+   en: '{matched} matches ({active} active · {done} done) / {total} total'
+ },
+ 'hierarchy.noMatches': {
+   ja: '条件に一致するタスクはありません。',
+   en: 'No tasks match the current filters.'
+ },
+ 'hierarchy.scopeCounts': {
+   ja: '表示中の構成: 進行中 {active} · 完了 {done} · 取消 {cancelled}',
+   en: 'Visible structure: {active} active · {done} completed · {cancelled} cancelled'
+ },
+ 'hierarchy.columnsLabel': { ja: 'タスク一覧の列', en: 'Task list columns' },
+ 'hierarchy.columnTask': { ja: 'タスク', en: 'Task' },
+ 'hierarchy.columnAssignee': { ja: '担当者', en: 'Assignee' },
+ 'hierarchy.columnDue': { ja: '期限', en: 'Due date' },
+ 'hierarchy.columnStatus': { ja: '状態', en: 'Status' },
+ 'hierarchy.columnActions': { ja: '操作', en: 'Actions' },
+ 'hierarchy.removeRecord': { ja: '一覧から削除', en: 'Remove from list' },
+ 'hierarchy.subprojectMenu': { ja: '{name} の操作', en: 'Actions for {name}' },
+ 'hierarchy.taskMenu': { ja: '{name} の操作', en: 'Actions for {name}' },
+ 'hierarchy.completedNotice': {
+   ja: '「{name}」を完了しました。',
+   en: '“{name}” was completed.'
+ },
+ 'hierarchy.completedNoticeAction': {
+   ja: '完了したタスクを表示',
+   en: 'View completed task'
+ },
+ 'hierarchy.filtersCleared': {
+   ja: '選択したタスクを表示するため、絞り込みを解除しました。',
+   en: 'Showing the selected task; the filters were cleared.'
+ },
+ 'hierarchy.taskUnavailable': {
+   ja: 'このタスクはこのプロジェクトで表示できません。',
+   en: 'That task is not available in this project.'
+ },
  'delete.target': { ja: '対象', en: 'Target' },
  'delete.confirmTitle': { ja: 'タスクを削除', en: 'Remove task' },
  'delete.checking': { ja: '削除できるか確認しています…', en: 'Checking whether this can be removed…' },
@@ -538,6 +604,10 @@ export const V2_LABELS = {
   'projects.archive': { ja: 'アーカイブ', en: 'Archive' },
   'projects.delete': { ja: '削除', en: 'Delete' },
   'projects.progress': { ja: '進捗', en: 'Progress' },
+  'projects.progressSummary': {
+    ja: '進捗 {percent}% · 完了 {done} / {total} タスク',
+    en: 'Progress {percent}% · {done} of {total} tasks completed'
+  },
   'projects.subprojects': { ja: 'サブプロジェクト', en: 'Subprojects' },
   'projects.tasks': { ja: 'タスク', en: 'Tasks' },
   'projects.milestones': { ja: 'マイルストーン', en: 'Milestones' },
@@ -1025,7 +1095,72 @@ export const V2_LABELS = {
   'timeline.preset.week': { ja: '7日間', en: '7 days' },
   'timeline.preset.fortnight': { ja: '2週間', en: '2 weeks' },
   'timeline.preset.month': { ja: '1か月', en: '1 month' },
+  'timeline.preset.quarter': { ja: '3か月', en: '3 months' },
   'timeline.preset.custom': { ja: 'カスタム', en: 'Custom' },
+  'timeline.presetHint': {
+    ja: 'プリセットは表示期間だけを変えます。保存済みの予定は変更しません。',
+    en: 'A preset changes only the visible period. Stored schedules are never changed.'
+  },
+  'timeline.filters': { ja: '絞り込み', en: 'Filters' },
+  'timeline.view': { ja: '表示形式', en: 'View' },
+  'timeline.view.chart': { ja: 'チャート', en: 'Chart' },
+  'timeline.view.agenda': { ja: '予定表', en: 'Agenda' },
+  'timeline.legend': { ja: '凡例', en: 'Legend' },
+  'timeline.legend.today': { ja: '今日', en: 'Today' },
+  'timeline.outside': { ja: '画面外', en: 'Outside view' },
+  'timeline.showInTimeline': { ja: '表示', en: 'Show in timeline' },
+  'timeline.deadlineOnly': { ja: '期限のみ: {date}', en: 'Deadline only: {date}' },
+  'timeline.derived': { ja: '子項目から算出', en: 'Derived from children' },
+  'timeline.undatedSection': { ja: '日付のない作業', en: 'Work without dates' },
+  'timeline.reason.none': { ja: '日付が保存されていません', en: 'No dates are stored' },
+  'timeline.reason.startMissing': { ja: '開始日がありません', en: 'The start date is missing' },
+  'timeline.reason.finishMissing': { ja: '終了日がありません', en: 'The finish date is missing' },
+  'timeline.reason.invalid': { ja: '開始日が期限より後です', en: 'The start falls after the deadline' },
+  'timeline.reason.notPlaced': { ja: '表示期間に収まらない日付です', en: 'Its dates fall outside the visible period' },
+  'timeline.attention.label': { ja: '要注意の絞り込み', en: 'Attention filters' },
+  'timeline.attention.ALL': { ja: 'すべての予定', en: 'All schedules' },
+  'timeline.attention.OVERDUE': { ja: '期限超過', en: 'Overdue' },
+  'timeline.attention.DUE_SOON': { ja: '7日以内', en: 'Due in 7 days' },
+  'timeline.attention.REVIEW': { ja: '確認待ち', en: 'Awaiting review' },
+  'timeline.attention.MISSING_DATES': { ja: '日付の不備', en: 'Missing dates' },
+  'timeline.attention.scopeNote': {
+    ja: '件数は表示期間に限らず、このプロジェクト全体の未完了作業から数えます（7日以内: {from}〜{to}）。',
+    en: 'Counts cover all open work in this project, not only the visible period (next 7 days: {from}–{to}).'
+  },
+  'timeline.attention.unavailable': {
+    ja: '件数を取得できませんでした。',
+    en: 'The counts could not be loaded.'
+  },
+  'timeline.attention.noMatch': {
+    ja: 'この条件に一致する作業はありません。',
+    en: 'No work matches this filter.'
+  },
+  'timeline.attention.showAll': { ja: 'すべての予定を表示', en: 'Show all schedules' },
+  'timeline.attention.applied': {
+    ja: '{n} 件の一致する作業と、その親を表示しています。',
+    en: 'Showing {n} matching items plus their context.'
+  },
+  'timeline.panel.kind.PROJECT': { ja: 'プロジェクト', en: 'Project' },
+  'timeline.panel.kind.SUBPROJECT': { ja: 'サブプロジェクト', en: 'Subproject' },
+  'timeline.panel.kind.TASK': { ja: 'タスク', en: 'Task' },
+  'timeline.panel.project': { ja: 'プロジェクト', en: 'Project' },
+  'timeline.panel.source': { ja: '日付の出所', en: 'Date source' },
+  'timeline.panel.source.explicit': { ja: '保存された予定', en: 'Stored schedule' },
+  'timeline.panel.source.derived': { ja: '子項目から算出', en: 'Derived from children' },
+  'timeline.panel.source.none': { ja: 'なし', en: 'None' },
+  'timeline.panel.review.NONE': { ja: '確認不要', en: 'Not awaiting review' },
+  'timeline.panel.review.PENDING': { ja: '確認待ち', en: 'Awaiting review' },
+  'timeline.panel.review.APPROVED': { ja: '承認済み', en: 'Approved' },
+  'timeline.panel.review.STALE': { ja: '古い申請', en: 'Stale request' },
+  'timeline.panel.openProject': { ja: 'プロジェクトを開く', en: 'Open project' },
+  'timeline.panel.readOnly': { ja: 'このパネルは閲覧専用です。', en: 'This panel is read-only.' },
+  'timeline.agenda.DUE': { ja: '期限', en: 'Due' },
+  'timeline.agenda.COMPLETED': { ja: '完了', en: 'Completed' },
+  'timeline.agenda.SCHEDULE': { ja: '予定', en: 'Scheduled' },
+  'timeline.agendaTotal': {
+    ja: '{shown} 件を表示中（全 {total} 件、{page}/{pages} ページ）',
+    en: 'Showing {shown} of {total} ({page}/{pages})'
+  },
   'timeline.measuring': { ja: '表示幅を測定中…', en: 'Measuring chart…' },
   'timeline.chartHelp': {
     ja: '選択期間全体を表示する閲覧専用タイムライン。',

@@ -21,7 +21,7 @@ import {
   workOverview,
   type WorkCtx
 } from '../services/work';
-import { timelineBranch, timelineProjects } from '../services/timeline';
+import { timelineBranch, timelineProjects, projectAttention } from '../services/timeline';
 import { readCtx } from '../services/views';
 
 function ctx(request: FastifyRequest): WorkCtx {
@@ -72,6 +72,11 @@ const TimelineQuery = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(25),
   includeCompleted: z.enum(['true', 'false']).optional(),
   includeArchived: z.enum(['true', 'false']).optional()
+});
+
+/** Attention filters accept the same display narrowing as every other read. */
+const AttentionQuery = z.object({
+  divisionId: z.string().trim().max(64).optional()
 });
 
 export function registerWorkRoutes(app: FastifyInstance, _deps: AppDependencies): void {
@@ -134,6 +139,28 @@ export function registerWorkRoutes(app: FastifyInstance, _deps: AppDependencies)
   });
 
   /**
+   * Project attention filters: counts and matching work resolved on the server from the whole
+   * authorized project scope, never from a page, an expanded folder or a loaded row set.
+   */
+  app.get('/api/work/projects/:id/attention', async (request, reply) => {
+    try {
+      const { id } = IdParams.parse(request.params ?? {});
+      const query = AttentionQuery.parse(request.query ?? {});
+      return ok(
+        reply,
+        request,
+        await projectAttention(ctx(request), id, {
+          divisionIds: query.divisionId
+            ? scopedDivisionIds(request.state.divisions, query.divisionId)
+            : undefined
+        })
+      );
+    } catch (error) {
+      return sendError(reply, request.state, error);
+    }
+  });
+
+  /**
    * The member overview: the same authorized scope as the lists, resolved before every aggregate
    * and top-N cut. A manager may read it too, but the management overview stays its own endpoint.
    */
@@ -170,7 +197,10 @@ export function registerWorkRoutes(app: FastifyInstance, _deps: AppDependencies)
           request,
           await timelineBranch(ctx(request), query.projectId, {
             includeCompleted: query.includeCompleted !== 'false',
-            subprojectId: query.subprojectId || undefined
+            subprojectId: query.subprojectId || undefined,
+            // The selected division is enforced on the branch as well: a readable project in
+            // another division must never be painted under the wrong division label.
+            divisionIds: query.divisionId ? divisionIds : undefined
           })
         );
       }

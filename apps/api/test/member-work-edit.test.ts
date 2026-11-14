@@ -96,15 +96,21 @@ describe('member collaboration and manager recovery', () => {
   it('refuses READ-only, foreign and restricted projects and read-only roles', async () => {
     await fixture(); const headers = await login('0010');
     await db.query("UPDATE member_divisions SET access_kind='READ' WHERE member_id='MEM-A'");
-    for (const action of ['edit','remove']) {
-      const response=await app.inject({method:action==='edit'?'PATCH':'POST',url:'/api/work/tasks/T-OTHER'+(action==='remove'?'/remove':''),headers,payload:action==='edit'?{revision:1,taskName:'Forbidden'}:{revision:1,confirmed:true}});
-      expect(response.statusCode,response.body).toBe(403);
+    for (const [kind,id,patch] of [['tasks','T-OTHER',{revision:1,taskName:'Forbidden'}],['subprojects','S-OTHER',{revision:1,subprojectName:'Forbidden'}]] as const) {
+      for (const action of ['edit','remove']) {
+        const response=await app.inject({method:action==='edit'?'PATCH':'POST',url:'/api/work/'+kind+'/'+id+(action==='remove'?'/remove':''),headers,payload:action==='edit'?patch:{revision:1,confirmed:true}});
+        expect(response.statusCode,response.body).toBe(403);
+      }
     }
     await db.query("UPDATE member_divisions SET removed_at=now(),removed_by='MEM-ADMIN' WHERE member_id='MEM-A'");
     expect((await app.inject({url:'/api/work/editor/tasks/T-OTHER',headers})).statusCode).toBe(404);
-    await db.query("UPDATE member_divisions SET access_kind='WORK',removed_at=NULL,removed_by=NULL WHERE member_id='MEM-A'");
+    await db.query("UPDATE member_divisions SET access_kind='WORK',removed_at=NULL,removed_by='' WHERE member_id='MEM-A'");
     await db.query("UPDATE projects SET dashboard_visibility='RESTRICTED' WHERE project_id='PRJ-A'");
-    expect((await app.inject({url:'/api/work/editor/tasks/T-OTHER',headers})).statusCode).toBe(404);
+    for (const [kind,id,patch] of [['tasks','T-OTHER',{revision:1,taskName:'Forbidden'}],['subprojects','S-OTHER',{revision:1,subprojectName:'Forbidden'}]] as const) {
+      expect((await app.inject({url:'/api/work/editor/'+kind+'/'+id,headers})).statusCode).toBe(404);
+      expect((await app.inject({method:'PATCH',url:'/api/work/'+kind+'/'+id,headers,payload:patch})).statusCode).toBe(404);
+      expect((await app.inject({method:'POST',url:'/api/work/'+kind+'/'+id+'/remove',headers,payload:{revision:1,confirmed:true}})).statusCode).toBe(404);
+    }
     for (const role of ['VIEWER','GENERAL_MANAGER']) {
       await db.query('UPDATE members SET role=$1 WHERE member_id=$2',[role,'MEM-A']);
       expect((await app.inject({method:'POST',url:'/api/work/tasks/T-OTHER/remove',headers,payload:{revision:1,confirmed:true}})).statusCode).toBe(403);
@@ -115,9 +121,8 @@ describe('member collaboration and manager recovery', () => {
     const blocker=await pool.connect();
     await blocker.query('BEGIN');
     await blocker.query('SELECT pg_advisory_xact_lock(hashtext($1))',['member-divisions']);
-    let pending: ReturnType<typeof app.inject> | undefined;
     try {
-      pending=app.inject({method:'PATCH',url:'/api/work/tasks/T-OTHER',headers,payload:{revision:1,taskName:'Must not save'}});
+      const pending=app.inject({method:'PATCH',url:'/api/work/tasks/T-OTHER',headers,payload:{revision:1,taskName:'Must not save'}});
       // Start injection before waiting for its blocked transaction.
       const completion=Promise.resolve(pending);
       const deadline=Date.now()+5000;
@@ -130,6 +135,26 @@ describe('member collaboration and manager recovery', () => {
       const result=await completion;
       expect(result.statusCode,result.body).toBe(403);
       expect((await db.one<{task_name:string}>("SELECT task_name FROM tasks WHERE task_id='T-OTHER'"))?.task_name).toBe('Other member task');
+    } finally { await blocker.query('ROLLBACK').catch(()=>undefined); blocker.release(); }
+  });
+  it('audits the current role when a manager becomes a member before removal', async () => {
+    await fixture(); const headers=await login('0002');
+    const blocker=await pool.connect();
+    await blocker.query('BEGIN');
+    await blocker.query('SELECT pg_advisory_xact_lock(hashtext($1))',['member-divisions']);
+    try {
+      const completion=Promise.resolve(app.inject({method:'POST',url:'/api/work/tasks/T-OTHER/remove',headers,payload:{revision:1,confirmed:true}}));
+      const deadline=Date.now()+5000;
+      while (!(await db.one("SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted LIMIT 1"))) {
+        if(Date.now()>deadline) throw new Error('removal did not wait for lock');
+        await new Promise(resolve=>setTimeout(resolve,20));
+      }
+      await blocker.query("UPDATE members SET role='MEMBER' WHERE member_id='MEM-MANAGER'");
+      await blocker.query('COMMIT');
+      const result=await completion;
+      expect(result.statusCode,result.body).toBe(200);
+      const audit=await db.one<{ role: string }>("SELECT new_value->>'removedByRole' AS role FROM audit_log WHERE entity_id='T-OTHER' AND action='RECORD_REMOVED'");
+      expect(audit?.role).toBe('MEMBER');
     } finally { await blocker.query('ROLLBACK').catch(()=>undefined); blocker.release(); }
   });
   it('does not grant member approval, completion, restoration or purge powers', async () => {
