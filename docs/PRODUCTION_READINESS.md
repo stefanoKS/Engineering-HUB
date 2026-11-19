@@ -1,5 +1,14 @@
 # Production readiness
 
+## Planning Board (計画ボード) - 2026-11-19
+
+**NOT APPROVED FOR PRODUCTION.** The Planning Board is implemented and covered by local domain,
+repository, API and interface tests. No operational migration was applied, nothing was deployed and
+no external service was activated. Schema 13 needs the reviewed one-shot migration and a verified
+backup; a real-browser walkthrough of the new screen, a live Workspace check and an export against a
+real installation are **NOT_RUN**. Local results are not live evidence. See
+[v2/ACCEPTANCE.md](v2/ACCEPTANCE.md).
+
 ## Employee-ID LAN implementation — 2026-11-02
 
 Local account and backup-only mode is implemented; [setup](v2/LOCAL_LAN.md) and [acceptance](v2/LOCAL_LAN_ACCEPTANCE.md). **NOT APPROVED FOR PRODUCTION** until the actual host/network and backup recovery gates pass.

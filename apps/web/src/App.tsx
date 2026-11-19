@@ -29,6 +29,7 @@ const DivisionsScreen = lazy(() => import('./screens/Divisions').then(module => 
 const DeletedItemsScreen = lazy(() => import('./screens/DeletedItems').then(module => ({ default: module.DeletedItemsScreen })));
 const StatusScreen = lazy(() => import('./screens/Status').then(module => ({ default: module.StatusScreen })));
 const TimelineScreen = lazy(() => import('./screens/Timeline').then(module => ({ default: module.TimelineScreen })));
+const PlanningBoardScreen = lazy(() => import('./screens/PlanningBoard').then(module => ({ default: module.PlanningBoardScreen })));
 import { LanguageSwitch, Menu } from './components/ui';
 import { DivisionScopeBar } from './components/DivisionScopeBar';
 import { SubmissionNotices } from './components/submission-notices';
@@ -183,6 +184,7 @@ export function App(): JSX.Element {
       { path: 'all-work', label: t('nav.allWork'), group: 'daily' },
       { path: 'projects', label: t('nav.projects'), group: 'daily' },
       { path: 'timeline', label: t('nav.timeline'), group: 'daily' },
+      { path: 'planning', label: t('nav.planning'), group: 'daily' },
       { path: 'requests', label: t('nav.requests'), group: 'daily' },
       { path: 'responsibilities', label: t('nav.responsibilities'), group: 'team' },
       { path: 'members', label: t('nav.members'), group: 'team' },      { path: 'skills', label: t('nav.skills'), group: 'team' },
@@ -505,6 +507,8 @@ function renderScreen(route: Route, actor: Actor, isManager: boolean): JSX.Eleme
       return (actor.role === 'ADMIN' || actor.role === 'MANAGER') ? <DeletedItemsScreen actor={actor} /> : <OverviewScreen actor={actor} />;
     case 'overview':
       return <OverviewScreen actor={actor} />;
+    case 'planning':
+      return <PlanningBoardScreen actor={actor} />;
     case 'projects':
       return <ProjectsScreen actor={actor} />;
     case 'project':

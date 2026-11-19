@@ -606,3 +606,32 @@ Server authorization is repeated under the existing division/role advisory locks
 filters both records and totals by writable divisions before pagination. Member edit APIs retain
 project visibility and field allowlists and do not expose manager-only history or settings.
 No schema change, operational migration, deployment or outbound activation is required or performed.
+
+## Planning Board (計画ボード)
+
+A plan is **private to its author**. Every plan endpoint resolves the verified session first, then
+requires `MANAGER`, then compares the stored `author_member_id`. A different account — including a
+manager in the same division or an ADMIN — receives the same `NOT_FOUND` an unknown identifier
+receives, so a guessed identifier reveals nothing. There is no sharing model and none is invented.
+
+Saving and exporting are division-scoped writes. The request-level read is a fast pre-check only:
+inside the write transaction the plan row is locked first, the actor's stored role, activation and
+division relationships are re-read, and the destination division, the responsibility, the existing
+project and every selected owner and assignee are validated again. An ADMIN's status or a
+`GENERAL_MANAGER`'s oversight never makes a person assignable; only an active `WORK` membership in
+the work's division does. A retired division and an archived, cancelled or completed destination
+project accept nothing.
+
+The export is one transaction with the existing lock order (`member-divisions` then
+`members:role-and-activation`). If any item, relationship, assignment, revision or review token
+fails, no project, subproject, task, assignment, audit row or receipt remains. The reviewed content
+token prevents an older review from being applied to a newer draft (`STALE_REQUEST`). Idempotency is
+bound to that token: an identical retry replays the stored receipt, and reusing the key for different
+content is `IDEMPOTENCY_REPLAY`.
+
+Limits and data handling: at most 200 items per plan, 200-character names, 50 additional assignees
+per item and 200 active plans per author. Text fields are rendered as untrusted React text; there is
+no HTML sink. The browser keeps the draft in page memory only — no `localStorage`, `sessionStorage`,
+IndexedDB or service-worker cache — and the receipt endpoint returns only the caller's own receipt.
+An export creates operational records; it never approves an assignment, completes work, sends mail,
+touches Calendar or publishes a snapshot.

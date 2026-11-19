@@ -22,6 +22,7 @@ import { registerWorkRoutes } from './routes/work';
 import { registerAccountRoutes } from './routes/accounts';
 import { registerSessionRoutes } from './routes/session';
 import { registerManagerRoutes } from './routes/manager';
+import { registerPlanningRoutes } from './routes/planning';
 import { registerEmployeeRoutes } from './routes/employee';
 import { registerHealthRoutes } from './routes/health';
 import type { InboxSource } from './inbox';
@@ -101,6 +102,7 @@ export async function buildApp(options: BuildOptions): Promise<FastifyInstance> 
   registerMyWork(app, deps);
   registerWorkRoutes(app, deps);
   registerManagerRoutes(app, deps);
+  registerPlanningRoutes(app, deps);
   registerEmployeeRoutes(app, deps);
 
   if (options.webRoot && existsSync(join(options.webRoot, 'index.html'))) {

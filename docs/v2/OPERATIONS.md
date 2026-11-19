@@ -418,3 +418,33 @@ Server authorization is repeated under the existing division/role advisory locks
 filters both records and totals by writable divisions before pagination. Member edit APIs retain
 project visibility and field allowlists and do not expose manager-only history or settings.
 No schema change, operational migration, deployment or outbound activation is required or performed.
+
+## Planning Board (計画ボード)
+
+**Drafts.** A plan is stored in `plan_drafts`/`plan_items` when its author saves it. The browser
+holds the working copy in page memory; closing the page, signing out or losing the session discards
+unsaved edits, and the screen warns before an unload. An existing plan saves automatically after a
+short pause, one save at a time; a new plan is created deliberately the first time. A save conflict
+keeps the local draft and offers a deliberate reload — it is never a silent last-write-wins.
+
+**Review and create.** `Review & Create` reads a review bound to the plan revision. A material edit
+invalidates it. The action creates the destination project (when the plan says so), the reviewed
+subprojects and tasks, the additional assignees and the per-parent order in one transaction, then
+stores a durable receipt and marks the plan `EXPORTED`. It does not send mail, install a trigger,
+touch Calendar, publish the shared snapshot, approve an assignment or complete work. A plan that has
+been created is a historical reference: edit the operational records through the existing screens.
+
+**Uncertain outcome.** A lost response is reported as `送信結果不明` / "the outcome could not be
+confirmed". It is not retried automatically and never reported as success. Use
+`GET /api/manager/plans/:id/exports` to retrieve the durable receipt before deciding anything. One
+attempt keeps one idempotency key; a deliberate new attempt gets a new key.
+
+**Limits and archive.** A plan holds at most 200 items; the screen states the count and the limit.
+Archive hides a plan from the default list but keeps it, its items and its receipt. No cleanup job
+deletes a draft, and nothing is removed automatically.
+
+**Schema.** Migration `0013_planning_board` adds three tables, the `tasks.sort_order` and
+`subprojects.sort_order` columns and their indexes. It rewrites no row. Apply it as the reviewed
+one-shot step against a verified backup; the API reports `DATABASE_MIGRATION_REQUIRED` until schema
+13 is present. The export writes the manual order into the new columns; the existing lists keep
+their current ordering in this release.

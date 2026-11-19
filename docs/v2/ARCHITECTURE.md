@@ -949,3 +949,36 @@ Server authorization is repeated under the existing division/role advisory locks
 filters both records and totals by writable divisions before pagination. Member edit APIs retain
 project visibility and field allowlists and do not expose manager-only history or settings.
 No schema change, operational migration, deployment or outbound activation is required or performed.
+
+## Planning Board (計画ボード)
+
+The Planning Board is a separate management screen at `#/planning` (route access `manager`). It is
+not the read-only Timeline and does not replace it. One page holds an editable hierarchy table and a
+synchronized Gantt chart; both render from one canonical draft object
+(`apps/web/src/state/planning.ts`), so a typed name or a changed date is visible on the bar without a
+request. Pointer movement, typing and dragging are local; a save is debounced and revision-checked.
+
+A plan is a **private, author-owned draft** stored in PostgreSQL (`plan_drafts`, `plan_items`,
+`plan_exports`; migration `0013`). It is excluded from every operational count, report, publication,
+notification, assignment approval and completion workflow. Nothing becomes a task, a subproject or a
+project until the reviewed export runs.
+
+The draft reuses the existing limits (`MAX_SUBPROJECT_DEPTH` 4, `MAX_TASK_DEPTH` 3) and the one
+duration derivation (`planFromDuration`); client and server call the same domain functions
+(`packages/domain/src/planning-board.ts`), so the table, the chart and the review cannot disagree.
+Manual order is a per-parent integer independent of dates: a date edit never reorders a row, and a
+drag never changes a date, an owner or an identifier. Moving one item moves its subtree, and the whole
+resulting structure is validated before it is accepted.
+
+Export is one transaction: the existing division advisory locks are taken first, the actor's stored
+role, activation and division relationships are re-read through the transaction handle, the plan row
+is locked, the reviewed content token is compared, parents are created before children, draft
+identifiers are mapped to permanent identifiers, assignment rows are written and audit evidence is
+recorded. The whole set commits with its receipt or not at all. No calendar job, notification job,
+publication, approval or completion is produced. The idempotency key is bound to the reviewed
+request: an identical retry replays the durable receipt, a different request under the same key is
+refused, and a second export of the same plan is an `EDIT_CONFLICT`.
+
+`tasks.sort_order` and `subprojects.sort_order` are the minimal operational ordering support the
+export needs: it writes the reviewed manual order per parent. Existing screens keep their current
+ordering in this release; the column is additive and nothing rewrites it outside the export.

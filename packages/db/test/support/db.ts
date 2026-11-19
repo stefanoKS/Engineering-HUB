@@ -34,7 +34,7 @@ const TRUNCATE = `
     milestones, issues, project_phases, phase_templates, projects, responsibilities,
     member_skills, skills, members, divisions, member_divisions, holidays, app_settings,
     outbox_jobs, idempotency_keys, sessions, published_snapshots, audit_log, record_deletions,
-    backup_log, import_runs
+    backup_log, import_runs, plan_exports, plan_items, plan_drafts
   RESTART IDENTITY CASCADE;
 `;
 

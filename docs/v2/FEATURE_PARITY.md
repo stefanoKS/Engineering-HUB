@@ -198,3 +198,23 @@ Treat every remaining **PASS** below as "implemented and covered by the named lo
 * Google Sheets editing from the browser — the database is PostgreSQL.
 * Workload-overlap validation, capacity blocking, automatic reassignment — excluded by the
   product rules and never added.
+
+## Planning Board (計画ボード)
+
+Added as a separate management screen; the read-only Timeline is unchanged and remains available.
+
+* One editable hierarchy table and one synchronized Gantt chart rendered from one draft, with
+  in-place names and dates, bar drawing/moving/resizing, manual order with drag and explicit
+  structural actions, day/week/month scales, Today and Fit.
+* A private, versioned PostgreSQL draft (author-only) with a debounced revision-checked save, visible
+  save states and conflict preservation.
+* An in-page `Review & Create` bound to the reviewed content, and one transactional export that
+  creates a new project or appends to an existing one, maps every draft identifier and stores a
+  durable receipt.
+* Assignments use the existing eligible-member data (active member with a `WORK` membership in the
+  division); primary owner and additional assignees keep their existing meanings.
+
+Deliberately **not** added: member planning access, project-sharing of drafts, branch-wide
+rescheduling when a parent bar moves, automatic dependency rescheduling, capacity blocking, labour
+hour inference, and any planner write to an existing operational schedule. Export never completes
+work, approves an assignment, notifies, touches Calendar or publishes.

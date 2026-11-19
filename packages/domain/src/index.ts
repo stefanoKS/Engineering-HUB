@@ -10,6 +10,7 @@ export * from './progress';
 export * from './scope';
 export * from './workload-period';
 export * from './planning';
+export * from './planning-board';
 export * from './roles';
 export * from './divisions';
 export * from './requests';

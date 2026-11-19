@@ -1,5 +1,70 @@
 # V2 Acceptance Record
 
+## Planning Board (計画ボード) - 2026-11-19
+
+**Local implementation and verification only.** No operational database was migrated, initialized,
+mapped or reset; nothing was deployed; no outbound service (mail, Calendar, publication) or trigger
+was activated. **Schema 13 is a new, additive migration (`0013_planning_board.sql`)** and was applied
+only to disposable test databases. Existing authorization, counting, completion/approval, revision,
+audit and publication rules are unchanged.
+
+User-visible outcome:
+
+- A localized navigation entry **計画ボード / Planning Board** (`#/planning`, `manager` route) opens a
+  single page: plan list/open/create, title and save status, division and responsibility selectors,
+  new-project or existing-project destination, visibility, owner, manual/duration scheduling mode,
+  undo/redo, day/week/month scales, Today, Fit plan and `Review & Create`.
+- An editable hierarchy table and a synchronized Gantt chart render from one draft. Typing a name
+  updates its bar label, a valid date edit updates the bar, a drawn bar supplies its dates, a bar
+  move changes both manual endpoints and an edge changes the relevant endpoint. Undated items stay
+  visible; an invalid date keeps its text and blocks a save.
+- Manual order is independent of dates. A drag handle reorders inside the same parent with an
+  insertion line; `Move up`/`Move down`, `Indent`/`Outdent` and `Move to` are the explicit
+  alternatives; moving a branch keeps its descendants and validates the whole result (4 subproject
+  levels, 3 task levels, no self-parent, cycle or cross-parent task).
+- Primary owner and additional assignees use the existing eligible-member data; a bulk assignment
+  previews its count, owner and assignees before it is applied.
+- The draft is private to its author in PostgreSQL. Saves are debounced, serialized and revision-
+  checked, with Saving / Saved / Save failed / Conflict states; a conflict keeps the local draft and
+  offers a deliberate reload. No private draft is written to browser storage.
+- `Review & Create` shows destination, counts, hierarchy, dates, owners, visibility, errors and
+  warnings and is bound to the reviewed revision and content token. The export is one transaction
+  with a durable receipt, stable draft-to-record mapping and one idempotency identity per attempt.
+
+Evidence (actual runs in this checkout):
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| `npm ci` | NOT_RUN | Dependencies were already installed; no manifest or lockfile change was needed. |
+| `npm run lint` | PASS | `lint:v1` and `lint:v2` exit 0. |
+| `npm run typecheck` | PASS | Every workspace compiles (contracts, domain, db, api, web, worker, migration, benchmark, i18n). |
+| `npm run test:v2` | PASS | 80 files, **931 passed / 1 skipped** against the real embedded PostgreSQL 18 (two full runs; one earlier run produced a single intermittent failure in the untouched `apps/web/test/deleted-items.test.tsx` that passed 3/3 in isolation and in the repeat full run). New files: `packages/domain/test/planning-board.test.ts` (16), `packages/db/test/planning.test.ts` (5), `apps/api/test/planning.test.ts` (12), `apps/web/test/planning-board.test.tsx` (9). |
+| `npm run test:v1` | 773/776 (pre-existing) | 3 failures — `tests/gate3-views.test.js`, `tests/v1_3-ui.test.js` and `tests/v1_6_1-counting.test.js` — reproduce identically on a clean `HEAD` worktree (their fixed fixture dates are now in the past). No V1 file was changed; recorded, not silenced. |
+| `npm run validate` | PASS | V1 source (42 manager files, 989 keys), V2 (262 files) and the deployment templates. |
+| `npm run build` | PASS | API, web, worker and migration CLI artifacts. |
+| `npm run smoke:prod` | NOT_RUN | Not run for this change. |
+| Inline editing and bar synchronization | PASS | `apps/web/test/planning-board.test.tsx`: a typed name and a real date appear on the bar immediately; extending the finish widens it. |
+| Order is independent of dates | PASS | Same file and `packages/domain/test/planning-board.test.ts`: reordering changes only `order`; a later date edit does not reorder; reordering keeps dates/owners; a branch move keeps descendants. |
+| Escape and undo/redo | PASS | `apps/web/test/planning-board.test.tsx`: Escape cancels a drag with no date change; one release is one undoable change; a typed edit is one undo/redo action. |
+| Language switch preserves the draft | PASS | Same file: the draft survives `日本語 → English` with the typed value intact. |
+| Scheduling semantics | PASS | `packages/domain/test/planning-board.test.ts`: manual endpoints, duration-derived start, missing duration refused, resize clamping, inclusive range, duration-basis duration. |
+| Draft privacy and division authorization | PASS | `apps/api/test/planning.test.ts`: MEMBER refused, a manager without a `WORK` membership refused, another manager and an ADMIN see `NOT_FOUND`, an ineligible assignee is one failed operation. |
+| One-transaction export and rollback | PASS | Same API test: parents before children, mapped parents, additional assignee, per-parent order, `PLAN_EXPORTED` audit and no outbox job; a forced mid-export failure leaves zero project/subproject/task/export rows and the plan in `DRAFT`. |
+| Idempotency and concurrency | PASS | Same API test: identical retry replays the same receipt, a different request under the same key is `IDEMPOTENCY_REPLAY`, a second key is `EDIT_CONFLICT`, two concurrent exports yield exactly `[200, 409]` and one project. |
+| Review binding and revoked authority | PASS | Same API test: a changed plan makes the old token `STALE_REQUEST`; a role revoked after review yields `AUTHORIZATION_DENIED` with no record; an owner deactivated after review is refused with no record. |
+| Append-only destination | PASS | Same API test: an existing project gains the new task and no second project; its other work is unchanged. |
+| No private browser persistence | PASS | `validate:v2` rule 7 (only `eh.lang`/`eh.receipts` keys) and the draft model's page-memory design. |
+| Browser verification | NOT_RUN | No real-browser walkthrough of the new screen was recorded; jsdom tests are not a substitute and are not claimed as one. |
+| Live Workspace / deployment | NOT_RUN | Nothing was deployed, migrated, initialized or activated. |
+| Production approval | **NOT APPROVED** | `docs/PRODUCTION_READINESS.md` is unchanged. |
+
+Known limitations, stated rather than hidden: the client computes a duration-mode start with the
+weekend-only calendar, while the server review and export use the stored holiday calendar (the
+review shows the authoritative derived dates); existing operational lists keep their current ordering
+even though the exported manual order is stored in `sort_order`; rows are not virtualized (200-item
+bound); there is no branch-wide rescheduling, dependency creation or date sorting; member planning
+access and draft sharing are deliberately absent.
+
 ## Project structure reveal and timeline usability — 2026-11-14
 
 **Local implementation and verification only.** No operational database was migrated, initialized,

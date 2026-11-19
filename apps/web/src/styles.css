@@ -3249,3 +3249,225 @@ input[type='search'] {
   .tl-row { grid-template-columns: minmax(0, 10.5rem) minmax(0, 1fr); }
   .tl-label { font-size: 0.85rem; }
 }
+
+/* ------------------------- Planning Board (計画ボード) ------------------------- */
+
+.planning-screen .planning-title-field { min-width: min(320px, 100%); flex: 1 1 320px; }
+.planning-radio { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: .35rem .9rem; align-items: center; }
+.planning-radio legend { padding: 0; margin-bottom: .25rem; width: 100%; }
+.planning-project-field { min-width: min(280px, 100%); }
+.planning-view-toolbar { align-items: center; }
+
+.pb-scroller {
+  --pb-name-width: 620px;
+  overflow: auto;
+  max-height: 66vh;
+  min-width: 0;
+  border: 1px solid var(--ui-border, #d7dbe0);
+  border-radius: 8px;
+  background: #fff;
+}
+.pb-row {
+  display: grid;
+  grid-template-columns: var(--pb-name-width) minmax(0, 1fr);
+  min-height: 38px;
+  border-bottom: 1px solid #eef0f2;
+  position: relative;
+}
+.pb-row:last-child { border-bottom: 0; }
+.pb-row.pb-head {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: #f7f8fa;
+  font-size: .78rem;
+  color: var(--ui-muted);
+}
+.pb-row.selected { background: #fff8f9; }
+.pb-row.dragging { opacity: .75; }
+.pb-row.drop-before::before,
+.pb-row.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--ui-accent, #a8182f);
+  z-index: 6;
+  pointer-events: none;
+}
+.pb-row.drop-before::before { top: -1px; }
+.pb-row.drop-after::after { bottom: -1px; }
+
+.pb-cell-name {
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+  min-width: 0;
+  padding: .2rem .4rem;
+  border-right: 1px solid #e6e9ee;
+  position: relative;
+}
+.pb-head .pb-cell-name { gap: .75rem; padding-left: .6rem; }
+.pb-cell-name input[type='checkbox'] { flex: 0 0 auto; }
+.pb-handle {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: #8a93a5;
+  cursor: grab;
+  letter-spacing: -2px;
+  padding: 0 .1rem;
+  touch-action: none;
+}
+.pb-handle:active { cursor: grabbing; }
+.pb-toggle {
+  flex: 0 0 auto;
+  width: 1.15rem;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--ui-muted);
+}
+.pb-toggle-spacer { flex: 0 0 1.15rem; }
+.pb-type {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 4px;
+  font-size: .62rem;
+  font-weight: 700;
+  color: #fff;
+}
+.pb-type.sub { background: #4a5b8c; }
+.pb-type.task { background: #7a869c; }
+.pb-name { flex: 1 1 120px; min-width: 70px; }
+.pb-date { flex: 0 0 auto; width: 8.1rem; font-size: .78rem; }
+.pb-duration { flex: 0 0 auto; width: 3.6rem; }
+.pb-owner { flex: 0 0 auto; width: 6.4rem; font-size: .78rem; }
+.pb-row-menu .menu-trigger { padding: .1rem .35rem; border: 0; background: transparent; }
+
+.pb-splitter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -4px;
+  width: 9px;
+  cursor: col-resize;
+  z-index: 5;
+  touch-action: none;
+}
+.pb-splitter:hover, .pb-splitter:focus-visible { background: var(--ui-accent-soft, #fbe3e7); outline: 0; }
+
+.pb-cell-track {
+  position: relative;
+  min-width: 0;
+  min-height: 38px;
+  overflow: hidden;
+  background-image: linear-gradient(to right, #f0f2f6 1px, transparent 1px);
+  background-size: 100% 100%;
+  touch-action: none;
+}
+.pb-axis { min-height: 44px; }
+.pb-tick {
+  position: absolute;
+  top: .45rem;
+  font-size: .68rem;
+  color: var(--ui-muted);
+  white-space: nowrap;
+  transform: translateX(2px);
+}
+.pb-tick.weekend { color: #b0899a; }
+.pb-tick.major { font-weight: 650; color: #46536d; }
+.pb-today-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--ui-accent, #a8182f);
+  opacity: .55;
+  pointer-events: none;
+}
+.pb-today-label {
+  position: absolute;
+  bottom: .15rem;
+  font-size: .66rem;
+  font-weight: 700;
+  color: var(--ui-accent, #a8182f);
+  pointer-events: none;
+}
+.pb-bar {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 20px;
+  min-width: 10px;
+  border-radius: 5px;
+  background: var(--project-accent, #4a5b8c);
+  border: 1px solid var(--project-outline, #3b4a75);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  cursor: grab;
+  touch-action: none;
+  overflow: hidden;
+  user-select: none;
+}
+.pb-bar.dragging { cursor: grabbing; opacity: .85; outline: 2px dashed #fff; }
+.pb-bar.invalid { border-style: dashed; }
+.pb-bar-label {
+  flex: 1 1 auto;
+  padding: 0 .35rem;
+  font-size: .7rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.pb-bar-handle {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 100%;
+  cursor: ew-resize;
+  background: rgba(255, 255, 255, .35);
+  touch-action: none;
+}
+.pb-bar-handle.start { border-radius: 5px 0 0 5px; }
+.pb-bar-handle.end { border-radius: 0 5px 5px 0; }
+.pb-draw {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 20px;
+  border: 1px dashed var(--ui-accent, #a8182f);
+  background: rgba(168, 24, 47, .12);
+  border-radius: 5px;
+  pointer-events: none;
+}
+
+.planning-bulk { padding: .9rem 1rem; }
+.planning-bulk h3 { font-size: .95rem; margin-bottom: .5rem; }
+.planning-review-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: .6rem 1rem; margin: 0; }
+.planning-review-summary dt { font-size: .74rem; color: var(--ui-muted); }
+.planning-review-summary dd { margin: 0; font-weight: 600; }
+.planning-review-table { font-size: .8rem; }
+.planning-links { columns: 2; margin: .4rem 0; }
+.planning-detail-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .5rem 1rem; margin: .4rem 0; }
+.planning-detail-facts dt { font-size: .74rem; color: var(--ui-muted); }
+.planning-detail-facts dd { margin: 0; font-weight: 600; }
+.planning-problem { display: block; }
+.planning-details { align-items: flex-end; }
+
+@media (max-width: 780px) {
+  /* The chart stays on the page; the name column narrows and the scroller scrolls horizontally. */
+  .pb-scroller { --pb-name-width: min(60%, 420px); }
+  .pb-date { width: 6.6rem; }
+  .pb-owner { width: 5rem; }
+}
+
+.pb-assignees { flex: 0 0 auto; font-size: .68rem; font-weight: 700; color: var(--ui-muted); background: #eef1f7; border-radius: 999px; padding: 0 .35rem; }
+

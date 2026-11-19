@@ -215,3 +215,14 @@ acknowledgement and initial usable page were **NOT_RUN** in this pass. The state
 (100 ms interaction feedback, 100 ms cached navigation, 100 ms read p95, 200 ms mutation p95, 300 ms
 office-LAN save, provisional 1 s remote save, provisional 2 s initial page) therefore remain
 unverified. They were not relaxed.
+
+## Planning Board (計画ボード)
+
+Interaction is local: typing, dragging and drawing update the in-memory draft only, and no request
+is sent per keystroke or per pointer move. A save is debounced and serialized. Date geometry reuses
+the existing timeline helpers rather than a second implementation. The draft is bounded to 200 items
+and its list/review responses are bounded pages; rows are not virtualized, which is an accepted
+limit at this size and is stated in the interface.
+
+No benchmark was run for this screen. Pointer-drag responsiveness, a 200-item draft and the export
+transaction duration remain **NOT_RUN**; no latency claim is made from a local run.

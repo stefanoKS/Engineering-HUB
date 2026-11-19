@@ -337,3 +337,33 @@ release because no authorized business-calendar projection exists.
   outside-view marker and a `表示` action that deliberately adjusts the viewport.
 - A phone starts on the agenda, keeps the chosen presentation in page memory, and the Chart/Agenda
   switch never changes the selected scope or dates. Nothing here is persisted in the browser.
+
+## Planning Board (計画ボード)
+
+- The screen is a single page: a plan toolbar, then one scroll container whose rows are a
+  resizable name column and a date track. The table and the chart share the row element, so their
+  heights and vertical scroll can never drift. A separator changes the name column width with the
+  pointer or with ArrowLeft/ArrowRight.
+- Rows show a drag handle, an expand/collapse control when the item has children, the item name, the
+  start and finish, the owner, an additional-assignee count and a validation badge. Names and dates
+  are edited in place; routine naming never opens a separate form. The optional details panel adds
+  the duration, the assignees, `Move to`, the resolved schedule and the export target.
+- One canonical draft feeds the table, the chart labels and the bars. A typed name updates the bar
+  label immediately and a valid date edits the bar; no keystroke or pointer move sends a request.
+  An invalid date keeps its typed text, shows an explanation and blocks a save instead of being
+  silently replaced.
+- A bar drag moves both manual endpoints; its right edge changes the finish and its left edge the
+  start. In duration mode the right edge moves the deadline (the duration is kept) and the left edge
+  adjusts the required duration. Escape cancels a drag. Every drag operation also has keyboard or
+  date-input alternatives, and one completed drag is one undoable action.
+- Manual order is the default and is independent of dates. A drag reorders inside the same parent
+  with an insertion line; `Move up`/`Move down`, `Indent`/`Outdent` and `Move to` are the explicit
+  alternatives, and moving a branch keeps its descendants. Date sorting is not offered, so manual
+  order is never ambiguous.
+- Scale is day, week or month; `Today` returns to the business date and `Fit plan` frames the plan's
+  dates. A bulk assignment shows the count, the owner and the assignees before it is applied.
+- The `日本語 | English` switch keeps the screen, the plan, the selection and the table filters; the
+  draft itself is never reset by a language change. Everything is page memory, not browser storage.
+- `Review & Create` opens an in-page dialog with the destination, counts, hierarchy, dates, owners,
+  visibility, errors and warnings. An error focuses its row. An uncertain export is shown as an
+  uncertain outcome with a receipt-retrieval action, never as success.

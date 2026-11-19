@@ -11,4 +11,5 @@ export * from './repo/tasks';
 export * from './repo/reports';
 export * from './repo/workflow';
 export * from './repo/system';
+export * from './repo/planning';
 export { updateWithRevision } from './repo/patch';

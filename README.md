@@ -33,6 +33,13 @@ For the month preset, the finish is the day before the corresponding date in the
 that month's last day when the corresponding date does not exist. These controls do not edit schedules.
 Within an expanded project, a subproject's arrow independently shows or hides its own task tree.
 
+The separate **Planning Board** (計画ボード, `#/planning`) lets a manager build a whole project plan
+on one page: edit names and dates in the table, draw and adjust bars on the synchronized chart,
+reorder rows manually, assign owners and additional assignees, then review and create the records.
+The read-only timeline is unchanged. A plan is a private draft of its author; nothing becomes a task
+or a project until `Review & Create` runs one transaction, and that export never completes work,
+approves an assignment, sends mail, touches Calendar or publishes.
+
 A project's displayed status is derived, not chosen: the start date, the finish date and today's
 Tokyo date decide between planned, in progress, late and a readable missing-date warning. Only an
 explicit completion, cancellation or archive changes the stored lifecycle, so no nightly job

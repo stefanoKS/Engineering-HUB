@@ -34,6 +34,7 @@ export const APP_ROUTES = {
   projects: 'all',
   project: 'all',
   timeline: 'all',
+  planning: 'manager',
   responsibilities: 'manager',
   members: 'manager',
   member: 'manager',

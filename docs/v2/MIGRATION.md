@@ -277,3 +277,21 @@ triggers. It rewrites no row, so accounts, password hashes, password versions, s
 operational work survive it. Do not edit an applied migration; a correction is the next migration
 ID. Until the mapping is complete the installation is **not** operationally ready: every existing
 project has a blank division and is therefore ADMIN-only.
+
+## 0013 planning board
+
+`0013_planning_board.sql` is additive. It creates `plan_drafts`, `plan_items` (with a deferred
+self-reference, a soft-removal marker and a draft-only array of additional assignees) and
+`plan_exports` (its receipt, the bound request hash and a unique `(plan_id, idempotency_key)`), plus
+the `tasks.sort_order` and `subprojects.sort_order` columns and three indexes. It rewrites no row, so
+every project, subproject, task, assignment, approval, request, notification and audit record
+survives it, and every existing row keeps `sort_order = 0`.
+
+There is **no** data movement: the migration creates no plan, no division, no project and no
+assignment, and it does not reinterpret an existing row as a draft item. `REQUIRED_SCHEMA_VERSION`
+and `DB_SCHEMA_VERSION` become 13. Apply it as the reviewed one-shot step against a verified backup;
+nothing migrates at boot, and the API reports `503 DATABASE_MIGRATION_REQUIRED` on a schema-12
+database. Do not edit the applied file — a correction is the next migration ID.
+
+The export writes `TASKS.sort_order`/`SUBPROJECTS.sort_order` per parent so the reviewed manual order
+is preserved; existing screens keep their current ordering in this release.

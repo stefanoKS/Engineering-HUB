@@ -897,3 +897,58 @@ recoverable removal workflow. Ordinary fields only; forbidden workflow/settings 
 The existing /api/admin/deleted-records and /api/admin/{tasks|subprojects}/:id/restore[-preflight]
 URLs are retained for compatibility but now authorize MANAGER with WORK scope as well as ADMIN.
 Their historical URL prefix is not the authorization boundary.
+
+## Planning Board (計画ボード)
+
+Every endpoint requires `MANAGER` and returns records of the caller's own plans only; another
+account, including another manager or an ADMIN, receives `NOT_FOUND` for a plan it does not own.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/manager/plans?status=ALL\|DRAFT\|EXPORTED\|ARCHIVED&query=&page=&pageSize=` | The author's plans, newest first, with an item count. |
+| `GET /api/manager/plans/:id` | One plan with its items, revision and export receipt. |
+| `POST /api/manager/plans` | Create (and save) a plan. Body `CreatePlanBody` with `idempotencyKey`. |
+| `PATCH /api/manager/plans/:id` | Save with `revision`; a mismatch is `EDIT_CONFLICT`. |
+| `POST /api/manager/plans/:id/archive` | `{ revision, confirmed: true }`. Export history is retained. |
+| `GET /api/manager/plans/:id/review?revision=` | The server-computed review and its `reviewToken`. |
+| `POST /api/manager/plans/:id/export` | `{ revision, idempotencyKey, reviewToken, confirmed: true }`. |
+| `GET /api/manager/plans/:id/exports` | The latest durable receipt. |
+| `GET /api/manager/plans/:id/exports/:exportId` | One specific durable receipt. |
+
+The bodies are strict: `title` (≤200), `divisionId`, `responsibilityId`, `destinationMode`
+(`NEW_PROJECT`/`EXISTING_PROJECT`), `destinationProjectId`, `projectOwnerId`, `dashboardVisibility`,
+`scheduleMode` (`MANUAL`/`DURATION`) and at most 200 items (`PLAN_LIMITS`). An item carries a stable
+draft `itemId`, its `type`, `parentItemId`, manual `order`, name (≤200), `startDate`, `finishDate`,
+optional duration, primary owner and at most 50 additional assignees. Unknown fields fail
+validation. A save is a partial plan patch plus the complete desired item set; an item the person
+removed is soft-removed (`removed_at`), never deleted.
+
+`reviewToken` is a SHA-256 of the reviewed content (destination, mode, order and every exported item
+field). A material edit changes the plan revision and therefore the token; an export with an older
+token is `STALE_REQUEST`. Example responses:
+
+```json
+{ "plan": { "planId": "PLN-20261119-…", "revision": 3, "status": "DRAFT",
+  "scheduleMode": "MANUAL", "destinationMode": "NEW_PROJECT", "items": [] } }
+```
+
+```json
+{ "review": { "planId": "PLN-…", "planRevision": 3, "reviewToken": "…",
+  "destination": { "mode": "NEW_PROJECT", "divisionId": "DIV-DEV", "projectId": null },
+  "counts": { "subprojects": 2, "tasks": 5, "dated": 7, "undated": 0, "unassigned": 1 },
+  "items": [], "errors": [], "warnings": [] } }
+```
+
+```json
+{ "receipt": { "exportId": "PEX-20261119-…", "planId": "PLN-…", "planRevision": 3,
+  "destination": { "mode": "NEW_PROJECT", "projectId": "PRJ-…", "projectName": "…" },
+  "counts": { "subprojects": 2, "tasks": 5 },
+  "created": { "projectId": "PRJ-…", "subprojectIds": [], "taskIds": [] },
+  "mapping": [{ "itemId": "pi-…", "recordType": "TASK", "recordId": "TSK-…" }] },
+  "replayed": false }
+```
+
+The export writes `Project` (new destination only), `SUBPROJECTS` with `planned_start`/`planned_end`,
+`TASKS` with `planned_start` and `due_date` (the finish), the additional-assignee rows and the per-
+parent `sort_order`. It never writes `Done`, an approval, a notification, a publication, a calendar
+link or a change to existing operational work.
